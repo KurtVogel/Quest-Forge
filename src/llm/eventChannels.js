@@ -18,8 +18,8 @@
  */
 
 import { canonicalEnemyId, validateEnemyAttackBonus, validateEnemySaveBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, isDeclaredDowned, normalizeEnemyConditions } from '../engine/enemyStats.js';
-import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatExchange.js';
-import { LOCATION_NAME_MAX, MAX_COIN_EVENT } from '../config/contentLimits.js';
+import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatWire.js';
+import { LOCATION_NAME_MAX, MAX_COIN_EVENT, MAX_ROLL_DC } from '../config/contentLimits.js';
 import { toFiniteNumber, toFlag } from '../data/items.js';
 import { normalizeConditionName, findSkillInText, CONDITION_LIST_CAP } from '../engine/rules.js';
 
@@ -126,9 +126,6 @@ export function validateCombatStart(combatStart) {
     };
 }
 
-/** DC band the resolvers honor (roleplayCheck + combat slots clamp the same way). */
-export const MAX_ROLL_DC = 30;
-
 /** Player roll types that resolve through a skill/ability — the resolver has no other lane for them. */
 const SKILL_BEARING_ROLL_TYPES = new Set(['skill_check', 'ability_check', 'saving_throw', 'attack_roll']);
 
@@ -155,6 +152,11 @@ export function normalizeRequestedRoll(r) {
     // one step later, but the roll arbiter's JSON payload and the parser's debug
     // line rode a 50,000-char description raw.
     const str = (value, max = 500) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null);
+    // First string among the wire spellings, one line, clamped; anything else is ''.
+    const adjudication = (...values) => {
+        const found = values.find(value => typeof value === 'string' && value.trim());
+        return found ? found.trim().slice(0, 500) : '';
+    };
     const type = str(r.type, 40) || 'skill_check';
     const description = str(r.description, 300) || '';
     const ability = str(r.ability, 80);
@@ -178,12 +180,15 @@ export function normalizeRequestedRoll(r) {
         // an unclamped `-40` auto-succeeded and `1e9` auto-failed (2026-09-05).
         dc: Math.round(clamp(r.dc, 0, MAX_ROLL_DC, 10)),
         description,
-        reason: String(r.reason || r.roll_reason || '').slice(0, 500),
-        opposition: String(r.opposition || '').slice(0, 500),
-        failureStakes: String(r.failure_stakes || r.failureStakes || '').slice(0, 500),
-        difficultyReason: String(r.difficulty_reason || r.difficultyReason || '').slice(0, 500),
-        advantageReason: String(r.advantage_reason || r.advantageReason || '').slice(0, 500),
-        disadvantageReason: String(r.disadvantage_reason || r.disadvantageReason || '').slice(0, 500),
+        // The public adjudication: string-or-empty (2026-10-05). `String(r.reason
+        // || '')` persisted an object as "[object Object]" on the proposal, the
+        // card rendered it and the challenge prompt quoted it back to the DM.
+        reason: adjudication(r.reason, r.roll_reason),
+        opposition: adjudication(r.opposition),
+        failureStakes: adjudication(r.failure_stakes, r.failureStakes),
+        difficultyReason: adjudication(r.difficulty_reason, r.difficultyReason),
+        advantageReason: adjudication(r.advantage_reason, r.advantageReason),
+        disadvantageReason: adjudication(r.disadvantage_reason, r.disadvantageReason),
         // NPC attack fields
         attacker: str(r.attacker, 120),
         attackerId: str(r.attackerId, 120) || str(r.companionId, 120) || str(r.companion_id, 120),

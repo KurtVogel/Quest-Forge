@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { buildSpellSlots } from '../engine/spellcasting.js';
-import { COMBAT_PHASES } from '../engine/combatExchange.js';
+import { COMBAT_PHASES } from '../engine/combatPredicates.js';
 
 function clericState(overrides = {}) {
     return {

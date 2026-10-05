@@ -41,7 +41,11 @@ vi.mock('../engine/dice.ts', () => {
 });
 
 const { gameReducer, initialGameState } = await import('./gameReducer.js');
-const { COMBAT_PHASES, combatNarrationPrompt, describeFightCost, normalizeCombatExchange, planCombatExchange, startFightTally } = await import('../engine/combatExchange.js');
+const { COMBAT_PHASES } = await import('../engine/combatPredicates.js');
+const { normalizeCombatExchange } = await import('../engine/combatWire.js');
+const { planCombatExchange } = await import('../engine/combatExchange.js');
+const { describeFightCost, startFightTally } = await import('../engine/fightTally.js');
+const { combatNarrationPrompt } = await import('../llm/combatNarration.js');
 
 function dyingState() {
     const base = {

@@ -8,7 +8,9 @@
  * DEFENSIVE stats (AC, HP) the bound itself is mechanically safe, so we clamp into range.
  *
  * Used at every enemy-stat entry point: combat_start (parser), START_COMBAT, LOAD_GAME,
- * UPDATE_ENEMY, and immediately before rolling (defense-in-depth).
+ * and immediately before rolling (defense-in-depth). Also the home of what
+ * every lane reads ABOUT an enemy: the health ladder (`healthWord`), the
+ * outcome word (`enemyOutcome`) and the engine defaults (`ENEMY_DEFAULT_*`).
  */
 
 import { toFlag } from '../data/items.js';
@@ -157,13 +159,47 @@ export function clampEnemyCurrentHP(value, maxHp, fallback = maxHp) {
     return Math.max(0, Math.min(maxHp, Math.round(n)));
 }
 
-export function enemyHealthCondition(hp, maxHp) {
-    if (hp <= 0) return 'dead';
+/**
+ * THE health ladder (2026-10-05): one combatant's HP as the word the prompt,
+ * the cards and the fight tally read. It was three byte-equivalent functions
+ * (an enemy's, a companion's in the exchange, a companion's in the reducer)
+ * and a fourth bare 0.25 for the fight mark.
+ */
+export const HEALTH_CRITICAL_RATIO = 0.25;
+export const HEALTH_BLOODIED_RATIO = 0.5;
+
+/** `healthy` / `bloodied` (≤ half) / `critical` (≤ a quarter) / `downWord` at 0 HP. */
+export function healthWord(hp, maxHp, downWord = 'dead') {
+    if (!(hp > 0)) return downWord;
     const ratio = maxHp > 0 ? hp / maxHp : 1;
-    if (ratio <= 0.25) return 'critical';
-    if (ratio <= 0.5) return 'bloodied';
+    if (ratio <= HEALTH_CRITICAL_RATIO) return 'critical';
+    if (ratio <= HEALTH_BLOODIED_RATIO) return 'bloodied';
     return 'healthy';
 }
+
+export function enemyHealthCondition(hp, maxHp) {
+    return healthWord(hp, maxHp, 'dead');
+}
+
+/**
+ * How an enemy stands in the fight — the ONE reading of the `hp` /
+ * `condition` / `combatStatus` tuple (it was re-typed at five sites):
+ * `defeated` (0 HP or dead), `fled`, `surrendered`, else `active`.
+ */
+export function enemyOutcome(enemy) {
+    if (!((enemy?.hp ?? 0) > 0) || enemy.condition === 'dead') return 'defeated';
+    if (enemy.combatStatus === 'fled') return 'fled';
+    if (enemy.combatStatus === 'surrendered') return 'surrendered';
+    return 'active';
+}
+
+/**
+ * What an enemy rolls with when its statline omitted (or failed validation on)
+ * an offensive stat — the conservative engine defaults every lane reads.
+ */
+export const ENEMY_DEFAULT_ATTACK_BONUS = 3;
+export const ENEMY_DEFAULT_DAMAGE = '1d6';
+export const ENEMY_DEFAULT_SAVE_BONUS = 2;
 
 /** The sanitized attack-relevant fields of an enemy-like object (omits invalid fields entirely). */
 export function normalizeEnemyAttackProfile(enemy) {

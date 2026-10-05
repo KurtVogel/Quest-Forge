@@ -3,7 +3,7 @@
  * death-and-stakes: "the count is on the page").
  *
  * Three lanes used to judge a death save with three private copies of the
- * 5e rule — the exchange engine's `projectedDeathSaveState`, the reducer's
+ * 5e rule — the exchange engine's own projection (deleted 2026-10-05), the reducer's
  * DEATH_SAVE_RESULT, and the out-of-combat resolver — and only the resolver
  * put the OUTCOME on the page; the combat line was a bare "natural 13." with
  * no success / failure word and no tally, so the player read dice and the DM

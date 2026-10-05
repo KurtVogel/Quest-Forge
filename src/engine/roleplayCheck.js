@@ -1,4 +1,5 @@
-import { normalizeRequestedRoll, MAX_ROLL_DC } from '../llm/eventChannels.js';
+import { normalizeRequestedRoll } from '../llm/eventChannels.js';
+import { MAX_ROLL_DC } from '../config/contentLimits.js';
 
 // String-or-empty (2026-09-18 P2): String(object) persisted "[object Object]" as a
 // ruling objective and RECENT TABLE RULINGS bound the DM to it. A finite number reads.
@@ -7,40 +8,21 @@ const text = (value, max = 500) => asText(value).replace(/\s+/g, ' ').trim().sli
 
 /**
  * One typed roll for the proposal store. The parser's `normalizeRequestedRoll`
- * owns the field typing (dc numeric-or-default, advantage flags boolean,
- * modifier numeric-or-null); this layer only adds the proposal-side clamps and
- * the public adjudication text. Spreading the raw roll first (pre-2026-09-02)
- * let a hostile save hand the resolver `dc: -100` (guaranteed success) or
- * `dc: "12"` (string comparison) on LOAD_GAME.
+ * owns ALL the field typing — type, description, dc 0..MAX_ROLL_DC, the six
+ * adjudication texts string-or-empty, refs and notation string-or-null, flags
+ * boolean, modifier numeric-or-null — and it reads a stored camelCase roll as
+ * readily as the wire's snake_case, so a hostile save is typed by the same
+ * rules as a hostile reply. This layer adds the one proposal-side delta: the
+ * resolver reads `skill`, so a roll that named only an `ability` carries it
+ * there. (Until 2026-10-05 this function re-typed every field at the parser's
+ * own limits, and both missed the object `reason`.)
  */
 function sanitizeProposalRoll(roll) {
     const typed = normalizeRequestedRoll(roll);
     // The parser drops a skill-less player roll (nothing to roll against);
     // a stored proposal carrying one drops here for the same reason.
     if (!typed) return null;
-    // String-or-null: the parser passes these through with `|| null`, so an
-    // object/array from a hostile save must not stringify to "[object Object]".
-    const str = (value, max) => (typeof value === 'string' ? text(value, max) || null : null);
-    const dc = Number.isFinite(typed.dc) ? Math.min(MAX_ROLL_DC, Math.max(0, typed.dc)) : 10;
-    return {
-        ...typed,
-        type: str(typed.type, 40) || 'skill_check',
-        skill: text(typed.skill || typed.ability, 80) || null,
-        ability: text(typed.ability, 80) || null,
-        dc,
-        description: str(typed.description, 300) || '',
-        reason: text(typed.reason, 500),
-        opposition: text(typed.opposition, 500),
-        failureStakes: text(typed.failureStakes, 500),
-        difficultyReason: text(typed.difficultyReason, 500),
-        advantageReason: text(typed.advantageReason, 500),
-        disadvantageReason: text(typed.disadvantageReason, 500),
-        attacker: str(typed.attacker, 120),
-        attackerId: str(typed.attackerId, 120),
-        notation: str(typed.notation, 40),
-        target: str(typed.target, 120),
-        damage: str(typed.damage, 40),
-    };
+    return { ...typed, skill: typed.skill || typed.ability };
 }
 
 export function sanitizePendingRoleplayCheck(value) {
@@ -69,7 +51,6 @@ export function sanitizePendingRoleplayCheck(value) {
         // Change Approach can reveal it instead of erasing it. Reload-safe by design.
         setupNarrative: text(value.setupNarrative, 4000),
         setupMessageId: text(value.setupMessageId, 160) || null,
-        proposedAt: Number.isFinite(value.proposedAt) ? value.proposedAt : Date.now(),
         loot: value.loot ? {
             goldFound: Number.isFinite(value.loot.goldFound) ? Math.max(0, value.loot.goldFound) : 0,
             silverFound: Number.isFinite(value.loot.silverFound) ? Math.max(0, value.loot.silverFound) : 0,
@@ -77,10 +58,12 @@ export function sanitizePendingRoleplayCheck(value) {
             itemsFound: Array.isArray(value.loot.itemsFound) ? value.loot.itemsFound.map(item => {
                 if (typeof item === 'string') return item.slice(0, 100);
                 if (item && typeof item === 'object') {
-                    const name = String(item.name || item.itemKey || '').trim().slice(0, 100);
+                    // String-or-drop (2026-10-05): `String(item.name || …)` minted
+                    // "[object Object]" as a loot name on a loaded proposal.
+                    const itemKey = text(item.itemKey, 100) || undefined;
+                    const name = text(item.name, 100) || itemKey;
                     if (!name) return null;
                     const quantity = Number.isFinite(item.quantity) ? Math.max(1, item.quantity) : 1;
-                    const itemKey = item.itemKey ? String(item.itemKey).trim().slice(0, 100) : undefined;
                     return { name, quantity, ...(itemKey && { itemKey }) };
                 }
                 return null;
@@ -90,7 +73,7 @@ export function sanitizePendingRoleplayCheck(value) {
 }
 
 export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null, supersedesId = null } = {}) {
-    return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, setupNarrative, setupMessageId, supersedesId, proposedAt: Date.now() });
+    return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, setupNarrative, setupMessageId, supersedesId });
 }
 
 // --- Recent-checks ledger (heat input) ---------------------------------------
@@ -108,8 +91,7 @@ export function buildRecentCheckEntry(proposal, messageCount = 0) {
     const dc = Math.max(...rolls.map(roll => (Number.isFinite(roll.dc) ? roll.dc : 0)));
     return {
         messageIndex: Number.isFinite(messageCount) ? Math.max(0, messageCount) : 0,
-        dc: dc > 0 ? Math.min(30, dc) : null,
-        skill: text(rolls[0].skill, 80) || null,
+        dc: dc > 0 ? Math.min(MAX_ROLL_DC, dc) : null,
         proposalId: text(proposal.id, 160) || null,
     };
 }
@@ -151,8 +133,7 @@ export function sanitizeRecentChecks(list, { maxMessageCount = Infinity } = {}) 
         .filter(entry => entry && typeof entry === 'object' && Number.isFinite(entry.messageIndex))
         .map(entry => ({
             messageIndex: Math.min(ceiling, Math.max(0, entry.messageIndex)),
-            dc: Number.isFinite(entry.dc) ? Math.min(30, Math.max(0, entry.dc)) : null,
-            skill: text(entry.skill, 80) || null,
+            dc: Number.isFinite(entry.dc) ? Math.min(MAX_ROLL_DC, Math.max(0, entry.dc)) : null,
             proposalId: text(entry.proposalId, 160) || null,
         }))
         .slice(-RECENT_CHECK_LIMIT);
@@ -189,7 +170,6 @@ export function normalizeRollRuling(value, { maxMessageCount = Infinity } = {}) 
         challenge: text(value.challenge, 300),
         atMessageCount: Number.isFinite(value.atMessageCount) ? Math.min(ceiling, Math.max(0, value.atMessageCount)) : 0,
         location: text(value.location, 120) || null,
-        t: Number.isFinite(value.t) ? value.t : Date.now(),
     };
 }
 
@@ -205,24 +185,28 @@ export function buildRollRulingRecord(proposal, outcome, { messageCount = 0, loc
         challenge,
         atMessageCount: messageCount,
         location,
-        t: Date.now(),
     });
 }
 
 /** Only rulings from the current scene bind the DM: same location, recent turns. */
 export function pruneRecentRulings(rulings, { messageCount = 0, location = null } = {}) {
     return (Array.isArray(rulings) ? rulings : [])
-        .map(normalizeRollRuling)
+        .map(ruling => normalizeRollRuling(ruling))
         .filter(Boolean)
         .filter(r => messageCount - r.atMessageCount <= RULING_MESSAGE_TTL)
         .filter(r => !r.location || !location || r.location === location)
         .slice(-RECENT_RULING_LIMIT);
 }
 
-/** Grant-or-deny reminder for loot the withheld setup declared but never applied. */
-function pendingLootChallengeNote(loot) {
+/**
+ * "3 gold, 2x Healing Potion" — the loot a withheld setup declared and the
+ * engine never applied, as both grant-or-deny reminders list it (the challenge
+ * prompt below and the post-roll outcome prompt in rollResolver.js). '' when
+ * the proposal carries none.
+ */
+export function describePendingLoot(loot) {
     if (!loot) return '';
-    const parts = [
+    return [
         loot.goldFound > 0 ? `${loot.goldFound} gold` : null,
         loot.silverFound > 0 ? `${loot.silverFound} silver` : null,
         loot.copperFound > 0 ? `${loot.copperFound} copper` : null,
@@ -231,9 +215,14 @@ function pendingLootChallengeNote(loot) {
             if (!item?.name) return null;
             return item.quantity > 1 ? `${item.quantity}x ${item.name}` : item.name;
         }),
-    ].filter(Boolean);
-    if (parts.length === 0) return '';
-    return `\n\nYour withheld setup declared potential loot (${parts.join(', ')}) which was NOT applied. If you WITHDRAW and your narration awards any of it, emit the matching items_found/X_found events in that same response; otherwise neither narrate nor emit those gains.`;
+    ].filter(Boolean).join(', ');
+}
+
+/** Grant-or-deny reminder for loot the withheld setup declared but never applied. */
+function pendingLootChallengeNote(loot) {
+    const listed = describePendingLoot(loot);
+    if (!listed) return '';
+    return `\n\nYour withheld setup declared potential loot (${listed}) which was NOT applied. If you WITHDRAW and your narration awards any of it, emit the matching items_found/X_found events in that same response; otherwise neither narrate nor emit those gains.`;
 }
 
 export function buildRoleplayChallengePrompt(proposal, challenge) {

@@ -83,6 +83,15 @@ export const MESSAGE_CONTENT_MAX = 20000;
  */
 export const ROLL_HISTORY_CAP = 50;
 
+/**
+ * THE DC ceiling (2026-10-05): the parser's `requested_rolls.dc` clamp, the
+ * proposal store, the recent-checks / rulings ledgers, the odds line and the
+ * combat exchange's check slots all read this one constant. It was
+ * `MAX_ROLL_DC` in eventChannels.js, `MAX_CHECK_DC` in rules.js and a literal
+ * 30 in roleplayCheck.js — three names for one band.
+ */
+export const MAX_ROLL_DC = 30;
+
 export function cleanTextField(value, max = Infinity) {
     if (typeof value !== 'string') return '';
     return value.trim().slice(0, max);

@@ -28,7 +28,7 @@ describe('pending roleplay check state', () => {
             messages: Array.from({ length: 6 }, () => ({ role: 'user', content: 'x' })),
         };
         const proposed = gameReducer(withMessages, { type: 'PROPOSE_ROLEPLAY_CHECK', payload: { ...proposal, id: 'rc-1' } });
-        expect(proposed.recentChecks).toEqual([{ messageIndex: 6, dc: 10, skill: 'insight', proposalId: 'rc-1' }]);
+        expect(proposed.recentChecks).toEqual([{ messageIndex: 6, dc: 10, proposalId: 'rc-1' }]);
 
         // A challenge REVISE lands AFTER the "Roll challenge" line and the hidden
         // ruling message — a different messageIndex — but supersedes rc-1, so the
@@ -41,7 +41,7 @@ describe('pending roleplay check state', () => {
             type: 'PROPOSE_ROLEPLAY_CHECK',
             payload: { ...proposal, id: 'rc-2', supersedesId: 'rc-1', rolls: [{ type: 'skill_check', skill: 'insight', dc: 8 }] },
         });
-        expect(revised.recentChecks).toEqual([{ messageIndex: 8, dc: 8, skill: 'insight', proposalId: 'rc-2' }]);
+        expect(revised.recentChecks).toEqual([{ messageIndex: 8, dc: 8, proposalId: 'rc-2' }]);
 
         // A genuinely new proposal (no lineage) at a later index appends.
         const later = { ...revised, messages: [...revised.messages, { role: 'user', content: 'y' }] };

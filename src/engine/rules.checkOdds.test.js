@@ -7,7 +7,8 @@
  * the low die) and pins the branch order + condition folding.
  */
 import { describe, it, expect } from 'vitest';
-import { canonicalRollKey, d20SuccessChance, describeCheckOdds, MAX_CHECK_DC } from './rules.js';
+import { canonicalRollKey, d20SuccessChance, describeCheckOdds } from './rules.js';
+import { MAX_ROLL_DC } from '../config/contentLimits.js';
 
 function bruteForceChance(mod, dc, { advantage = false, disadvantage = false } = {}) {
     const succeeds = face => face === 20 || face + mod >= dc;
@@ -64,9 +65,9 @@ describe('d20SuccessChance', () => {
         expect(d20SuccessChance(30, 0, { advantage: true })).toBe(1);
     });
 
-    it('clamps the DC to 0..MAX_CHECK_DC and defaults a non-finite DC to 10', () => {
+    it('clamps the DC to 0..MAX_ROLL_DC and defaults a non-finite DC to 10', () => {
         expect(d20SuccessChance(0, -40)).toBe(1);
-        expect(d20SuccessChance(0, 999)).toBe(d20SuccessChance(0, MAX_CHECK_DC));
+        expect(d20SuccessChance(0, 999)).toBe(d20SuccessChance(0, MAX_ROLL_DC));
         expect(d20SuccessChance(0, 'nope')).toBe(d20SuccessChance(0, 10));
         expect(d20SuccessChance('nope', 10)).toBe(d20SuccessChance(0, 10));
     });
@@ -168,7 +169,7 @@ describe('describeCheckOdds', () => {
         expect(describeCheckOdds(hero, [], { type: 'skill_check', skill: 'athletics', dc: 0 }).chance).toBe(1);
         expect(describeCheckOdds(hero, [], { type: 'skill_check', skill: 'athletics', dc: 30 }).chance).toBeCloseTo(1 / 20, 12);
         expect(describeCheckOdds(hero, [], { type: 'skill_check', skill: 'athletics', dc: '12' }).dc).toBe(10);
-        expect(describeCheckOdds(hero, [], { type: 'skill_check', skill: 'athletics', dc: 200 }).dc).toBe(MAX_CHECK_DC);
+        expect(describeCheckOdds(hero, [], { type: 'skill_check', skill: 'athletics', dc: 200 }).dc).toBe(MAX_ROLL_DC);
     });
 
     it('returns null for a roll the resolver skips (initiative) or junk input', () => {

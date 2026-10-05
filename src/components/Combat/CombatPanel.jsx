@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getCombatStatus } from '../../engine/combatStatus.js';
-import { COMBAT_PHASES, isEnemyActive } from '../../engine/combatExchange.js';
+import { COMBAT_PHASES, isEnemyActive } from '../../engine/combatPredicates.js';
 import { isSpellcaster, summarizeSpellSlots } from '../../engine/spellcasting.js';
 import './Combat.css';
 

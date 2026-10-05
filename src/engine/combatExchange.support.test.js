@@ -6,7 +6,9 @@
  * engine's largest unexercised block).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { COMBAT_PHASES, normalizeCombatExchange, planCombatExchange } from './combatExchange.js';
+import { COMBAT_PHASES } from './combatPredicates.js';
+import { normalizeCombatExchange } from './combatWire.js';
+import { planCombatExchange } from './combatExchange.js';
 import { buildSpellSlots } from './spellcasting.js';
 
 const { rollQueue } = vi.hoisted(() => ({ rollQueue: [] }));

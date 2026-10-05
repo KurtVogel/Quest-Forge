@@ -7,10 +7,8 @@
  * first beat or the hero's drop to a quarter, only for an OLD key moment.
  */
 import { describe, expect, it } from 'vitest';
-import {
-    buildFightMemories, combatNarrationPrompt, describeFightMark, describeFightResonance,
-    FIGHT_RESONANCE_MIN_DISTANCE, recordExchangeCost, sanitizeFightTally, startFightTally,
-} from './combatExchange.js';
+import { buildFightMemories, describeFightMark, describeFightResonance, FIGHT_RESONANCE_MIN_DISTANCE, recordExchangeCost, sanitizeFightTally, startFightTally } from './fightTally.js';
+import { combatNarrationPrompt } from '../llm/combatNarration.js';
 
 const hero = (overrides = {}) => ({ name: 'Astra', currentHP: 20, maxHP: 20, ...overrides });
 const torvald = (overrides = {}) => ({ id: 'c1', name: 'Torvald', hp: 18, maxHp: 18, status: 'healthy', ...overrides });

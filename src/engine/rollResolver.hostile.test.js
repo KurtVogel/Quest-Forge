@@ -53,7 +53,7 @@ function run(rolls, ctx = {}) {
     const dispatch = vi.fn();
     const character = makeCharacter(ctx.character || {});
     const { results } = resolveRolls(rolls, {
-        character, inventory: ctx.inventory || [], combat: ctx.combat || { enemies: [] }, party: ctx.party || [], dispatch,
+        character, inventory: ctx.inventory || [], party: ctx.party || [], dispatch,
     });
     return { results, dispatch };
 }
@@ -88,23 +88,17 @@ describe('death-save mirror reads a typed tally', () => {
     });
 });
 
-describe('hero attack damage fallback is band-checked', () => {
-    it('a weaponless hero with a wire "100d1000+3" rolls the 1d4 default (queue draws ONE die)', () => {
-        rollQueue.push(18, 3); // attack d20, then exactly one damage die
-        const combat = { active: false, enemies: [{ id: 'gob', name: 'Goblin', hp: 7, maxHp: 7, ac: 10, condition: 'healthy' }] };
+describe('a hero attack never rolls a wire damage notation', () => {
+    // The inline-damage lane needed a tracked enemy, and none exists outside a
+    // fight (2026-10-05): a hostile "100d1000+3" is not band-checked any more —
+    // it is not read at all.
+    it('"100d1000+3" beside an out-of-combat attack draws ONE die: the d20', () => {
+        rollQueue.push(18);
         // Level 2: a level-5 fighter's Extra Attack would draw a second d20.
-        const { results } = run([{ type: 'attack_roll', skill: 'attack', target: 'gob', dc: 10, damage: '100d1000+3' }], { combat, character: { level: 2 } });
+        const { results } = run([{ type: 'attack_roll', skill: 'attack', target: 'gob', dc: 10, damage: '100d1000+3' }], { character: { level: 2 } });
         expect(results[0].success).toBe(true);
-        expect(Number.isFinite(results[0].damage)).toBe(true);
-        expect(rollQueue).toHaveLength(0); // a 100-die notation would have exhausted the queue and thrown
-    });
-
-    it('an honest in-band notation still rides', () => {
-        rollQueue.push(18, 4, 2); // attack d20, then 2d6 → two dice
-        const combat = { active: false, enemies: [{ id: 'gob', name: 'Goblin', hp: 20, maxHp: 20, ac: 10, condition: 'healthy' }] };
-        const { results } = run([{ type: 'attack_roll', skill: 'attack', target: 'gob', dc: 10, damage: '2d6' }], { combat, character: { level: 2 } });
-        expect(results[0].success).toBe(true);
-        expect(rollQueue).toHaveLength(0); // both 2d6 dice drawn
+        expect(results[0].damage).toBeUndefined();
+        expect(rollQueue).toHaveLength(0);
     });
 });
 

@@ -6,10 +6,8 @@
  *     ONE cost line, and a marking fight yields ONE engine-minted wound card.
  */
 import { describe, expect, it } from 'vitest';
-import {
-    buildFightWoundCard, combatNarrationPrompt, describeFightCost, isMarkingFight,
-    recordExchangeCost, sanitizeFightTally, snapshotHeroResources, spentFightResources, startFightTally,
-} from './combatExchange.js';
+import { buildFightWoundCard, describeFightCost, isMarkingFight, recordExchangeCost, sanitizeFightTally, snapshotHeroResources, spentFightResources, startFightTally } from './fightTally.js';
+import { combatNarrationPrompt } from '../llm/combatNarration.js';
 
 const hero = (overrides = {}) => ({
     name: 'Astra', currentHP: 20, maxHP: 20,

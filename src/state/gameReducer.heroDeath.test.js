@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
-import { startFightTally } from '../engine/combatExchange.js';
+import { startFightTally } from '../engine/fightTally.js';
 import { describeEpitaph, describeFightCause, sanitizeHeroDeath } from '../engine/heroDeath.js';
 import { sanitizeChapterCloseSuggested } from '../engine/livingWorldSession.js';
 

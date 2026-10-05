@@ -66,7 +66,7 @@ function makeCharacter(overrides = {}) {
 function run(rolls, characterOverrides = {}) {
     const dispatch = vi.fn();
     const character = makeCharacter(characterOverrides);
-    const { results } = resolveRolls(rolls, { character, inventory: [], combat: { enemies: [] }, party: [], dispatch });
+    const { results } = resolveRolls(rolls, { character, inventory: [], party: [], dispatch });
     return { results, dispatch, character };
 }
 
@@ -76,7 +76,6 @@ function runWithContext(rolls, ctx = {}) {
     const { results } = resolveRolls(rolls, {
         character,
         inventory: ctx.inventory || [],
-        combat: ctx.combat || { enemies: [] },
         party: ctx.party || [],
         dispatch,
     });
@@ -117,7 +116,7 @@ describe('active-combat legacy-batch rejection (repair layer removed 2026-07-23)
             }
         );
 
-        expect(outcome).toEqual({ resolved: false, requiresCombatExchange: true });
+        expect(outcome).toBeUndefined();
         expect(dispatch).not.toHaveBeenCalled();
         expect(sendToLLM).not.toHaveBeenCalled();
     });
@@ -150,33 +149,28 @@ describe('active-combat isolation from the legacy roll resolver', () => {
                 playerAction: 'I attack the goblin',
             }
         );
-        expect(outcome).toEqual({ resolved: false, requiresCombatExchange: true });
+        expect(outcome).toBeUndefined();
         expect(sendToLLM).not.toHaveBeenCalled();
         expect(dispatch).not.toHaveBeenCalled();
     });
 });
 
-describe('player attack uses live enemy AC, not the DM dc', () => {
-    it('hits an AC-11 foe on a roll that beats AC but not the bogus DM dc', () => {
-        rollQueue.push(10, 3); // attack die 10 (+bonus beats AC 11), damage die
-        const enemy = { id: 'gob', name: 'Goblin', hp: 7, maxHp: 7, ac: 11, condition: 'healthy' };
+describe('an out-of-combat attack is a to-hit against the stated DC (2026-10-05)', () => {
+    // combat.enemies is empty outside a fight and the resolver refuses a live
+    // one, so no roll here ever has a tracked enemy: the "live enemy AC" /
+    // inline-damage / UPDATE_ENEMY half was unreachable and is gone.
+    it('resolves against roll.dc and rolls no damage, whatever target or notation the wire names', () => {
+        rollQueue.push(12); // ONE die: 12 + 5 = 17 vs DC 15. A damage die would throw (queue exhausted).
         const inventory = [{ type: 'weapon', category: 'martialMelee', name: 'Longsword', damage: '1d8', equipped: true }];
-        const { results } = runWithContext(
-            [{ type: 'attack_roll', skill: 'attack', target: 'gob', dc: 99, description: 'Strike' }],
-            { combat: { enemies: [enemy] }, inventory }
+        const { results, dispatch } = runWithContext(
+            [{ type: 'attack_roll', skill: 'attack', target: 'gob', damage: '1d8+3', dc: 15, description: 'Smash the door' }],
+            { inventory },
         );
-        // Resolved against the enemy's real AC (11), not the DM's dc: 99.
-        expect(results[0].dc).toBe(11);
-        expect(results[0].success).toBe(true);
-    });
-
-    it('falls back to roll.dc when the attack has no tracked enemy target', () => {
-        rollQueue.push(20); // arbitrary
-        const { results } = runWithContext(
-            [{ type: 'attack_roll', skill: 'attack', dc: 15, description: 'Smash the door' }],
-            { combat: { enemies: [] } }
-        );
-        expect(results[0].dc).toBe(15);
+        expect(results).toHaveLength(1);
+        expect(results[0]).toMatchObject({ type: 'attack_roll', dc: 15, rolled: 17, success: true });
+        expect(results[0].damage).toBeUndefined();
+        expect(dispatch.mock.calls.map(([a]) => a.type)).toEqual(['ADD_ROLL', 'ADD_MESSAGE']);
+        expect(formatRollSummary(results)).toBe('[ROLL RESULT: Smash the door, vs AC 15, rolled 17 — HIT]');
     });
 });
 
@@ -197,13 +191,14 @@ describe('death saves', () => {
         const lineOf = dispatch => dispatch.mock.calls.map(([a]) => a).find(a => a.type === 'ADD_MESSAGE' && String(a.payload?.content).startsWith('**Death Saving Throw:**'));
         rollQueue.push(4);
         const failed = run([{ type: 'death_save' }], { ...dyingChar, name: 'Astra', deathSaves: { successes: 0, failures: 1 } });
-        expect(lineOf(failed.dispatch).payload).toMatchObject({ role: 'system', content: '**Death Saving Throw:** natural **4** — failure (2/3). One more and Astra dies.', isDeathEvent: false });
+        expect(lineOf(failed.dispatch).payload).toMatchObject({ role: 'system', content: '**Death Saving Throw:** natural **4** — failure (2/3). One more and Astra dies.' });
+        expect(lineOf(failed.dispatch).payload).not.toHaveProperty('isDeathEvent');
         rollQueue.push(13);
         const succeeded = run([{ type: 'death_save' }], { ...dyingChar, name: 'Astra' });
         expect(lineOf(succeeded.dispatch).payload.content).toBe('**Death Saving Throw:** natural **13** — success (1/3). Two more and Astra is stable.');
         rollQueue.push(1);
         const died = run([{ type: 'death_save' }], { ...dyingChar, name: 'Astra', deathSaves: { successes: 1, failures: 1 } });
-        expect(lineOf(died.dispatch).payload).toMatchObject({ content: '**Death Saving Throw:** natural **1** — THE THIRD FAILURE. Astra dies.', isDeathEvent: true });
+        expect(lineOf(died.dispatch).payload).toMatchObject({ content: '**Death Saving Throw:** natural **1** — THE THIRD FAILURE. Astra dies.' });
         expect(formatRollSummary(died.results)).toContain('THE PLAYER CHARACTER IS DEAD');
     });
 
@@ -316,125 +311,71 @@ describe('condition effects on rolls', () => {
 });
 
 describe('companion attacks', () => {
-    it('rolls companion attacks and applies enemy HP on a hit', () => {
-        rollQueue.push(14, 5); // attack 14 + 4 = 18; damage 1d8+2 = 7
-        const enemy = { id: 'enemy-1', name: 'Goblin', hp: 12, maxHp: 12, ac: 13, condition: 'healthy' };
-        const companion = {
-            id: 'companion-1',
-            name: 'Garrick',
-            hp: 18,
-            maxHp: 18,
-            ac: 14,
-            attackBonus: 4,
-            damage: '1d8+2',
-            status: 'healthy',
-        };
+    const garrick = { id: 'companion-1', name: 'Garrick', hp: 18, maxHp: 18, ac: 14, attackBonus: 4, damage: '1d8+2', status: 'healthy' };
 
+    it('rolls a companion to-hit with the ENGINE attack bonus against the stated DC — no damage, no HP flush', () => {
+        rollQueue.push(14); // 14 + 4 = 18 vs DC 13; a damage die would throw
         const { results, dispatch } = runWithContext(
-            [{ type: 'companion_attack', attackerId: companion.id, target: enemy.id, description: 'Garrick cuts at the goblin' }],
-            { combat: { enemies: [enemy] }, party: [companion] }
+            [{ type: 'companion_attack', attackerId: garrick.id, target: 'the lock', dc: 13, modifier: 9, description: 'Garrick cuts at the rope' }],
+            { party: [garrick] },
         );
 
-        expect(results[0]).toMatchObject({
-            type: 'companion_attack',
-            rolled: 18,
-            success: true,
-            damage: 7,
-            targetHp: 5,
-        });
-        expect(dispatch).toHaveBeenCalledWith({
-            type: 'UPDATE_ENEMY',
-            payload: { id: enemy.id, hp: 5 },
-        });
+        expect(results[0]).toMatchObject({ type: 'companion_attack', attacker: 'Garrick', dc: 13, rolled: 18, success: true });
+        expect(results[0].damage).toBeUndefined();
+        expect(dispatch.mock.calls.map(([a]) => a.type)).toEqual(['ADD_ROLL', 'ADD_MESSAGE']);
+        expect(messagesFrom(dispatch)).toBe('**Garrick cuts at the rope** (vs AC 13): Rolled **18** — **Hit!**');
+        expect(formatRollSummary(results)).toBe('[ROLL RESULT: Garrick cuts at the rope vs AC 13, rolled 18 — HIT]');
     });
 
     it('does not let a downed companion act', () => {
         const { results, dispatch } = runWithContext(
             [{ type: 'companion_attack', attackerId: 'companion-1', target: 'enemy-1' }],
-            {
-                combat: { enemies: [{ id: 'enemy-1', name: 'Goblin', hp: 12, maxHp: 12, ac: 13 }] },
-                party: [{ id: 'companion-1', name: 'Garrick', hp: 0, maxHp: 18, status: 'downed' }],
-            }
+            { party: [{ ...garrick, hp: 0, status: 'downed' }] },
         );
 
         expect(results[0]).toMatchObject({ type: 'note', text: expect.stringContaining('cannot act') });
-        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'UPDATE_ENEMY' }));
+        expect(dispatch).not.toHaveBeenCalled();
     });
 });
 
 describe('fighter fighting styles in roll resolution', () => {
-    it('rerolls 1s and 2s on two-handed melee damage for Great Weapon Fighting', () => {
-        rollQueue.push(10, 1, 2, 5, 6); // attack, two damage dice, then two rerolls
-        const enemy = { id: 'enemy-1', name: 'Ogre', hp: 30, maxHp: 30, ac: 10, condition: 'healthy' };
-        const inventory = [{
-            type: 'weapon',
-            category: 'martialMelee',
-            name: 'Greatsword',
-            damage: '2d6',
-            twoHanded: true,
-            equipped: true,
-        }];
+    it('rerolls 1s and 2s on a standalone two-handed damage roll for Great Weapon Fighting', () => {
+        rollQueue.push(1, 2, 5, 6); // two damage dice, then their two rerolls
+        const inventory = [{ type: 'weapon', category: 'martialMelee', name: 'Greatsword', damage: '2d6', twoHanded: true, equipped: true }];
 
         const { results, dispatch } = runWithContext(
-            [{ type: 'attack_roll', skill: 'attack', target: enemy.id, dc: enemy.ac }],
-            {
-                character: { fightingStyle: 'greatWeaponFighting' },
-                combat: { enemies: [enemy] },
-                inventory,
-            }
+            [{ type: 'damage_roll', notation: '2d6+3', description: 'Greatsword damage' }],
+            { character: { fightingStyle: 'greatWeaponFighting' }, inventory },
         );
 
-        expect(results[0]).toMatchObject({ type: 'attack_roll', success: true, damage: 14, targetHp: 16 });
-        expect(messagesFrom(dispatch)).toContain('Great Weapon Fighting rerolls: 1->5, 2->6');
+        expect(results[0]).toMatchObject({ type: 'damage_roll', rolled: 14 });
+        // THE damage line — one wording for every lane (2026-10-05).
+        expect(messagesFrom(dispatch)).toBe('**Greatsword damage** (2d6+3): **14** damage (dice: 5, 6, mod: +3; Great Weapon Fighting rerolls: 1->5, 2->6)');
     });
 });
 
 describe('fighter Champion archetype', () => {
-    it('makes a level 3 Champion crit on a natural 19 and doubles damage dice', () => {
-        rollQueue.push(19, 4, 5); // attack, crit damage dice
-        const enemy = { id: 'enemy-1', name: 'Ogre', hp: 20, maxHp: 20, ac: 30, condition: 'healthy' };
-        const inventory = [{
-            type: 'weapon',
-            category: 'martialMelee',
-            name: 'Longsword',
-            damage: '1d8',
-            equipped: true,
-        }];
+    const longsword = [{ type: 'weapon', category: 'martialMelee', name: 'Longsword', damage: '1d8', equipped: true }];
 
+    it('makes a level 3 Champion crit on a natural 19 — a crit beats any AC', () => {
+        rollQueue.push(19);
         const { results, dispatch } = runWithContext(
-            [{ type: 'attack_roll', skill: 'attack', target: enemy.id, dc: enemy.ac }],
-            {
-                character: { level: 3, martialArchetype: 'champion' },
-                combat: { enemies: [enemy] },
-                inventory,
-            }
+            [{ type: 'attack_roll', skill: 'attack', dc: 30 }],
+            { character: { level: 3, martialArchetype: 'champion' }, inventory: longsword },
         );
 
-        expect(results[0]).toMatchObject({
-            success: true,
-            critical: true,
-            damage: 12, // (4 + 5) crit dice + STR 3
-            targetHp: 8,
-        });
+        expect(results[0]).toMatchObject({ success: true, critical: true });
         expect(messagesFrom(dispatch)).toContain('Champion critical on natural 19');
-        expect(messagesFrom(dispatch)).toContain('crit — dice doubled');
     });
 
     it('does not make a non-Champion natural 19 auto-hit', () => {
         rollQueue.push(19);
-        const enemy = { id: 'enemy-1', name: 'Ogre', hp: 20, maxHp: 20, ac: 30, condition: 'healthy' };
-
-        const { results, dispatch } = runWithContext(
-            [{ type: 'attack_roll', skill: 'attack', target: enemy.id, dc: enemy.ac }],
-            {
-                character: { level: 3, martialArchetype: null },
-                combat: { enemies: [enemy] },
-                inventory: [{ type: 'weapon', category: 'martialMelee', damage: '1d8', equipped: true }],
-            }
+        const { results } = runWithContext(
+            [{ type: 'attack_roll', skill: 'attack', dc: 30 }],
+            { character: { level: 3, martialArchetype: null }, inventory: longsword },
         );
 
         expect(results[0]).toMatchObject({ success: false, critical: false });
-        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'UPDATE_ENEMY' }));
     });
 });
 
@@ -489,50 +430,6 @@ describe('natural 20 out-of-combat checks', () => {
             description: 'Sneak past the giant',
         }]);
         expect(summary).toContain('SUCCESS (CRITICAL SUCCESS / NATURAL 20)');
-    });
-});
-
-describe('Rogue Sneak Attack (out-of-combat)', () => {
-    it('applies Sneak Attack damage on a hit with a finesse weapon when having advantage', () => {
-        const rogue = {
-            class: 'rogue',
-            level: 3, // Sneak Attack is 2d6
-            abilityScores: { strength: 10, dexterity: 16, constitution: 12, intelligence: 10, wisdom: 10, charisma: 10 },
-            conditions: [],
-        };
-        const inventory = [
-            { id: 'rapier', type: 'weapon', finesse: true, damage: '1d8', equipped: true },
-        ];
-        // We need:
-        // 1. To-hit roll: d20 = 15 (success)
-        // 2. Weapon damage roll: 1d8 = 5
-        // 3. Sneak Attack rolls: 2d6 = 3, 4
-        rollQueue.push(15, 5); // to-hit (advantage draws two)
-        rollQueue.push(5);     // weapon damage
-        rollQueue.push(3, 4);  // sneak attack rolls (2d6)
-
-        const dispatch = vi.fn();
-        const { results } = resolveRolls(
-            [{ type: 'attack_roll', skill: 'attack', target: 'enemy-1', advantage: true }],
-            {
-                character: rogue,
-                inventory,
-                combat: {
-                    enemies: [{ id: 'enemy-1', name: 'Orc', hp: 30, maxHp: 30, ac: 12 }]
-                },
-                party: [],
-                dispatch,
-            }
-        );
-
-        // Weapon damage (5) + DEX modifier (3) + Sneak Attack (7) = 15 total damage
-        expect(results[0]).toMatchObject({
-            success: true,
-            damage: 15,
-        });
-        const msg = messagesFrom(dispatch);
-        expect(msg).toContain('Sneak Attack');
-        expect(msg).toContain('2d6');
     });
 });
 
@@ -696,7 +593,7 @@ describe('low-level solo death save mirrors the reducer (2026-09-02 audit)', () 
         // The reducer applies the setback (and posts its own "Death save skipped" line).
         expect(dispatch).toHaveBeenCalledWith({ type: 'DEATH_SAVE_RESULT', payload: { die: null } });
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ROLL' }));
-        const deathLine = dispatch.mock.calls.map(([a]) => a).find(a => a.type === 'ADD_MESSAGE' && a.payload?.isDeathEvent);
+        const deathLine = dispatch.mock.calls.map(([a]) => a).find(a => a.type === 'ADD_MESSAGE' && /Death Saving Throw/.test(a.payload?.content || ''));
         expect(deathLine).toBeUndefined();
         expect(formatRollSummary(results)).not.toContain('DEAD');
     });
@@ -712,46 +609,19 @@ describe('low-level solo death save mirrors the reducer (2026-09-02 audit)', () 
     });
 });
 
-describe('Sneak Attack ally condition reads the working party copies (2026-09-02 audit)', () => {
-    const rogue = {
-        name: 'Nix',
-        class: 'rogue',
-        level: 3, // 2d6 Sneak Attack
-        currentHP: 20,
-        maxHP: 20,
-        abilityScores: { strength: 10, dexterity: 16, constitution: 12, intelligence: 10, wisdom: 10, charisma: 10 },
-        conditions: [],
-    };
-    const inventory = [{ id: 'rapier', type: 'weapon', finesse: true, damage: '1d8', equipped: true }];
-    const combat = () => ({ enemies: [{ id: 'orc-1', name: 'Orc', hp: 30, maxHp: 30, ac: 10 }] });
-    const party = () => [{ id: 'c1', name: 'Bo', hp: 5, maxHp: 10, ac: 8 }];
-
-    it('control: a standing ally grants Sneak Attack without advantage', () => {
-        rollQueue.push(15); // to-hit
-        rollQueue.push(5);  // 1d8 weapon
-        rollQueue.push(3, 4); // 2d6 sneak
-        const { results } = runWithContext(
-            [{ type: 'attack_roll', skill: 'attack', target: 'orc-1' }],
-            { character: rogue, inventory, combat: combat(), party: party() },
-        );
-        expect(results[0]).toMatchObject({ success: true, damage: 5 + 3 + 7 });
-    });
-
-    it('a companion downed earlier in the same batch no longer grants the ally condition', () => {
-        rollQueue.push(18); // Orc attacks Bo: hits AC 8
-        rollQueue.push(6);  // 1d6 damage → Bo drops to 0
-        rollQueue.push(15); // rogue to-hit
-        rollQueue.push(5);  // 1d8 weapon — NO sneak dice queued; a draw would throw
+describe('the working party copies carry a drop through the batch (2026-09-02 audit)', () => {
+    it('a companion dropped earlier in the same batch cannot act later in it', () => {
+        rollQueue.push(18, 6); // the Orc hits Bo (AC 8) for 1d6 = 6 → Bo drops; no die is queued for Bo's attack
         const { results, dispatch } = runWithContext(
             [
                 { type: 'npc_attack', attacker: 'Orc', target: 'c1', modifier: 2, damage: '1d6' },
-                { type: 'attack_roll', skill: 'attack', target: 'orc-1' },
+                { type: 'companion_attack', attackerId: 'c1', dc: 12 },
             ],
-            { character: rogue, inventory, combat: combat(), party: party() },
+            { party: [{ id: 'c1', name: 'Bo', hp: 5, maxHp: 10, ac: 8 }] },
         );
         expect(results[0]).toMatchObject({ type: 'npc_attack', success: true, targetHp: 0 });
-        expect(results[1]).toMatchObject({ success: true, damage: 5 + 3 });
-        expect(messagesFrom(dispatch)).not.toContain('Sneak Attack');
+        expect(results[1]).toMatchObject({ type: 'note', text: 'Bo is down and cannot act.' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'UPDATE_COMPANION', payload: { id: 'c1', hp: 0 } });
     });
 });
 
@@ -767,7 +637,7 @@ describe('a proposal whose every roll resolves to nothing (2026-09-02 audit)', (
             getState: state, dispatch, sendToLLM, playerAction: 'I draw steel.', setupMessageId: 'msg-setup-9',
         });
 
-        expect(outcome).toEqual({ resolved: false, nothingToRoll: true });
+        expect(outcome).toBeUndefined();
         expect(sendToLLM).not.toHaveBeenCalled();
         expect(dispatch).toHaveBeenCalledWith({ type: 'REVEAL_MESSAGE', payload: { id: 'msg-setup-9' } });
         expect(messagesFrom(dispatch)).toContain('no dice were rolled and the check is set aside');
@@ -789,7 +659,7 @@ describe('follow-up narration failure surfacing', () => {
         const dispatch = vi.fn();
         const sendToLLM = vi.fn().mockRejectedValue(new Error('provider 500'));
 
-        const outcome = await handleRequestedRolls(
+        await handleRequestedRolls(
             [{ type: 'skill_check', skill: 'athletics', dc: 10, description: 'Climb the wall' }],
             {
                 getState: () => ({ character: makeCharacter(), inventory: [], combat: { active: false }, party: [] }),
@@ -799,7 +669,7 @@ describe('follow-up narration failure surfacing', () => {
             }
         );
 
-        expect(outcome.resolved).toBe(true);
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ROLL' })); // the die landed
         const errorLine = dispatch.mock.calls
             .map(([action]) => action)
             .find(a => a.type === 'ADD_MESSAGE'
@@ -812,17 +682,11 @@ describe('follow-up narration failure surfacing', () => {
     });
 });
 describe('enemy attacks a companion (inline damage, queue 2026-07-08)', () => {
-    const partyCombat = {
-        active: false, // legacy path runs out of engine-owned combat (pre-combat_start ambush)
-        enemies: [{ id: 'wolf', name: 'Fen Wolf', hp: 11, maxHp: 11, ac: 12, condition: 'healthy' }],
-    };
-
     it('rolls vs the companion AC, applies inline damage to the companion, and flushes their HP', () => {
         rollQueue.push(15, 4); // to-hit die (15 + 3 = 18 vs AC 14), damage die
         const { results, dispatch } = runWithContext(
             [{ type: 'npc_attack', attackerId: 'wolf', attacker: 'Fen Wolf', target: 'companion-1', modifier: 3, damage: '1d6+1' }],
             {
-                combat: partyCombat,
                 party: [{ id: 'companion-1', name: 'Terho', hp: 15, maxHp: 15, ac: 14, status: 'healthy' }],
             }
         );
@@ -846,7 +710,6 @@ describe('enemy attacks a companion (inline damage, queue 2026-07-08)', () => {
         const { results, dispatch } = runWithContext(
             [{ type: 'npc_attack', attackerId: 'wolf', attacker: 'Fen Wolf', target: 'Terho', modifier: 3, damage: '1d6+1' }],
             {
-                combat: partyCombat,
                 party: [{ id: 'companion-1', name: 'Terho', hp: 15, maxHp: 15, ac: 14, status: 'healthy' }],
             }
         );
@@ -859,7 +722,7 @@ describe('enemy attacks a companion (inline damage, queue 2026-07-08)', () => {
         rollQueue.push(15, 4);
         const { results, dispatch } = runWithContext(
             [{ type: 'npc_attack', attackerId: 'wolf', attacker: 'Fen Wolf', target: 'some stranger', modifier: 3, damage: '1d6+1' }],
-            { combat: partyCombat, party: [] }
+            { party: [] }
         );
 
         expect(results.find(r => r.type === 'npc_attack')).toMatchObject({ targetIsPlayer: true, damage: 5 });
@@ -911,34 +774,6 @@ describe('exchange-machine parity via the combat math kernel (2026-07-30)', () =
         expect(results[1].targetHp).toBe(17);
     });
 
-    it('a companion attack against a prone enemy rolls with advantage (target-side conditions)', () => {
-        // Advantage draws two d20s: 4 and 17, keeps 17 → 17 + 4 = 21 vs AC 12 (hit).
-        // Damage 1d8 = 6.
-        rollQueue.push(4, 17, 6);
-        const { results } = runWithContext([
-            { type: 'companion_attack', attackerId: 'comp-1', target: 'enemy-1' },
-        ], {
-            party: [{ id: 'comp-1', name: 'Kaarina', hp: 18, maxHp: 18, ac: 15, attackBonus: 4, damage: '1d8' }],
-            combat: { enemies: [{ id: 'enemy-1', name: 'Marauder', hp: 20, maxHp: 20, ac: 12, conditions: ['prone'] }] },
-        });
-
-        expect(results[0]).toMatchObject({ success: true, damage: 6, targetName: 'Marauder' });
-        expect(results[0].targetHp).toBe(14);
-    });
-
-    it('a player attack against a restrained tracked enemy gains advantage', () => {
-        // Advantage: d20s 3 and 16 → keep 16; +5 (STR 3 + prof 2) = 21 vs AC 14; damage 1d4+3 unarmed? use dagger.
-        rollQueue.push(3, 16, 4);
-        const { results } = runWithContext([
-            { type: 'attack_roll', skill: 'attack', target: 'enemy-1' },
-        ], {
-            inventory: [{ id: 'dagger', type: 'weapon', damage: '1d4', finesse: false, equipped: true }],
-            combat: { enemies: [{ id: 'enemy-1', name: 'Cultist', hp: 10, maxHp: 10, ac: 14, conditions: ['restrained'] }] },
-        });
-
-        expect(results[0].success).toBe(true);
-        expect(results[0].damage).toBeGreaterThan(0);
-    });
 });
 
 describe('fighter L5+ out-of-combat Extra Attack (pinned 2026-08-27)', () => {

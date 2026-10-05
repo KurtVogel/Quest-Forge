@@ -1,15 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-    COMBAT_PHASES,
-    combatNarrationPrompt,
-    exchangeEventLines,
-    exchangeSummary,
-    normalizeCombatExchange,
-    planCombatExchange,
-    planOpeningExchange,
-    reconcileStartingCombatExchange,
-} from './combatExchange.js';
+import { COMBAT_PHASES } from './combatPredicates.js';
+import { normalizeCombatExchange, reconcileStartingCombatExchange } from './combatWire.js';
+import { exchangeEventLines, planCombatExchange, planOpeningExchange } from './combatExchange.js';
+import { combatNarrationPrompt } from '../llm/combatNarration.js';
 import { buildSpellSlots } from './spellcasting.js';
+
+/** The result's chat lines as one block (what the narration prompt's RESOLVED EVENTS carries). */
+const exchangeSummary = result => exchangeEventLines(result).join('\n');
 
 const { rollQueue } = vi.hoisted(() => ({ rollQueue: [] }));
 
@@ -235,14 +232,41 @@ describe('engine-owned exchange resolution', () => {
         expect(plan.payload.result.postState.enemies[0]).toMatchObject({ name: 'Goblin', hp: 0, status: 'defeated' });
     });
 
-    it('hands the reducer the hero’s own dice apart from the whole exchange (2026-09-21 audit P2)', () => {
+    it('hands the reducer the hero’s own dice only — no other actor’s, and no second list (2026-09-21 audit P2)', () => {
         rollQueue.push(15, 5, 18, 4); // hero hits (attack + damage); the goblin hits back (attack + damage)
         const plan = planCombatExchange(state(), exchange());
 
         expect(plan.ok).toBe(true);
-        expect(plan.payload.rolls).toHaveLength(4);
-        expect(plan.payload.heroRolls).toHaveLength(2);
-        expect(plan.payload.heroRolls).toEqual(plan.payload.rolls.slice(0, 2));
+        expect(rollQueue).toHaveLength(0); // all four dice were rolled…
+        expect(plan.payload.heroRolls).toHaveLength(2); // …and the ledger gets the hero's two
+        // The whole-exchange `rolls` list had no reader (2026-10-05): every die is on the result lines.
+        expect(plan.payload).not.toHaveProperty('rolls');
+    });
+
+    it('every plan branch seals the same payload keys — an opening takes the defaults (2026-10-05)', () => {
+        const keys = payload => Object.keys(payload).sort();
+        rollQueue.push(15, 5, 18, 4);
+        const ordinary = planCombatExchange(state(), exchange());
+        const fled = planCombatExchange(state(), normalizeCombatExchange({ player_slots: [{ action: 'flee' }] }));
+        rollQueue.push(18, 4); // the goblin's opening attack + damage
+        const opening = planOpeningExchange({
+            ...state(),
+            combat: {
+                ...state().combat,
+                phase: COMBAT_PHASES.OPENING,
+                openingActorIds: ['Goblin'],
+                turnOrder: [{ type: 'enemy', id: 'Goblin', name: 'Goblin', initiative: 18 }, { type: 'player', name: 'Vesa', initiative: 10 }],
+            },
+        });
+
+        expect(opening.ok).toBe(true);
+        expect(keys(fled.payload)).toEqual(keys(ordinary.payload));
+        expect(keys(opening.payload)).toEqual(keys(ordinary.payload));
+        expect(opening.payload).toMatchObject({
+            playerHealing: 0, characterUpdates: null, deathSaveNatural: null, deathSaveSkipped: false,
+            heroRolls: [], flankedEnemyIds: [], bonusActionUsed: false, consumeActionSurge: false,
+        });
+        expect(fled.payload.result.terminal).toBe('escaped');
     });
 
     it('tells narration that a heavily wounded foe remains alive and combat is ongoing', () => {
@@ -1250,8 +1274,12 @@ describe('spellcasting v1 combat exchanges', () => {
         expect(plan.ok).toBe(true);
         expect(plan.payload.characterUpdates.classResources.channelDivinity.used).toBe(1);
         const [skeleton, wight] = plan.payload.enemies;
-        expect(skeleton.condition).toBe(`dead`);
+        // Destroy Undead (level 5+, a foe of 20 max HP or less): gone outright,
+        // not merely turned; the Wight is too strong and only flees.
+        expect(skeleton).toMatchObject({ hp: 0, condition: `dead` });
+        expect(wight).toMatchObject({ hp: 45, condition: `healthy` });
         expect(wight.conditions).toContain(`frightened`);
+        expect(exchangeSummary(plan.payload.result)).toContain(`Skeleton is destroyed outright by the divine radiance`);
 
         const noUndead = planCombatExchange(clericState(), normalizeCombatExchange({
             player_slots: [{ action: `channel` }],
@@ -1486,7 +1514,7 @@ describe('surrender and interact resolution', () => {
         // with the snapshot keeping it alive at full HP.
         expect(plan.payload.result.terminal).toBe('victory');
         expect(plan.payload.result.postState.enemies[0]).toMatchObject({ status: 'surrendered', hp: 10 });
-        expect(plan.payload.rolls).toHaveLength(0); // no dice existed anywhere in the exchange
+        expect(plan.payload.heroRolls).toHaveLength(0); // no dice existed anywhere in the exchange (the mock throws on an unqueued die)
     });
 
     it('a player interact slot resolves without dice as a narrative note', () => {
@@ -1502,7 +1530,7 @@ describe('surrender and interact resolution', () => {
             type: 'note',
             text: 'Vesa uses their action to interact.',
         });
-        expect(plan.payload.rolls).toHaveLength(0);
+        expect(plan.payload.heroRolls).toHaveLength(0);
         expect(plan.payload.result.terminal).toBeNull();
     });
 });
@@ -1519,7 +1547,7 @@ describe('critical hit dice doubling (live exchange path)', () => {
         expect(attack).toMatchObject({ critical: true, hit: true, damage: 14, remainingHp: 16, maxHp: 30 });
         expect(plan.payload.enemies[0].hp).toBe(16);
         // The single damage roll carries BOTH crit dice.
-        const damageRoll = plan.payload.rolls[1];
+        const damageRoll = plan.payload.heroRolls[1];
         expect(damageRoll.rolls).toEqual([6, 5]);
         expect(damageRoll.total).toBe(14);
     });
@@ -1747,7 +1775,7 @@ describe('death seam: one live isLowLevelSolo at the death save (2026-09-02 audi
         expect(plan.payload.result.terminal).toBe('defeat');
         expect(plan.payload.deathSaveNatural).toBeNull();
         expect(plan.payload.deathSaveSkipped).toBe(true);
-        expect(plan.payload.rolls).toHaveLength(0);
+        expect(plan.payload.heroRolls).toHaveLength(0);
         expect(plan.payload.result.events.some(event => event.type === 'death_save')).toBe(false);
         expect(plan.payload.result.events.some(event => event.type === 'note' && event.text.includes('Death save skipped'))).toBe(true);
         expect(combatNarrationPrompt(plan.payload.result)).toContain('mechanically defeated');
@@ -1917,5 +1945,150 @@ describe('combatNarrationPrompt size at the 10-event ceiling (2026-09-23 combat-
         expect(prompt).toContain('DEFEATED: Marsh bandit 4');
         expect(prompt.length).toBeGreaterThan(1500);
         expect(prompt.length).toBeLessThan(3000);
+    });
+});
+
+describe('check / save slot keys are the rules\' own keys (2026-10-05 audit P1)', () => {
+    // A level-3 rogue with EXPERTISE in Sleight of Hand: DEX +3, proficiency +2 doubled = +7.
+    // The lane used to lowercase the key twice — `sleightofhand` is no skill, so the
+    // check rolled 1d20+0 — and rejected the camelCase key the HERO SHEET prints.
+    const rogue = {
+        class: 'rogue', level: 3,
+        abilityScores: { strength: 10, dexterity: 16, constitution: 12, intelligence: 10, wisdom: 14, charisma: 8 },
+        skillProficiencies: ['sleightOfHand', 'animalHandling'],
+        expertiseSkills: ['sleightOfHand'],
+        savingThrowProficiencies: ['dexterity', 'intelligence'],
+    };
+    const check = (slot) => {
+        const plan = planCombatExchange(state({ character: rogue }), normalizeCombatExchange({
+            player_slots: [slot],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        }));
+        return { plan, event: plan.payload?.result.events.find(e => e.type === 'check' || e.type === 'save') };
+    };
+
+    it.each([
+        ['sleightOfHand'],   // the HERO SHEET's own key — was REJECTED as unsupported (a dead turn)
+        ['Sleight of Hand'], // display casing — validated, then rolled +0
+        ['sleight of hand'],
+        ['sleight_of_hand'],
+        ['sleightofhand'],
+        ['SLEIGHT-OF-HAND'],
+    ])('a check declared as %j rolls the expertise modifier (+7)', (wire) => {
+        rollQueue.push(10);
+        const { plan, event } = check({ action: 'check', skill: wire, dc: 15 });
+        expect(plan.ok).toBe(true);
+        expect(event).toMatchObject({ type: 'check', rolled: 17, natural: 10, success: true });
+        expect(plan.payload.heroRolls[0]).toMatchObject({ modifier: 7 });
+    });
+
+    it.each([
+        ['animalHandling'],
+        ['Animal Handling'],
+        ['animal handling'],
+    ])('a check declared as %j rolls WIS + proficiency (+4)', (wire) => {
+        rollQueue.push(10);
+        const { plan, event } = check({ action: 'check', skill: wire, dc: 12 });
+        expect(plan.ok).toBe(true);
+        expect(event).toMatchObject({ rolled: 14, success: true });
+    });
+
+    it('a bare ability in any casing is the ability modifier; a save adds its proficiency', () => {
+        rollQueue.push(10);
+        expect(check({ action: 'check', skill: 'Dexterity', dc: 10 }).event).toMatchObject({ type: 'check', rolled: 13 });
+        rollQueue.push(10);
+        expect(check({ action: 'save', ability: 'DEXTERITY', dc: 10 }).event).toMatchObject({ type: 'save', rolled: 15 });
+        rollQueue.push(10);
+        expect(check({ action: 'save', skill: 'wisdom', dc: 10 }).event).toMatchObject({ type: 'save', rolled: 12 }); // not proficient
+    });
+
+    it('the Cunning Action lane still reads a display-cased Stealth as stealth', () => {
+        rollQueue.push(10, 10, 4); // the stealth check, then the attack + damage
+        const plan = planCombatExchange(state({ character: rogue }), normalizeCombatExchange({
+            player_slots: [
+                { action: 'check', skill: 'Stealth', dc: 12 },
+                { action: 'attack', strikes: [{ target: 'Goblin' }] },
+            ],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        }));
+        expect(plan.ok).toBe(true);
+    });
+
+    it('a key the rules do not know is still rejected by name — and a save still needs an ability', () => {
+        expect(check({ action: 'check', skill: 'lockpicking', dc: 12 }).plan)
+            .toMatchObject({ ok: false, error: 'Check skill or ability "lockpicking" is unsupported.' });
+        expect(check({ action: 'save', skill: 'stealth', dc: 12 }).plan)
+            .toMatchObject({ ok: false, error: 'Saving throw ability "stealth" is unsupported.' });
+        expect(check({ action: 'check', skill: { evil: true }, dc: 12 }).plan)
+            .toMatchObject({ ok: false, error: 'Check slots must name an ability or skill.' });
+    });
+});
+
+describe('combat pins the audit found missing (2026-10-05)', () => {
+    it('weapon_id makes the named weapon the one this Attack swings', () => {
+        // Longsword (1d8) is equipped; the slot names the Greatsword in the pack (2d6).
+        // TWO damage dice are drawn — with the equipped longsword one would be left queued.
+        rollQueue.push(15, 3, 4);
+        const base = state({ enemies: [enemy('Goblin', { hp: 30, maxHp: 30 })] });
+        const plan = planCombatExchange({
+            ...base,
+            inventory: [
+                ...base.inventory,
+                { id: 'greatsword', name: 'Greatsword', type: 'weapon', category: 'martialMelee', damage: '2d6', twoHanded: true, equipped: false },
+            ],
+        }, normalizeCombatExchange({
+            player_slots: [{ action: 'attack', weapon_id: 'Greatsword', strikes: [{ target: 'Goblin' }] }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        }));
+        expect(plan.ok).toBe(true);
+        expect(rollQueue).toHaveLength(0);
+        expect(plan.payload.result.events[0]).toMatchObject({ type: 'attack', hit: true, damage: 3 + 4 + 3 }); // 2d6 + STR 3
+    });
+
+    it('a weapon_id that is not in the pack rejects the turn', () => {
+        const plan = planCombatExchange(state(), normalizeCombatExchange({
+            player_slots: [{ action: 'attack', weapon_id: 'Vorpal Blade', strikes: [{ target: 'Goblin' }] }],
+        }));
+        expect(plan).toMatchObject({ ok: false, error: 'Attack weapon "Vorpal Blade" is not in the player\'s inventory.' });
+    });
+
+    it('an enemy whose declared target is unavailable DROPS its action — never a silent retarget onto the hero', () => {
+        rollQueue.push(2); // the hero's miss (2 + 5 vs AC 12); NO die exists for the goblin
+        const plan = planCombatExchange(state({
+            party: [{ id: 'brann', name: 'Brann', hp: 0, maxHp: 12, ac: 14, attackBonus: 4, damage: '1d8+2', status: 'downed' }],
+        }), normalizeCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }] }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'attack', target: 'Brann' }],
+        }));
+        expect(plan.ok).toBe(true);
+        expect(rollQueue).toHaveLength(0);
+        expect(plan.payload.playerDamage).toBe(0);
+        expect(plan.payload.result.events.filter(e => e.type === 'attack' && e.actor === 'Goblin')).toHaveLength(0);
+        expect(exchangeSummary(plan.payload.result)).toContain('Goblin\'s declared target is unavailable; its action is dropped rather than silently redirected.');
+    });
+
+    it('Great Weapon Fighting rerolls 1s and 2s on the COMBAT lane too (the kernel is shared)', () => {
+        // Attack 15; 2d6 comes up 1 and 2; both reroll (5, 6): 5 + 6 + STR 3 = 14.
+        rollQueue.push(15, 1, 2, 5, 6);
+        const base = state({ character: { fightingStyle: 'greatWeaponFighting' }, enemies: [enemy('Goblin', { hp: 30, maxHp: 30 })] });
+        const plan = planCombatExchange({
+            ...base,
+            inventory: [{ id: 'greatsword', name: 'Greatsword', type: 'weapon', category: 'martialMelee', damage: '2d6', twoHanded: true, equipped: true }],
+        }, normalizeCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }] }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        }));
+        expect(plan.ok).toBe(true);
+        expect(rollQueue).toHaveLength(0);
+        expect(plan.payload.result.events[0]).toMatchObject({ hit: true, damage: 14, remainingHp: 16 });
+    });
+
+    it('an object target ref is no target (it used to read "[object Object]")', () => {
+        const intent = normalizeCombatExchange({
+            player_slots: [{ action: 'attack', strikes: [{ target: { evil: true } }, { target: 'Goblin' }] }],
+            enemy_intents: [{ enemy_id: { evil: true }, action: 'attack' }, { enemy_id: 'Goblin', action: 'attack', target: { evil: true } }],
+        });
+        expect(intent.playerSlots[0].strikes).toEqual([{ target: 'Goblin' }]);
+        expect(intent.enemyIntents).toEqual([{ enemyId: 'Goblin', action: 'attack', target: 'player', description: '' }]);
     });
 });

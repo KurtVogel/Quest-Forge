@@ -1,35 +1,53 @@
 /**
  * Engine-owned combat exchanges.
  *
- * The DM interprets fiction into a bounded intent envelope. This module validates that
- * envelope, rolls every die, and returns one immutable mechanics plan. The reducer applies
- * that plan in one dispatch; narration happens afterwards from the stored result.
+ * The DM interprets fiction into a bounded intent envelope (combatWire.js
+ * normalizes it). This module validates that envelope against live state,
+ * rolls every die, and returns one immutable mechanics plan. The reducer
+ * applies that plan in one dispatch; narration happens afterwards from the
+ * stored result (llm/combatNarration.js composes its prompt).
+ *
+ * Until 2026-10-05 this file also held the wire normalization, the three
+ * combat predicates, the fight tally / wound / memory family and the
+ * narration prompt — four modules whose only coupling was the file. They
+ * live in combatWire.js, combatPredicates.js, fightTally.js and
+ * llm/combatNarration.js.
  */
 import { rollWithModifier } from './dice.ts';
-import { toFiniteNumber } from '../data/items.js';
 import {
+    ABILITY_KEY_SET,
+    SKILL_KEY_SET,
     combineRollModifiers,
     computeACFromInventory,
     getConditionRollEffects,
     getIncapacitatingCondition,
-    getModifier,
-    getSavingThrowModifier,
-    getSkillModifier,
     getWeaponAttackBonus,
     getWeaponDamageNotation,
     normalizeDeathSaves,
+    resolvePlayerRollModifier,
 } from './rules.js';
-import { DEATH_SAVE_OUTCOMES, deathSaveLine, describeDeathSaveCount, judgeDeathSave } from './deathSaves.js';
+import { DEATH_SAVE_OUTCOMES, deathSaveLine, judgeDeathSave } from './deathSaves.js';
 import {
     applyUncannyDodge,
     conditionAwareAttackModifiers,
+    getAttackCount,
     resolveAttackRoll,
     rollD20Kept as rollD20,
     rollDamage,
 } from './combatMath.js';
-import { sanitizeEnemyDamage, validateEnemyAttackBonus, validateEnemySaveBonus, enemyHealthCondition, normalizeEnemyConditions } from './enemyStats.js';
-import { namesMatch, splitBondMoments } from './npcRoster.js';
-import { conversationalDistance } from './replayLedger.js';
+import {
+    ENEMY_DEFAULT_ATTACK_BONUS,
+    ENEMY_DEFAULT_DAMAGE,
+    ENEMY_DEFAULT_SAVE_BONUS,
+    enemyHealthCondition,
+    enemyOutcome,
+    healthWord,
+    normalizeEnemyConditions,
+    sanitizeEnemyDamage,
+    validateEnemyAttackBonus,
+    validateEnemySaveBonus,
+} from './enemyStats.js';
+import { COMBAT_PHASES, isCompanionActive, isEnemyActive, isLowLevelSolo } from './combatPredicates.js';
 import {
     chooseSlotLevel,
     getSpellAttackBonus,
@@ -41,295 +59,6 @@ import {
     spendSpellSlot,
     summarizeSpellSlots,
 } from './spellcasting.js';
-
-export const COMBAT_PHASES = Object.freeze({
-    OPENING: 'opening',
-    AWAITING_PLAYER: 'awaiting_player',
-    AWAITING_INTENT: 'awaiting_intent',
-    AWAITING_NARRATION: 'awaiting_narration',
-});
-
-const PLAYER_ACTIONS = new Set(['attack', 'cast', 'channel', 'check', 'save', 'dodge', 'dash', 'disengage', 'flee', 'interact', 'pass', 'death_save', 'second_wind']);
-const ENEMY_ACTIONS = new Set(['attack', 'defend', 'flee', 'surrender']);
-const COMPANION_ACTIONS = new Set(['attack', 'defend', 'guard', 'pass']);
-const ABILITIES = new Set(['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']);
-const SKILLS = new Set([
-    'acrobatics', 'animalHandling', 'arcana', 'athletics', 'deception', 'history', 'insight',
-    'intimidation', 'investigation', 'medicine', 'nature', 'perception', 'performance',
-    'persuasion', 'religion', 'sleightOfHand', 'stealth', 'survival',
-]);
-const DEFAULT_ENEMY_ATTACK_BONUS = 3;
-const DEFAULT_ENEMY_DAMAGE = '1d6';
-const DEFAULT_ENEMY_SAVE_BONUS = 2;
-
-const text = (value, max = 120) => String(value || '').trim().slice(0, max);
-const ref = value => text(value, 100) || null;
-const normalizeSkillRef = value => {
-    const raw = text(value, 50).toLowerCase();
-    if (raw === 'animal handling') return 'animalHandling';
-    if (raw === 'sleight of hand') return 'sleightOfHand';
-    return raw;
-};
-
-function normalizeStrikes(slot) {
-    const raw = Array.isArray(slot?.strikes)
-        ? slot.strikes
-        : (slot?.target ? [{ target: slot.target }] : []);
-    return raw.slice(0, 4).map(strike => ({ target: ref(strike?.target || strike) })).filter(s => s.target);
-}
-
-/** Most distinct cast targets the wire keeps; each resolver clamps to the SPELL's own limit with a visible note. */
-const MAX_CAST_TARGETS = 6;
-/** Raw wire entries scanned for those targets (a flooded list is not walked). */
-const MAX_CAST_TARGET_SCAN = 30;
-
-/**
- * Deduped target refs for a cast slot ("targets" array or single "target").
- * Dedupe BEFORE the cap (2026-09-26): the old `slice(0, 3)` ran first, so a
- * repeated name or a junk entry among the first three ate a legitimate
- * recipient's slot — `["self", "Jorun", "Jorun", "Mika"]` on Mass Healing
- * Word healed two and dropped Mika without a word, and a level-2 Magic
- * Missile (4 darts) could never name its fourth foe. The cap sits above every
- * catalog limit so the resolvers' own clamp posts the "extra targets are
- * unaffected" note instead of the wire silently losing them.
- */
-function normalizeCastTargets(slot) {
-    const raw = Array.isArray(slot?.targets)
-        ? slot.targets
-        : (slot?.target != null ? [slot.target] : []);
-    const unique = [];
-    for (const value of raw.slice(0, MAX_CAST_TARGET_SCAN)) {
-        const target = ref(value?.target ?? value);
-        if (!target || unique.includes(target)) continue;
-        unique.push(target);
-        if (unique.length >= MAX_CAST_TARGETS) break;
-    }
-    return unique;
-}
-
-function normalizeConditionDelta(raw, targetValue) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const target = ref(targetValue || raw.target || raw.enemy_id || raw.enemyId);
-    if (!target) return null;
-    const asList = value => Array.isArray(value) ? value : [value];
-    const add = normalizeEnemyConditions(asList(raw.add_conditions || raw.addConditions || raw.add || raw.add_condition || raw.addCondition));
-    const remove = normalizeEnemyConditions(asList(raw.remove_conditions || raw.removeConditions || raw.remove || raw.remove_condition || raw.removeCondition));
-    if (add.length === 0 && remove.length === 0) return null;
-    return { target, add, remove };
-}
-
-function normalizeSituationalRuling(raw) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const source = raw.situational_ruling || raw.situationalRuling || raw;
-    if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
-    const mode = text(source.roll_mode || source.rollMode || source.mode, 20).toLowerCase();
-    const reason = text(source.roll_reason || source.rollReason || source.reason, 180);
-    if (!['advantage', 'disadvantage'].includes(mode) || !reason) return null;
-    return { mode, reason };
-}
-
-/** Normalize an LLM-authored intent envelope without consulting mutable game state. */
-export function normalizeCombatExchange(raw) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const rawPlayerSlots = raw.player_slots || raw.playerSlots;
-    const rawEnemyIntents = raw.enemy_intents || raw.enemyIntents;
-    const rawCompanionIntents = raw.companion_intents || raw.companionIntents;
-    const rawEnemyConditionUpdates = raw.enemy_condition_updates || raw.enemyConditionUpdates;
-    // Cap 3: up to two action slots (Action Surge / Cunning Action / bonus-cast
-    // lane) plus one bonus-action second_wind slot. validatePlayerSlots owns the
-    // real per-lane rules.
-    const playerSlots = Array.isArray(rawPlayerSlots)
-        ? rawPlayerSlots.slice(0, 3).map((slot, index) => {
-            // "Second Wind"/"secondWind" spellings fold into the documented key.
-            const action = text(slot?.action, 30).toLowerCase().replace(/[\s-]+/g, '_').replace(/^secondwind$/, 'second_wind');
-            if (!PLAYER_ACTIONS.has(action)) return null;
-            const situationalRuling = normalizeSituationalRuling(slot);
-            // Normalized ONCE (2026-09-27 audit nit): the truthiness-then-value spread re-ran it.
-            const onSuccess = action === 'check' ? normalizeConditionDelta(slot.on_success || slot.onSuccess) : null;
-            return {
-                id: ref(slot.id) || `player-slot-${index + 1}`,
-                action,
-                description: text(slot.description, 180),
-                ...(action === 'attack' && { strikes: normalizeStrikes(slot), weaponId: ref(slot.weapon_id || slot.weaponId) }),
-                ...(action === 'cast' && {
-                    target: ref(slot.target),
-                    targets: normalizeCastTargets(slot),
-                    spell: ref(slot.spell),
-                    // Numeric-string parity with the out-of-combat lane (2026-09-13 audit P2).
-                    slotLevel: Number.isFinite(toFiniteNumber(slot.slot_level ?? slot.slotLevel))
-                        ? Math.max(1, Math.min(5, Math.round(toFiniteNumber(slot.slot_level ?? slot.slotLevel))))
-                        : null,
-                }),
-                ...((action === 'check' || action === 'save') && {
-                    skill: normalizeSkillRef(slot.skill || slot.ability),
-                    // Missing DC defaults to 10 — the out-of-combat channel's
-                    // default (eventChannels.js): the solo-play ladder is 8/10/12/15/18+
-                    // and "never default DC 15" (2026-09-02 audit P2).
-                    // Coerced first ("15" was DC 10 — 2026-09-15 audit P2), the
-                    // slot_level / out-of-combat dc parity.
-                    dc: Number.isFinite(toFiniteNumber(slot.dc)) ? Math.max(5, Math.min(30, Math.round(toFiniteNumber(slot.dc)))) : 10,
-                }),
-                ...(onSuccess && { onSuccess }),
-                ...(situationalRuling && { situationalRuling }),
-            };
-        }).filter(Boolean)
-        : [];
-    if (playerSlots.length === 0) return null;
-
-    const enemyIntents = Array.isArray(rawEnemyIntents)
-        ? rawEnemyIntents.slice(0, 30).map(intent => {
-            const action = text(intent?.action, 30).toLowerCase();
-            const enemyId = ref(intent?.enemy_id || intent?.enemyId);
-            if (!enemyId || !ENEMY_ACTIONS.has(action)) return null;
-            const rawRemoveConditions = intent.remove_conditions || intent.removeConditions;
-            const situationalRuling = normalizeSituationalRuling(intent);
-            const removeConditions = normalizeEnemyConditions(
-                Array.isArray(rawRemoveConditions) ? rawRemoveConditions : [rawRemoveConditions]
-            );
-            return {
-                enemyId,
-                action,
-                target: ref(intent.target) || 'player',
-                description: text(intent.description, 180),
-                ...(removeConditions.length > 0 && { removeConditions }),
-                ...(situationalRuling && { situationalRuling }),
-            };
-        }).filter(Boolean)
-        : [];
-
-    const companionIntents = Array.isArray(rawCompanionIntents)
-        ? rawCompanionIntents.slice(0, 4).map(intent => {
-            const action = text(intent?.action, 30).toLowerCase();
-            const companionId = ref(intent?.companion_id || intent?.companionId);
-            if (!companionId || !COMPANION_ACTIONS.has(action)) return null;
-            const situationalRuling = normalizeSituationalRuling(intent);
-            return {
-                companionId,
-                action,
-                target: ref(intent.target),
-                description: text(intent.description, 180),
-                ...(situationalRuling && { situationalRuling }),
-            };
-        }).filter(Boolean)
-        : [];
-
-    const enemyConditionUpdates = Array.isArray(rawEnemyConditionUpdates)
-        ? rawEnemyConditionUpdates.slice(0, 30)
-            .map(update => normalizeConditionDelta(update, update?.enemy_id || update?.enemyId))
-            .filter(Boolean)
-        : [];
-
-    const rawFlankBroken = raw.flank_broken || raw.flankBroken;
-    const flankBroken = Array.isArray(rawFlankBroken)
-        ? [...new Set(rawFlankBroken.slice(0, 30).map(value => ref(value?.target ?? value)).filter(Boolean))]
-        : [];
-
-    return {
-        playerSlots,
-        enemyIntents,
-        companionIntents,
-        ...(enemyConditionUpdates.length > 0 && { enemyConditionUpdates }),
-        ...(flankBroken.length > 0 && { flankBroken }),
-    };
-}
-
-const combatRefKey = value => text(value, 100)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-
-/**
- * Link a combat-start response's intent references to the engine's canonical enemy ids.
- * The model sometimes invents a readable slug ("goblin-duelist") while combat_start only
- * supplied the foe's name. A unique id/name/slug match is safe; a single-foe encounter is
- * unambiguous. Multi-foe unresolved references remain untouched so normal validation blocks
- * them instead of silently retargeting the player.
- */
-export function reconcileStartingCombatExchange(rawExchange, enemies = []) {
-    const exchange = normalizeCombatExchange(rawExchange);
-    if (!exchange) return null;
-
-    const livingEnemies = enemies.filter(isEnemyActive);
-    const aliases = new Map();
-    const addAlias = (alias, enemyId) => {
-        const key = combatRefKey(alias);
-        if (!key) return;
-        const ids = aliases.get(key) || new Set();
-        ids.add(enemyId);
-        aliases.set(key, ids);
-    };
-    for (const enemy of livingEnemies) {
-        addAlias(enemy.id, enemy.id);
-        addAlias(String(enemy.id || '').replace(/^enemy-/, ''), enemy.id);
-        addAlias(enemy.name, enemy.id);
-    }
-    const resolveEnemy = target => {
-        const ids = aliases.get(combatRefKey(target));
-        if (ids?.size === 1) return [...ids][0];
-        if (livingEnemies.length === 1) return livingEnemies[0].id;
-        return target;
-    };
-
-    return {
-        playerSlots: exchange.playerSlots.map(slot => ({
-            ...slot,
-            ...(slot.action === 'attack' && {
-                strikes: slot.strikes.map(strike => ({ ...strike, target: resolveEnemy(strike.target) })),
-            }),
-            ...(slot.action === 'cast' && {
-                target: slot.target ? resolveEnemy(slot.target) : slot.target,
-                targets: (slot.targets || []).map(resolveEnemy),
-            }),
-            ...(slot.onSuccess && {
-                onSuccess: { ...slot.onSuccess, target: resolveEnemy(slot.onSuccess.target) },
-            }),
-        })),
-        enemyIntents: exchange.enemyIntents.map(intent => ({
-            ...intent,
-            enemyId: resolveEnemy(intent.enemyId),
-        })),
-        ...((exchange.enemyConditionUpdates || []).length > 0 && {
-            enemyConditionUpdates: exchange.enemyConditionUpdates.map(update => ({
-                ...update,
-                target: resolveEnemy(update.target),
-            })),
-        }),
-        companionIntents: exchange.companionIntents.map(intent => ({
-            ...intent,
-            ...(intent.target && { target: resolveEnemy(intent.target) }),
-        })),
-    };
-}
-
-export function isEnemyActive(enemy) {
-    return !!enemy
-        && (enemy.hp ?? 0) > 0
-        && enemy.condition !== 'dead'
-        && enemy.combatStatus !== 'fled'
-        && enemy.combatStatus !== 'surrendered';
-}
-
-export function isCompanionActive(companion) {
-    return !!companion
-        && (companion.hp ?? 0) > 0
-        && companion.status !== 'downed'
-        && companion.status !== 'dead';
-}
-
-/**
- * THE low-level-solo predicate — the one answer to "is this 0-HP moment a
- * non-lethal setback or real dying/death?" (DECISIONS.md 2026-07-17, 2026-09-02).
- * "Solo" means no companion who can actually fight: a party whose only
- * companion is downed leaves the hero exactly as exposed as having none.
- * Every consumer (TAKE_DAMAGE, DEATH_SAVE_RESULT, terminalState on BOTH the
- * not-yet-dying and the dying branch, applyEvents' player_death, the
- * out-of-combat death-save resolver, the prompt safety block) must ask this
- * LIVE at its decision point — never cache it in a flag and never re-derive it
- * with a local party check.
- */
-export function isLowLevelSolo(character, party = []) {
-    return !!character && (character.level ?? 1) <= 2 && !(party || []).some(isCompanionActive);
-}
 
 function applyEnemyConditionDelta(enemy, delta, events) {
     if (!enemy || !delta) return;
@@ -377,7 +106,7 @@ function isSharedFlankingRuling(ruling) {
  * save lanes rolled flat, so the condition's save effect never reached an enemy.
  */
 function rollEnemySave(enemy, description) {
-    const bonus = validateEnemySaveBonus(enemy.saveBonus) ?? DEFAULT_ENEMY_SAVE_BONUS;
+    const bonus = validateEnemySaveBonus(enemy.saveBonus) ?? ENEMY_DEFAULT_SAVE_BONUS;
     const conditionEffects = getConditionRollEffects(enemy.conditions, 'save');
     const modifiers = combineRollModifiers(false, false, conditionEffects);
     const save = rollD20(bonus, description, modifiers.advantage, modifiers.disadvantage);
@@ -395,14 +124,6 @@ function rollModeLabel(roll, modifiers, ruling) {
     }
     if (modifiers.note) parts.push(modifiers.note.trim());
     return parts.join('; ');
-}
-
-function companionHealthStatus(companion) {
-    if ((companion.hp ?? 0) <= 0) return 'downed';
-    const ratio = companion.maxHp > 0 ? companion.hp / companion.maxHp : 1;
-    if (ratio <= 0.25) return 'critical';
-    if (ratio <= 0.5) return 'bloodied';
-    return 'healthy';
 }
 
 function makeExchangeId(kind, combat) {
@@ -438,7 +159,8 @@ function eventMessage(event) {
     if (event.type === 'death_save') {
         // The count is on the page (WOW 2026-09-30): the event carries the
         // engine's judged outcome + tally and renders through THE shared
-        // line. A pre-change stored event (no outcome) keeps the bare line.
+        // line. An event with no judged outcome (junk a load could not type)
+        // keeps the bare line rather than a countdown built on `undefined`.
         if (!DEATH_SAVE_OUTCOMES.includes(event.outcome)) return `**Death Saving Throw:** natural **${event.natural}**.`;
         return deathSaveLine(event, event.actor);
     }
@@ -458,18 +180,7 @@ export function exchangeEventLines(result) {
     return String(result?.summary || '').split('\n').map(line => line.trim()).filter(Boolean);
 }
 
-export function exchangeSummary(result) {
-    return exchangeEventLines(result).join('\n');
-}
-
 function enemySnapshot(enemy) {
-    const status = (enemy.hp ?? 0) <= 0 || enemy.condition === 'dead'
-        ? 'defeated'
-        : enemy.combatStatus === 'fled'
-            ? 'fled'
-            : enemy.combatStatus === 'surrendered'
-                ? 'surrendered'
-                : 'active';
     return {
         id: enemy.id,
         name: enemy.name,
@@ -477,18 +188,17 @@ function enemySnapshot(enemy) {
         maxHp: enemy.maxHp,
         condition: enemy.condition,
         conditions: normalizeEnemyConditions(enemy.conditions),
-        status,
+        status: enemyOutcome(enemy),
     };
 }
 
-function makeResult(kind, exchangeId, round, events, terminal, {
-    enemies = [],
-    companions = [],
-    character = null,
-    playerHp = null,
-    player = null,
-} = {}) {
-    const snapshot = player || (character ? projectPlayerSnapshot({ character, playerHp }) : null);
+/**
+ * The stored result: the events (the single source of truth for the chat
+ * lines and the narration prompt) plus the authoritative post-exchange
+ * snapshot. `player` is `projectPlayerSnapshot`'s reading of the hero — the
+ * same one the terminal was judged from.
+ */
+function makeResult(kind, exchangeId, round, events, terminal, { enemies, companions, character, playerHp, player }) {
     return {
         exchangeId,
         kind,
@@ -496,15 +206,15 @@ function makeResult(kind, exchangeId, round, events, terminal, {
         terminal,
         events,
         postState: {
-            player: character ? {
+            player: {
                 name: character.name || 'Player',
                 hp: Number.isFinite(playerHp) ? playerHp : character.currentHP,
                 maxHp: character.maxHP,
                 // The hero's state after the exchange (WOW 2026-09-30): the
                 // narration prompt's PLAYER line and the DIED terminal read it.
-                status: snapshot.status,
-                deathSaves: snapshot.deathSaves,
-            } : null,
+                status: player.status,
+                deathSaves: player.deathSaves,
+            },
             enemies: enemies.map(enemySnapshot),
             companions: companions.map(companion => ({
                 id: companion.id,
@@ -526,11 +236,7 @@ function activeEnemies(enemies) {
     return enemies.filter(isEnemyActive);
 }
 
-function expectedStrikes(character) {
-    return character?.class === 'fighter' && (character.level || 1) >= 5 ? 2 : 1;
-}
-
-/** Backward compatibility: a bare "cast" with no spell name means the class's attack cantrip. */
+/** A defensive default: a bare "cast" with no spell name means the class's attack cantrip. */
 function resolveCastSpell(character, slot) {
     const fallback = character?.class === 'wizard' ? 'fireBolt' : character?.class === 'cleric' ? 'sacredFlame' : null;
     return resolveSpellForCharacter(character, slot?.spell || fallback);
@@ -558,27 +264,23 @@ function castTargetRefs(slot, fallback = []) {
     return slot.target ? [slot.target] : fallback;
 }
 
-function validatePlayerSlots(exchange, state) {
-    const allSlots = exchange.playerSlots || [];
+/**
+ * Turn-level rules: how many slots this hero may declare, which lanes they
+ * ride, and what a dying / defeated hero may do at all. Returns the rejection
+ * text, or null when the turn's shape is legal.
+ */
+function validateTurnShape(allSlots, state) {
     // Fighter bonus-action lane (Codex 2026-08-09): a player-invoked Second Wind
     // rides beside the normal action without consuming an action slot — the
     // fighter parallel of the Cleric bonus-cast lane below.
     const secondWindSlots = allSlots.filter(slot => slot.action === 'second_wind');
     const slots = allSlots.filter(slot => slot.action !== 'second_wind');
-    if (secondWindSlots.length > 1) {
-        return { ok: false, error: 'Second Wind can be declared at most once per turn.' };
-    }
+    if (secondWindSlots.length > 1) return 'Second Wind can be declared at most once per turn.';
     if (secondWindSlots.length === 1) {
         const res = state.character?.classResources?.secondWind;
-        if (!res) {
-            return { ok: false, error: 'Second Wind is a Fighter ability this character does not have.' };
-        }
-        if (res.used >= res.max) {
-            return { ok: false, error: 'Second Wind is already spent; it recharges on a rest.' };
-        }
-        if (state.combat?.bonusActionUsed) {
-            return { ok: false, error: 'The bonus action is already used this turn; Second Wind must wait for a later turn.' };
-        }
+        if (!res) return 'Second Wind is a Fighter ability this character does not have.';
+        if (res.used >= res.max) return 'Second Wind is already spent; it recharges on a rest.';
+        if (state.combat?.bonusActionUsed) return 'The bonus action is already used this turn; Second Wind must wait for a later turn.';
     }
     const surge = !!state.character?.pendingActionSurge;
     const isRogue = state.character?.class === 'rogue';
@@ -590,7 +292,7 @@ function validatePlayerSlots(exchange, state) {
     if (bonusCastCount > 0 && state.combat?.bonusActionUsed) {
         // Mirror of the Second Wind guard above: a potion already spent the
         // round's one bonus action, so a bonus-time spell cannot ride this turn.
-        return { ok: false, error: 'The bonus action is already used this turn; a bonus-action spell must wait for a later turn.' };
+        return 'The bonus action is already used this turn; a bonus-action spell must wait for a later turn.';
     }
     const casterBonusTurn = isSpellcaster(state.character?.class) && bonusCastCount === 1;
 
@@ -599,148 +301,132 @@ function validatePlayerSlots(exchange, state) {
     // A lone second_wind slot is a complete turn (the fighter just catches their
     // breath), so only the fully empty envelope is rejected here.
     if (slots.length > maxSlots || allSlots.length === 0) {
-        return {
-            ok: false,
-            error: hasCunningActionFeature
-                ? 'Declare one action slot, or up to two slots if one is a Cunning Action (dash, disengage, or stealth check).'
-                : (surge ? 'Action Surge is active: declare exactly two action slots in this turn.' : 'Declare exactly one action slot for this turn.'),
-        };
+        return hasCunningActionFeature
+            ? 'Declare one action slot, or up to two slots if one is a Cunning Action (dash, disengage, or stealth check).'
+            : (surge ? 'Action Surge is active: declare exactly two action slots in this turn.' : 'Declare exactly one action slot for this turn.');
     }
 
     if (slots.length === 2) {
         if (hasCunningActionFeature && !surge) {
             const isCunning = slot => slot.action === 'dash' || slot.action === 'disengage' || (slot.action === 'check' && slot.skill === 'stealth');
-            const cunningCount = slots.filter(isCunning).length;
-            if (cunningCount < 1) {
-                return {
-                    ok: false,
-                    error: 'To declare two slots, a Rogue must use one slot for a Cunning Action (dash, disengage, or stealth check).',
-                };
+            if (slots.filter(isCunning).length < 1) {
+                return 'To declare two slots, a Rogue must use one slot for a Cunning Action (dash, disengage, or stealth check).';
             }
             const attacks = slots.filter(s => s.action === 'attack').length;
             const casts = slots.filter(s => s.action === 'cast').length;
             if (attacks > 1 || casts > 1 || (attacks > 0 && casts > 0)) {
-                return {
-                    ok: false,
-                    error: 'A Rogue cannot declare multiple attack or spellcast actions in a single turn.',
-                };
+                return 'A Rogue cannot declare multiple attack or spellcast actions in a single turn.';
             }
-        } else if (surge) {
-            // Fighter Action Surge
-        } else if (casterBonusTurn) {
-            // One bonus-time cast + one normal action; bonusCastCount === 1
-            // already guarantees the pair cannot be two bonus spells.
-        } else {
-            return {
-                ok: false,
-                error: 'Declare exactly one action slot for this turn.',
-            };
+        } else if (!surge && !casterBonusTurn) {
+            // (Action Surge: any two actions. A caster's bonus turn: one
+            // bonus-time cast + one normal action — bonusCastCount === 1
+            // already guarantees the pair cannot be two bonus spells.)
+            return 'Declare exactly one action slot for this turn.';
         }
     }
 
-    if (surge && slots.length !== 2) {
-        return {
-            ok: false,
-            error: 'Action Surge is active: declare exactly two action slots in this turn.',
-        };
-    }
+    if (surge && slots.length !== 2) return 'Action Surge is active: declare exactly two action slots in this turn.';
     if (state.character?.isDead || state.character?.lowLevelDefeat) {
-        return { ok: false, error: 'The player cannot commit a combat action while defeated or dead.' };
+        return 'The player cannot commit a combat action while defeated or dead.';
     }
     // Dying checks run over EVERY slot: a dying fighter cannot slip a Second
     // Wind in beside their death save.
     if (state.character?.dying && allSlots.some(slot => slot.action !== 'death_save')) {
-        return { ok: false, error: 'A dying character can only make a death saving throw.' };
+        return 'A dying character can only make a death saving throw.';
     }
     if (!state.character?.dying && allSlots.some(slot => slot.action === 'death_save')) {
-        return { ok: false, error: 'A death saving throw is only valid while dying.' };
+        return 'A death saving throw is only valid while dying.';
     }
     const fleeIndex = slots.findIndex(slot => slot.action === 'flee');
-    if (fleeIndex >= 0 && fleeIndex !== slots.length - 1) {
-        return { ok: false, error: 'Flee must be the final action slot in the exchange.' };
-    }
+    if (fleeIndex >= 0 && fleeIndex !== slots.length - 1) return 'Flee must be the final action slot in the exchange.';
+    return null;
+}
 
+/** A check / save slot names a key the rules know (the wire already canonicalized it). */
+function validateCheckSlot(slot, state, living) {
+    const isSave = slot.action === 'save';
+    if (!slot.skill) return `${isSave ? 'Save' : 'Check'} slots must name an ability or skill.`;
+    if (isSave && !ABILITY_KEY_SET.has(slot.skill)) return `Saving throw ability "${slot.skill}" is unsupported.`;
+    if (!isSave && !ABILITY_KEY_SET.has(slot.skill) && !SKILL_KEY_SET.has(slot.skill)) {
+        return `Check skill or ability "${slot.skill}" is unsupported.`;
+    }
+    if (!isSave && slot.onSuccess && !findByRef(living, slot.onSuccess.target)) {
+        return `Check condition target "${slot.onSuccess.target}" is not an active enemy in this fight.`;
+    }
+    return null;
+}
+
+function validateCastSlot(slot, state, living) {
+    const spell = resolveCastSpell(state.character, slot);
+    if (!spell) return 'That spell is not on this character\'s engine-owned spell list; choose a known class spell or another action.';
+    if (!spell.combatAvailable) return `${spell.name} has no combat effect; it belongs outside battle.`;
+    if (spell.level > 0 && chooseSlotLevel(state.character.spellSlots, spell, slot.slotLevel) === null) {
+        return `No spell slot remains to cast ${spell.name} (needs a level ${spell.level}+ slot).`;
+    }
+    // Over-targeting a limited spell is NOT a rejection: the resolvers clamp to
+    // the spell's real target count (first named targets win) with a visible
+    // note. A hard reject here cost the player a dead turn every time the DM
+    // pattern-matched 5e's AoE Sleep onto our single-target version (2026-07-17
+    // live playtest — it happened twice in one fight).
+    if (spell.targeting.side === 'enemy') {
+        const targets = castTargetRefs(slot);
+        if (targets.length === 0) return `${spell.name} needs a living enemy target.`;
+        const missing = targets.find(target => !findByRef(living, target));
+        if (missing) return `Spell target "${missing}" is not an active enemy in this fight.`;
+    } else if (spell.targeting.side === 'ally') {
+        const missing = castTargetRefs(slot, ['self']).find(target => !resolveAllyTarget(state.character, state.party || [], target));
+        if (missing) return `Spell target "${missing}" is not the hero or a living companion.`;
+    }
+    return null;
+}
+
+function validateChannelSlot(slot, state, living) {
+    if (state.character?.class !== 'cleric' || (state.character.level || 1) < 2) {
+        return 'Channel Divinity requires a Cleric of level 2 or higher.';
+    }
+    const channel = state.character.classResources?.channelDivinity;
+    if (!channel || channel.used >= channel.max) return 'Channel Divinity is already spent; it recharges on a rest.';
+    if (!living.some(enemy => enemy.isUndead)) return 'Turn Undead has no undead foes to affect in this fight.';
+    return null;
+}
+
+function validateAttackSlot(slot, state, living) {
+    if (slot.weaponId && !findByRef(state.inventory || [], slot.weaponId)) {
+        return `Attack weapon "${slot.weaponId}" is not in the player's inventory.`;
+    }
+    if (!slot.strikes?.length) return 'Every combat Attack needs a living target.';
+    const strikeLimit = getAttackCount(state.character);
+    if (slot.strikes.length > strikeLimit) {
+        return `One Attack action currently allows ${strikeLimit} strike${strikeLimit === 1 ? '' : 's'}.`;
+    }
+    const missing = slot.strikes.find(strike => !findByRef(living, strike.target));
+    if (missing) return `Attack target "${missing.target}" is not an active enemy in this fight.`;
+    return null;
+}
+
+/** One validator per slot action that has rules of its own (dodge, dash, flee… have none). */
+const SLOT_VALIDATORS = new Map([
+    ['check', validateCheckSlot],
+    ['save', validateCheckSlot],
+    ['cast', validateCastSlot],
+    ['channel', validateChannelSlot],
+    ['attack', validateAttackSlot],
+]);
+
+function validatePlayerSlots(exchange, state) {
+    const allSlots = exchange.playerSlots || [];
+    const shapeError = validateTurnShape(allSlots, state);
+    if (shapeError) return { ok: false, error: shapeError };
     const living = activeEnemies(state.combat?.enemies || []);
-    const strikeLimit = expectedStrikes(state.character);
-    for (const slot of slots) {
-        if ((slot.action === 'check' || slot.action === 'save') && !slot.skill) {
-            return { ok: false, error: `${slot.action === 'save' ? 'Save' : 'Check'} slots must name an ability or skill.` };
-        }
-        if (slot.action === 'save' && !ABILITIES.has(slot.skill)) {
-            return { ok: false, error: `Saving throw ability "${slot.skill}" is unsupported.` };
-        }
-        if (slot.action === 'check' && !ABILITIES.has(slot.skill) && !SKILLS.has(slot.skill)) {
-            return { ok: false, error: `Check skill or ability "${slot.skill}" is unsupported.` };
-        }
-        if (slot.action === 'check' && slot.onSuccess && !findByRef(living, slot.onSuccess.target)) {
-            return { ok: false, error: `Check condition target "${slot.onSuccess.target}" is not an active enemy in this fight.` };
-        }
-        if (slot.action === 'cast') {
-            const spell = resolveCastSpell(state.character, slot);
-            if (!spell) {
-                return { ok: false, error: 'That spell is not on this character\'s engine-owned spell list; choose a known class spell or another action.' };
-            }
-            if (!spell.combatAvailable) {
-                return { ok: false, error: `${spell.name} has no combat effect; it belongs outside battle.` };
-            }
-            if (spell.level > 0 && chooseSlotLevel(state.character.spellSlots, spell, slot.slotLevel) === null) {
-                return { ok: false, error: `No spell slot remains to cast ${spell.name} (needs a level ${spell.level}+ slot).` };
-            }
-            // Over-targeting a limited spell is NOT a rejection: the resolvers clamp to
-            // the spell's real target count (first named targets win) with a visible
-            // note. A hard reject here cost the player a dead turn every time the DM
-            // pattern-matched 5e's AoE Sleep onto our single-target version (2026-07-17
-            // live playtest — it happened twice in one fight).
-            if (spell.targeting.side === 'enemy') {
-                const targets = castTargetRefs(slot);
-                if (targets.length === 0) return { ok: false, error: `${spell.name} needs a living enemy target.` };
-                for (const target of targets) {
-                    if (!findByRef(living, target)) {
-                        return { ok: false, error: `Spell target "${target}" is not an active enemy in this fight.` };
-                    }
-                }
-            } else if (spell.targeting.side === 'ally') {
-                const targets = castTargetRefs(slot, ['self']);
-                for (const target of targets) {
-                    if (!resolveAllyTarget(state.character, state.party || [], target)) {
-                        return { ok: false, error: `Spell target "${target}" is not the hero or a living companion.` };
-                    }
-                }
-            }
-            continue;
-        }
-        if (slot.action === 'channel') {
-            if (state.character?.class !== 'cleric' || (state.character.level || 1) < 2) {
-                return { ok: false, error: 'Channel Divinity requires a Cleric of level 2 or higher.' };
-            }
-            const channel = state.character.classResources?.channelDivinity;
-            if (!channel || channel.used >= channel.max) {
-                return { ok: false, error: 'Channel Divinity is already spent; it recharges on a rest.' };
-            }
-            if (!living.some(enemy => enemy.isUndead)) {
-                return { ok: false, error: 'Turn Undead has no undead foes to affect in this fight.' };
-            }
-            continue;
-        }
-        if (slot.action !== 'attack') continue;
-        if (slot.weaponId && !findByRef(state.inventory || [], slot.weaponId)) {
-            return { ok: false, error: `Attack weapon "${slot.weaponId}" is not in the player's inventory.` };
-        }
-        if (!slot.strikes?.length) return { ok: false, error: 'Every combat Attack needs a living target.' };
-        if (slot.strikes.length > strikeLimit) {
-            return { ok: false, error: `One Attack action currently allows ${strikeLimit} strike${strikeLimit === 1 ? '' : 's'}.` };
-        }
-        for (const strike of slot.strikes) {
-            if (!findByRef(living, strike.target)) {
-                return { ok: false, error: `Attack target "${strike.target}" is not an active enemy in this fight.` };
-            }
-        }
+    for (const slot of allSlots) {
+        const error = SLOT_VALIDATORS.get(slot.action)?.(slot, state, living);
+        if (error) return { ok: false, error };
     }
     return { ok: true };
 }
 
 /** Resolve an enemy-side spell (attack rolls, engine-rolled saves, auto damage). */
-function resolveEnemySpell({ spell, slotLevel, slot, character, enemies, events, rolls }) {
+function resolveEnemySpell({ character, enemies, events, rolls }, { spell, slotLevel, slot }) {
     // Dart spells (Magic Missile): 3 darts +1 per upcast level, each dart a
     // legal target — the player's declared split is honored (Codex 2026-08-09
     // P2: a legal two-wisp split was silently dumped into one wisp and the
@@ -885,7 +571,7 @@ function stripConditionList(conditions, toRemove) {
  * through `support.playerHealing` and `support.characterUpdates` so the reducer
  * applies them atomically with the exchange.
  */
-function resolveSupportSpell({ spell, slotLevel, slot, character, companions, events, rolls, support }) {
+function resolveSupportSpell({ character, companions, events, rolls }, support, { spell, slotLevel, slot }) {
     const updates = support.characterUpdates;
     const targetLimit = spell.targeting.mode === 'upTo3' ? 3 : 1;
     const refs = spell.targeting.side === 'self' ? ['self'] : castTargetRefs(slot, ['self']);
@@ -918,7 +604,7 @@ function resolveSupportSpell({ spell, slotLevel, slot, character, companions, ev
                 const companion = ally.companion;
                 const wasDown = (companion.hp ?? 0) <= 0;
                 companion.hp = Math.min(companion.maxHp || companion.hp || 1, (companion.hp || 0) + healRoll.total);
-                companion.status = companionHealthStatus(companion);
+                companion.status = healthWord(companion.hp, companion.maxHp, 'downed');
                 events.push({ type: 'note', text: `**${spell.name}** — ${allyName} recovers **${healRoll.total}** HP (now ${companion.hp}/${companion.maxHp})${wasDown ? ' and is back on their feet' : ''}.` });
             }
             continue;
@@ -995,233 +681,262 @@ function clearPreviousSustained({ character, companions, updates, events }) {
     events.push({ type: 'note', text: `${previous.name || previous.key} fades as the new spell takes hold.` });
 }
 
-function resolvePlayerSlots({ state, exchange, enemies, companions, events, rolls, standingFlankIds = null }) {
-    const character = state.character;
-    const inventory = state.inventory || [];
-    let dodging = false;
-    let fled = false;
-    let deathSaveNatural = null;
-    let deathSaveSkipped = false;
-    const strikeLimit = expectedStrikes(character);
-    const support = { playerHealing: 0, characterUpdates: {} };
-    let workingSlots = character.spellSlots || null;
+// ─── The player phase: one resolver per slot action ─────────────────────────
+// Each takes the exchange context (`ctx`: the live working copies every phase
+// shares — character, inventory, party, enemies, companions, events, the
+// hero's roll list) and the player's `turn` (what this phase accumulates for
+// the commit: dodge / flee flags, the death-save die, healing and character
+// updates, the slots a second cast must not double-spend).
 
-    for (const slot of exchange.playerSlots) {
-        if (slot.action === 'dodge') {
-            dodging = true;
-            events.push({ type: 'note', text: `${character.name || 'The player'} takes the Dodge action.` });
-            continue;
-        }
-        if (slot.action === 'flee') {
-            fled = true;
-            events.push({ type: 'note', text: `${character.name || 'The player'} escapes the fight.` });
-            continue;
-        }
-        if (slot.action === 'death_save') {
-            // The save is the dying hero's decision point. Low-level solo at
-            // this moment (a downed companion counts as solo) means the reducer's
-            // DEATH_SAVE_RESULT converts the save into the defeat setback and
-            // rolls nothing — so the engine rolls nothing, posts no death-save
-            // line, and advances no tally either. Diverging here soft-locked the
-            // fight (2026-09-02 audit P1: terminal 'dying' beside a reducer-side
-            // lowLevelDefeat hero who could never commit another action).
-            if (isLowLevelSolo(character, companions)) {
-                deathSaveSkipped = true;
-                events.push({ type: 'note', text: `**Death save skipped** — no battle-ready ally stands with ${character.name || 'the player'}; low-level solo protection ends this as a defeat setback, not a death.` });
-                continue;
-            }
-            const save = rollWithModifier(1, 20, 0, 'Death Saving Throw');
-            rolls.push(save);
-            deathSaveNatural = save.rolls[0];
-            // The event carries the judged outcome and the post-save tally so
-            // the chat line reads as a countdown (WOW 2026-09-30); the reducer's
-            // DEATH_SAVE_RESULT judges the same die through the same judge.
-            const judged = judgeDeathSave(character.deathSaves, deathSaveNatural);
-            events.push({
-                type: 'death_save',
-                natural: deathSaveNatural,
-                actor: character.name || 'The player',
-                outcome: judged.outcome,
-                successes: judged.successes,
-                failures: judged.failures,
-            });
-            continue;
-        }
-        if (slot.action === 'second_wind') {
-            // Player-invoked bonus action, validated upstream; the soft guard here
-            // keeps a stale envelope from double-spending (the channel pattern).
-            const resources = support.characterUpdates.classResources || character.classResources || {};
-            const res = resources.secondWind;
-            if (!res || res.used >= res.max) {
-                events.push({ type: 'note', text: 'Second Wind is already spent; nothing happens.' });
-                continue;
-            }
-            const heal = rollWithModifier(1, 10, character.level || 1, 'Second Wind (bonus action)');
-            rolls.push(heal);
-            support.playerHealing += heal.total;
-            support.characterUpdates.classResources = { ...resources, secondWind: { ...res, used: res.used + 1 } };
-            const preview = Math.min(character.maxHP, (character.currentHP || 0) + support.playerHealing);
-            events.push({ type: 'note', text: `**${character.name || 'The player'} catches a Second Wind** *(bonus action)* — recovering **${heal.total} HP** (now ${preview}/${character.maxHP}). Their main action is unaffected.` });
-            continue;
-        }
-        if (slot.action === 'cast') {
-            const spell = resolveCastSpell(character, slot);
-            if (!spell) {
-                events.push({ type: 'note', text: `${slot.spell || 'The spell'} is not on the engine-owned spell list; nothing happens.` });
-                continue;
-            }
-            let slotLevel = 0;
-            if (spell.level > 0) {
-                slotLevel = chooseSlotLevel(workingSlots, spell, slot.slotLevel);
-                if (slotLevel === null) {
-                    events.push({ type: 'note', text: `${spell.name} fizzles — no spell slot remains to pay for it.` });
-                    continue;
-                }
-                workingSlots = spendSpellSlot(workingSlots, slotLevel);
-                support.characterUpdates.spellSlots = workingSlots;
-                events.push({
-                    type: 'note',
-                    text: `**${character.name || 'Player'} casts ${spell.name}**${slotLevel > spell.level ? ` using a level ${slotLevel} slot` : ''} (slots left: ${summarizeSpellSlots(workingSlots)}).`,
-                });
-            }
-            if (spell.targeting.side === 'enemy') {
-                resolveEnemySpell({ spell, slotLevel, slot, character, enemies, events, rolls });
-            } else {
-                resolveSupportSpell({ spell, slotLevel, slot, character, companions, events, rolls, support });
-            }
-            continue;
-        }
-        if (slot.action === 'channel') {
-            const channel = character.classResources?.channelDivinity;
-            if (!channel || channel.used >= channel.max) {
-                events.push({ type: 'note', text: 'Channel Divinity is already spent; nothing happens.' });
-                continue;
-            }
-            support.characterUpdates.classResources = {
-                ...character.classResources,
-                channelDivinity: { ...channel, used: channel.used + 1 },
-            };
-            const dc = getSpellSaveDC(character);
-            events.push({ type: 'note', text: `**${character.name || 'Player'} presents their holy symbol — Turn Undead** (save DC ${dc}).` });
-            for (const enemy of enemies) {
-                if (!isEnemyActive(enemy) || !enemy.isUndead) continue;
-                const save = rollEnemySave(enemy, `${enemy.name} saves vs Turn Undead`);
-                rolls.push(save.roll);
-                const success = save.roll.total >= dc;
-                events.push({
-                    type: 'save', actor: enemy.name, description: 'save vs Turn Undead',
-                    rolled: save.roll.total, natural: save.natural, dc, success, mode: save.mode,
-                });
-                if (success) continue;
-                if ((character.level || 1) >= 5 && (enemy.maxHp || 0) <= 20) {
-                    enemy.hp = 0;
-                    enemy.condition = 'dead';
-                    events.push({ type: 'note', text: `**${enemy.name} is destroyed outright by the divine radiance.**` });
-                } else {
-                    applyEnemyConditionDelta(enemy, { add: ['frightened'], remove: [] }, events);
-                }
-            }
-            continue;
-        }
-        if (slot.action === 'check' || slot.action === 'save') {
-            const skill = String(slot.skill || '').toLowerCase();
-            const modifier = slot.action === 'save'
-                ? getSavingThrowModifier(character, skill)
-                : character.abilityScores?.[skill] != null
-                    ? getModifier(character.abilityScores[skill])
-                    : getSkillModifier(character, skill);
-            const conditionEffects = getConditionRollEffects(character.conditions, slot.action === 'save' ? 'save' : 'check');
-            const ruling = rulingFlags(slot.situationalRuling);
-            const modifiers = combineRollModifiers(ruling.advantage, ruling.disadvantage, conditionEffects);
-            const roll = rollD20(modifier, slot.description || `${skill} ${slot.action}`, modifiers.advantage, modifiers.disadvantage);
-            rolls.push(roll.roll);
-            const success = roll.natural === 20 || roll.roll.total >= slot.dc;
-            events.push({
-                type: slot.action,
-                actor: character.name || 'Player',
-                description: slot.description || `${skill} ${slot.action}`,
-                rolled: roll.roll.total,
-                natural: roll.natural,
-                dc: slot.dc,
-                success,
-                mode: rollModeLabel(roll, modifiers, slot.situationalRuling),
-            });
-            if (success && slot.action === 'check' && slot.onSuccess) {
-                const enemy = findByRef(enemies, slot.onSuccess.target);
-                // Same-exchange ordering can down the target before the check
-                // resolves — a condition never lands on a dead foe (the :1443 rule).
-                if (isEnemyActive(enemy)) applyEnemyConditionDelta(enemy, slot.onSuccess, events);
-            }
-            continue;
-        }
-        if (slot.action !== 'attack') {
-            events.push({ type: 'note', text: `${character.name || 'The player'} uses their action to ${slot.action}.` });
-            continue;
-        }
+function resolveDodgeSlot({ character, events }, turn) {
+    turn.dodging = true;
+    events.push({ type: 'note', text: `${character.name || 'The player'} takes the Dodge action.` });
+}
 
-        const attackInventory = slot.weaponId
-            ? inventory.map(item => ({
-                ...item,
-                equipped: item.type === 'weapon' || item.category?.toLowerCase().includes('melee') || item.category?.toLowerCase().includes('ranged')
-                    ? item.id === slot.weaponId || item.name?.toLowerCase() === slot.weaponId.toLowerCase()
-                    : item.equipped,
-            }))
-            : inventory;
-        const declared = slot.strikes;
-        const strikes = [...declared];
-        while (strikes.length < strikeLimit) strikes.push({ ...strikes[strikes.length - 1] });
-        for (const strike of strikes) {
-            const enemy = findByRef(enemies, strike.target);
-            if (!isEnemyActive(enemy)) {
-                events.push({ type: 'note', text: `${enemy?.name || strike.target} has already been overcome; the unused strike does not retarget without player intent.` });
-                continue;
-            }
-            // A standing flank persists between exchanges; a slot's own ruling replaces it.
-            const appliedRuling = slot.situationalRuling
-                || (standingFlankIds?.has(enemy.id) ? STANDING_FLANK_RULING : null);
-            const ruling = rulingFlags(appliedRuling);
-            const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, ruling.advantage, ruling.disadvantage || !!enemy.defending);
-            const outcome = resolveAttackRoll({
-                attacker: character,
-                attackBonus: getWeaponAttackBonus(character, attackInventory),
-                description: `${character.name || 'Player'} attacks ${enemy.name}`,
-                modifiers,
-                targetAc: enemy.ac,
-                damage: {
-                    notation: getWeaponDamageNotation(character, attackInventory, '1d4'),
-                    description: `Damage to ${enemy.name}`,
-                    options: {
-                        character,
-                        inventory: attackInventory,
-                        advantage: modifiers.advantage,
-                        disadvantage: modifiers.disadvantage,
-                        hasAlly: (state.party || []).some(isCompanionActive),
-                    },
-                },
-                rolls,
-            });
-            if (outcome.hit) {
-                enemy.hp = Math.max(0, enemy.hp - outcome.damage);
-                enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
-            }
-            events.push({
-                type: 'attack', actor: character.name || 'Player', target: enemy.name,
-                rolled: outcome.attack.roll.total, natural: outcome.natural, dc: enemy.ac,
-                mode: rollModeLabel(outcome.attack, modifiers, appliedRuling),
-                hit: outcome.hit, critical: outcome.critical, damage: outcome.damage,
-                remainingHp: enemy.hp, maxHp: enemy.maxHp,
-                sneakAttackDetail: outcome.damageRoll?.sneakAttackDetail ?? null,
-            });
+function resolveFleeSlot({ character, events }, turn) {
+    turn.fled = true;
+    events.push({ type: 'note', text: `${character.name || 'The player'} escapes the fight.` });
+}
+
+function resolveDeathSaveSlot({ character, companions, events, rolls }, turn) {
+    // The save is the dying hero's decision point. Low-level solo at
+    // this moment (a downed companion counts as solo) means the reducer's
+    // DEATH_SAVE_RESULT converts the save into the defeat setback and
+    // rolls nothing — so the engine rolls nothing, posts no death-save
+    // line, and advances no tally either. Diverging here soft-locked the
+    // fight (2026-09-02 audit P1: terminal 'dying' beside a reducer-side
+    // lowLevelDefeat hero who could never commit another action).
+    if (isLowLevelSolo(character, companions)) {
+        turn.deathSaveSkipped = true;
+        events.push({ type: 'note', text: `**Death save skipped** — no battle-ready ally stands with ${character.name || 'the player'}; low-level solo protection ends this as a defeat setback, not a death.` });
+        return;
+    }
+    const save = rollWithModifier(1, 20, 0, 'Death Saving Throw');
+    rolls.push(save);
+    turn.deathSaveNatural = save.rolls[0];
+    // The event carries the judged outcome and the post-save tally so
+    // the chat line reads as a countdown (WOW 2026-09-30); the reducer's
+    // DEATH_SAVE_RESULT judges the same die through the same judge.
+    const judged = judgeDeathSave(character.deathSaves, turn.deathSaveNatural);
+    events.push({
+        type: 'death_save',
+        natural: turn.deathSaveNatural,
+        actor: character.name || 'The player',
+        outcome: judged.outcome,
+        successes: judged.successes,
+        failures: judged.failures,
+    });
+}
+
+function resolveSecondWindSlot({ character, events, rolls }, turn) {
+    // Player-invoked bonus action, validated upstream; the soft guard here
+    // keeps a stale envelope from double-spending (the channel pattern).
+    const resources = turn.characterUpdates.classResources || character.classResources || {};
+    const res = resources.secondWind;
+    if (!res || res.used >= res.max) {
+        events.push({ type: 'note', text: 'Second Wind is already spent; nothing happens.' });
+        return;
+    }
+    const heal = rollWithModifier(1, 10, character.level || 1, 'Second Wind (bonus action)');
+    rolls.push(heal);
+    turn.playerHealing += heal.total;
+    turn.characterUpdates.classResources = { ...resources, secondWind: { ...res, used: res.used + 1 } };
+    const preview = Math.min(character.maxHP, (character.currentHP || 0) + turn.playerHealing);
+    events.push({ type: 'note', text: `**${character.name || 'The player'} catches a Second Wind** *(bonus action)* — recovering **${heal.total} HP** (now ${preview}/${character.maxHP}). Their main action is unaffected.` });
+}
+
+function resolveCastSlot(ctx, turn, slot) {
+    const { character, events } = ctx;
+    const spell = resolveCastSpell(character, slot);
+    if (!spell) {
+        events.push({ type: 'note', text: `${slot.spell || 'The spell'} is not on the engine-owned spell list; nothing happens.` });
+        return;
+    }
+    let slotLevel = 0;
+    if (spell.level > 0) {
+        slotLevel = chooseSlotLevel(turn.spellSlots, spell, slot.slotLevel);
+        if (slotLevel === null) {
+            events.push({ type: 'note', text: `${spell.name} fizzles — no spell slot remains to pay for it.` });
+            return;
+        }
+        turn.spellSlots = spendSpellSlot(turn.spellSlots, slotLevel);
+        turn.characterUpdates.spellSlots = turn.spellSlots;
+        events.push({
+            type: 'note',
+            text: `**${character.name || 'Player'} casts ${spell.name}**${slotLevel > spell.level ? ` using a level ${slotLevel} slot` : ''} (slots left: ${summarizeSpellSlots(turn.spellSlots)}).`,
+        });
+    }
+    if (spell.targeting.side === 'enemy') {
+        resolveEnemySpell(ctx, { spell, slotLevel, slot });
+    } else {
+        resolveSupportSpell(ctx, turn, { spell, slotLevel, slot });
+    }
+}
+
+/** Channel Divinity — Turn Undead (and Destroy Undead from level 5). */
+function resolveChannelSlot({ character, enemies, events, rolls }, turn) {
+    const channel = character.classResources?.channelDivinity;
+    if (!channel || channel.used >= channel.max) {
+        events.push({ type: 'note', text: 'Channel Divinity is already spent; nothing happens.' });
+        return;
+    }
+    turn.characterUpdates.classResources = {
+        ...character.classResources,
+        channelDivinity: { ...channel, used: channel.used + 1 },
+    };
+    const dc = getSpellSaveDC(character);
+    events.push({ type: 'note', text: `**${character.name || 'Player'} presents their holy symbol — Turn Undead** (save DC ${dc}).` });
+    for (const enemy of enemies) {
+        if (!isEnemyActive(enemy) || !enemy.isUndead) continue;
+        const save = rollEnemySave(enemy, `${enemy.name} saves vs Turn Undead`);
+        rolls.push(save.roll);
+        const success = save.roll.total >= dc;
+        events.push({
+            type: 'save', actor: enemy.name, description: 'save vs Turn Undead',
+            rolled: save.roll.total, natural: save.natural, dc, success, mode: save.mode,
+        });
+        if (success) continue;
+        if ((character.level || 1) >= 5 && (enemy.maxHp || 0) <= 20) {
+            enemy.hp = 0;
+            enemy.condition = 'dead';
+            events.push({ type: 'note', text: `**${enemy.name} is destroyed outright by the divine radiance.**` });
+        } else {
+            applyEnemyConditionDelta(enemy, { add: ['frightened'], remove: [] }, events);
         }
     }
-    const hasCharacterUpdates = Object.keys(support.characterUpdates).length > 0;
+}
+
+/** A check or a save: the hero's d20 through THE modifier ladder (rules.js). */
+function resolveCheckSlot({ character, inventory, enemies, events, rolls }, turn, slot) {
+    const isSave = slot.action === 'save';
+    // `slot.skill` is already the canonical key (combatWire's slotRollKey) —
+    // never lowercase it again: `sleightofhand` is an unknown skill (+0).
+    const { modifier, kind } = resolvePlayerRollModifier(character, inventory, {
+        type: isSave ? 'saving_throw' : 'skill_check',
+        skill: slot.skill,
+    });
+    const conditionEffects = getConditionRollEffects(character.conditions, kind);
+    const ruling = rulingFlags(slot.situationalRuling);
+    const modifiers = combineRollModifiers(ruling.advantage, ruling.disadvantage, conditionEffects);
+    const description = slot.description || `${slot.skill} ${slot.action}`;
+    const roll = rollD20(modifier, description, modifiers.advantage, modifiers.disadvantage);
+    rolls.push(roll.roll);
+    const success = roll.natural === 20 || roll.roll.total >= slot.dc;
+    events.push({
+        type: slot.action,
+        actor: character.name || 'Player',
+        description,
+        rolled: roll.roll.total,
+        natural: roll.natural,
+        dc: slot.dc,
+        success,
+        mode: rollModeLabel(roll, modifiers, slot.situationalRuling),
+    });
+    if (success && !isSave && slot.onSuccess) {
+        const enemy = findByRef(enemies, slot.onSuccess.target);
+        // Same-exchange ordering can down the target before the check
+        // resolves — a condition never lands on a dead foe.
+        if (isEnemyActive(enemy)) applyEnemyConditionDelta(enemy, slot.onSuccess, events);
+    }
+}
+
+/** The weapon the slot names counts as the equipped one for this Attack action. */
+function attackInventoryFor(inventory, weaponId) {
+    if (!weaponId) return inventory;
+    const isWeapon = item => item.type === 'weapon' || item.category?.toLowerCase().includes('melee') || item.category?.toLowerCase().includes('ranged');
+    return inventory.map(item => ({
+        ...item,
+        equipped: isWeapon(item)
+            ? item.id === weaponId || item.name?.toLowerCase() === weaponId.toLowerCase()
+            : item.equipped,
+    }));
+}
+
+function resolveAttackSlot({ state, character, inventory, enemies, events, rolls, standingFlankIds }, turn, slot) {
+    const attackInventory = attackInventoryFor(inventory, slot.weaponId);
+    const strikeLimit = getAttackCount(character);
+    const strikes = [...slot.strikes];
+    while (strikes.length < strikeLimit) strikes.push({ ...strikes[strikes.length - 1] });
+    for (const strike of strikes) {
+        const enemy = findByRef(enemies, strike.target);
+        if (!isEnemyActive(enemy)) {
+            events.push({ type: 'note', text: `${enemy?.name || strike.target} has already been overcome; the unused strike does not retarget without player intent.` });
+            continue;
+        }
+        // A standing flank persists between exchanges; a slot's own ruling replaces it.
+        const appliedRuling = slot.situationalRuling
+            || (standingFlankIds?.has(enemy.id) ? STANDING_FLANK_RULING : null);
+        const ruling = rulingFlags(appliedRuling);
+        const modifiers = conditionAwareAttackModifiers(character.conditions, enemy.conditions, ruling.advantage, ruling.disadvantage || !!enemy.defending);
+        const outcome = resolveAttackRoll({
+            attacker: character,
+            attackBonus: getWeaponAttackBonus(character, attackInventory),
+            description: `${character.name || 'Player'} attacks ${enemy.name}`,
+            modifiers,
+            targetAc: enemy.ac,
+            damage: {
+                notation: getWeaponDamageNotation(character, attackInventory, '1d4'),
+                description: `Damage to ${enemy.name}`,
+                options: {
+                    character,
+                    inventory: attackInventory,
+                    advantage: modifiers.advantage,
+                    disadvantage: modifiers.disadvantage,
+                    hasAlly: (state.party || []).some(isCompanionActive),
+                },
+            },
+            rolls,
+        });
+        if (outcome.hit) {
+            enemy.hp = Math.max(0, enemy.hp - outcome.damage);
+            enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
+        }
+        events.push({
+            type: 'attack', actor: character.name || 'Player', target: enemy.name,
+            rolled: outcome.attack.roll.total, natural: outcome.natural, dc: enemy.ac,
+            mode: rollModeLabel(outcome.attack, modifiers, appliedRuling),
+            hit: outcome.hit, critical: outcome.critical, damage: outcome.damage,
+            remainingHp: enemy.hp, maxHp: enemy.maxHp,
+            sneakAttackDetail: outcome.damageRoll?.sneakAttackDetail ?? null,
+        });
+    }
+}
+
+/** Dash, disengage, interact, pass have no dice — they ride the generic note. */
+const PLAYER_SLOT_RESOLVERS = new Map([
+    ['dodge', resolveDodgeSlot],
+    ['flee', resolveFleeSlot],
+    ['death_save', resolveDeathSaveSlot],
+    ['second_wind', resolveSecondWindSlot],
+    ['cast', resolveCastSlot],
+    ['channel', resolveChannelSlot],
+    ['check', resolveCheckSlot],
+    ['save', resolveCheckSlot],
+    ['attack', resolveAttackSlot],
+]);
+
+function resolvePlayerSlots(ctx) {
+    const turn = {
+        dodging: false,
+        fled: false,
+        deathSaveNatural: null,
+        deathSaveSkipped: false,
+        playerHealing: 0,
+        characterUpdates: {},
+        spellSlots: ctx.character.spellSlots || null,
+    };
+    for (const slot of ctx.exchange.playerSlots) {
+        const resolve = PLAYER_SLOT_RESOLVERS.get(slot.action);
+        if (resolve) resolve(ctx, turn, slot);
+        else ctx.events.push({ type: 'note', text: `${ctx.character.name || 'The player'} uses their action to ${slot.action}.` });
+    }
     return {
-        dodging,
-        fled,
-        deathSaveNatural,
-        deathSaveSkipped,
-        playerHealing: support.playerHealing,
-        characterUpdates: hasCharacterUpdates ? support.characterUpdates : null,
+        dodging: turn.dodging,
+        fled: turn.fled,
+        deathSaveNatural: turn.deathSaveNatural,
+        deathSaveSkipped: turn.deathSaveSkipped,
+        playerHealing: turn.playerHealing,
+        characterUpdates: Object.keys(turn.characterUpdates).length > 0 ? turn.characterUpdates : null,
     };
 }
 
@@ -1248,7 +963,7 @@ function companionDamageNotation(companion) {
     return `${notation.trim()}+${bonus}`;
 }
 
-function resolveCompanionAttack(companion, target, events, rolls, situationalRuling = null, flankingEnemyIds = null) {
+function resolveCompanionAttack({ companion, target, events, situationalRuling = null, flankingEnemyIds = null }) {
     const ruling = rulingFlags(situationalRuling);
     // Propagate explicit player flanking only when the companion has no separate ruling.
     const companionFlanking = !situationalRuling && (flankingEnemyIds?.has(target.id) ?? false);
@@ -1266,7 +981,6 @@ function resolveCompanionAttack(companion, target, events, rolls, situationalRul
         modifiers,
         targetAc: target.ac,
         damage: { notation: companionDamageNotation(companion), description: `${companion.name} damage` },
-        rolls,
     });
     if (outcome.hit) {
         target.hp = Math.max(0, target.hp - outcome.damage);
@@ -1280,7 +994,7 @@ function resolveCompanionAttack(companion, target, events, rolls, situationalRul
     });
 }
 
-function resolveCompanions({ exchange, enemies, companions, events, rolls, onlyIds = null, flankingEnemyIds = null }) {
+function resolveCompanions({ exchange, enemies, companions, events }, { onlyIds = null, flankingEnemyIds = null } = {}) {
     const intents = new Map();
     for (const intent of exchange?.companionIntents || []) {
         const companion = findByRef(companions, intent.companionId);
@@ -1320,11 +1034,11 @@ function resolveCompanions({ exchange, enemies, companions, events, rolls, onlyI
             events.push({ type: 'note', text: `${companion.name} has no valid target and holds position.` });
             continue;
         }
-        resolveCompanionAttack(companion, target, events, rolls, intent.situationalRuling, flankingEnemyIds);
+        resolveCompanionAttack({ companion, target, events, situationalRuling: intent.situationalRuling, flankingEnemyIds });
     }
 }
 
-function resolveEnemyAttack({ enemy, targetRef, character, playerAc, companions, playerHp, playerDodging, situationalRuling, events, rolls, uncannyDodgeState }) {
+function resolveEnemyAttack({ enemy, targetRef, character, playerAc, companions, playerHp, playerDodging, situationalRuling, events, uncannyDodgeState }) {
     let targetType = 'player';
     let target = character;
     let targetName = character.name || 'Player';
@@ -1362,12 +1076,11 @@ function resolveEnemyAttack({ enemy, targetRef, character, playerAc, companions,
     const ruling = rulingFlags(situationalRuling);
     const modifiers = conditionAwareAttackModifiers(enemy.conditions, targetConditions, ruling.advantage, ruling.disadvantage || targetDisadvantage);
     const outcome = resolveAttackRoll({
-        attackBonus: validateEnemyAttackBonus(enemy.attackBonus) ?? DEFAULT_ENEMY_ATTACK_BONUS,
+        attackBonus: validateEnemyAttackBonus(enemy.attackBonus) ?? ENEMY_DEFAULT_ATTACK_BONUS,
         description: `${enemy.name} attacks ${targetName}`,
         modifiers,
         targetAc,
-        damage: { notation: sanitizeEnemyDamage(enemy.damage) || DEFAULT_ENEMY_DAMAGE, description: `${enemy.name} damage` },
-        rolls,
+        damage: { notation: sanitizeEnemyDamage(enemy.damage) || ENEMY_DEFAULT_DAMAGE, description: `${enemy.name} damage` },
     });
     let damage = outcome.damage;
     let uncannyDodgeApplied = false;
@@ -1379,7 +1092,7 @@ function resolveEnemyAttack({ enemy, targetRef, character, playerAc, companions,
             playerHp = Math.max(0, playerHp - damage);
         } else {
             target.hp = Math.max(0, target.hp - damage);
-            target.status = companionHealthStatus(target);
+            target.status = healthWord(target.hp, target.maxHp, 'downed');
         }
     }
     events.push({
@@ -1395,7 +1108,11 @@ function resolveEnemyAttack({ enemy, targetRef, character, playerAc, companions,
     return { playerHp, playerDamage: targetType === 'player' ? damage : 0 };
 }
 
-function resolveEnemies({ state, exchange, enemies, companions, playerHp, playerDodging, events, rolls, onlyIds = null, uncannyDodgeState = null }) {
+/**
+ * The enemy phase. `character` is the hero AS THE FOES MEET THEM — after this
+ * exchange's casts (a new AC, a condition) and after a natural-20 revive.
+ */
+function resolveEnemies({ exchange, inventory, enemies, companions, events }, { character, playerHp, playerDodging, onlyIds = null, uncannyDodgeState = null }) {
     const intents = new Map();
     for (const intent of exchange?.enemyIntents || []) {
         const enemy = findByRef(enemies, intent.enemyId);
@@ -1406,10 +1123,9 @@ function resolveEnemies({ state, exchange, enemies, companions, playerHp, player
     // resolve the same turn across multiple calls (planOpeningExchange goes actor by
     // actor) must pass one shared state object for the whole turn.
     uncannyDodgeState = uncannyDodgeState || { used: false };
-    // Character and inventory are fixed for the duration of this call (a cast that
-    // changes AC substitutes a new state object before we're invoked), so the hero's
-    // AC is computed once instead of per enemy attack.
-    const playerAc = computeACFromInventory(state.inventory || [], state.character) ?? state.character.armorClass ?? 10;
+    // Character and inventory are fixed for the duration of this call, so the
+    // hero's AC is computed once instead of per enemy attack.
+    const playerAc = computeACFromInventory(inventory, character) ?? character.armorClass ?? 10;
     for (const enemy of enemies) {
         if (!isEnemyActive(enemy)) continue;
         if (onlyIds && !onlyIds.has(enemy.id)) continue;
@@ -1446,14 +1162,13 @@ function resolveEnemies({ state, exchange, enemies, companions, playerHp, player
         const resolved = resolveEnemyAttack({
             enemy,
             targetRef: intent.target,
-            character: state.character,
+            character,
             playerAc,
             companions,
             playerHp,
             playerDodging,
             situationalRuling: intent.situationalRuling,
             events,
-            rolls,
             uncannyDodgeState,
         });
         playerHp = resolved.playerHp;
@@ -1474,23 +1189,21 @@ function projectRevivedCharacter(character) {
     };
 }
 
-function projectedDeathSaveState(character, natural) {
-    const judged = judgeDeathSave(character.deathSaves, natural);
-    if (!judged) return 'dying';
-    return judged.outcome === 'success' || judged.outcome === 'failure' ? 'dying' : judged.outcome;
-}
-
 const FRESH_TALLY = Object.freeze({ successes: 0, failures: 0 });
 
 /**
  * The hero's state AFTER the exchange, for `postState.player` (WOW
  * 2026-09-30, death-and-stakes): `status` in PLAYER_SNAPSHOT_STATUSES plus
  * the death-save tally as the reducer will hold it once the commit lands.
- * Mirrors terminalState's party choice exactly — a still-dying hero is judged
- * at the death save against the party as it stood (`partyAtSave`); a
- * conscious or just-revived hero dropping to 0 against the post-exchange
- * party (`partyAfter`) — so the snapshot never says `dying` beside a reducer
- * that converted the moment into the low-level defeat setback.
+ * THE judge of the hero's fate in an exchange — `terminalState` reads its
+ * `status`, it never re-derives one. The party is the one that stood at the
+ * hero's decision point: a still-dying hero is judged at the death save
+ * against the party as it stood (`partyAtSave` — the same one the reducer's
+ * DEATH_SAVE_RESULT consults, since it runs before the exchange's party
+ * commit); a conscious or just-revived hero dropping to 0 against the
+ * post-exchange party (`partyAfter` — the reducer commits the party before
+ * TAKE_DAMAGE) — so the snapshot never says `dying` beside a reducer that
+ * converted the moment into the low-level defeat setback.
  */
 function projectPlayerSnapshot({
     character,
@@ -1527,28 +1240,26 @@ function projectPlayerSnapshot({
         : { status: 'dying', deathSaves: { ...FRESH_TALLY } };
 }
 
+/** What the hero's post-exchange status means for the fight. */
+const TERMINAL_BY_PLAYER_STATUS = Object.freeze({
+    active: null,
+    revived: null,
+    dying: 'dying',
+    // Stable is unconscious at 0 HP with foes still standing: the fight is lost.
+    stable: 'defeat',
+    defeated: 'defeat',
+    dead: 'defeat',
+});
+
 /**
- * `party` must be the party as it stood at the hero's decision point: for a
- * dying hero that is the death save (the pre-exchange party — the same one the
- * reducer's DEATH_SAVE_RESULT consults, since it runs before the exchange's
- * party commit); for a conscious hero dropping to 0 it is the post-exchange
- * party (the reducer commits the party before TAKE_DAMAGE). Callers pick.
+ * The exchange's terminal: victory when no foe is left, else whatever the
+ * hero's snapshot says. One judge (`projectPlayerSnapshot`), one table —
+ * until 2026-10-05 this function re-derived the dying / defeat / revive
+ * branches beside a snapshot whose doc promised to "mirror" it.
  */
-function terminalState(enemies, playerHp, character, deathSaveNatural = null, party = []) {
+function terminalState(enemies, playerStatus) {
     if (activeEnemies(enemies).length === 0) return 'victory';
-    if (character.isDead || character.lowLevelDefeat) return 'defeat';
-    if (playerHp > 0) return null;
-    if (character.dying) {
-        // Same predicate the not-yet-dying branch and DEATH_SAVE_RESULT ask:
-        // a low-level hero with no battle-ready ally never rolls death saves —
-        // the save converts into the defeat setback (2026-09-02 audit P1).
-        if (isLowLevelSolo(character, party)) return 'defeat';
-        const projected = projectedDeathSaveState(character, deathSaveNatural);
-        if (projected === 'revived') return null;
-        if (projected === 'stable' || projected === 'dead') return 'defeat';
-        return 'dying';
-    }
-    return isLowLevelSolo(character, party) ? 'defeat' : 'dying';
+    return TERMINAL_BY_PLAYER_STATUS[playerStatus] ?? null;
 }
 
 /**
@@ -1573,116 +1284,204 @@ export function mergeCharacterUpdates(character, updates) {
     return { ...next, conditions };
 }
 
+// ─── The planners ───────────────────────────────────────────────────────────
+
+/**
+ * The exchange context: the working copies ONE exchange resolves against,
+ * cloned once and handed to every phase (it used to ride as five loose
+ * arguments through three layers). `rolls` collects the HERO's own dice only —
+ * the roll ledger is the hero's (2026-09-21), so the companion and enemy
+ * phases keep no roll list at all; their dice are on the result lines.
+ */
+function openExchange(state, exchange) {
+    return {
+        state,
+        exchange,
+        character: state.character,
+        inventory: state.inventory || [],
+        enemies: (state.combat.enemies || []).map(enemy => ({ ...enemy })),
+        // Stances are declared per exchange: stale defend / guard flags must
+        // not carry over, and a fresh fight starts with none.
+        companions: (state.party || []).map(companion => ({ ...companion, defending: false, guarding: false })),
+        events: [],
+        rolls: [],
+        standingFlankIds: null,
+    };
+}
+
+/** A DM condition sync (never an intent), applied to the working enemy copies. */
+function applyConditionSync({ enemies, events }, updates) {
+    for (const update of updates || []) {
+        const enemy = findByRef(enemies, update.target);
+        if (isEnemyActive(enemy)) applyEnemyConditionDelta(enemy, update, events);
+    }
+}
+
+/**
+ * Standing flanks: an accepted flanking ruling persists engine-side between
+ * exchanges — the DM kept forgetting to re-emit it each round. The DM ends one
+ * with flank_broken when the fiction repositions; enemies leaving the fight,
+ * the hero dashing/disengaging away, or the last companion dropping also end it.
+ */
+function carryStandingFlanks({ state, exchange, enemies, events }) {
+    const standing = new Set((state.combat.flankedEnemyIds || [])
+        .filter(id => isEnemyActive(enemies.find(enemy => enemy.id === id))));
+    for (const target of exchange.flankBroken || []) {
+        const enemy = findByRef(enemies, target);
+        if (enemy && standing.delete(enemy.id)) {
+            events.push({ type: 'note', text: `The flank on ${enemy.name} is broken — the standing advantage ends.` });
+        }
+    }
+    return standing;
+}
+
+/**
+ * The enemies the player explicitly flanked this exchange, on top of any
+ * standing flanks carried over from earlier exchanges. Other situational
+ * advantage sources, such as concealment or distraction, stay local to the actor.
+ */
+function establishFlanks({ exchange, enemies, events, standingFlankIds }) {
+    const flanking = new Set(standingFlankIds);
+    for (const slot of exchange.playerSlots || []) {
+        if (slot.action !== 'attack' || !isSharedFlankingRuling(slot.situationalRuling)) continue;
+        const targeted = new Set((slot.strikes || [])
+            .map(strike => findByRef(enemies, strike.target)?.id)
+            .filter(Boolean));
+        if (targeted.size !== 1) continue;
+        const targetId = [...targeted][0];
+        if (flanking.has(targetId)) continue;
+        flanking.add(targetId);
+        const flanked = enemies.find(enemy => enemy.id === targetId);
+        if (isEnemyActive(flanked)) {
+            events.push({ type: 'note', text: `**Flanking established against ${flanked.name}** — the advantage persists until the flank breaks.` });
+        }
+    }
+    return flanking;
+}
+
+/**
+ * The flanks that stand for the next exchange. Repositioning by the hero
+ * (dash/disengage) abandons the pincer; a party whose every companion is down
+ * has nobody left to hold the far side (a companionless party keeps a
+ * DM-adjudicated flank — the second threat is an untracked NPC — until the DM
+ * breaks it). Enemies overcome this exchange fall out of the list.
+ */
+function persistFlanks({ exchange, enemies, companions }, flankingEnemyIds) {
+    const playerLeftMelee = (exchange.playerSlots || []).some(slot => slot.action === 'dash' || slot.action === 'disengage');
+    const flankHoldersRemain = companions.length === 0 || companions.some(isCompanionActive);
+    if (playerLeftMelee || !flankHoldersRemain) return [];
+    return [...flankingEnemyIds].filter(id => isEnemyActive(enemies.find(enemy => enemy.id === id)));
+}
+
+/**
+ * Close an exchange: judge the hero's post-state ONCE, read the terminal off
+ * it, and build the stored result and the reducer's payload. Every plan branch
+ * ends here, so every payload carries every key — the literal used to be
+ * written out three times, and the opening copy silently omitted five of
+ * fourteen. An opening simply takes the defaults (no player phase, no hero
+ * dice, no standing flank, nothing spent).
+ *
+ * `player` is resolvePlayerSlots' result; `terminal` forces one (a fled hero
+ * has `escaped`, whatever the field looks like).
+ */
+function sealExchange(ctx, {
+    kind,
+    exchangeId,
+    playerHp,
+    player = null,
+    terminal: forcedTerminal = null,
+    playerDamage = 0,
+    flankedEnemyIds = [],
+    bonusActionUsed = false,
+    consumeActionSurge = false,
+}) {
+    const { state, enemies, companions, events } = ctx;
+    const snapshot = projectPlayerSnapshot({
+        character: state.character,
+        playerHp,
+        deathSaveNatural: player?.deathSaveNatural ?? null,
+        deathSaveSkipped: player?.deathSaveSkipped ?? false,
+        partyAtSave: state.party || [],
+        partyAfter: companions,
+    });
+    const terminal = forcedTerminal || terminalState(enemies, snapshot.status);
+    const result = makeResult(kind, exchangeId, state.combat.round, events, terminal, {
+        enemies,
+        companions,
+        character: state.character,
+        playerHp,
+        player: snapshot,
+    });
+    return {
+        ok: true,
+        payload: {
+            exchangeId,
+            enemies,
+            party: companions,
+            playerDamage,
+            playerHealing: player?.playerHealing ?? 0,
+            characterUpdates: player?.characterUpdates ?? null,
+            deathSaveNatural: player?.deathSaveNatural ?? null,
+            deathSaveSkipped: player?.deathSaveSkipped ?? false,
+            // The roll LEDGER keeps the hero's own dice only (2026-09-21 audit
+            // P2): an exchange rolls ~10 dice (every actor's attack AND
+            // damage), so one five-exchange fight evicted every check the
+            // campaign ever rolled from the 50-row ledger the recall lane
+            // answers "what did I roll to…" from. Every die is on the result lines.
+            heroRolls: ctx.rolls,
+            result,
+            flankedEnemyIds,
+            bonusActionUsed,
+            consumeActionSurge,
+        },
+    };
+}
+
 /** Validate and resolve a committed player-centered combat exchange. */
 export function planCombatExchange(state, exchange) {
     if (!state.combat?.active || ![COMBAT_PHASES.AWAITING_PLAYER, COMBAT_PHASES.AWAITING_INTENT].includes(state.combat.phase)) {
         return { ok: false, error: 'Combat is not waiting for a player action.' };
     }
     // Latent but load-reachable: validatePlayerSlots optional-chains state.character
-    // while resolvePlayerSlots does not — a characterless save with active combat
+    // while the resolvers do not — a characterless save with active combat
     // would pass validation and then throw mid-resolve (2026-07-25 audit).
     if (!state.character) return { ok: false, error: 'No active character — the exchange cannot resolve.' };
     if (!exchange) return { ok: false, error: 'The DM did not provide a valid combat exchange.' };
     const validation = validatePlayerSlots(exchange, state);
     if (!validation.ok) return validation;
 
-    // A bonus-action lane (Second Wind slot, Cleric bonus-time cast) spends the
-    // round's one bonus action; the reducer marks combat.bonusActionUsed so the
-    // potion button (UI-owned bonus action) can't grant a second one this round
-    // (2026-08-27 audit P1 — the guard was one-way before this).
-    const usedBonusAction = (exchange.playerSlots || [])
-        .some(slot => slot.action === 'second_wind' || isBonusCastSlot(state.character, slot));
+    const ctx = openExchange(state, exchange);
+    const seal = {
+        kind: 'exchange',
+        exchangeId: makeExchangeId('exchange', state.combat),
+        // A bonus-action lane (Second Wind slot, Cleric bonus-time cast) spends the
+        // round's one bonus action; the reducer marks combat.bonusActionUsed so the
+        // potion button (UI-owned bonus action) can't grant a second one this round
+        // (2026-08-27 audit P1 — the guard was one-way before this).
+        bonusActionUsed: (exchange.playerSlots || [])
+            .some(slot => slot.action === 'second_wind' || isBonusCastSlot(state.character, slot)),
+        consumeActionSurge: !!state.character.pendingActionSurge,
+    };
 
-    const exchangeId = makeExchangeId('exchange', state.combat);
-    const enemies = (state.combat.enemies || []).map(enemy => ({ ...enemy }));
-    // Stances are declared per exchange; stale defend/guard flags must not carry over.
-    const companions = (state.party || []).map(companion => ({ ...companion, defending: false, guarding: false }));
-    const events = [];
-    const rolls = [];
-    for (const update of exchange.enemyConditionUpdates || []) {
-        const enemy = findByRef(enemies, update.target);
-        if (isEnemyActive(enemy)) applyEnemyConditionDelta(enemy, update, events);
-    }
-    // Standing flanks: an accepted flanking ruling persists engine-side between
-    // exchanges — the DM kept forgetting to re-emit it each round. The DM ends one
-    // with flank_broken when the fiction repositions; enemies leaving the fight,
-    // the hero dashing/disengaging away, or the last companion dropping also end it.
-    const standingFlankIds = new Set((state.combat.flankedEnemyIds || [])
-        .filter(id => isEnemyActive(enemies.find(enemy => enemy.id === id))));
-    for (const target of exchange.flankBroken || []) {
-        const enemy = findByRef(enemies, target);
-        if (enemy && standingFlankIds.delete(enemy.id)) {
-            events.push({ type: 'note', text: `The flank on ${enemy.name} is broken — the standing advantage ends.` });
-        }
-    }
-    const player = resolvePlayerSlots({ state, exchange, enemies, companions, events, rolls, standingFlankIds });
-    // The roll LEDGER keeps the hero's own dice only (2026-09-21 audit P2): an
-    // exchange appends ~10 rolls (every actor's attack AND damage), so one
-    // five-exchange fight evicted every check the campaign ever rolled from the
-    // 50-row ledger the recall lane answers "what did I roll to…" from. The
-    // full set still rides `rolls` and the result lines show every die.
-    const heroRolls = rolls.slice();
-    // Casting changes the character mid-exchange (AC buffs, invisibility, spent
-    // slots); enemies acting later in this same exchange must see that state.
-    const castCharacter = mergeCharacterUpdates(state.character, player.characterUpdates);
+    applyConditionSync(ctx, exchange.enemyConditionUpdates);
+    ctx.standingFlankIds = carryStandingFlanks(ctx);
+    const player = resolvePlayerSlots(ctx);
     const healedBaseHp = player.playerHealing > 0
         ? Math.min(state.character.maxHP, state.character.currentHP + player.playerHealing)
         : state.character.currentHP;
 
     if (player.fled) {
-        const result = makeResult('exchange', exchangeId, state.combat.round, events, 'escaped', {
-            enemies,
-            companions,
-            character: state.character,
-            playerHp: healedBaseHp,
-            player: projectPlayerSnapshot({ character: state.character, playerHp: healedBaseHp, partyAtSave: state.party || [], partyAfter: companions }),
-        });
-        return {
-            ok: true,
-            payload: {
-                exchangeId,
-                enemies,
-                party: companions,
-                playerDamage: 0,
-                playerHealing: player.playerHealing,
-                characterUpdates: player.characterUpdates,
-                deathSaveNatural: player.deathSaveNatural,
-                deathSaveSkipped: player.deathSaveSkipped,
-                rolls,
-                heroRolls,
-                result,
-                flankedEnemyIds: [],
-                bonusActionUsed: usedBonusAction,
-                consumeActionSurge: !!state.character.pendingActionSurge,
-            },
-        };
+        return sealExchange(ctx, { ...seal, player, playerHp: healedBaseHp, terminal: 'escaped' });
     }
 
-    // Collect enemies the player explicitly flanked this exchange (on top of any
-    // standing flanks carried over from earlier exchanges). Other situational
-    // advantage sources, such as concealment or distraction, stay local to the actor.
-    const flankingEnemyIds = new Set(standingFlankIds);
-    for (const slot of exchange.playerSlots || []) {
-        if (!isSharedFlankingRuling(slot.situationalRuling)) continue;
-        if (slot.action === 'attack') {
-            const targetedEnemies = new Set((slot.strikes || [])
-                .map(strike => findByRef(enemies, strike.target)?.id)
-                .filter(Boolean));
-            if (targetedEnemies.size !== 1) continue;
-            const targetId = [...targetedEnemies][0];
-            if (flankingEnemyIds.has(targetId)) continue;
-            flankingEnemyIds.add(targetId);
-            const flanked = enemies.find(enemy => enemy.id === targetId);
-            if (isEnemyActive(flanked)) {
-                events.push({ type: 'note', text: `**Flanking established against ${flanked.name}** — the advantage persists until the flank breaks.` });
-            }
-        }
-    }
-
-    resolveCompanions({ state, exchange, enemies, companions, events, rolls, flankingEnemyIds });
+    const flankingEnemyIds = establishFlanks(ctx);
+    resolveCompanions(ctx, { flankingEnemyIds });
     // A defense declared last exchange protects against this exchange's player and companion
     // attacks, then expires before foes choose their new actions.
-    for (const enemy of enemies) enemy.defending = false;
+    for (const enemy of ctx.enemies) enemy.defending = false;
+    // Casting changes the character mid-exchange (AC buffs, invisibility, spent
+    // slots); enemies acting later in this same exchange must see that state.
+    const castCharacter = mergeCharacterUpdates(state.character, player.characterUpdates);
     // A natural-20 death save revives the hero BEFORE the enemy phase: in 5e a
     // revived creature is a valid target for everyone acting after it, and the
     // reducer's own commit order is death save → damage. Foes this exchange
@@ -1690,69 +1489,19 @@ export function planCombatExchange(state, exchange) {
     // P2 — the revive used to land after every foe had skipped the
     // "already-defeated player").
     const revived = player.deathSaveNatural === 20;
-    const enemyPhaseCharacter = revived ? projectRevivedCharacter(castCharacter) : castCharacter;
-    const enemyPhaseHp = revived ? Math.max(1, healedBaseHp) : healedBaseHp;
-    const enemyResult = resolveEnemies({
-        state: enemyPhaseCharacter === state.character ? state : { ...state, character: enemyPhaseCharacter },
-        exchange, enemies, companions,
-        playerHp: enemyPhaseHp,
+    const enemyPhase = resolveEnemies(ctx, {
+        character: revived ? projectRevivedCharacter(castCharacter) : castCharacter,
+        playerHp: revived ? Math.max(1, healedBaseHp) : healedBaseHp,
         playerDodging: player.dodging,
-        events, rolls,
-    });
-    // A still-dying hero is judged against the party as it stood at the death
-    // save (pre-exchange); a conscious or just-revived hero dropping to 0 is
-    // judged against the post-exchange party — see terminalState.
-    const terminal = terminalState(
-        enemies, enemyResult.playerHp, enemyPhaseCharacter,
-        revived ? null : player.deathSaveNatural,
-        enemyPhaseCharacter.dying ? state.party || [] : companions,
-    );
-    const playerHp = enemyResult.playerHp;
-    const result = makeResult('exchange', exchangeId, state.combat.round, events, terminal, {
-        enemies,
-        companions,
-        character: state.character,
-        playerHp,
-        player: projectPlayerSnapshot({
-            character: state.character,
-            playerHp,
-            deathSaveNatural: player.deathSaveNatural,
-            deathSaveSkipped: player.deathSaveSkipped,
-            partyAtSave: state.party || [],
-            partyAfter: companions,
-        }),
     });
 
-    // Persist standing flanks for the next exchange. Repositioning by the hero
-    // (dash/disengage) abandons the pincer; a party whose every companion is down
-    // has nobody left to hold the far side (a companionless party keeps a
-    // DM-adjudicated flank — the second threat is an untracked NPC — until the DM
-    // breaks it). Enemies overcome this exchange fall out of the list.
-    const playerLeftMelee = (exchange.playerSlots || []).some(slot => slot.action === 'dash' || slot.action === 'disengage');
-    const flankHoldersRemain = companions.length === 0 || companions.some(isCompanionActive);
-    const flankedEnemyIds = playerLeftMelee || !flankHoldersRemain
-        ? []
-        : [...flankingEnemyIds].filter(id => isEnemyActive(enemies.find(enemy => enemy.id === id)));
-
-    return {
-        ok: true,
-        payload: {
-            exchangeId,
-            enemies,
-            party: companions,
-            playerDamage: enemyResult.playerDamage,
-            playerHealing: player.playerHealing,
-            characterUpdates: player.characterUpdates,
-            deathSaveNatural: player.deathSaveNatural,
-            deathSaveSkipped: player.deathSaveSkipped,
-            rolls,
-            heroRolls,
-            result,
-            flankedEnemyIds,
-            bonusActionUsed: usedBonusAction,
-            consumeActionSurge: !!state.character.pendingActionSurge,
-        },
-    };
+    return sealExchange(ctx, {
+        ...seal,
+        player,
+        playerHp: enemyPhase.playerHp,
+        playerDamage: enemyPhase.playerDamage,
+        flankedEnemyIds: persistFlanks(ctx, flankingEnemyIds),
+    });
 }
 
 /** Resolve only the initiative winners who act before the player when combat begins. */
@@ -1765,11 +1514,8 @@ export function planOpeningExchange(state) {
     if (!state.character) return { ok: false, error: 'No active character — the opening cannot resolve.' };
     const actorIds = new Set(state.combat.openingActorIds || []);
     const exchangeId = makeExchangeId('opening', state.combat);
-    const enemies = (state.combat.enemies || []).map(enemy => ({ ...enemy }));
-    // A fresh fight starts with no stances; clear any flags persisted from a previous combat.
-    const companions = (state.party || []).map(companion => ({ ...companion, defending: false, guarding: false }));
-    const events = [];
-    const rolls = [];
+    // No intent envelope: the opening's actors take their default actions.
+    const ctx = openExchange(state, null);
 
     // The fight-starting response's enemy_condition_updates ride the QUEUED
     // exchange, which resolves only after the opening — so a foe the DM synced
@@ -1778,10 +1524,7 @@ export function planOpeningExchange(state) {
     // 2026-08-29 audit). Apply the condition sync (never the intents) before
     // the initiative winners act; the queued exchange re-applying the same
     // delta later is a no-op, so nothing double-fires.
-    for (const update of state.combat.queuedExchange?.enemyConditionUpdates || []) {
-        const enemy = findByRef(enemies, update.target);
-        if (isEnemyActive(enemy)) applyEnemyConditionDelta(enemy, update, events);
-    }
+    applyConditionSync(ctx, state.combat.queuedExchange?.enemyConditionUpdates);
 
     let playerHp = state.character.currentHP;
     let playerDamage = 0;
@@ -1792,744 +1535,20 @@ export function planOpeningExchange(state) {
         if (!actor || typeof actor !== 'object') continue;
         const actorId = actor.id || actor.name;
         if (!actorIds.has(actorId)) continue;
+        const onlyIds = new Set([actor.id]);
         if (actor.type === 'companion') {
-            resolveCompanions({
-                exchange: null, enemies, companions, events, rolls,
-                onlyIds: new Set([actor.id]),
-            });
+            resolveCompanions(ctx, { onlyIds });
         } else if (actor.type === 'enemy') {
-            const resolved = resolveEnemies({
-                state, exchange: null, enemies, companions,
+            const resolved = resolveEnemies(ctx, {
+                character: state.character,
                 playerHp,
                 playerDodging: false,
-                events, rolls,
-                onlyIds: new Set([actor.id]),
+                onlyIds,
                 uncannyDodgeState,
             });
             playerHp = resolved.playerHp;
             playerDamage += resolved.playerDamage;
         }
     }
-    const terminal = terminalState(
-        enemies, playerHp, state.character, null,
-        state.character.dying ? state.party || [] : companions,
-    );
-    const result = makeResult('opening', exchangeId, state.combat.round, events, terminal, {
-        enemies,
-        companions,
-        character: state.character,
-        playerHp,
-        player: projectPlayerSnapshot({ character: state.character, playerHp, partyAtSave: state.party || [], partyAfter: companions }),
-    });
-    return {
-        ok: true,
-        payload: {
-            exchangeId,
-            enemies,
-            party: companions,
-            playerDamage,
-            deathSaveNatural: null,
-            rolls,
-            // The opening belongs to the initiative winners — no hero dice.
-            heroRolls: [],
-            result,
-            consumeActionSurge: false,
-        },
-    };
-}
-
-// ─── The fight leaves a mark (WOW 2026-09-27, combat-drama slice B) ─────────
-/**
- * The cost tally the reducer keeps on the combat envelope (`combat.fightTally`):
- * START_COMBAT seeds it from the live hero, APPLY_COMBAT_EXCHANGE folds each
- * committed result in through `recordExchangeCost`, the terminal narration
- * prompt carries `describeFightCost`'s ONE line, and END_COMBAT mints ONE
- * salience-4 `wound` story card through `buildFightWoundCard` when the fight
- * MARKED the party. Zero LLM calls; every number is the engine's own. Resources
- * are measured as a DIFF between the start snapshot and the live hero at the
- * end (`snapshotHeroResources`), so a potion drunk from the Inventory panel
- * and a Second Wind declared on the exchange wire count the same way without
- * a hook in either handler.
- */
-export const FIGHT_MARK_HP_RATIO = 0.25;
-/** A crit the hero TAKES is "big" — a fight memory of its own — at this share of max HP. */
-export const FIGHT_BIG_CRIT_RATIO = 0.5;
-/** A fight memory resonates (the private cue in a LATER fight) only once it is
- * at least this many conversational messages old — the afterglow of the same
- * scene is the key-moments line's job, not the cue's. */
-export const FIGHT_RESONANCE_MIN_DISTANCE = 24;
-const MAX_TALLY_CRITS = 6;
-const MAX_TALLY_NAMES = 6;
-const MAX_TALLY_SAVES = 6;
-const MAX_TALLY_KILLING_CRITS = 3;
-const MAX_RESONANCE_LINES = 2;
-const SAVE_HOWS = new Set(['revived', 'felled', 'intercepted']);
-const TALLY_NAME_MAX = 100;
-const TALLY_RESOURCE_KEY_MAX = 40;
-
-function tallyName(value) {
-    return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, TALLY_NAME_MAX) : '';
-}
-
-function finiteInt(value, fallback) {
-    const n = Number(value);
-    return Number.isFinite(n) ? Math.trunc(n) : fallback;
-}
-
-function isHealingConsumable(item) {
-    return !!item && typeof item === 'object' && item.consumableType === 'healing';
-}
-
-/** `secondWind` → "Second Wind"; a key the class data never named still reads as words. */
-function humanizeResourceKey(key) {
-    return String(key)
-        .replace(/([a-z])([A-Z])/g, '$1 $2')
-        .replace(/[_-]+/g, ' ')
-        .replace(/\b\w/g, c => c.toUpperCase())
-        .trim();
-}
-
-function joinNames(names) {
-    if (names.length <= 1) return names[0] || '';
-    return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-}
-
-/** The hero's spendable state at one moment: class resources used, spell slots used, healing potions carried. */
-export function snapshotHeroResources(character, inventory = []) {
-    const resources = {};
-    const classResources = character?.classResources;
-    if (classResources && typeof classResources === 'object' && !Array.isArray(classResources)) {
-        for (const [key, res] of Object.entries(classResources)) {
-            if (!res || typeof res !== 'object' || !key) continue;
-            resources[key.slice(0, TALLY_RESOURCE_KEY_MAX)] = Math.max(0, finiteInt(res.used, 0));
-        }
-    }
-    const slots = character?.spellSlots;
-    const slotsUsed = slots && typeof slots === 'object' && !Array.isArray(slots)
-        ? Object.values(slots).reduce((sum, slot) => sum + Math.max(0, finiteInt(slot?.used, 0)), 0)
-        : 0;
-    const potions = (Array.isArray(inventory) ? inventory : [])
-        .filter(isHealingConsumable)
-        .reduce((sum, item) => sum + Math.max(1, finiteInt(item.quantity, 1)), 0);
-    return { resources, slotsUsed, potions };
-}
-
-/**
- * Complete-or-null (the 2026-09-08 living-world rule): a stored tally is
- * untrusted input at load, and a half-typed one would render "undefined→3 HP"
- * into the AUTHORITATIVE terminal prompt.
- */
-export function sanitizeFightTally(value) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-    const heroMaxHp = finiteInt(value.heroMaxHp, NaN);
-    if (!Number.isFinite(heroMaxHp) || heroMaxHp < 1) return null;
-    const heroHpStart = Math.max(0, finiteInt(value.heroHpStart, 0));
-    const start = value.resourcesStart && typeof value.resourcesStart === 'object' && !Array.isArray(value.resourcesStart)
-        ? value.resourcesStart
-        : {};
-    const resources = {};
-    if (start.resources && typeof start.resources === 'object' && !Array.isArray(start.resources)) {
-        for (const [key, used] of Object.entries(start.resources)) {
-            if (!key || !Number.isFinite(Number(used))) continue;
-            resources[key.slice(0, TALLY_RESOURCE_KEY_MAX)] = Math.max(0, finiteInt(used, 0));
-        }
-    }
-    const critsTaken = (Array.isArray(value.critsTaken) ? value.critsTaken : [])
-        .filter(crit => crit && typeof crit === 'object' && !Array.isArray(crit))
-        .map(crit => ({
-            by: tallyName(crit.by) || 'a foe',
-            target: tallyName(crit.target) || 'the hero',
-            damage: Math.max(0, finiteInt(crit.damage, 0)),
-            round: Math.max(1, finiteInt(crit.round, 1)),
-        }))
-        .slice(0, MAX_TALLY_CRITS);
-    const companionsDowned = [...new Set((Array.isArray(value.companionsDowned) ? value.companionsDowned : [])
-        .map(tallyName).filter(Boolean))].slice(0, MAX_TALLY_NAMES);
-    // The fight-memory fields (2026-09-28) default EMPTY on a pre-fix tally —
-    // the ledger stays complete; only the memories it never recorded are absent.
-    const witnesses = [...new Set((Array.isArray(value.witnesses) ? value.witnesses : [])
-        .map(tallyName).filter(Boolean))].slice(0, MAX_TALLY_NAMES);
-    const saves = (Array.isArray(value.saves) ? value.saves : [])
-        .filter(save => save && typeof save === 'object' && !Array.isArray(save) && SAVE_HOWS.has(save.how))
-        .map(save => ({
-            how: save.how,
-            by: tallyName(save.by),
-            saved: tallyName(save.saved),
-            detail: tallyName(save.detail),
-            round: Math.max(1, finiteInt(save.round, 1)),
-        }))
-        .filter(save => save.by && save.saved)
-        .slice(0, MAX_TALLY_SAVES);
-    const heroKillingCrits = (Array.isArray(value.heroKillingCrits) ? value.heroKillingCrits : [])
-        .filter(crit => crit && typeof crit === 'object' && !Array.isArray(crit))
-        .map(crit => ({
-            target: tallyName(crit.target) || 'a foe',
-            damage: Math.max(0, finiteInt(crit.damage, 0)),
-            round: Math.max(1, finiteInt(crit.round, 1)),
-            decisive: crit.decisive === true,
-        }))
-        .slice(0, MAX_TALLY_KILLING_CRITS);
-    return {
-        heroHpStart,
-        heroMaxHp,
-        heroLowestHp: Math.max(0, Math.min(heroHpStart, finiteInt(value.heroLowestHp, heroHpStart))),
-        heroDroppedRound: Number.isInteger(value.heroDroppedRound) && value.heroDroppedRound >= 1 ? value.heroDroppedRound : null,
-        // The foe whose blow dropped the hero the LAST time (the last chapter,
-        // 2026-09-30): the epitaph's killer when the clock then ran out.
-        heroDroppedBy: tallyName(value.heroDroppedBy) || null,
-        deathSaves: Math.max(0, finiteInt(value.deathSaves, 0)),
-        critsTaken,
-        companionsDowned,
-        witnesses,
-        saves,
-        heroKillingCrits,
-        heroLowExchangeId: typeof value.heroLowExchangeId === 'string' && value.heroLowExchangeId.trim()
-            ? value.heroLowExchangeId.trim().slice(0, 80)
-            : null,
-        resourcesStart: {
-            resources,
-            slotsUsed: Math.max(0, finiteInt(start.slotsUsed, 0)),
-            potions: Math.max(0, finiteInt(start.potions, 0)),
-        },
-        rounds: Math.max(1, finiteInt(value.rounds, 1)),
-    };
-}
-
-/** START_COMBAT: the fight's opening ledger, from the live hero. */
-export function startFightTally(state) {
-    const character = state?.character || {};
-    const hp = Math.max(0, finiteInt(character.currentHP, 0));
-    return sanitizeFightTally({
-        heroHpStart: hp,
-        heroMaxHp: Math.max(1, finiteInt(character.maxHP, hp || 1)),
-        heroLowestHp: hp,
-        heroDroppedRound: null,
-        heroDroppedBy: null,
-        deathSaves: 0,
-        critsTaken: [],
-        companionsDowned: [],
-        // Witnesses only (fight memory, 2026-09-28): the companions standing
-        // here when the blades come out are the ones who can remember it.
-        witnesses: (Array.isArray(state?.party) ? state.party : []).map(c => tallyName(c?.name)).filter(Boolean),
-        saves: [],
-        heroKillingCrits: [],
-        heroLowExchangeId: null,
-        resourcesStart: snapshotHeroResources(character, state?.inventory),
-        rounds: 1,
-    });
-}
-
-/**
- * APPLY_COMBAT_EXCHANGE: fold one committed result into the tally. Pure —
- * the caller passes the hero's HP and the party before and after the commit.
- * A crit is counted on the hero or a companion (the guard's intercepted blow
- * lands on the guardian and is theirs); a companion is "downed" when an attack
- * event leaves them at 0 or the party snapshot does.
- */
-export function recordExchangeCost(tally, { result, heroName, hpBefore, hpAfter, partyBefore = [], partyAfter = [] } = {}) {
-    const base = sanitizeFightTally(tally);
-    if (!base || !result || typeof result !== 'object') return base;
-    const hero = tallyName(heroName) || 'Player';
-    const round = Math.max(base.rounds, finiteInt(result.round, base.rounds));
-    const before = Array.isArray(partyBefore) ? partyBefore : [];
-    const after = Array.isArray(partyAfter) ? partyAfter : [];
-    const companionNames = new Set(before.map(c => tallyName(c?.name)).filter(Boolean));
-    let lowest = base.heroLowestHp;
-    if (Number.isFinite(hpAfter)) lowest = Math.min(lowest, Math.max(0, Math.trunc(hpAfter)));
-    let droppedRound = base.heroDroppedRound;
-    let droppedBy = base.heroDroppedBy;
-    let deathSaves = base.deathSaves;
-    const crits = [...base.critsTaken];
-    const downed = [...base.companionsDowned];
-    const saves = [...base.saves];
-    const killingCrits = [...base.heroKillingCrits];
-    const noteDowned = (name) => {
-        if (name && !downed.includes(name) && downed.length < MAX_TALLY_NAMES) downed.push(name);
-    };
-    const noteSave = (save) => {
-        if (saves.length < MAX_TALLY_SAVES) saves.push({ ...save, round });
-    };
-    const events = Array.isArray(result.events) ? result.events : [];
-    // The hero is DOWN through the companion phase when they entered the
-    // exchange at 0 and no natural 20 stood them up first (the revive lands
-    // before the companions act — DECISIONS 2026-09-02).
-    const heroDownThisExchange = Number.isFinite(hpBefore) && hpBefore <= 0
-        && !events.some(event => event?.type === 'death_save' && event.natural === 20);
-    const heroLowThisExchange = Number.isFinite(hpBefore) && hpBefore > 0 && hpBefore <= base.heroMaxHp * FIGHT_MARK_HP_RATIO;
-    for (const event of events) {
-        if (!event || typeof event !== 'object') continue;
-        if (event.type === 'death_save') {
-            deathSaves += 1;
-            continue;
-        }
-        if (event.type !== 'attack' || !event.hit) continue;
-        const target = tallyName(event.target);
-        const actor = tallyName(event.actor);
-        const remaining = finiteInt(event.remainingHp, NaN);
-        const onHero = target === hero;
-        const onCompanion = companionNames.has(target);
-        if (!onHero && !onCompanion) {
-            // A blow on a FOE: the hero's own killing crit, or a companion's
-            // kill while the hero lay at 0 — the fight memories (2026-09-28).
-            if (!Number.isFinite(remaining) || remaining > 0) continue;
-            if (actor === hero && event.critical && killingCrits.length < MAX_TALLY_KILLING_CRITS) {
-                killingCrits.push({ target: target || 'a foe', damage: Math.max(0, finiteInt(event.damage, 0)), round, decisive: result.terminal === 'victory' });
-            } else if (heroDownThisExchange && companionNames.has(actor)) {
-                noteSave({ how: 'felled', by: actor, saved: hero, detail: target || 'a foe' });
-            }
-            continue;
-        }
-        if (event.intercepted === true && onCompanion && heroLowThisExchange) {
-            noteSave({ how: 'intercepted', by: target, saved: hero, detail: actor || 'a foe' });
-        }
-        if (onHero && Number.isFinite(remaining)) {
-            lowest = Math.min(lowest, Math.max(0, remaining));
-            if (remaining <= 0) {
-                if (droppedRound === null) droppedRound = round;
-                // The LAST dropper wins: a natural-20 revive and a second
-                // drop make the second blow the one the clock ran out on.
-                droppedBy = actor || droppedBy;
-            }
-        }
-        if (onCompanion && Number.isFinite(remaining) && remaining <= 0) noteDowned(target);
-        if (event.critical && crits.length < MAX_TALLY_CRITS) {
-            crits.push({
-                by: tallyName(event.actor) || 'a foe',
-                target,
-                damage: Math.max(0, finiteInt(event.damage, 0)),
-                round,
-            });
-        }
-    }
-    if (Number.isFinite(hpBefore) && Number.isFinite(hpAfter) && hpBefore > 0 && hpAfter <= 0 && droppedRound === null) {
-        droppedRound = round;
-    }
-    for (const companion of after) {
-        const name = tallyName(companion?.name);
-        if (!name) continue;
-        const was = before.find(c => (companion.id != null && c?.id === companion.id) || tallyName(c?.name) === name);
-        if (!was) continue;
-        if ((companion?.hp ?? 0) <= 0) {
-            if ((was.hp ?? 0) > 0) noteDowned(name);
-        } else if ((was.hp ?? 0) <= 0 && hero) {
-            // Only the hero heals mid-fight (companions attack, defend, guard
-            // or pass): a companion back on their feet was the hero's doing.
-            noteSave({ how: 'revived', by: hero, saved: name, detail: '' });
-        }
-    }
-    // The exchange that first brought a standing hero to a quarter or less —
-    // the resonance cue's second trigger (describeFightResonance).
-    const lowRatio = base.heroMaxHp * FIGHT_MARK_HP_RATIO;
-    const heroLowExchangeId = base.heroLowExchangeId
-        || (base.heroLowestHp > lowRatio && lowest <= lowRatio && typeof result.exchangeId === 'string' ? result.exchangeId : null);
-    return {
-        ...base,
-        heroLowestHp: lowest,
-        heroDroppedRound: droppedRound,
-        heroDroppedBy: droppedBy,
-        deathSaves,
-        critsTaken: crits,
-        companionsDowned: downed,
-        saves,
-        heroKillingCrits: killingCrits,
-        heroLowExchangeId,
-        rounds: round,
-    };
-}
-
-/** What the hero spent between the start snapshot and now, as short phrases. */
-export function spentFightResources(tally, character, inventory = []) {
-    const t = sanitizeFightTally(tally);
-    if (!t) return [];
-    const now = snapshotHeroResources(character, inventory);
-    const spent = [];
-    for (const [key, used] of Object.entries(now.resources)) {
-        const delta = used - (t.resourcesStart.resources[key] ?? used);
-        if (delta <= 0) continue;
-        spent.push(delta > 1 ? `${humanizeResourceKey(key)} ×${delta}` : `${humanizeResourceKey(key)} spent`);
-    }
-    const slots = now.slotsUsed - t.resourcesStart.slotsUsed;
-    if (slots > 0) spent.push(`${slots} spell slot${slots === 1 ? '' : 's'} spent`);
-    const potions = t.resourcesStart.potions - now.potions;
-    if (potions > 0) spent.push(`${potions} potion${potions === 1 ? '' : 's'} drunk`);
-    return spent;
-}
-
-function foeOutcomeCounts(enemies) {
-    const counts = { slain: 0, fled: 0, surrendered: 0, standing: 0 };
-    for (const enemy of Array.isArray(enemies) ? enemies : []) {
-        if (!enemy || typeof enemy !== 'object') continue;
-        if ((enemy.hp ?? 0) <= 0 || enemy.condition === 'dead') counts.slain += 1;
-        else if (enemy.combatStatus === 'fled') counts.fled += 1;
-        else if (enemy.combatStatus === 'surrendered') counts.surrendered += 1;
-        else counts.standing += 1;
-    }
-    return counts;
-}
-
-function summarizeFoeOutcomes(enemies) {
-    const counts = foeOutcomeCounts(enemies);
-    return ['slain', 'fled', 'surrendered', 'standing']
-        .filter(key => counts[key] > 0)
-        .map(key => `${counts[key]} ${key}`)
-        .join(', ');
-}
-
-/** "the Goblin Cutter", "the Goblin Cutter and Wolf", "the Goblin Cutter and 3 others". */
-function describeFoes(enemies) {
-    const names = [...new Set((Array.isArray(enemies) ? enemies : []).map(e => tallyName(e?.name)).filter(Boolean))];
-    if (names.length === 0) return 'the foes';
-    if (names.length <= 2) return joinNames(names);
-    return `${names[0]} and ${names.length - 1} others`;
-}
-
-/**
- * The ONE line the terminal narration prompt carries. `state` is the live
- * state at narration time (the exchange has committed; the hero's HP and
- * resources are post-fight).
- */
-export function describeFightCost(tally, state) {
-    const t = sanitizeFightTally(tally);
-    if (!t || !state?.character) return null;
-    const hero = tallyName(state.character.name) || 'The hero';
-    const hpNow = Math.max(0, finiteInt(state.character.currentHP, 0));
-    const notes = [];
-    if (t.heroLowestHp < Math.min(t.heroHpStart, hpNow)) notes.push(`lowest ${t.heroLowestHp}`);
-    if (t.heroDroppedRound !== null) {
-        const saves = t.deathSaves ? `, ${t.deathSaves} death save${t.deathSaves === 1 ? '' : 's'}` : '';
-        notes.push(`DOWN at 0 HP in round ${t.heroDroppedRound}${saves}`);
-    }
-    for (const crit of t.critsTaken) {
-        const on = crit.target !== hero ? ` on ${crit.target}` : '';
-        const dmg = crit.damage ? `, ${crit.damage} damage` : '';
-        notes.push(`${crit.by}'s critical blow${on} in round ${crit.round}${dmg}`);
-    }
-    const parts = [`${hero} ${t.heroHpStart}→${hpNow} HP${notes.length ? ` (${notes.join('; ')})` : ''}`];
-    if (t.companionsDowned.length > 0) parts.push(`${joinNames(t.companionsDowned)} downed`);
-    const spent = spentFightResources(t, state.character, state.inventory);
-    if (spent.length > 0) parts.push(spent.join(', '));
-    const foes = summarizeFoeOutcomes(state.combat?.enemies);
-    if (foes) parts.push(`foes: ${foes}`);
-    parts.push(`${t.rounds} round${t.rounds === 1 ? '' : 's'}`);
-    return `COST OF THIS FIGHT: ${parts.join('; ')}.`;
-}
-
-/**
- * A fight MARKS the party when the hero was dropped to 0, brought to a quarter
- * of their HP or less (from higher — a hero who walked in wounded and took
- * nothing is not marked), took a critical hit, or a companion went down.
- */
-export function isMarkingFight(tally) {
-    const t = sanitizeFightTally(tally);
-    if (!t) return false;
-    const heroDropped = t.heroDroppedRound !== null;
-    const heroLow = t.heroLowestHp < t.heroHpStart && t.heroLowestHp <= t.heroMaxHp * FIGHT_MARK_HP_RATIO;
-    return heroDropped || heroLow || t.critsTaken.length > 0 || t.companionsDowned.length > 0;
-}
-
-/**
- * END_COMBAT's ONE engine-minted `wound` card for a marking fight — narrative-
- * only by DECISIONS 2026-06-17 (no harm track): it rides DRAMATIC CALLBACK
- * OPPORTUNITIES so a later scene can name the wound, and the Scribe's
- * appearance merge can make the scar canon. `source: 'engine'` + the
- * `fight-cost` tag are what the dormancy pass keys on.
- */
-export function buildFightWoundCard(tally, state, outcome = 'victory') {
-    const t = sanitizeFightTally(tally);
-    if (!t || !isMarkingFight(t) || !state?.character) return null;
-    const hero = tallyName(state.character.name) || 'The hero';
-    const foes = describeFoes(state.combat?.enemies);
-    const place = tallyName(state.currentLocation);
-    const verb = outcome === 'defeat' ? 'fell to' : outcome === 'escaped' ? 'fled from' : 'beat';
-    const clauses = [];
-    if (t.heroDroppedRound !== null) {
-        clauses.push(`went down at 0 HP in round ${t.heroDroppedRound}${t.deathSaves ? ` and rolled ${t.deathSaves} death save${t.deathSaves === 1 ? '' : 's'}` : ''}`);
-    } else if (t.heroLowestHp < t.heroHpStart) {
-        clauses.push(`was cut down to ${t.heroLowestHp} of ${t.heroMaxHp} HP`);
-    }
-    const heroCrit = t.critsTaken.find(crit => crit.target === hero);
-    if (heroCrit) clauses.push(`took ${heroCrit.by}'s critical blow in round ${heroCrit.round}`);
-    const companionCrits = t.critsTaken.filter(crit => crit.target !== hero);
-    const sentences = [`${hero} ${verb} ${foes}${place ? ` at ${place}` : ''}${clauses.length ? `, ${joinNames(clauses)}` : ''}.`];
-    if (t.companionsDowned.length > 0) {
-        sentences.push(`${joinNames(t.companionsDowned)} went down in the fight.`);
-    } else if (companionCrits.length > 0) {
-        sentences.push(`${companionCrits[0].target} took ${companionCrits[0].by}'s critical blow.`);
-    }
-    const spent = spentFightResources(t, state.character, state.inventory);
-    if (spent.length > 0) sentences.push(`${spent.join(', ')}.`);
-    sentences.push('The wound is fresh and unnamed.');
-    return {
-        type: 'wound',
-        subject: `${hero}'s wound from ${foes}`.slice(0, 80),
-        text: sentences.join(' ').slice(0, 260),
-        salience: 4,
-        emotionalCharge: 3,
-        status: 'active',
-        source: 'engine',
-        tags: ['fight-cost', outcome],
-        linkedNpcNames: t.companionsDowned.slice(0, 6),
-        ...(place && { location: place }),
-    };
-}
-
-// ─── The fight is remembered (WOW 2026-09-28, fight memory) ─────────────────
-/**
- * Three deterministic patterns make a fight STRIKING, read from the tally the
- * exchanges already keep — no Scribe judgment, no extra call:
- *   5 — a life saved: the hero pulled a companion back from the ground, or a
- *       companion felled a foe while the hero lay at 0 (the fight was won);
- *   4 — a save at the edge: a companion took a blow meant for a hero at a
- *       quarter or less; the hero went down and the party carried the fight;
- *       the hero's critical blow ENDED the fight; a companion fought over the
- *       downed hero's body and still lost;
- *   3 — "lately": a companion's own fall in a won fight, a killing crit that
- *       did not end it, the hero cut to a quarter and the fight won, a big crit
- *       taken (≥ FIGHT_BIG_CRIT_RATIO of max HP).
- * The moment is minted on WITNESSES only (the party at START_COMBAT, still in
- * the party at the end), ONE per companion (the most salient), with the
- * direction said in plain words — who saved whom — so the Scribe's later
- * voice cannot get gratitude and pride backwards. Salience 4–5 is a KEY
- * moment (`splitBondMoments`): it rides the party line, the Companions card,
- * the ✦ quiet tell, and the resonance cue below; a 3 fades from "lately".
- */
-function memoryPlace(place) {
-    return place ? ` at ${place}` : '';
-}
-
-function fightMemoryFor(name, t, { hero, foes, place, outcome, others }) {
-    const won = outcome === 'victory';
-    const revived = t.saves.find(save => save.how === 'revived' && save.saved === name);
-    if (revived) {
-        return { kind: 'rescue', salience: 5, text: `${hero} pulled ${name} back from the ground mid-fight against ${foes}${memoryPlace(place)} — ${hero} saved ${name}'s life.` };
-    }
-    const felled = t.saves.find(save => save.how === 'felled' && save.by === name);
-    if (felled && won) {
-        return { kind: 'rescue', salience: 5, text: `${name} cut down ${felled.detail} while ${hero} lay at 0 HP against ${foes}${memoryPlace(place)} — ${name} kept ${hero} alive until it was won.` };
-    }
-    if (felled) {
-        return { kind: 'shared_danger', salience: 4, text: `${name} fought on over ${hero}'s body against ${foes}${memoryPlace(place)}, felling ${felled.detail}, and still the fight was lost.` };
-    }
-    const intercepted = t.saves.find(save => save.how === 'intercepted' && save.by === name);
-    if (intercepted) {
-        return { kind: 'rescue', salience: 4, text: `${name} stepped into ${intercepted.detail}'s blow meant for ${hero}, who stood at ${t.heroLowestHp} of ${t.heroMaxHp} HP, against ${foes}${memoryPlace(place)} — ${name} took the hit for ${hero}.` };
-    }
-    if (t.heroDroppedRound !== null && won) {
-        const with_ = others.length ? ` with ${joinNames(others)}` : ' alone';
-        return { kind: 'shared_danger', salience: 4, text: `${hero} went down at 0 HP against ${foes}${memoryPlace(place)}; ${name}${with_} fought on until it was won.` };
-    }
-    const decisive = t.heroKillingCrits.find(crit => crit.decisive);
-    if (decisive) {
-        return { kind: 'shared_danger', salience: 4, text: `${hero}'s critical blow felled ${decisive.target} and ended the fight against ${foes}${memoryPlace(place)}, with ${name} there to see it.` };
-    }
-    if (t.companionsDowned.includes(name) && won) {
-        return { kind: 'shared_danger', salience: 3, text: `${name} went down against ${foes}${memoryPlace(place)}; ${hero} carried the fight to its end.` };
-    }
-    if (t.heroKillingCrits.length > 0) {
-        const crit = t.heroKillingCrits[0];
-        return { kind: 'shared_danger', salience: 3, text: `${hero}'s critical blow felled ${crit.target} against ${foes}${memoryPlace(place)}, with ${name} fighting beside them.` };
-    }
-    const heroLow = t.heroLowestHp < t.heroHpStart && t.heroLowestHp <= t.heroMaxHp * FIGHT_MARK_HP_RATIO;
-    if (heroLow && won) {
-        return { kind: 'shared_danger', salience: 3, text: `${hero} was cut to ${t.heroLowestHp} of ${t.heroMaxHp} HP against ${foes}${memoryPlace(place)} and still won, ${name} beside them.` };
-    }
-    const bigCrit = t.critsTaken.find(crit => crit.target === hero && crit.damage >= t.heroMaxHp * FIGHT_BIG_CRIT_RATIO);
-    if (bigCrit) {
-        return { kind: 'shared_danger', salience: 3, text: `${name} watched ${bigCrit.by}'s critical blow take ${bigCrit.damage} HP off ${hero} in one stroke against ${foes}${memoryPlace(place)}.` };
-    }
-    return null;
-}
-
-/**
- * END_COMBAT's engine-minted bond moments: `[{ name, moment: { text, kind,
- * salience } }]`, one per witness companion still in the party, or `[]` for
- * a fight nobody will speak of. Pure; the reducer dispatches each through
- * UPDATE_NPC so the bond machinery (scene collapse, salience eviction, the
- * ✦ tell) treats it exactly like a Scribe moment.
- */
-export function buildFightMemories(tally, state, outcome = 'victory') {
-    const t = sanitizeFightTally(tally);
-    if (!t || !state?.character || t.witnesses.length === 0) return [];
-    const hero = tallyName(state.character.name) || 'The hero';
-    const foes = describeFoes(state.combat?.enemies);
-    const place = tallyName(state.currentLocation);
-    const party = (Array.isArray(state.party) ? state.party : []).map(c => tallyName(c?.name)).filter(Boolean);
-    const present = t.witnesses.filter(name => party.some(member => namesMatch(member, name)));
-    const out = [];
-    for (const name of present) {
-        const others = present.filter(other => other !== name);
-        const moment = fightMemoryFor(name, t, { hero, foes, place, outcome, others });
-        if (moment) out.push({ name, moment: { ...moment, text: moment.text.slice(0, 220) } });
-    }
-    return out;
-}
-
-/**
- * The striking particular a PLACE keeps of the fight (≤ 160 chars) — rides
- * the encounter-ledger entry as `mark`, so regional hearsay repeats the thing
- * worth repeating ("went down and the dwarf fought on over the body") instead
- * of only who won. Null for a fight with nothing to tell.
- */
-export function describeFightMark(tally, state, outcome = 'victory') {
-    const t = sanitizeFightTally(tally);
-    if (!t || !state?.character) return null;
-    const hero = tallyName(state.character.name) || 'the hero';
-    const won = outcome === 'victory';
-    const revived = t.saves.find(save => save.how === 'revived');
-    const felled = t.saves.find(save => save.how === 'felled');
-    const intercepted = t.saves.find(save => save.how === 'intercepted');
-    const decisive = t.heroKillingCrits.find(crit => crit.decisive);
-    let mark = null;
-    if (felled && won) mark = `${hero} went down and ${felled.by} fought on over the body until it was won`;
-    else if (revived) mark = `${hero} brought ${revived.saved} back from the ground mid-fight`;
-    else if (t.heroDroppedRound !== null && won) mark = `${hero} went down and the companions carried the fight`;
-    else if (decisive) mark = `one blow of ${hero}'s ended it — ${decisive.target} felled outright`;
-    else if (intercepted) mark = `${intercepted.by} took a blow meant for ${hero}`;
-    else if (t.heroDroppedRound !== null) mark = `${hero} was left at 0 HP`;
-    else if (t.companionsDowned.length > 0) mark = `${joinNames(t.companionsDowned)} went down`;
-    else if (t.heroKillingCrits.length > 0) mark = `${hero}'s critical blow felled ${t.heroKillingCrits[0].target}`;
-    // The last two marking kinds (grand playtest 2026-10-02): isMarkingFight
-    // counts a hero cut to a quarter and any critical blow taken, and such a
-    // fight minted its wound card while the place kept no mark for hearsay.
-    else if (t.heroLowestHp < t.heroHpStart && t.heroLowestHp <= t.heroMaxHp * FIGHT_MARK_HP_RATIO) {
-        mark = `${hero} was cut down to ${t.heroLowestHp} HP${won ? ' and still won' : ''}`;
-    } else if (t.critsTaken.length > 0) mark = `${t.critsTaken[0].target} took ${t.critsTaken[0].by}'s critical blow`;
-    return mark ? mark.slice(0, 160) : null;
-}
-
-const RESONANCE_KINDS = new Set(['rescue', 'shared_danger']);
-
-/**
- * The resonance cue — where "way later" lands. On an ONGOING narration, at
- * the first exchange of a fight or the exchange that first cut the hero to a
- * quarter, a present standing companion who carries an OLD (≥
- * FIGHT_RESONANCE_MIN_DISTANCE conversational messages) rescue /
- * shared-danger KEY moment gets one private line: the echo shows in the next
- * dangerous moment, not at every campfire. ≤ 2 companions; null otherwise.
- * Engine-only, no call, never on a terminal beat.
- */
-export function describeFightResonance(state, result) {
-    if (!state?.combat?.active || !result || result.terminal) return null;
-    const tally = sanitizeFightTally(state.combat.fightTally);
-    const resolved = Array.isArray(state.combat.resolvedExchangeIds) ? state.combat.resolvedExchangeIds : [];
-    const firstBeat = resolved.length <= 1;
-    const lowBeat = !!tally?.heroLowExchangeId && tally.heroLowExchangeId === result.exchangeId;
-    if (!firstBeat && !lowBeat) return null;
-    const messages = Array.isArray(state.messages) ? state.messages : [];
-    const now = messages.length;
-    const npcs = Array.isArray(state.npcs) ? state.npcs : [];
-    const lines = [];
-    for (const companion of Array.isArray(state.party) ? state.party : []) {
-        if (lines.length >= MAX_RESONANCE_LINES) break;
-        const name = tallyName(companion?.name);
-        if (!name || (companion?.hp ?? 0) <= 0 || companion?.status === 'downed') continue;
-        const record = npcs.find(npc => namesMatch(npc?.name, name));
-        if (!record) continue;
-        const carried = splitBondMoments(record.bondMoments).key
-            .filter(moment => RESONANCE_KINDS.has(moment.kind) && Number.isFinite(moment.salience) && moment.salience >= 4
-                && Number.isFinite(moment.atMessage))
-            .map(moment => ({ moment, distance: conversationalDistance(messages, moment.atMessage, now) }))
-            .filter(entry => entry.distance >= FIGHT_RESONANCE_MIN_DISTANCE)
-            .sort((a, b) => (b.moment.salience - a.moment.salience) || (a.distance - b.distance))[0];
-        if (!carried) continue;
-        const turns = Math.max(1, Math.round(carried.distance / 2));
-        lines.push(`${name} carries this from ${turns} turns ago: "${carried.moment.text}"`);
-    }
-    if (lines.length === 0) return null;
-    const when = lowBeat ? 'with the hero cut this low' : 'as the fight opens';
-    return `FIGHT MEMORY (private, engine record): ${lines.join(' · ')} Let it show ${when} in ONE beat of their bearing or a single line in their own voice — never a speech, never narrator commentary, never a second mention this fight.`;
-}
-
-/**
- * The narration prompt's PLAYER line (WOW 2026-09-30): the hero's status
- * after the exchange and, while dying, the count — so the DM plays the round
- * over the body knowing what the next die means. A pre-change stored result
- * (no status) renders the old HP-only line.
- */
-function describePlayerPostState(player) {
-    const head = `${player.name} — ${player.hp}/${player.maxHp} HP`;
-    switch (player.status) {
-        case 'dying':
-            return `- PLAYER DYING: ${head}; death saves ${describeDeathSaveCount(player.deathSaves)}. Unconscious: cannot act, speak, or be roused without healing.`;
-        case 'stable':
-            return `- PLAYER STABLE: ${head}; three successful death saves — unconscious, no longer dying. Not dead, not awake.`;
-        case 'revived':
-            return `- PLAYER REVIVED: ${head}; a natural-20 death save put them back on their feet — conscious and acting.`;
-        case 'defeated':
-            return `- PLAYER DEFEATED: ${head}; down but alive — a setback, never a death.`;
-        case 'dead':
-            return `- PLAYER DEAD: ${head}; the third failed death save. Dead — not dying, not unconscious, not coming back.`;
-        default:
-            return `- PLAYER: ${head}.`;
-    }
-}
-
-const TELEGRAPH_RULE = 'THE FOE\'S NEXT MOVE IS ON THE PAGE: the passage\'s LAST beat is, for each ALIVE AND ACTIVE foe, its visible next move in the fiction (circling to a companion\'s blind side, nocking another arrow, backing toward the door, lowering the blade), grounded in the health word beside it — a bloodied foe fights like it, a critical foe with no reason to die fighting is on the edge of flight or plea, and the passage says which. That telegraph IS the situation returned to the player.';
-const COST_RULE = 'Let the ending carry its cost: a wound the hero will feel tomorrow, named in the fiction; a companion\'s fall felt by those still standing; what was spent, remembered. Never add damage or alter the tally.';
-
-/**
- * @param {object} result - the committed exchange result
- * @param {{ cost?: string|null, resonance?: string|null }} [options] - `cost`
- *   is `describeFightCost`'s line; it rides only a TERMINAL prompt (victory /
- *   defeat / escaped). `resonance` is `describeFightResonance`'s cue; it
- *   rides only an ONGOING one.
- */
-export function combatNarrationPrompt(result, { cost = null, resonance = null } = {}) {
-    const terminalEnd = ['victory', 'defeat', 'escaped'].includes(result.terminal);
-    const ongoing = !result.terminal;
-    // The engine terminal stays `defeat` for a dead hero (END_COMBAT's XP and
-    // ledger rules are untouched); the PROMPT says DIED (WOW 2026-09-30).
-    const heroDead = result.postState?.player?.status === 'dead';
-    const ending = result.terminal === 'victory'
-        ? 'The fight is mechanically won. Narrate the victory and its immediate fictional consequences.'
-        : result.terminal === 'defeat'
-            ? (heroDead
-                ? `The player has DIED — the third failed death save. Narrate the death plainly and finally; the fight ends here. Do not add damage, a rescue, or a last-moment revival. SAY IT IN PLAIN WORDS — "${result.postState.player.name} is dead" or "dies" must appear in the prose; a fade to black, a last breath, or "the story ends" on its own is not the death. The count that killed them (three failed saving throws) may be named.`
-                : 'The player is mechanically defeated. Narrate the setback or collapse without adding more damage.')
-            : result.terminal === 'escaped'
-                ? 'The player has mechanically escaped combat. Narrate the retreat without adding pursuit attacks or XP.'
-            : result.terminal === 'dying'
-                ? 'The player remains unconscious and dying. Narrate this round from the party\'s side — who does what over the body, and what the count means. Do not end combat or invent another attack.'
-            : 'COMBAT IS STILL ACTIVE. End with the situation returned to the player for their next decision. Do not narrate victory or the end of the fight.';
-    const enemyStates = result.postState?.enemies?.length
-        ? result.postState.enemies.map(enemy => {
-            if (enemy.status === 'defeated') return `- DEFEATED: ${enemy.name} — 0/${enemy.maxHp} HP.`;
-            if (enemy.status === 'fled') return `- ALIVE, FLED: ${enemy.name} — ${enemy.hp}/${enemy.maxHp} HP.`;
-            if (enemy.status === 'surrendered') return `- ALIVE, SURRENDERED: ${enemy.name} — ${enemy.hp}/${enemy.maxHp} HP.`;
-            const conditions = enemy.conditions?.length ? `; conditions: ${enemy.conditions.join(', ')}` : '';
-            return `- ALIVE AND ACTIVE: ${enemy.name} — ${enemy.hp}/${enemy.maxHp} HP (${enemy.condition || 'wounded'}${conditions}).`;
-        })
-        : result.events
-            .filter(event => event.type === 'attack' && Number.isFinite(event.remainingHp))
-            .map(event => event.remainingHp <= 0
-                ? `- DEFEATED: ${event.target} — 0/${event.maxHp} HP.`
-                : `- ALIVE AND ACTIVE: ${event.target} — ${event.remainingHp}/${event.maxHp} HP.`);
-    const playerState = result.postState?.player ? describePlayerPostState(result.postState.player) : null;
-    const companionStates = (result.postState?.companions || []).map(companion => (companion.hp ?? 0) <= 0
-        ? `- COMPANION DOWN: ${companion.name} — 0/${companion.maxHp} HP (unconscious, not dead unless an event says so).`
-        : `- COMPANION ALIVE: ${companion.name} — ${companion.hp}/${companion.maxHp} HP.`);
-    const postState = [playerState, ...companionStates, ...enemyStates].filter(Boolean).join('\n');
-    return [
-        `[SYSTEM: Combat exchange ${result.exchangeId} has already been resolved completely by the engine.`,
-        'Narrate these exact results once in one cohesive, vivid but concise passage.',
-        'Do not roll, request rolls, change HP, add attacks, repeat actions, or emit JSON.',
-        'Never turn a miss into a hit or invent a counterattack.',
-        `The terminal state is mechanically authoritative: ${result.terminal || 'ongoing'}.`,
-        'The POST-EXCHANGE STATE is absolute. Never describe an ALIVE AND ACTIVE combatant as dead, defeated, lifeless, finished, going slack, or collapsing permanently. Fled and surrendered foes may be overcome, but remain alive. Do not quote HP numbers in the prose.',
-        'Do not introduce, remove, or imply a mechanical condition unless it appears in the POST-EXCHANGE STATE or resolved events.',
-        ending,
-        // WOW 2026-09-27 (combat-drama): the telegraph rides every ongoing
-        // beat; the cost line rides the terminal one — both dynamic, once
-        // per call, no new channel.
-        ...(ongoing ? [TELEGRAPH_RULE] : []),
-        ...(ongoing && typeof resonance === 'string' && resonance ? [resonance] : []),
-        ...(terminalEnd && cost ? [cost, COST_RULE] : []),
-        '',
-        'POST-EXCHANGE STATE (AUTHORITATIVE):',
-        postState || '- No combatant snapshot available; obey each event\'s remaining-HP statement exactly.',
-        '',
-        'RESOLVED EVENTS:',
-        exchangeSummary(result),
-        ']'
-    ].join('\n');
+    return sealExchange(ctx, { kind: 'opening', exchangeId, playerHp, playerDamage });
 }

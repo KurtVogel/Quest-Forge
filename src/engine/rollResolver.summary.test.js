@@ -59,8 +59,17 @@ describe('formatRollSummary — every result type renders a line the DM can act 
         expect(line({ outcome: 'junk' })).toBe('[ROLL RESULT: Death saving throw, rolled 10 — 1/3 successes, 1/3 failures]');
     });
 
-    it('a player attack that hit and resolved its damage inline reads like an NPC hit', () => {
-        expect(formatRollSummary([{ type: 'attack_roll', description: 'Longsword', dc: 13, rolled: 16, success: true, damage: 8, targetName: 'Goblin', targetHp: 0, targetMaxHp: 7 }]))
-            .toBe(`[ROLL RESULT: Longsword vs AC 13, rolled 16 — HIT for 8 damage. Goblin now 0/7 HP — Goblin is DOWNED. ${HP_APPLIED}]`);
+    it('a player attack is a to-hit and nothing more — no inline-damage line exists for it (2026-10-05)', () => {
+        expect(formatRollSummary([{ type: 'attack_roll', description: 'Longsword', dc: 13, rolled: 16, success: true }]))
+            .toBe('[ROLL RESULT: Longsword, vs AC 13, rolled 16 — HIT]');
+    });
+
+    it('a companion attack and an NPC attack share one line shape', () => {
+        expect(formatRollSummary([{ type: 'companion_attack', attacker: 'Brann', dc: 12, rolled: 9, success: false }]))
+            .toBe('[ROLL RESULT: Brann attack vs AC 12, rolled 9 — MISS]');
+        expect(formatRollSummary([{ type: 'companion_attack', dc: 12, rolled: 15, success: true }]))
+            .toBe('[ROLL RESULT: Companion attack vs AC 12, rolled 15 — HIT]');
+        expect(formatRollSummary([{ type: 'npc_attack', dc: 12, rolled: 15, success: true }]))
+            .toBe('[ROLL RESULT: Enemy attack vs AC 12, rolled 15 — HIT]');
     });
 });

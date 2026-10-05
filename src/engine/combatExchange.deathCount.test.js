@@ -7,7 +7,10 @@
  * `state/gameReducer.deathCount.test.js`.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { COMBAT_PHASES, combatNarrationPrompt, exchangeEventLines, normalizeCombatExchange, planCombatExchange, planOpeningExchange } from './combatExchange.js';
+import { COMBAT_PHASES } from './combatPredicates.js';
+import { normalizeCombatExchange } from './combatWire.js';
+import { exchangeEventLines, planCombatExchange, planOpeningExchange } from './combatExchange.js';
+import { combatNarrationPrompt } from '../llm/combatNarration.js';
 
 const { rollQueue } = vi.hoisted(() => ({ rollQueue: [] }));
 

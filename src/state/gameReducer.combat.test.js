@@ -34,7 +34,8 @@ vi.mock('../engine/dice.ts', () => {
 });
 
 const { gameReducer, initialGameState } = await import('./gameReducer.js');
-const combatEngine = await import('../engine/combatExchange.js');
+const { planCombatExchange } = await import('../engine/combatExchange.js');
+const { normalizeCombatExchange } = await import('../engine/combatWire.js');
 
 function makeState() {
     return {
@@ -286,7 +287,10 @@ describe('enemy-stat validation at every entry point', () => {
         expect(e.damage).toBeUndefined();
     });
 
-    it('UPDATE_ENEMY only changes HP and ignores injected mechanical stats', () => {
+    it('UPDATE_ENEMY is retired: nothing but a committed exchange moves an enemy (2026-10-05)', () => {
+        // Its one dispatcher was the roll resolver's enemy-HP flush — a lane no
+        // production state could reach (the resolver refuses active combat and
+        // combat.enemies is empty outside it). The reducer went with the lane.
         const state = {
             ...makeState(),
             combat: {
@@ -301,13 +305,7 @@ describe('enemy-stat validation at every entry point', () => {
             type: 'UPDATE_ENEMY',
             payload: { id: 'e1', hp: 4, attackBonus: 99, damage: '50d100', ac: 999, name: 'Hacked' },
         });
-        const e = next.combat.enemies[0];
-        expect(e.hp).toBe(4);
-        expect(e.condition).toBe('bloodied');
-        expect(e.attackBonus).toBe(4);
-        expect(e.damage).toBe('1d6+2');
-        expect(e.ac).toBe(13);
-        expect(e.name).toBe('Goblin');
+        expect(next.combat.enemies).toEqual(state.combat.enemies);
     });
 
     it('LOAD_GAME re-validates enemy stats from an untrusted save', () => {
@@ -352,20 +350,6 @@ describe('enemy-stat validation at every entry point', () => {
         expect(malformed.combat.enemies).toEqual([]);
     });
 
-    it('clamps UPDATE_ENEMY HP to an integer between zero and max HP', () => {
-        const base = {
-            ...makeState(),
-            combat: {
-                ...initialGameState.combat,
-                active: true,
-                enemies: [{ id: 'e1', name: 'Goblin', hp: 5, maxHp: 10, ac: 12, condition: 'bloodied' }],
-            },
-        };
-        const overhealed = gameReducer(base, { type: 'UPDATE_ENEMY', payload: { id: 'e1', hp: 999.8 } });
-        expect(overhealed.combat.enemies[0]).toMatchObject({ hp: 10, condition: 'healthy' });
-        const defeated = gameReducer(base, { type: 'UPDATE_ENEMY', payload: { id: 'e1', hp: -4 } });
-        expect(defeated.combat.enemies[0]).toMatchObject({ hp: 0, condition: 'dead' });
-    });
 });
 
 describe('atomic combat exchange lifecycle', () => {
@@ -760,8 +744,6 @@ describe('END_COMBAT client-side XP fallback', () => {
 });
 
 describe('death seam through the reducer: engine plan → APPLY_COMBAT_EXCHANGE agree (2026-09-02 audit P1/P2)', () => {
-    const { planCombatExchange, normalizeCombatExchange } = combatEngine;
-
     function dyingState({ level = 1, party, enemies } = {}) {
         return {
             ...makeState(),

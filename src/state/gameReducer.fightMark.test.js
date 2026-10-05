@@ -29,7 +29,7 @@ vi.mock('../engine/dice.ts', () => {
 });
 
 const { gameReducer, initialGameState } = await import('./gameReducer.js');
-const { describeFightCost } = await import('../engine/combatExchange.js');
+const { describeFightCost } = await import('../engine/fightTally.js');
 const { applyStoryMemoryDormancy, WOUND_DORMANCY_JOURNAL_CYCLES } = await import('../engine/storyMemory.js');
 
 const potion = (quantity) => ({ id: 'potion', name: 'Potion of Healing', type: 'consumable', consumableType: 'healing', healing: '2d4+2', quantity });

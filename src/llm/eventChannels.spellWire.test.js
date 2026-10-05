@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { normalizeEvents } from './eventChannels.js';
-import { normalizeCombatExchange } from '../engine/combatExchange.js';
+import { normalizeCombatExchange } from '../engine/combatWire.js';
 import { chooseSlotLevel, buildSpellSlots } from '../engine/spellcasting.js';
 import { findSpell } from '../data/spells.js';
 

@@ -1,6 +1,6 @@
 /**
- * Combat: start/end, the intent lock, atomic exchange commits, narration
- * acknowledgement, and enemy HP updates.
+ * Combat: start/end, the intent lock, atomic exchange commits, and narration
+ * acknowledgement.
  */
 import { computeACFromInventory, getModifier } from '../../engine/rules.js';
 import { rollDie, rollWithModifier } from '../../engine/dice.ts';
@@ -8,17 +8,17 @@ import { awardExperience, estimateCombatExperience } from '../../engine/progress
 import {
     canonicalEnemyId,
     clampEnemyAC,
-    clampEnemyCurrentHP,
     clampEnemyHP,
     enemyHealthCondition,
+    enemyOutcome,
     normalizeEnemyAttackProfile,
     normalizeEnemyConditions,
     validateEnemySaveBonus,
 } from '../../engine/enemyStats.js';
-import {
-    COMBAT_PHASES, buildFightMemories, buildFightWoundCard, describeFightCost, describeFightMark, exchangeEventLines, isEnemyActive,
-    mergeCharacterUpdates, reconcileStartingCombatExchange, recordExchangeCost, startFightTally,
-} from '../../engine/combatExchange.js';
+import { COMBAT_PHASES } from '../../engine/combatPredicates.js';
+import { reconcileStartingCombatExchange } from '../../engine/combatWire.js';
+import { exchangeEventLines, mergeCharacterUpdates } from '../../engine/combatExchange.js';
+import { describeFightCost, recordExchangeCost, rememberFight, startFightTally } from '../../engine/fightTally.js';
 import { appendRecentEncounter, buildEncounterEntry, distanceSince } from '../../engine/worldTempo.js';
 import { HEARSAY_WINDOW_MESSAGES } from '../../engine/regionalHearsay.js';
 import { describeFightCause } from '../../engine/heroDeath.js';
@@ -33,8 +33,8 @@ function normalizeCombatEnemy(enemy, index, usedIds) {
     const initiative = rollDie(20);
     // Engine-owned enemy turns need canonical attack stats. Accept them from the DM's
     // combat_start when given (validated through the shared sanitizer — defense-in-depth even
-    // though the parser already ran); otherwise the roll resolver fills flat defaults at roll
-    // time, so older saves whose enemies lack these fields still work.
+    // though the parser already ran); otherwise the exchange engine fills the flat
+    // ENEMY_DEFAULT_* at roll time, so older saves whose enemies lack these fields still work.
     const attackProfile = normalizeEnemyAttackProfile(enemy);
     const saveBonus = validateEnemySaveBonus(enemy?.saveBonus);
 
@@ -57,6 +57,133 @@ function normalizeCombatEnemy(enemy, index, usedIds) {
         isUndead: !!enemy?.isUndead,
         boss: enemy?.boss === true,
     };
+}
+
+const withMessages = (state, ...lines) => ({ ...state, messages: [...state.messages, ...lines] });
+
+// ─── END_COMBAT's steps ─────────────────────────────────────────────────────
+// `before` is the state as the fight ended (the envelope, the tally and the
+// enemies are still there); `next` is the state being built after the reset.
+
+/**
+ * The death, stated plainly (WOW 2026-09-30, death-and-stakes) — and the last
+ * chapter. The ☠ line is the FIGHT's ending (its cost tally: the terminal
+ * narration said DIED, the page says it too); the epitaph is the STORY's —
+ * two lines, two owners, on purpose. The terminal stays `defeat` (slain-XP
+ * rules untouched). The epitaph is posted whatever the payload says (a manual
+ * End Combat on a dead hero is still a death) with the killer read from the
+ * pre-reset tally; RECORD_HERO_DEATH is idempotent, so a death already
+ * written stands.
+ */
+function recordFightDeath(before, next, outcome) {
+    if (!before.character?.isDead) return next;
+    let state = next;
+    if (outcome === 'defeat') {
+        const cost = describeFightCost(before.combat.fightTally, before);
+        state = withMessages(state, systemMessage(`☠ **${before.character.name || 'The hero'} is dead.** The third failed death save ends the story here.${cost ? ` ${cost}` : ''}`));
+    }
+    return gameReducer(state, {
+        type: 'RECORD_HERO_DEATH',
+        payload: { cause: describeFightCause(before.combat.fightTally, before.combat.enemies) },
+    });
+}
+
+/**
+ * Ambush-on-arrival (2026-08-31 P2): a fight that started while a live
+ * hearsay offer's window was open burns that window through the rounds
+ * before any local can speak. If the hero is still at the offer's place,
+ * re-open the window now that talk is possible again. The overlap check
+ * (offer still live at combat START) keeps a long-expired offer from
+ * resurrecting after an unrelated later fight.
+ */
+function reopenHearsayWindow(before, next) {
+    const offer = before.session?.regionalHearsay;
+    const combatStartIdx = before.combat?.startedAtMessage;
+    if (!offer || !Number.isFinite(offer.arrivedAtMessage) || !Number.isFinite(combatStartIdx)) return next;
+    if (!isStillAtPlace(before.locations, offer.locationName, before.currentLocation)) return next;
+    if (distanceSince(before.messages, offer.arrivedAtMessage, combatStartIdx) > HEARSAY_WINDOW_MESSAGES) return next;
+    return {
+        ...next,
+        session: { ...next.session, regionalHearsay: { ...offer, arrivedAtMessage: (before.messages || []).length } },
+    };
+}
+
+/**
+ * Combat's end releases the caster's sustained spell (v1 concentration).
+ * Announced: the fade was silent, so the DM's next narration kept asserting
+ * the ward still held ("you are already protected") while the real AC had
+ * dropped — live playtest #7. The system line reaches the player AND the DM's
+ * message window.
+ */
+function releaseSustainedSpell(next) {
+    if (!next.character?.sustainedSpell) return next;
+    const endedName = next.character.sustainedSpell.name || 'The sustained spell';
+    const released = clearSustainedSpellState(next.character, next.party, next.inventory);
+    return withMessages(
+        { ...next, character: released.character, party: released.party },
+        systemMessage(`**${endedName}** fades as the fight ends.`),
+    );
+}
+
+/**
+ * A companion down at combat's end is stable — no bleed-out mechanic by
+ * design (death stays behind the deliberate remove_companions channel).
+ * One visible line so the player knows they're recoverable, not lost.
+ */
+function announceDownedCompanions(next) {
+    const downed = (next.party || []).filter(c => c.status === 'downed');
+    if (downed.length === 0) return next;
+    return withMessages(next, systemMessage(`${downed.map(c => `**${c.name}**`).join(' and ')} ${downed.length === 1 ? 'is' : 'are'} down but stable — a healing potion, healing magic, or a rest will bring them back.`));
+}
+
+/**
+ * The fight leaves a mark (WOW 2026-09-27) and is remembered (WOW
+ * 2026-09-28): ONE engine `wound` card with its visible line when the fight
+ * marked the party, and one graded bond moment per witness. The moments are
+ * minted BEFORE the terminal Scribe runs: its same-scene re-report of the beat
+ * folds into this row (appendBondMoments' scene collapse) and can only add a
+ * voice; the ✦ tell on the narration is the player's free notice, so no extra
+ * line for them here.
+ */
+function leaveFightMark(next, { woundCard, memories }) {
+    let state = next;
+    if (woundCard) {
+        state = gameReducer(state, { type: 'ADD_STORY_MEMORY_CARD', payload: woundCard });
+        state = withMessages(state, systemMessage(`**The fight leaves a mark** — ${woundCard.text}`));
+    }
+    for (const { name, moment } of memories) {
+        state = gameReducer(state, { type: 'UPDATE_NPC', payload: { name, kind: 'character', bondMoment: moment } });
+    }
+    return state;
+}
+
+/**
+ * Client-side XP — only when NO XP was earned for this fight at all: neither
+ * by the DM this turn (llmAwardedXp) nor at any point during it
+ * (combat.xpAwarded). Prevents the manual "End Combat" button double-awarding.
+ * A lost / abandoned fight still pays, but only for foes genuinely slain
+ * before the end — never for enemies who fled or accepted a surrender while
+ * the player ultimately went down or ran.
+ */
+function awardFightXp(before, next, { llmAwardedXp, slainXpOnly }) {
+    if (llmAwardedXp || before.combat.xpAwarded || !before.character) return next;
+    const overcome = (before.combat.enemies || []).filter(enemy => (slainXpOnly
+        ? enemyOutcome(enemy) === 'defeated'
+        : enemyOutcome(enemy) !== 'active'));
+    const xp = estimateCombatExperience(overcome, before.character.level);
+    if (xp <= 0) return next;
+    const names = overcome.map(e => e.name).join(', ');
+    const result = awardExperience(next.character, xp, {
+        reason: slainXpOnly
+            ? `foes slain before the fight ended: ${names || 'enemies'}`
+            : `battle complete: ${names || 'enemies'}`,
+        // A level crossed at a DEFEAT/escape terminal must not stand
+        // the downed hero back up mid-collapse (2026-09-07 audit P1):
+        // the sheet grows, the defeat stands, the DM narrates the
+        // setback it was told to.
+        keepDowned: slainXpOnly,
+    });
+    return withMessages({ ...next, character: result.character }, ...result.messages);
 }
 
 export const handlers = {
@@ -139,159 +266,30 @@ export const handlers = {
         // the fight ends" line — reachable through the (now retired) DM
         // `combat_end` wire. REJECT_COMBAT_EXCHANGE carries the same guard.
         if (!state.combat?.active) return state;
-        const llmAwardedXp = action.payload?.llmAwardedXp || false;
-        // Lost/abandoned fights still earn XP, but only for foes genuinely slain
-        // before the end — never for enemies who fled or accepted a surrender
-        // while the player ultimately went down or ran.
-        const slainXpOnly = !!action.payload?.slainXpOnly;
-        // The fight leaves a mark (WOW 2026-09-27, combat-drama slice B): ONE
-        // engine-minted salience-4 `wound` card when the fight marked the party
-        // (hero dropped / ≤ 25 % / crit taken / companion downed), from the
-        // tally the exchanges accumulated — read BEFORE the envelope resets.
         const outcome = action.payload?.defeat ? 'defeat' : action.payload?.escaped ? 'escaped' : 'victory';
-        // A dead hero carries no wound into later scenes (the last chapter,
-        // 2026-09-30, the WOW Lap-3 note): the epitaph is the mark.
-        const heroDied = !!state.character?.isDead;
-        const woundCard = heroDied ? null : buildFightWoundCard(state.combat.fightTally, state, outcome);
-        // The fight is remembered (WOW 2026-09-28): the companions who stood
-        // here remember what was striking (one graded bond moment each, who
-        // saved whom in plain words) and the place keeps its particular as the
-        // encounter entry's `mark` for regional hearsay — both from the same
-        // tally, both read BEFORE the envelope resets, zero calls.
-        const fightMemories = buildFightMemories(state.combat.fightTally, state, outcome);
-        const fightMark = describeFightMark(state.combat.fightTally, state, outcome);
-        let newState = {
+        // What the fight leaves behind — the wound card, the witnesses'
+        // memories, the place's mark — is read off the tally ONCE, before the
+        // envelope resets. Zero calls.
+        const remembered = rememberFight(state.combat.fightTally, state, outcome);
+        let next = {
             ...state,
             combat: { ...initialGameState.combat },
-            // Variety-fatigue ledger: what was fought, where, and how it ended.
+            // Variety-fatigue ledger: what was fought, where, and how it ended
+            // (the mark is what regional hearsay repeats).
             recentEncounters: appendRecentEncounter(
                 state.recentEncounters,
-                buildEncounterEntry(state, { ...(action.payload || {}), mark: fightMark }),
+                buildEncounterEntry(state, { ...(action.payload || {}), mark: remembered.mark }),
             ),
         };
-        // The death is stated plainly (WOW 2026-09-30, death-and-stakes): a
-        // hero whose clock ran out gets ONE engine line with the fight's cost
-        // tally — the terminal narration said DIED, the page says it too. The
-        // terminal stays `defeat` (slain-XP rules untouched); the line is the
-        // only thing death adds here. Read from the pre-reset envelope.
-        if (outcome === 'defeat' && heroDied) {
-            const cost = describeFightCost(state.combat.fightTally, state);
-            newState = {
-                ...newState,
-                messages: [
-                    ...newState.messages,
-                    systemMessage(`☠ **${state.character.name || 'The hero'} is dead.** The third failed death save ends the story here.${cost ? ` ${cost}` : ''}`),
-                ],
-            };
-        }
-        // The last chapter (WOW 2026-09-30): the ☠ line above is the FIGHT's
-        // ending (its cost); the epitaph is the STORY's — two lines, two
-        // owners, on purpose. Posted here, after the terminal narration, with
-        // the killer read from the pre-reset tally / envelope; whatever the
-        // payload says (a manual End Combat on a dead hero is still a death).
-        // RECORD_HERO_DEATH is idempotent, so a death already written stands.
-        if (heroDied) {
-            newState = gameReducer(newState, {
-                type: 'RECORD_HERO_DEATH',
-                payload: { cause: describeFightCause(state.combat.fightTally, state.combat.enemies) },
-            });
-        }
-        // Ambush-on-arrival (2026-08-31 P2): a fight that started while a live
-        // hearsay offer's window was open burns that window through the rounds
-        // before any local can speak. If the hero is still at the offer's place,
-        // re-open the window now that talk is possible again. The overlap check
-        // (offer still live at combat START) keeps a long-expired offer from
-        // resurrecting after an unrelated later fight.
-        {
-            const offer = state.session?.regionalHearsay;
-            const combatStartIdx = state.combat?.startedAtMessage;
-            if (offer && Number.isFinite(offer.arrivedAtMessage) && Number.isFinite(combatStartIdx)
-                && isStillAtPlace(state.locations, offer.locationName, state.currentLocation)
-                && distanceSince(state.messages, offer.arrivedAtMessage, combatStartIdx) <= HEARSAY_WINDOW_MESSAGES) {
-                newState.session = {
-                    ...newState.session,
-                    regionalHearsay: { ...offer, arrivedAtMessage: (state.messages || []).length },
-                };
-            }
-        }
-        // Combat's end releases the caster's sustained spell (v1 concentration).
-        // Announce it: the fade was silent, so the DM's next narration kept
-        // asserting the ward still held ("you are already protected") while the
-        // real AC had dropped — live playtest #7. The system line reaches the
-        // player AND the DM's message window.
-        if (newState.character?.sustainedSpell) {
-            const endedName = newState.character.sustainedSpell.name || 'The sustained spell';
-            const released = clearSustainedSpellState(newState.character, newState.party, newState.inventory);
-            newState = {
-                ...newState,
-                character: released.character,
-                party: released.party,
-                messages: [
-                    ...newState.messages,
-                    systemMessage(`**${endedName}** fades as the fight ends.`),
-                ],
-            };
-        }
-        // A companion down at combat's end is stable — no bleed-out mechanic by
-        // design (death stays behind the deliberate remove_companions channel).
-        // One visible line so the player knows they're recoverable, not lost.
-        const downedAtEnd = (newState.party || []).filter(c => c.status === 'downed');
-        if (downedAtEnd.length > 0) {
-            newState = {
-                ...newState,
-                messages: [
-                    ...newState.messages,
-                    systemMessage(`${downedAtEnd.map(c => `**${c.name}**`).join(' and ')} ${downedAtEnd.length === 1 ? 'is' : 'are'} down but stable — a healing potion, healing magic, or a rest will bring them back.`),
-                ],
-            };
-        }
-
-        if (woundCard) {
-            newState = gameReducer(newState, { type: 'ADD_STORY_MEMORY_CARD', payload: woundCard });
-            newState = {
-                ...newState,
-                messages: [...newState.messages, systemMessage(`**The fight leaves a mark** — ${woundCard.text}`)],
-            };
-        }
-        // Minted BEFORE the terminal Scribe runs: its same-scene re-report of
-        // the beat folds into this row (appendBondMoments' scene collapse) and
-        // can only add a voice; the ✦ tell on the narration is the player's
-        // free notice, so no extra line here.
-        for (const { name, moment } of fightMemories) {
-            newState = gameReducer(newState, { type: 'UPDATE_NPC', payload: { name, kind: 'character', bondMoment: moment } });
-        }
-
-        // Client-side XP fallback — only when NO XP was earned for this fight at all:
-        // neither by the DM this turn (llmAwardedXp) nor at any point during it
-        // (combat.xpAwarded). Prevents the manual "End Combat" button double-awarding.
-        if (!llmAwardedXp && !state.combat.xpAwarded && state.character) {
-            const defeatedEnemies = (state.combat.enemies || []).filter(e => slainXpOnly
-                ? ((e.hp ?? 0) <= 0 || e.condition === 'dead')
-                : !isEnemyActive(e));
-            const fallbackXp = estimateCombatExperience(defeatedEnemies, state.character.level);
-
-            if (fallbackXp > 0) {
-                const enemyNames = defeatedEnemies.map(e => e.name).join(', ');
-                const result = awardExperience(newState.character, fallbackXp, {
-                    reason: slainXpOnly
-                        ? `foes slain before the fight ended: ${enemyNames || 'enemies'}`
-                        : `battle complete: ${enemyNames || 'enemies'}`,
-                    // A level crossed at a DEFEAT/escape terminal must not stand
-                    // the downed hero back up mid-collapse (2026-09-07 audit P1):
-                    // the sheet grows, the defeat stands, the DM narrates the
-                    // setback it was told to.
-                    keepDowned: slainXpOnly,
-                });
-                newState = {
-                    ...newState,
-                    character: result.character,
-                    messages: [...newState.messages, ...result.messages],
-                };
-                return newState;
-            }
-        }
-
-        return newState;
+        next = recordFightDeath(state, next, outcome);
+        next = reopenHearsayWindow(state, next);
+        next = releaseSustainedSpell(next);
+        next = announceDownedCompanions(next);
+        next = leaveFightMark(next, remembered);
+        return awardFightXp(state, next, {
+            llmAwardedXp: !!action.payload?.llmAwardedXp,
+            slainXpOnly: !!action.payload?.slainXpOnly,
+        });
     },
 
     BEGIN_COMBAT_INTENT(state) {
@@ -325,7 +323,7 @@ export const handlers = {
         // Commit the party BETWEEN the death save and the enemy damage — the
         // exchange's own order (player phase → companions → foes) — so the
         // TAKE_DAMAGE below asks isLowLevelSolo against the post-exchange party,
-        // exactly as the engine's terminalState did. A hero and their only
+        // exactly as the engine's post-exchange snapshot did. A hero and their only
         // companion both dropping in one exchange is a defeat setback on BOTH
         // sides, never engine 'defeat' beside a reducer 'dying'.
         if (Array.isArray(payload.party)) {
@@ -390,7 +388,8 @@ export const handlers = {
                 queuedExchange: payload.result.kind === 'opening' ? next.combat.queuedExchange : null,
                 openingActorIds: payload.result.kind === 'opening' ? next.combat.openingActorIds : [],
                 resolvedExchangeIds: [...(next.combat.resolvedExchangeIds || []), payload.exchangeId].slice(-20),
-                // Opening payloads omit the field and keep the (empty) list untouched.
+                // Every plan carries the list (an opening's is empty — no flank
+                // stands before the first exchange); a payload without one keeps it.
                 flankedEnemyIds: Array.isArray(payload.flankedEnemyIds)
                     ? payload.flankedEnemyIds.slice(0, 30)
                     : (next.combat.flankedEnemyIds || []),
@@ -456,26 +455,6 @@ export const handlers = {
                 ...state.messages,
                 systemMessage(`**Combat action not resolved:** ${action.payload?.reason || 'The action envelope was invalid.'} No one acted; try again.`),
             ],
-        };
-    },
-
-    UPDATE_ENEMY(state, action) {
-        return {
-            ...state,
-            combat: {
-                ...state.combat,
-                enemies: state.combat.enemies.map(e => {
-                    if (e.id !== action.payload.id) return e;
-                    // Allowlist: UPDATE_ENEMY may only change HP. Mechanical stats
-                    // (attackBonus/damage/ac/maxHp/name) are NOT mutable here, so a DM
-                    // enemy_updates payload can't inject "+99" or "50d100". Condition is
-                    // always re-derived from HP, never trusted from the payload.
-                    const newHp = clampEnemyCurrentHP(action.payload.hp, e.maxHp, e.hp);
-                    const updated = { ...e, hp: newHp };
-                    updated.condition = enemyHealthCondition(updated.hp, updated.maxHp);
-                    return updated;
-                }),
-            },
         };
     },
 };

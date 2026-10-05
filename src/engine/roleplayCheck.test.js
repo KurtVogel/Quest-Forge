@@ -139,7 +139,8 @@ describe('recent-checks heat ledger', () => {
             [{ ...roll, dc: 10 }, { ...roll, skill: 'athletics', dc: 99 }],
             'I leap the gap while arguing.',
         );
-        expect(buildRecentCheckEntry(proposal, 12)).toEqual({ messageIndex: 12, dc: 30, skill: 'persuasion', proposalId: proposal.id });
+        // Heat reads when and how hard — the entry carries no `skill` (no reader, 2026-10-05).
+        expect(buildRecentCheckEntry(proposal, 12)).toEqual({ messageIndex: 12, dc: 30, proposalId: proposal.id });
         expect(buildRecentCheckEntry(null, 12)).toBeNull();
     });
 
@@ -180,8 +181,8 @@ describe('recent-checks heat ledger', () => {
             { messageIndex: -3, dc: 500, skill: 42 },
         ]);
         expect(cleaned).toEqual([
-            { messageIndex: 4, dc: 12, skill: 'insight', proposalId: null },
-            { messageIndex: 0, dc: 30, skill: '42', proposalId: null },
+            { messageIndex: 4, dc: 12, proposalId: null },
+            { messageIndex: 0, dc: 30, proposalId: null },
         ]);
         expect(sanitizeRecentChecks(null)).toEqual([]);
     });

@@ -15,8 +15,10 @@ import { buildHeroDeath, describeEpitaph } from '../../engine/heroDeath.js';
 import { sanitizeQuestRecords } from './quests.js';
 import { cleanTextField, JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX, MESSAGE_CONTENT_MAX, normalizeCampaignPremise } from '../../config/contentLimits.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
-import { canonicalEnemyId, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
-import { COMBAT_PHASES, normalizeCombatExchange, sanitizeFightTally } from '../../engine/combatExchange.js';
+import { canonicalEnemyId, enemyOutcome, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
+import { COMBAT_PHASES } from '../../engine/combatPredicates.js';
+import { normalizeCombatExchange } from '../../engine/combatWire.js';
+import { sanitizeFightTally } from '../../engine/fightTally.js';
 import { DEATH_SAVE_OUTCOMES, PLAYER_SNAPSHOT_STATUSES } from '../../engine/deathSaves.js';
 import { normalizeDeathSaves } from '../../engine/rules.js';
 import { archiveDescriptiveLabels, dedupeNpcRoster, healPromotedStoryMemoryTwins, migrateLegacyNpc } from '../../engine/npcRoster.js';
@@ -254,7 +256,7 @@ function sanitizeStoredExchangeResult(result) {
                         maxHp,
                         ...(condition && { condition }),
                         conditions: normalizeEnemyConditions(enemy.conditions),
-                        status: SNAPSHOT_STATUSES.has(enemy.status) ? enemy.status : (hp <= 0 ? 'defeated' : 'active'),
+                        status: SNAPSHOT_STATUSES.has(enemy.status) ? enemy.status : enemyOutcome({ hp, condition }),
                     };
                 })
                 : [],
@@ -274,7 +276,11 @@ function sanitizeStoredExchangeResult(result) {
         kind,
         round: Number.isInteger(result.round) ? Math.max(1, result.round) : 1,
         terminal,
-        summary: String(result.summary || '').slice(0, 12000),
+        // A pre-2026-08-03 result stored its lines as one `summary` string and
+        // `exchangeEventLines` still reads it; a live result carries events
+        // only, so the key is CARRIED when a save has it and never minted
+        // (every loaded result used to gain `summary: ''`).
+        ...(typeof result.summary === 'string' && result.summary && { summary: result.summary.slice(0, 12000) }),
         events: Array.isArray(result.events)
             ? result.events.map(sanitizeStoredExchangeEvent).filter(Boolean).slice(0, 100)
             : [],

@@ -1,7 +1,8 @@
 /**
  * Combat math kernel — the ONE implementation of the 5e attack/damage
  * mechanics shared by the exchange machine (combatExchange.js) and the
- * out-of-combat roll path (rollResolver.js).
+ * out-of-combat roll path (rollResolver.js). New class features go here ONCE
+ * (`getAttackCount` — Extra Attack — was a copy in each until 2026-10-05).
  *
  * Before 2026-07-30 these existed as parallel copies in both files and had
  * already drifted: condition effects applied attacker-and-target-side in
@@ -66,7 +67,7 @@ export function rollD20Kept(modifier, description, advantage = false, disadvanta
     };
 }
 
-export function shouldUseGreatWeaponFighting(character, inventory = []) {
+function shouldUseGreatWeaponFighting(character, inventory = []) {
     if (character?.class !== 'fighter' || character.fightingStyle !== 'greatWeaponFighting') return false;
     const weapon = getEquippedWeapon(inventory);
     return !!weapon && !weapon.ranged && weapon.twoHanded;
@@ -200,6 +201,15 @@ export function resolveAttackRoll({ attacker = null, attackBonus, description, m
         damageTotal = damageRoll.total;
     }
     return { attack, natural: attack.natural, critical, hit, damage: damageTotal, damageRoll };
+}
+
+/**
+ * Strikes one Attack action makes: 2 for a Fighter of level 5+ (Extra Attack),
+ * else 1. The exchange machine's strike limit and the out-of-combat resolver's
+ * second d20 both read it — the class feature lived as one copy in each.
+ */
+export function getAttackCount(character) {
+    return character?.class === 'fighter' && (character.level || 1) >= 5 ? 2 : 1;
 }
 
 /**

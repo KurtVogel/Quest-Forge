@@ -1,69 +1,63 @@
 /**
- * Roll Resolver — processes dice roll requests from the LLM.
- * Extracted from ChatPanel to keep the component focused on UI.
+ * Roll Resolver — resolves an accepted OUT-OF-COMBAT roll proposal and asks the
+ * DM to narrate the outcome.
  *
- * Handles player skill checks, NPC attacks, damage rolls, and
- * auto-triggers follow-up LLM calls so the DM narrates the outcome.
- *
- * Combat (Phase 2 — batched rounds): when an attack carries an inline `damage`
- * notation and a `target`, the client rolls the attack AND (on a hit) the damage,
- * then applies HP itself against working copies. So a whole round resolves in ONE
- * pass, a foe slain earlier in the round can't swing back, the DM never does HP
- * math, and the follow-up narrates the exchange once. Attacks without inline
- * `target`/`damage` fall back to the original two-step flow (DM applies HP).
+ * Active combat never reaches this file: `handleRequestedRolls` refuses a
+ * batch while `combat.active` (the exchange machine owns every fight), and
+ * `combat.enemies` is empty outside one (END_COMBAT resets the envelope). So
+ * no roll here has a tracked enemy on either side of it: a hero's or a
+ * companion's attack is a to-hit against the DM's stated DC and nothing more,
+ * an NPC's attack lands on the hero or a companion, and the only HP this file
+ * moves is theirs. The enemy half of the old Phase-2 "batched round" — live
+ * enemy AC, inline damage to a foe, the UPDATE_ENEMY flush — was unreachable
+ * by construction and kept green only by tests that built `combat.enemies`
+ * outside a fight; it was deleted 2026-10-05 (DECISIONS 2026-07-23: delete
+ * rather than document).
  */
 
 import { rollWithModifier } from './dice.ts';
-import { getSkillModifier, getModifier, getSavingThrowModifier, computeACFromInventory, getWeaponAttackBonus, getWeaponDamageNotation, getConditionRollEffects, combineRollModifiers, canonicalRollKey, SKILL_ABILITIES } from './rules.js';
-import { validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
-import { applyUncannyDodge, conditionAwareAttackModifiers, rollD20Kept, rollDamage, stampCriticalRoll } from './combatMath.js';
-import { isCompanionActive, isLowLevelSolo } from './combatExchange.js';
+import { computeACFromInventory, getConditionRollEffects, combineRollModifiers, resolvePlayerRollModifier } from './rules.js';
+import { ENEMY_DEFAULT_DAMAGE, validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
+import { applyUncannyDodge, conditionAwareAttackModifiers, getAttackCount, rollD20Kept, rollDamage, stampCriticalRoll } from './combatMath.js';
+import { isCompanionActive, isLowLevelSolo } from './combatPredicates.js';
 import { deathSaveLine, judgeDeathSave } from './deathSaves.js';
-
-const ABILITY_NAMES = ['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma'];
-
-// The Phase-2 batched-combat repair layer (repairCombatRollBatch /
-// canonicalizeCombatRollBatch) and the recursive follow-up chain with its
-// MAX_ROLL_DEPTH guard were removed 2026-07-23 (DECISIONS.md): active-combat
-// requested_rolls are rejected outright (the exchange machine owns combat), so
-// the repair plumbing was production-unreachable, and the sole caller stages
-// follow-up rolls as new proposals instead of recursing. See git history for
-// the legacy implementation.
+import { describePendingLoot } from './roleplayCheck.js';
 
 /**
  * Resolve a batch of requested rolls.
  *
- * When attacks carry combat fields (`target` + `damage`), damage and HP are applied
- * client-side against working copies of enemy/companion/player HP, so a kill within the
- * same batch is honored (React state updates are async and can't be re-read mid-loop).
+ * NPC attacks that carry an inline `damage` notation apply it client-side
+ * against working copies of companion / player HP, so a companion dropped
+ * earlier in the same batch is honored (React state updates are async and
+ * can't be re-read mid-loop).
  *
  * @param {Array} requestedRolls
- * @param {object} ctx - { character, inventory, combat, party, dispatch }
+ * @param {object} ctx - { character, inventory, party, dispatch }
  * @returns {{ results: Array, appliedHp: boolean }}
  */
-export function resolveRolls(requestedRolls, { character, inventory, combat, party, dispatch }) {
-    const enemies = combat?.enemies || [];
+export function resolveRolls(requestedRolls, { character, inventory, party, dispatch }) {
     const companions = party || [];
 
-    // Working HP copies — mutated as the round resolves, flushed to state at the end.
-    const enemyWork = new Map(enemies.map(e => [e.id, { ...e }]));
+    // Working HP copies — mutated as the batch resolves, flushed to state at the end.
     const companionWork = new Map(companions.map(c => [c.id, { ...c }]));
     const playerStartHp = character?.currentHP ?? 0;
     let playerHp = playerStartHp;
     let playerDamageTaken = 0; // raw damage, so hits on an already-downed (0 HP) player still register
     const playerMaxHp = character?.maxHP ?? playerStartHp;
 
-    const matchByIdOrName = (work, ref) => {
+    const findCompanion = (ref) => {
         if (ref == null) return null;
-        if (work.has(ref)) return work.get(ref);
+        if (companionWork.has(ref)) return companionWork.get(ref);
         const lower = String(ref).toLowerCase();
-        for (const v of work.values()) {
+        for (const v of companionWork.values()) {
             if (v.name?.toLowerCase() === lower) return v;
         }
         return null;
     };
-    const findEnemy = (ref) => matchByIdOrName(enemyWork, ref);
-    const findCompanion = (ref) => matchByIdOrName(companionWork, ref);
+    // An NPC attack's named target, when it is a companion (else the hero).
+    const targetCompanion = (roll) => (roll.type === 'npc_attack' && roll.target && roll.target !== 'player' && roll.target !== 'self'
+        ? findCompanion(roll.target)
+        : null);
 
     const results = [];
     let appliedHp = false;
@@ -73,70 +67,33 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
     const uncannyDodgeState = { used: false };
 
     for (const roll of requestedRolls) {
-        const isNpcRoll = roll.type === 'npc_attack' || roll.type === 'npc_save';
-        const isCompanionRoll = roll.type === 'companion_attack';
-
-        if (isCompanionRoll) {
+        if (roll.type === 'companion_attack') {
             const companion = findCompanion(roll.attackerId || roll.attacker);
             if (!companion) {
                 results.push({ type: 'note', text: `${roll.attacker || 'A companion'} is not in the active party and does not act.` });
                 continue;
             }
-            if ((companion.hp ?? 0) <= 0 || companion.status === 'downed' || companion.status === 'dead') {
+            if (!isCompanionActive(companion)) {
                 results.push({ type: 'note', text: `${companion.name} is down and cannot act.` });
                 continue;
             }
-
-            const enemy = findEnemy(roll.target);
-            if (enemy && enemy.hp <= 0) {
-                results.push({ type: 'note', text: `${companion.name}'s target, ${enemy.name}, has already fallen.` });
-                continue;
-            }
-
             // Engine-owned companion stats win over DM-supplied numbers — the DM
             // has no dice/stat authority here any more than in the exchange machine.
             // A DM modifier is only a fallback for a stat-less companion, and even
             // then it passes the enemy-stat band check (a +40 is a hallucination).
-            const attackRoll = {
+            // To-hit only: there is no tracked foe outside a fight to take damage.
+            const result = resolveNpcRoll({
                 ...roll,
                 attacker: companion.name,
                 modifier: companion.attackBonus ?? validateEnemyAttackBonus(roll.modifier) ?? 0,
-                damage: companion.damage || sanitizeEnemyDamage(roll.damage),
-            };
-            // Target-side condition parity with the exchange machine: a prone or
-            // restrained foe grants the companion's attack advantage out of combat too.
-            const result = resolveNpcRoll(attackRoll, character, dispatch, inventory, enemy?.ac ?? roll.dc, enemy?.conditions);
-            if (!result) continue;
-            results.push(result);
-
-            if (result.success && attackRoll.damage && enemy) {
-                const dmg = rollAndShowDamage(attackRoll.damage, `${companion.name} damage`, dispatch, { crit: result.critical });
-                enemy.hp = Math.max(0, (enemy.hp ?? 0) - dmg.total);
-                Object.assign(result, { damage: dmg.total, targetName: enemy.name, targetHp: enemy.hp, targetMaxHp: enemy.maxHp });
-                appliedHp = true;
-            }
-        } else if (isNpcRoll) {
-            // A foe slain earlier in this same round does not get to act.
-            const attacker = findEnemy(roll.attackerId || roll.attacker);
-            if (attacker && attacker.hp <= 0) {
-                results.push({ type: 'note', text: `${attacker.name} has fallen and does not act.` });
-                continue;
-            }
-
+            }, character, dispatch, inventory, roll.dc ?? 10);
+            if (result) results.push(result);
+        } else if (roll.type === 'npc_attack' || roll.type === 'npc_save') {
             // Resolve the to-hit vs the correct target's AC (companion AC if targeting
             // one) — and the companion's conditions, same target-side treatment every
             // other attack path already gets (2026-08-27 audit).
-            let targetAC;
-            let targetConditions;
-            if (roll.type === 'npc_attack' && roll.target && roll.target !== 'player' && roll.target !== 'self') {
-                const comp = findCompanion(roll.target);
-                if (comp) {
-                    targetAC = comp.ac;
-                    targetConditions = comp.conditions;
-                }
-            }
-
-            const result = resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetConditions);
+            const comp = targetCompanion(roll);
+            const result = resolveNpcRoll(roll, character, dispatch, inventory, comp?.ac, comp?.conditions);
             if (!result) continue;
             results.push(result);
 
@@ -144,11 +101,8 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
             // DM damage notation passes the enemy-stat band check: a well-formed but
             // absurd "9d12+15" is rejected to the conservative default, same as combat.
             if (result.success && roll.type === 'npc_attack' && roll.damage) {
-                const safeDamage = sanitizeEnemyDamage(roll.damage) || '1d6';
+                const safeDamage = sanitizeEnemyDamage(roll.damage) || ENEMY_DEFAULT_DAMAGE;
                 const dmg = rollAndShowDamage(safeDamage, `${roll.attacker || 'Enemy'} damage`, dispatch, { crit: result.critical });
-                const comp = (roll.target && roll.target !== 'player' && roll.target !== 'self')
-                    ? findCompanion(roll.target)
-                    : null;
                 if (comp) {
                     comp.hp = Math.max(0, (comp.hp ?? 0) - dmg.total);
                     Object.assign(result, { damage: dmg.total, targetName: comp.name, targetHp: comp.hp, targetMaxHp: comp.maxHp });
@@ -179,60 +133,7 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
             const result = resolveDeathSave(character, dispatch, companions);
             if (result) results.push(result);
         } else if (roll.skill && character) {
-            const isAttack = roll.type === 'attack_roll' || String(roll.skill).toLowerCase() === 'attack';
-            // Player to-hit is engine-owned: an attack on a tracked enemy resolves against
-            // that enemy's LIVE AC, never a DM-supplied dc — mirroring how enemy attacks always
-            // use the player's live AC. Falls back to roll.dc only with no tracked target.
-            const targetEnemyForAc = isAttack && roll.target ? findEnemy(roll.target) : null;
-            let effectiveRoll = (targetEnemyForAc && Number.isFinite(targetEnemyForAc.ac))
-                ? { ...roll, dc: targetEnemyForAc.ac }
-                : roll;
-            // Target-side condition parity: attacking a prone/restrained tracked foe
-            // grants advantage out of combat too (attacker-side conditions are
-            // combined inside resolvePlayerRoll, so only the target side adds here).
-            if (targetEnemyForAc?.conditions?.length) {
-                const targetEff = getConditionRollEffects(targetEnemyForAc.conditions, 'incomingAttack');
-                if (targetEff.advantage || targetEff.disadvantage) {
-                    effectiveRoll = {
-                        ...effectiveRoll,
-                        advantage: !!effectiveRoll.advantage || targetEff.advantage,
-                        disadvantage: !!effectiveRoll.disadvantage || targetEff.disadvantage,
-                    };
-                }
-            }
-            const resolved = resolvePlayerRoll(effectiveRoll, character, dispatch, inventory);
-            const list = Array.isArray(resolved) ? resolved : (resolved ? [resolved] : []);
-            // The DM-supplied fallback passes the same band check the NPC lane
-            // uses (2026-09-10 audit P2 parity): a weaponless hero used to roll
-            // a literal "100d1000+3" from the wire; junk degrades to 1d4.
-            const damageNotation = isAttack
-                ? getWeaponDamageNotation(character, inventory, sanitizeEnemyDamage(roll.damage) || '1d4')
-                : roll.damage;
-
-            for (const one of list) {
-                results.push(one);
-                // Inline damage for a player attack that hit and names an enemy target.
-                if (one.success && isAttack && damageNotation && roll.target) {
-                    const enemy = findEnemy(roll.target);
-                    if (enemy) {
-                        // Working copies, not the pre-batch party: a companion downed
-                        // earlier in this same batch no longer grants Sneak Attack's
-                        // ally condition (2026-09-02 audit).
-                        const hasAlly = [...companionWork.values()].some(isCompanionActive);
-                        const dmg = rollAndShowDamage(damageNotation, `Damage to ${enemy.name}`, dispatch, {
-                            crit: one.critical,
-                            character,
-                            inventory,
-                            advantage: one.advantage,
-                            disadvantage: one.disadvantage,
-                            hasAlly
-                        });
-                        enemy.hp = Math.max(0, (enemy.hp ?? 0) - dmg.total);
-                        Object.assign(one, { damage: dmg.total, targetName: enemy.name, targetHp: enemy.hp, targetMaxHp: enemy.maxHp });
-                        appliedHp = true;
-                    }
-                }
-            }
+            results.push(...resolvePlayerRoll(roll, character, dispatch, inventory));
         } else if (character) {
             // Belt behind the parser's skill inference (2026-09-10 audit P2): a
             // roll that reaches here without a skill used to vanish silently —
@@ -247,12 +148,6 @@ export function resolveRolls(requestedRolls, { character, inventory, combat, par
 
     // Flush all HP changes to game state in one batch (only if the client applied any).
     if (appliedHp) {
-        for (const e of enemies) {
-            const w = enemyWork.get(e.id);
-            if (w && w.hp !== e.hp) {
-                dispatch({ type: 'UPDATE_ENEMY', payload: { id: e.id, hp: w.hp } });
-            }
-        }
         for (const c of companions) {
             const w = companionWork.get(c.id);
             if (w && w.hp !== c.hp) {
@@ -283,17 +178,9 @@ export function formatRollSummary(rollResults) {
         if (r.type === 'npc_save') {
             return `[ROLL RESULT: ${r.description || (r.attacker || 'NPC') + ' save'} vs DC ${r.dc}, rolled ${r.rolled} — ${r.success ? 'SUCCESS' : 'FAILURE'}]`;
         }
-        if (r.type === 'companion_attack') {
-            const head = `${r.description || (r.attacker || 'Companion') + ' attack'} vs AC ${r.dc}, rolled ${r.rolled}`;
-            if (!r.success) return `[ROLL RESULT: ${head} — MISS]`;
-            if (r.damage != null) {
-                const downed = r.targetHp <= 0 ? ` — ${r.targetName} is DOWNED` : '';
-                return `[ROLL RESULT: ${head} — HIT for ${r.damage} damage. ${r.targetName} now ${r.targetHp}/${r.targetMaxHp} HP${downed}. ${hpApplied}]`;
-            }
-            return `[ROLL RESULT: ${head} — HIT]`;
-        }
-        if (r.type === 'npc_attack') {
-            const head = `${r.description || (r.attacker || 'Enemy') + ' attack'} vs AC ${r.dc}, rolled ${r.rolled}`;
+        if (r.type === 'companion_attack' || r.type === 'npc_attack') {
+            const fallbackName = r.type === 'companion_attack' ? 'Companion' : 'Enemy';
+            const head = `${r.description || (r.attacker || fallbackName) + ' attack'} vs AC ${r.dc}, rolled ${r.rolled}`;
             if (!r.success) return `[ROLL RESULT: ${head} — MISS]`;
             if (r.damage != null) {
                 const downed = r.targetHp <= 0 ? (r.targetIsPlayer ? ' — the player is DOWNED (0 HP)' : ` — ${r.targetName} is DOWNED`) : '';
@@ -316,11 +203,6 @@ export function formatRollSummary(rollResults) {
         }
         // (No `initiative` branch: the lane was retired 2026-08-27 — resolvePlayerRoll
         // skips it with a note before any result exists.)
-        // Player attack_roll with inline damage already resolved.
-        if (r.type === 'attack_roll' && r.success && r.damage != null) {
-            const downed = r.targetHp <= 0 ? ` — ${r.targetName} is DOWNED` : '';
-            return `[ROLL RESULT: ${r.description || 'Attack'} vs AC ${r.dc}, rolled ${r.rolled} — HIT for ${r.damage} damage. ${r.targetName} now ${r.targetHp}/${r.targetMaxHp} HP${downed}. ${hpApplied}]`;
-        }
         // skill_check / saving_throw / plain attack_roll
         const isAttack = r.type === 'attack_roll';
         let verb = r.success ? (isAttack ? 'HIT' : 'SUCCESS') : (isAttack ? 'MISS' : 'FAILURE');
@@ -387,19 +269,34 @@ function formatRollPromise(r) {
  * the DM narrates a grant without emitting the events.
  */
 function formatPendingLootNote(pendingLoot) {
-    if (!pendingLoot) return '';
-    const parts = [
-        pendingLoot.goldFound > 0 ? `${pendingLoot.goldFound} gold` : null,
-        pendingLoot.silverFound > 0 ? `${pendingLoot.silverFound} silver` : null,
-        pendingLoot.copperFound > 0 ? `${pendingLoot.copperFound} copper` : null,
-        ...(pendingLoot.itemsFound || []).map(item => {
-            if (typeof item === 'string') return item;
-            if (!item?.name) return null;
-            return item.quantity > 1 ? `${item.quantity}x ${item.name}` : item.name;
-        }),
-    ].filter(Boolean);
-    if (parts.length === 0) return '';
-    return ` (7) Your withheld setup declared potential loot (${parts.join(', ')}) which was NOT applied. If this outcome genuinely awards any of it, narrate the acquisition and emit the matching items_found/X_found events in THIS response. If the dice deny it, neither narrate nor emit those gains.`;
+    const listed = describePendingLoot(pendingLoot);
+    if (!listed) return '';
+    return ` (7) Your withheld setup declared potential loot (${listed}) which was NOT applied. If this outcome genuinely awards any of it, narrate the acquisition and emit the matching items_found/X_found events in THIS response. If the dice deny it, neither narrate nor emit those gains.`;
+}
+
+/**
+ * The post-roll outcome prompt (the sibling of `buildRoleplayChallengePrompt`):
+ * the rules, the dice, and what the DM's own window no longer holds — the
+ * withheld setup narration and any loot it declared.
+ */
+function buildRollOutcomePrompt({ summary, preNarrated = false, setupNarrative = '', appliedHp = false, pendingLoot = null }) {
+    const correctionNote = preNarrated
+        ? `\n\n[IMPORTANT: Your previous response pre-narrated an outcome before seeing these dice results. The roll result above is the authoritative truth. Narrate the TRUE outcome based solely on these dice — completely discard any outcome you wrote before seeing the roll.]`
+        : '';
+
+    // The withheld setup was stripped from both the player's view and your own
+    // history window, so any fresh fiction it introduced exists nowhere else —
+    // hand it back so the outcome narration can re-establish it.
+    const setupText = typeof setupNarrative === 'string' ? setupNarrative.trim().slice(0, 4000) : '';
+    const setupNote = setupText
+        ? `\n\n[CONTEXT — your own setup narration for this beat, which the player NEVER saw (it was withheld pending these dice): """${setupText}""" Re-establish the scene elements and any new fiction it introduced (arrivals, terrain, discoveries, dialogue) in your outcome narration so nothing is lost — but the ROLL RESULT lines are the sole authority on success or failure.]`
+        : '';
+
+    const hpNote = appliedHp
+        ? ` Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken for them.`
+        : '';
+
+    return `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) Never narrate a result that is not supported by the rolls below. (5) If the result starts combat, declare combat_start; active combat actions use combat_exchange rather than requested_rolls. (6) Do NOT re-emit coin, loot, XP, purchase, or rest events that were already applied on this or earlier turns — recapping money or rewards already handled is narration only, never an event.${formatPendingLootNote(pendingLoot)}]${correctionNote}${setupNote}\n\n${summary}`;
 }
 
 /**
@@ -417,7 +314,8 @@ function formatPendingLootNote(pendingLoot) {
  * @param {function} [options.onFollowUpRejected] - called when the roll arbiter
  *   rejected every check the outcome chained (`{ attackAsCheck }`); the caller owns
  *   the correction response, exactly like the first hop's routing.
- * @returns {Promise<{resolved: boolean, requiresCombatExchange?: boolean, nothingToRoll?: boolean}>}
+ * @returns {Promise<void>} — nothing: the one caller awaits it, and "did dice
+ *   land" is read off the roll ledger, never off a return value.
  */
 export async function handleRequestedRolls(requestedRolls, {
     getState,
@@ -436,7 +334,7 @@ export async function handleRequestedRolls(requestedRolls, {
     const inventory = state.inventory || [];
     if (state.combat?.active) {
         console.warn('[RollResolver] Rejected legacy requested_rolls during active combat; combat_exchange is required.');
-        return { resolved: false, requiresCombatExchange: true };
+        return;
     }
 
     const rolls = Array.isArray(requestedRolls) ? requestedRolls : [];
@@ -445,7 +343,6 @@ export async function handleRequestedRolls(requestedRolls, {
     const { results: rollResults, appliedHp } = resolveRolls(rolls, {
         character,
         inventory,
-        combat: state.combat,
         party: state.party,
         dispatch,
     });
@@ -466,7 +363,7 @@ export async function handleRequestedRolls(requestedRolls, {
                 content: 'None of the proposed rolls could be resolved — no dice were rolled and the check is set aside. Describe what you do next.',
             },
         });
-        return { resolved: false, nothingToRoll: true };
+        return;
     }
 
     // Auto follow-up: send roll results back to DM and get outcome narration.
@@ -480,23 +377,6 @@ export async function handleRequestedRolls(requestedRolls, {
     console.log('[RollResolver] 🔄 Auto-triggering follow-up LLM call with roll results');
 
     try {
-        const correctionNote = preNarrated
-            ? `\n\n[IMPORTANT: Your previous response pre-narrated an outcome before seeing these dice results. The roll result above is the authoritative truth. Narrate the TRUE outcome based solely on these dice — completely discard any outcome you wrote before seeing the roll.]`
-            : '';
-
-        // The withheld setup was stripped from both the player's view and your own
-        // history window, so any fresh fiction it introduced exists nowhere else —
-        // hand it back so the outcome narration can re-establish it.
-        const setupText = String(setupNarrative || '').trim().slice(0, 4000);
-        const setupNote = setupText
-            ? `\n\n[CONTEXT — your own setup narration for this beat, which the player NEVER saw (it was withheld pending these dice): """${setupText}""" Re-establish the scene elements and any new fiction it introduced (arrivals, terrain, discoveries, dialogue) in your outcome narration so nothing is lost — but the ROLL RESULT lines are the sole authority on success or failure.]`
-            : '';
-
-        const hpNote = appliedHp
-            ? ` Damage and HP for these attacks have ALREADY been applied by the system — narrate the wounds, but do NOT output damage_taken for them.`
-            : '';
-
-        const lootNote = formatPendingLootNote(pendingLoot);
         let followUpNarrative = '';
         // The player's action rides as the runner's second argument (2026-09-02
         // P1): the outcome narration is the consequence beat, and that argument
@@ -505,7 +385,7 @@ export async function handleRequestedRolls(requestedRolls, {
         // pass `undefined` and was the one narrative call built with none of
         // them. playerActionContext stays for the transaction replay guard.
         const followUpEvents = await sendToLLM(
-            `[SYSTEM: Dice rolled — results below. Narrate the outcome in ONE cohesive, vivid pass that reads naturally on its own. Weave in just enough of the action for context, but do NOT retell at length or repeat beats you have already narrated. RULES: (1) Respect the dice exactly — a roll below the DC is a failure. (2) Do NOT re-request these same rolls. (3) If a result already shows "HIT for N damage", the damage is done — do NOT request a damage roll for it.${hpNote} (4) Never narrate a result that is not supported by the rolls below. (5) If the result starts combat, declare combat_start; active combat actions use combat_exchange rather than requested_rolls. (6) Do NOT re-emit coin, loot, XP, purchase, or rest events that were already applied on this or earlier turns — recapping money or rewards already handled is narration only, never an event.${lootNote}]${correctionNote}${setupNote}\n\n${summary}`,
+            buildRollOutcomePrompt({ summary, preNarrated, setupNarrative, appliedHp, pendingLoot }),
             playerAction || undefined,
             {
                 suppressHpEvents: appliedHp,
@@ -550,7 +430,7 @@ export async function handleRequestedRolls(requestedRolls, {
         // message resumes the scene — an error banner here was pure noise.
         if (e?.name === 'AbortError') {
             console.log('[RollResolver] Follow-up narration stopped by the player; the roll stands.');
-            return { resolved: rollResults.length > 0 };
+            return;
         }
         // The dice landed but the outcome narration didn't. Say so visibly — the
         // exception never escapes to ChatPanel's own error surfacing, so without
@@ -564,8 +444,6 @@ export async function handleRequestedRolls(requestedRolls, {
             },
         });
     }
-
-    return { resolved: rollResults.length > 0 };
 }
 
 // --- Internal Resolution Functions ---
@@ -594,52 +472,45 @@ function applyPlayerAttackCritical(character, result) {
     return stampCriticalRoll(character, result, result.rolls?.[0]);
 }
 
-/** Kernel-backed damage roll that preserves this file's display contract (fightingStyleDetail string, throw-on-invalid). */
-function rollDamageWithStyle(notation, label, { crit = false, character = null, inventory = [], includeSneakAttack = false, advantage = false, disadvantage = false, hasAlly = false } = {}) {
-    const out = rollDamage(notation, label, {
-        critical: crit, character, inventory, advantage, disadvantage, hasAlly,
-        onInvalid: 'throw', includeSneakAttack,
-    });
-    if (out.rerolls.length > 0) {
-        out.roll.fightingStyleDetail = `; Great Weapon Fighting rerolls: ${out.rerolls.map(r => r.replace('→', '->')).join(', ')}`;
-    }
-    return out;
+/** One chat line for a damage roll, whichever lane rolled it. */
+function damageLine({ label, notation, result, crit = false, rerolls = [] }) {
+    const mod = result.modifier ? `, mod: ${result.modifier >= 0 ? '+' : ''}${result.modifier}` : '';
+    const style = rerolls.length > 0
+        ? `; Great Weapon Fighting rerolls: ${rerolls.map(r => r.replace('→', '->')).join(', ')}`
+        : '';
+    return `**${label}**${crit ? ' *(crit — dice doubled)*' : ''} (${notation}): **${result.total}** damage (dice: ${result.rolls.join(', ')}${mod}${style})`;
 }
 
 /**
- * Roll a damage notation and surface it (ADD_ROLL + chat line). Doubles the dice on a
- * crit; a player `character` also brings Fighting Style and Sneak Attack effects.
+ * An NPC's inline damage on a hit: rolled, surfaced (ADD_ROLL + chat line),
+ * doubled on a crit. The notation is already band-checked by the caller; a
+ * string the dice parser still refuses rolls the kernel's 1d4.
  * @returns {{ total: number }}
  */
-function rollAndShowDamage(notation, label, dispatch, { crit = false, character = null, inventory = [], advantage = false, disadvantage = false, hasAlly = false } = {}) {
-    let result;
-    let saDetail = null;
-    try {
-        const out = rollDamageWithStyle(notation, label, { crit, character, inventory, includeSneakAttack: true, advantage, disadvantage, hasAlly });
-        result = out.roll;
-        saDetail = out.sneakAttackDetail;
-    } catch (e) {
-        console.error('[RollResolver] Bad damage notation:', notation, e);
-        result = rollWithModifier(1, 4, 0, label); // safe fallback
-    }
+function rollAndShowDamage(notation, label, dispatch, { crit = false } = {}) {
+    const out = rollDamage(notation, label, { critical: crit });
+    dispatch({ type: 'ADD_ROLL', payload: out.roll });
+    dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: damageLine({ label, notation: out.notation, result: out.roll, crit }) } });
+    return { total: out.total };
+}
 
-    const baseMod = result.modifier;
-    const sneakAttackDetail = saDetail
-        ? `, +**${saDetail.total}** Sneak Attack (${saDetail.diceCount}d6: ${saDetail.rolls.join(', ')})`
+/**
+ * One formatter for every d20 outcome line this file posts — the hero's check /
+ * save / attack and an NPC's or companion's attack / save. The player lanes
+ * were folded here on 2026-08-27 (two drifted copies, the Champion-19 label in
+ * both); the NPC lane kept hand-building the same shape until 2026-10-05.
+ * `versus` is the NPC lane's "vs DC 12" spelling; `note` its target-condition tag.
+ */
+function d20OutcomeLine({ label, result, dc, isAttack, critical, success, advantage, disadvantage, versus = false, note = '' }) {
+    const advLabel = advantage ? ' *(advantage)*' : disadvantage ? ' *(disadvantage)*' : '';
+    const hitMiss = isAttack
+        ? (success ? '**Hit!**' : '**Miss!**')
+        : (success ? '**Success!**' : '**Failure!**');
+    const critLabel = critical
+        ? (isAttack && result.rolls?.[0] === 19 ? ' Champion critical on natural 19!' : ' Natural 20!')
         : '';
-
-    dispatch({ type: 'ADD_ROLL', payload: result });
-
-    const critLabel = crit ? ' *(crit — dice doubled)*' : '';
-    dispatch({
-        type: 'ADD_MESSAGE',
-        payload: {
-            role: 'system',
-            content: `**${label}**${critLabel} (${notation}): **${result.total}** damage (dice: ${result.rolls.join(', ')}${baseMod ? `, mod: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${result.fightingStyleDetail || ''}${sneakAttackDetail})`,
-        },
-    });
-
-    return { total: result.total };
+    const dcLabel = isAttack ? `vs AC ${dc}` : `${versus ? 'vs ' : ''}DC ${dc}`;
+    return `**${label}**${advLabel}${note} (${dcLabel}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${critLabel}${result.isCritFail ? ' Natural 1!' : ''}`;
 }
 
 function resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetConditions = null) {
@@ -650,9 +521,9 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetCo
 
     // Attacks against the player (targetAC == null means the player is the target)
     // respect the player's conditions: prone/restrained/blinded etc. grant the
-    // attacker advantage; an invisible player imposes disadvantage. Attacks against
-    // a tracked enemy (companion attacks) get the same target-side treatment via
-    // the shared kernel — parity with the exchange machine (2026-07-30).
+    // attacker advantage; an invisible player imposes disadvantage. An attack on
+    // a companion gets the same target-side treatment via the shared kernel —
+    // parity with the exchange machine (2026-07-30).
     let effAdvantage = roll.advantage;
     let effDisadvantage = roll.disadvantage;
     let condNote = '';
@@ -662,7 +533,7 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetCo
         effAdvantage = eff.advantage;
         effDisadvantage = eff.disadvantage;
         condNote = eff.note ? ` (target${eff.note})` : '';
-    } else if ((roll.type === 'npc_attack' || roll.type === 'companion_attack') && Array.isArray(targetConditions) && targetConditions.length > 0) {
+    } else if (roll.type === 'npc_attack' && Array.isArray(targetConditions) && targetConditions.length > 0) {
         const eff = conditionAwareAttackModifiers([], targetConditions, roll.advantage, roll.disadvantage);
         effAdvantage = eff.advantage;
         effDisadvantage = eff.disadvantage;
@@ -690,15 +561,15 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetCo
     const success = result.total >= dc;
     const isSave = roll.type === 'npc_save';
     const label = roll.attacker ? `${roll.attacker}${isSave ? ' save' : "'s attack"}` : (isSave ? 'NPC save' : 'NPC attack');
-    const advLabel = (effAdvantage ? ' *(advantage)*' : effDisadvantage ? ' *(disadvantage)*' : '') + condNote;
-    const outcome = isSave
-        ? (success ? '**Success!**' : '**Failure!**')
-        : (success ? '**Hit!**' : '**Miss!**');
-    const rollMsg = `**${roll.description || label}**${advLabel} (vs ${isSave ? 'DC' : 'AC'} ${dc}): Rolled **${result.total}**${result.advantageDetail} — ${outcome}${result.isCritical ? ' Natural 20!' : ''}${result.isCritFail ? ' Natural 1!' : ''}`;
-
     dispatch({
         type: 'ADD_MESSAGE',
-        payload: { role: 'system', content: rollMsg },
+        payload: {
+            role: 'system',
+            content: d20OutcomeLine({
+                label: roll.description || label, result, dc, isAttack: !isSave, critical: result.isCritical, success,
+                advantage: effAdvantage, disadvantage: effDisadvantage, versus: true, note: condNote,
+            }),
+        },
     });
 
     return {
@@ -714,24 +585,24 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetCo
 
 function resolveDamageRoll(roll, character, dispatch, inventory = []) {
     try {
-        // Generic damage rolls never include Sneak Attack — that is an attack rider.
-        const { roll: result } = rollDamageWithStyle(roll.notation || '1d4', roll.description || 'Damage Roll', { character, inventory });
-        const baseMod = result.modifier;
-
-        dispatch({ type: 'ADD_ROLL', payload: result });
-
-        const rollMsg = `**${result.description}** (${roll.notation}): Rolled **${result.total}** (dice: ${result.rolls.join(', ')}${baseMod ? `, modifier: ${baseMod >= 0 ? '+' : ''}${baseMod}` : ''}${result.fightingStyleDetail || ''})`;
-
+        // Generic damage rolls never include Sneak Attack — that is an attack
+        // rider. A Great Weapon fighter's rerolls still apply (the hero's dice).
+        // `onInvalid: 'throw'`: this lane's error path IS the contract — an
+        // unparseable notation drops the roll instead of inventing a 1d4.
+        const out = rollDamage(roll.notation || '1d4', roll.description || 'Damage Roll', {
+            character, inventory, onInvalid: 'throw', includeSneakAttack: false,
+        });
+        dispatch({ type: 'ADD_ROLL', payload: out.roll });
         dispatch({
             type: 'ADD_MESSAGE',
-            payload: { role: 'system', content: rollMsg },
+            payload: { role: 'system', content: damageLine({ label: out.roll.description, notation: roll.notation, result: out.roll, rerolls: out.rerolls }) },
         });
 
         return {
             type: 'damage_roll',
             notation: roll.notation,
-            rolled: result.total,
-            description: result.description,
+            rolled: out.roll.total,
+            description: out.roll.description,
             success: true,
         };
     } catch (e) {
@@ -749,8 +620,8 @@ function resolveDamageRoll(roll, character, dispatch, inventory = []) {
  * The low-level solo guard is asked LIVE (`isLowLevelSolo`, the one shared
  * predicate) before any die exists, exactly where the reducer asks it: a dying
  * L1-2 hero whose only companion dropped afterwards used to get a real die and
- * a "your character dies" line stamped isDeathEvent while the reducer recorded
- * a non-lethal setback (2026-09-02 audit).
+ * a "your character dies" line while the reducer recorded a non-lethal setback
+ * (2026-09-02 audit).
  */
 function resolveDeathSave(character, dispatch, party = []) {
     if (!character.dying || character.lowLevelDefeat) {
@@ -790,7 +661,7 @@ function resolveDeathSave(character, dispatch, party = []) {
     // The line is computed from `judged`, never from reducer state.
     dispatch({
         type: 'ADD_MESSAGE',
-        payload: { role: 'system', content: deathSaveLine(judged, character.name), isDeathEvent: judged.outcome === 'dead' },
+        payload: { role: 'system', content: deathSaveLine(judged, character.name) },
     });
 
     dispatch({ type: 'DEATH_SAVE_RESULT', payload: { die } });
@@ -798,21 +669,7 @@ function resolveDeathSave(character, dispatch, party = []) {
     return { type: 'death_save', rolled: die, outcome: judged.outcome, successes: judged.successes, failures: judged.failures };
 }
 
-// One formatter for the player d20 outcome line — resolveSinglePlayerAttackRoll
-// and resolvePlayerRoll's tail carried duplicate copies (Champion-19 label in
-// both) until the 2026-08-27 audit folded them here.
-function playerD20OutcomeLine({ label, result, dc, isAttack, critical, success, advantage, disadvantage }) {
-    const advLabel = advantage ? ' *(advantage)*' : disadvantage ? ' *(disadvantage)*' : '';
-    const hitMiss = isAttack
-        ? (success ? '**Hit!**' : '**Miss!**')
-        : (success ? '**Success!**' : '**Failure!**');
-    const critLabel = isAttack && critical
-        ? (result.rolls?.[0] === 19 ? ' Champion critical on natural 19!' : ' Natural 20!')
-        : (!isAttack && result.isCritical ? ' Natural 20!' : '');
-    const dcLabel = isAttack ? `vs AC ${dc}` : `DC ${dc}`;
-    return `**${label}**${advLabel} (${dcLabel}): Rolled **${result.total}**${result.advantageDetail} — ${hitMiss}${critLabel}${result.isCritFail ? ' Natural 1!' : ''}`;
-}
-
+/** One of the hero's attack strikes: its own d20, its own crit, its own line. */
 function resolveSinglePlayerAttackRoll(roll, character, dispatch, mod, label) {
     const result = rollWithAdvantage(mod, label, roll.advantage, roll.disadvantage);
     const critical = applyPlayerAttackCritical(character, result);
@@ -826,7 +683,7 @@ function resolveSinglePlayerAttackRoll(roll, character, dispatch, mod, label) {
         type: 'ADD_MESSAGE',
         payload: {
             role: 'system',
-            content: playerD20OutcomeLine({ label, result, dc, isAttack: true, critical, success, advantage: roll.advantage, disadvantage: roll.disadvantage }),
+            content: d20OutcomeLine({ label, result, dc, isAttack: true, critical, success, advantage: roll.advantage, disadvantage: roll.disadvantage }),
         },
     });
 
@@ -843,71 +700,48 @@ function resolveSinglePlayerAttackRoll(roll, character, dispatch, mod, label) {
     };
 }
 
+/**
+ * The hero's check / save / attack — always a LIST of results (an Attack with
+ * Extra Attack is two; a skipped roll is none).
+ *
+ * The modifier, the lane (`kind`) and the default label are
+ * `resolvePlayerRollModifier`'s — the one ladder the odds line on the proposal
+ * card reads too, so the card's number is the die's number, and a canonical
+ * camelCase key (`sleightOfHand`) survives instead of lowercasing into an
+ * unknown skill (2026-09-16).
+ */
 function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
-    // Shared with describeCheckOdds (the card's odds line) so the two can never
-    // disagree — and a canonical camelCase key (`sleightOfHand`) survives
-    // instead of lowercasing into an unknown skill (2026-09-16).
-    const skillName = canonicalRollKey(roll.skill) || '';
+    const { key, modifier: mod, kind, source, label: defaultLabel } = resolvePlayerRollModifier(character, inventory, roll);
 
     // Initiative retired 2026-08-27 (DECISIONS.md): the exchange machine has
     // owned initiative since combat_start rolls it engine-side — a DM-requested
     // initiative roll has no consumer and only ever confused the table.
-    if (skillName === 'initiative') {
+    if (key === 'initiative') {
         dispatch({
             type: 'ADD_MESSAGE',
             payload: { role: 'system', content: 'Initiative is rolled automatically by the engine when combat starts — the requested roll is skipped.' },
         });
-        return null;
+        return [];
     }
+    if (source === 'untrained') console.warn('[RollResolver] Unknown skill/ability:', key, '— rolling plain d20');
 
-    const ability = SKILL_ABILITIES[skillName];
-    const isAbilityName = ABILITY_NAMES.includes(skillName);
-    const isAttackRoll = roll.type === 'attack_roll';
-    const isSavingThrow = roll.type === 'saving_throw';
-
-    let mod = 0;
-    let label = roll.description || `${skillName} check`;
-
-    if (isAbilityName && isSavingThrow) {
-        // Saving throw: ability modifier + proficiency when the class grants it.
-        mod = getSavingThrowModifier(character, skillName);
-        label = roll.description || `${skillName} saving throw`;
-    } else if (ability) {
-        mod = getSkillModifier(character, skillName);
-    } else if (isAbilityName) {
-        const abilityMod = getModifier(character.abilityScores[skillName]);
-        if (isAttackRoll) {
-            mod = getWeaponAttackBonus(character, inventory);
-            label = roll.description || `${skillName} attack`;
-        } else {
-            mod = abilityMod;
-        }
-    } else if (skillName === 'attack') {
-        mod = getWeaponAttackBonus(character, inventory);
-        label = roll.description || 'Attack roll';
-    } else {
-        console.warn('[RollResolver] Unknown skill/ability:', skillName, '— rolling plain d20');
-        mod = 0;
-        label = roll.description || `${skillName} check`;
-    }
-
-    const usesAttackResolution = roll.type === 'attack_roll' || skillName === 'attack';
+    // An `attack_roll` (or the `attack` key) resolves on the attack lane: the
+    // weapon crit rule, attack condition effects, Extra Attack.
+    const isAttack = kind === 'attack';
 
     // Active conditions impose advantage/disadvantage automatically (engine-owned).
-    const rollKind = usesAttackResolution ? 'attack' : (isSavingThrow ? 'save' : 'check');
-    const condEffects = getConditionRollEffects(character.conditions, rollKind);
+    const condEffects = getConditionRollEffects(character.conditions, kind);
     const eff = combineRollModifiers(roll.advantage, roll.disadvantage, condEffects);
-    if (eff.note) label += eff.note;
+    const label = `${roll.description || defaultLabel}${eff.note || ''}`;
     const effRoll = { ...roll, advantage: eff.advantage, disadvantage: eff.disadvantage };
 
-    if (usesAttackResolution && character.class === 'fighter' && character.level >= 5) {
+    if (isAttack && getAttackCount(character) > 1) {
         return [
             resolveSinglePlayerAttackRoll(effRoll, character, dispatch, mod, `${label} (Attack 1)`),
             resolveSinglePlayerAttackRoll(effRoll, character, dispatch, mod, `${label} (Extra Attack)`),
         ];
     }
 
-    const isAttack = roll.type === 'attack_roll' || skillName === 'attack';
     const result = rollWithAdvantage(mod, label, effRoll.advantage, effRoll.disadvantage);
     const critical = isAttack ? applyPlayerAttackCritical(character, result) : result.isCritical;
     dispatch({ type: 'ADD_ROLL', payload: result });
@@ -920,11 +754,11 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
         type: 'ADD_MESSAGE',
         payload: {
             role: 'system',
-            content: playerD20OutcomeLine({ label, result, dc, isAttack, critical, success, advantage: effRoll.advantage, disadvantage: effRoll.disadvantage }),
+            content: d20OutcomeLine({ label, result, dc, isAttack, critical, success, advantage: effRoll.advantage, disadvantage: effRoll.disadvantage }),
         },
     });
 
-    return {
+    return [{
         type: roll.type || 'skill_check',
         skill: roll.skill,
         dc,
@@ -941,6 +775,5 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
         objective: roll.description || label,
         margin: result.total - dc,
         naturalOne: !!result.isCritFail,
-        naturalTwenty: !!result.isCritical,
-    };
+    }];
 }

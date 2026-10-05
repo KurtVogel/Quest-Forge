@@ -6,7 +6,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
-import { COMBAT_PHASES, normalizeCombatExchange, planCombatExchange } from '../engine/combatExchange.js';
+import { COMBAT_PHASES } from '../engine/combatPredicates.js';
+import { normalizeCombatExchange } from '../engine/combatWire.js';
+import { planCombatExchange } from '../engine/combatExchange.js';
 
 const base = {
     character: {

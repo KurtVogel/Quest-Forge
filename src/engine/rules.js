@@ -3,6 +3,7 @@
  * Handles stat calculations, skill checks, and combat math.
  */
 import { CLASSES } from '../data/classes.js';
+import { MAX_ROLL_DC } from '../config/contentLimits.js';
 
 /**
  * Calculate ability modifier from ability score.
@@ -509,18 +510,20 @@ const SKILL_KEY_BY_LOWER = new Map(Object.keys(SKILL_ABILITIES).map(key => [key.
  * Canonical roll key for a DM-declared `skill`: a SKILL_ABILITIES key in its own
  * casing (`sleightOfHand`), an ability name, `attack`, or the lowercased raw
  * string when nothing matches (the resolver's "unknown → plain d20" branch).
- * One lookup shared by the resolver and the odds helper: `resolvePlayerRoll`'s
- * bare `.toLowerCase()` turned `sleightOfHand` into `sleightofhand`, which
- * SKILL_ABILITIES misses — an untrained +0 for a rogue's own skill (2026-09-16).
+ * THE lookup behind `resolvePlayerRollModifier`, so every lane that rolls a
+ * hero's d20 shares it: `resolvePlayerRoll`'s bare `.toLowerCase()` turned
+ * `sleightOfHand` into `sleightofhand`, which SKILL_ABILITIES misses — an
+ * untrained +0 for a rogue's own skill (2026-09-16). A two-word skill reads in
+ * any spelling ("Sleight of Hand", `sleight_of_hand`, `sleight-of-hand`) since
+ * 2026-10-05: the separators fold before the lookup, so a display-cased key
+ * that reaches a reader without passing the parser is still the skill.
  */
 export function canonicalRollKey(value) {
     if (typeof value !== 'string') return null;
     const lower = value.trim().toLowerCase();
     if (!lower) return null;
-    return SKILL_KEY_BY_LOWER.get(lower) || lower;
+    return SKILL_KEY_BY_LOWER.get(lower) || SKILL_KEY_BY_LOWER.get(lower.replace(/[\s_-]+/g, '')) || lower;
 }
-
-export const MAX_CHECK_DC = 30;
 
 /**
  * P(d20 + modifier ≥ dc) for one d20, with the natural-20 auto-success the
@@ -529,7 +532,7 @@ export const MAX_CHECK_DC = 30;
  */
 export function d20SuccessChance(modifier, dc, { advantage = false, disadvantage = false } = {}) {
     const mod = Number.isFinite(modifier) ? modifier : 0;
-    const target = Number.isFinite(dc) ? Math.min(MAX_CHECK_DC, Math.max(0, dc)) : 10;
+    const target = Number.isFinite(dc) ? Math.min(MAX_ROLL_DC, Math.max(0, dc)) : 10;
     let faces = 0;
     for (let face = 1; face <= 20; face += 1) {
         if (face === 20 || face + mod >= target) faces += 1;
@@ -541,62 +544,86 @@ export function d20SuccessChance(modifier, dc, { advantage = false, disadvantage
 }
 
 /**
+ * THE modifier ladder for a hero's d20 (2026-10-05): saving throw → skill →
+ * bare ability (an `attack_roll` on one swings the weapon) → `attack` →
+ * unknown +0. The out-of-combat resolver, the odds line on the proposal card
+ * and the combat exchange's check / save slots all read it, so the number the
+ * card prints is the number the die gets. `describeCheckOdds` used to carry a
+ * hand copy of the resolver's branches, pinned only on the CHANCE.
+ *
+ * `kind` is the roll's resolution lane — `attack` (an `attack_roll` or the
+ * `attack` key: weapon crit rule, attack condition effects), `save`, or
+ * `check` — and decides which condition effects apply.
+ *
+ * @returns {{ key: string|null, modifier: number, kind: 'attack'|'save'|'check',
+ *             source: string, ability: string|null, label: string }}
+ */
+export function resolvePlayerRollModifier(character, inventory, roll) {
+    const key = canonicalRollKey(roll?.skill);
+    const isSave = roll?.type === 'saving_throw';
+    const isAttackRoll = roll?.type === 'attack_roll';
+    const isAbility = ABILITY_KEY_SET.has(key);
+    const kind = isAttackRoll || key === 'attack' ? 'attack' : (isSave ? 'save' : 'check');
+    const name = key || '';
+
+    if (isAbility && isSave) {
+        return {
+            key, kind, ability: key,
+            modifier: getSavingThrowModifier(character, key),
+            source: hasListEntry(character.savingThrowProficiencies, key) ? 'proficient' : 'save',
+            label: `${name} saving throw`,
+        };
+    }
+    if (SKILL_KEY_SET.has(key)) {
+        return {
+            key, kind, ability: SKILL_ABILITIES[key],
+            modifier: getSkillModifier(character, key),
+            source: hasListEntry(character.expertiseSkills, key)
+                ? 'expertise'
+                : (hasListEntry(character.skillProficiencies, key) ? 'proficient' : 'ability'),
+            label: `${name} check`,
+        };
+    }
+    if (isAbility && !isAttackRoll) {
+        return {
+            key, kind, ability: key,
+            modifier: getModifier(character.abilityScores?.[key]),
+            source: 'ability',
+            label: `${name} check`,
+        };
+    }
+    if (isAbility || key === 'attack') {
+        return {
+            key, kind, ability: isAbility ? key : null,
+            modifier: getWeaponAttackBonus(character, inventory || []),
+            source: 'weapon',
+            label: isAbility ? `${name} attack` : 'Attack roll',
+        };
+    }
+    return { key, kind, ability: null, modifier: 0, source: 'untrained', label: `${name} check` };
+}
+
+/**
  * The odds on the card (WOW 2026-09-16, checks-and-consequence): the hero's real
  * modifier and the engine-computed success chance for a proposed out-of-combat
- * roll, BEFORE any dice exist. Mirrors `resolvePlayerRoll`'s own branch order
- * (saving throw → skill → bare ability → attack → unknown +0), folds the hero's
- * conditions through `getConditionRollEffects` + `combineRollModifiers` exactly
- * as the resolver does, then the roll's own advantage/disadvantage flags.
- * Pure: no dice, no state. Returns null for a roll the resolver would skip.
+ * roll, BEFORE any dice exist. The modifier and the lane are
+ * `resolvePlayerRollModifier`'s — the resolver's own ladder — then the hero's
+ * conditions fold through `getConditionRollEffects` + `combineRollModifiers`
+ * exactly as the resolver folds them, then the roll's own advantage /
+ * disadvantage flags. Pure: no dice, no state. Returns null for a roll the
+ * resolver would skip.
  *
  * @returns {{ key, kind, ability, modifier, source, dc, flatChance, chance,
  *             advantage, disadvantage, conditionSources } | null}
  */
 export function describeCheckOdds(character, inventory, roll) {
     if (!character || !roll || typeof roll !== 'object') return null;
-    const key = canonicalRollKey(roll.skill);
+    const { key, kind, ability, modifier, source } = resolvePlayerRollModifier(character, inventory, roll);
     if (key === 'initiative') return null;
-    const isSave = roll.type === 'saving_throw';
-    const isAttackRoll = roll.type === 'attack_roll';
-    const isAbility = ABILITY_KEY_SET.has(key);
-    const skillAbility = SKILL_ABILITIES[key];
-    const scores = character.abilityScores || {};
-
-    let modifier = 0;
-    let source = 'untrained';
-    let kind = 'check';
-    let ability = null;
-
-    if (isAbility && isSave) {
-        modifier = getSavingThrowModifier(character, key);
-        source = hasListEntry(character.savingThrowProficiencies, key) ? 'proficient' : 'save';
-        kind = 'save';
-        ability = key;
-    } else if (skillAbility) {
-        modifier = getSkillModifier(character, key);
-        source = hasListEntry(character.expertiseSkills, key)
-            ? 'expertise'
-            : (hasListEntry(character.skillProficiencies, key) ? 'proficient' : 'ability');
-        ability = skillAbility;
-    } else if (isAbility) {
-        ability = key;
-        if (isAttackRoll) {
-            modifier = getWeaponAttackBonus(character, inventory || []);
-            source = 'weapon';
-            kind = 'attack';
-        } else {
-            modifier = getModifier(scores[key]);
-            source = 'ability';
-        }
-    } else if (key === 'attack') {
-        modifier = getWeaponAttackBonus(character, inventory || []);
-        source = 'weapon';
-        kind = 'attack';
-    }
 
     const conditionEffects = getConditionRollEffects(character.conditions, kind);
     const eff = combineRollModifiers(roll.advantage, roll.disadvantage, conditionEffects);
-    const dc = Number.isFinite(roll.dc) ? Math.min(MAX_CHECK_DC, Math.max(0, roll.dc)) : 10;
+    const dc = Number.isFinite(roll.dc) ? Math.min(MAX_ROLL_DC, Math.max(0, roll.dc)) : 10;
     return {
         key,
         kind,

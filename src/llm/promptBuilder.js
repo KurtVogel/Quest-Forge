@@ -21,7 +21,7 @@ import { buildWorldTempoBlock, computeRecentHeat } from '../engine/worldTempo.js
 import { buildRegionalHearsayBlock } from '../engine/regionalHearsay.js';
 import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
 import { describeSpellbookForPrompt, describeSpellSlotsForPrompt, isSpellcaster } from '../engine/spellcasting.js';
-import { isLowLevelSolo } from '../engine/combatExchange.js';
+import { isLowLevelSolo } from '../engine/combatPredicates.js';
 import { listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../engine/npcRoster.js';
 import { buildRelationshipBeatBlock, describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
 import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
@@ -1314,7 +1314,7 @@ function buildActiveConstraints(worldFacts, character, party, combat = null) {
  * bytes in the app (2026-09-27 enemy-stats P2: 550 of 694 chars at 0 foes,
  * ~140 tokens × 2 per round). They now live in COMBAT NOTES (cached prefix);
  * this block is DATA plus the two live words the rules refer to (phase, surge).
- * Under `narrationOnly` the user prompt (`combatNarrationPrompt`) already
+ * Under `narrationOnly` the user prompt (`combatNarrationPrompt`, llm/combatNarration.js) already
  * carries the AUTHORITATIVE post-exchange snapshot, so only what it lacks
  * renders here: the header and the standing flanks.
  */

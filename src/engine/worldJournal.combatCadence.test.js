@@ -28,7 +28,9 @@ vi.mock('../llm/scribe.js', async (importOriginal) => ({
 }));
 
 const { gameReducer, initialGameState } = await import('../state/gameReducer.js');
-const { COMBAT_PHASES, normalizeCombatExchange, planCombatExchange, planOpeningExchange } = await import('./combatExchange.js');
+const { COMBAT_PHASES } = await import('./combatPredicates.js');
+const { normalizeCombatExchange } = await import('./combatWire.js');
+const { planCombatExchange, planOpeningExchange } = await import('./combatExchange.js');
 const { KEEP_TAIL, maybeAutoSummarize, resetSummarizeFailureTracker, SUMMARIZE_EVERY } = await import('./worldJournal.js');
 const { buildPresenceText, collectNarrativeMessages } = await import('../llm/narrativeMessages.js');
 

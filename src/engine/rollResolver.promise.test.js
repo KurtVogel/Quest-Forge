@@ -42,7 +42,7 @@ const character = {
 
 function resolve(roll, die) {
     rollQueue.push(die);
-    const { results } = resolveRolls([roll], { character, inventory: [], combat: { enemies: [] }, party: [], dispatch: vi.fn() });
+    const { results } = resolveRolls([roll], { character, inventory: [], party: [], dispatch: vi.fn() });
     return results[0];
 }
 
@@ -55,12 +55,14 @@ const stealth = {
 describe('resolvePlayerRoll carries the promise', () => {
     it('returns failureStakes, objective, margin, and the natural flags on a failure', () => {
         const r = resolve(stealth, 7); // 7 + 2 DEX = 9 vs DC 12
-        expect(r).toMatchObject({ success: false, rolled: 9, margin: -3, failureStakes: 'The patrol notices the escape attempt.', objective: 'Slip past the patrol', naturalOne: false, naturalTwenty: false });
+        expect(r).toMatchObject({ success: false, rolled: 9, margin: -3, failureStakes: 'The patrol notices the escape attempt.', objective: 'Slip past the patrol', naturalOne: false });
+        // `critical` IS the natural-20 flag the promise line reads; the twin `naturalTwenty` had no reader (2026-10-05).
+        expect(r).not.toHaveProperty('naturalTwenty');
     });
 
     it('returns a positive margin on a success and flags a natural 20', () => {
         expect(resolve(stealth, 16)).toMatchObject({ success: true, margin: 6 });
-        expect(resolve({ ...stealth, dc: 30 }, 20)).toMatchObject({ success: true, critical: true, naturalTwenty: true });
+        expect(resolve({ ...stealth, dc: 30 }, 20)).toMatchObject({ success: true, critical: true });
     });
 
     it('a natural 1 is flagged but pass/fail is still the total against the DC', () => {

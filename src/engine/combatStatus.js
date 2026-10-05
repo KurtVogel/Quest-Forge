@@ -1,4 +1,4 @@
-import { COMBAT_PHASES, isEnemyActive } from './combatExchange.js';
+import { COMBAT_PHASES, isEnemyActive } from './combatPredicates.js';
 
 /**
  * Derive the concise player-facing combat status from engine state.

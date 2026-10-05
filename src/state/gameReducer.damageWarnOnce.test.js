@@ -34,7 +34,8 @@ vi.mock('../engine/dice.ts', () => {
 
 const { gameReducer, initialGameState } = await import('./gameReducer.js');
 const { parseResponse } = await import('../llm/responseParser.js');
-const { planCombatExchange, normalizeCombatExchange } = await import('../engine/combatExchange.js');
+const { normalizeCombatExchange } = await import('../engine/combatWire.js');
+const { planCombatExchange } = await import('../engine/combatExchange.js');
 
 const RESPONSE = 'The brute lunges.\n```json\n{"combat_start": {"enemies": [{"id": "brute-1", "name": "Brute", "hp": 20, "ac": 13, "attack_bonus": 4, "damage": "2d8+4 bludgeoning"}], "surprise": "none"}}\n```';
 

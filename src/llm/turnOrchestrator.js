@@ -834,6 +834,19 @@ Translate the player's committed action into the single bounded combat_exchange 
         runAutoSummarize();
     };
 
+    /**
+     * THE re-response for a check the roll arbiter rejected — the first hop
+     * (ChatPanel), a check chained off a post-roll outcome, and a challenge's
+     * re-proposal all route here (the pair was written out at three sites).
+     * An attack declared as a check must come back as EVENTS (combat_start +
+     * the attack as a queued exchange), so it is a normal turn whose
+     * playerActionContext keeps the replay guards honest; a check that
+     * overrode the player's authored delivery gets a no-dice narration.
+     */
+    const sendRollCorrection = ({ attackAsCheck = false, playerAction = '' } = {}) => (attackAsCheck
+        ? sendToLLM(attackAsCheckCorrectionPrompt(playerAction), null, { playerActionContext: playerAction })
+        : sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true }));
+
     const acceptRoleplayCheck = async () => {
         const proposal = getState().pendingRoleplayCheck;
         if (!proposal) return;
@@ -875,32 +888,29 @@ Translate the player's committed action into the single bounded combat_exchange 
                 // The outcome call now runs the roll arbiter (2026-09-02 P1); a
                 // chained check it rejects takes the same correction routes the
                 // first hop gets in ChatPanel — the rejected narration was withheld.
-                onFollowUpRejected: async ({ attackAsCheck }) => {
-                    if (attackAsCheck) {
-                        await sendToLLM(attackAsCheckCorrectionPrompt(proposal.playerAction), null, { playerActionContext: proposal.playerAction });
-                    } else {
-                        await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
-                    }
-                },
+                onFollowUpRejected: ({ attackAsCheck }) => sendRollCorrection({ attackAsCheck, playerAction: proposal.playerAction }),
                 pendingLoot: proposal.loot,
             });
             if (!stagedFollowUp) finalizeRoleplayTurn(proposal.playerAction);
         } catch (error) {
+            // Two questions, asked once each. Did dice land? That decides what
+            // happens to the proposal. Was it a deliberate Stop? That decides
+            // only whether a line is posted (the player chose the silence).
             const diceRolled = newestRollMarker(getState().rollHistory) !== newestRollBefore;
-            if (error.name === 'AbortError') {
-                // A deliberate Stop before any dice landed must not discard the
-                // staged adjudication (2026-08-31 P2): restore the proposal —
-                // and with it the hidden setup's path to resolution — silently
-                // (the player chose to interrupt; no error line). Post-dice the
-                // dice are final: restoring would reopen the reroll-bargaining
-                // door, so that path deliberately stays untouched.
-                if (!diceRolled) dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
-            } else if (diceRolled) {
-                // The dice are final; only the outcome narration failed. Point the
-                // player at the retry path instead of stranding them in silence.
-                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', kind: 'error', content: `The dice landed (see the roll above) but the DM's outcome response failed: ${error.message}. Say "continue" to have the DM narrate the result.` } });
+            const stopped = error.name === 'AbortError';
+            if (diceRolled) {
+                // The dice are final: restoring the proposal would reopen the
+                // reroll-bargaining door. Only the outcome narration is owed —
+                // point the player at the retry path instead of silence.
+                if (!stopped) dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', kind: 'error', content: `The dice landed (see the roll above) but the DM's outcome response failed: ${error.message}. Say "continue" to have the DM narrate the result.` } });
             } else {
-                dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', kind: 'error', content: `Error resolving check: ${error.message}` } });
+                // Nothing was rolled, so nothing was adjudicated: the staged
+                // check returns to the table, and with it the hidden setup's
+                // path to resolution (2026-08-31 P2). Today the resolver rolls
+                // synchronously before its first await, so only a throw inside
+                // it lands here; the rule is stated for any await a later
+                // change puts ahead of the dice.
+                if (!stopped) dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', kind: 'error', content: `Error resolving check: ${error.message}` } });
                 dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
             }
         } finally {
@@ -949,9 +959,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                     challenge,
                 });
                 if (ruling) dispatch({ type: 'RECORD_ROLL_RULING', payload: ruling });
-                if (events?._playerAuthorityRollRejected) {
-                    await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
-                }
+                if (events?._playerAuthorityRollRejected) await sendRollCorrection();
                 finalizeRoleplayTurn(proposal.playerAction);
             }
         } catch (error) {
@@ -1011,6 +1019,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         runAutoSummarize,
         runPostTurnExtraction,
         stageRoleplayCheck,
+        sendRollCorrection,
         finalizeRoleplayTurn,
         acceptRoleplayCheck,
         challengeRoleplayCheck,

@@ -159,3 +159,53 @@ describe('challengeRoleplayCheck — Stop mid-reconsideration (always pre-dice)'
         expect(getState().messages.at(-1).content).toMatch(/Error challenging check/);
     });
 });
+
+describe('a rejected check takes ONE correction route (2026-10-05)', () => {
+    const fence = (obj) => '```json\n' + JSON.stringify(obj) + '\n```';
+    const replies = (...texts) => {
+        const queue = [...texts];
+        return vi.fn(async ({ onChunk }) => {
+            const text = queue.shift() ?? 'The scene goes on.';
+            onChunk?.(text);
+            return text;
+        });
+    };
+
+    it('challenge hop: a re-proposal the arbiter rejects is withdrawn AND answered with the no-dice correction', async () => {
+        // The player authored the composure; the DM's REVISE asks a check to decide it.
+        // No machinery key in this harness, so the arbiter's sync rulebook judges.
+        const streamMessage = replies(
+            fence({ requested_rolls: [{ type: 'skill_check', skill: 'wisdom', dc: 12, description: 'Maintain your composure and hide your fear' }] }),
+            'Your face gives nothing away. The warden grunts and waves you on.',
+        );
+        const { runner, getState } = createHarness({ streamMessage });
+        const action = 'I stay calm and do not flinch as I walk past the warden.';
+        runner.stageRoleplayCheck(CHECK, action);
+
+        await runner.challengeRoleplayCheck('Staying calm is my call, not a roll.');
+
+        expect(streamMessage).toHaveBeenCalledTimes(2);
+        // The second call is THE authority correction: narration-only, no dice.
+        const correction = streamMessage.mock.calls[1][0];
+        expect(correction.userMessage).toContain('authored');
+        expect(getState().pendingRoleplayCheck).toBeNull();
+        expect(getState().rollHistory).toHaveLength(0);
+        // The objective is settled without dice — the DM is bound by it.
+        expect(getState().recentRulings.at(-1)).toMatchObject({ outcome: 'withdrawn', challenge: 'Staying calm is my call, not a roll.' });
+        expect(getState().messages.at(-1)).toMatchObject({ role: 'assistant', content: expect.stringContaining('waves you on') });
+    });
+
+    it('sendRollCorrection: an attack staged as a check asks for a combat response that keeps the player action', async () => {
+        const streamMessage = replies('Steel rings.');
+        const { runner } = createHarness({ streamMessage });
+
+        await runner.sendRollCorrection({ attackAsCheck: true, playerAction: 'I attack the lookout with my longsword.' });
+        await runner.sendRollCorrection();
+
+        const [attack, authority] = streamMessage.mock.calls.map(([args]) => args.userMessage);
+        expect(attack).toContain('I attack the lookout with my longsword.');
+        expect(attack).toContain('combat_start');
+        expect(authority).not.toContain('combat_start');
+        expect(authority).not.toBe(attack);
+    });
+});

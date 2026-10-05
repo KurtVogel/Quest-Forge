@@ -13,7 +13,7 @@
 
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem, toFlag } from '../data/items.js';
-import { isLowLevelSolo } from '../engine/combatExchange.js';
+import { isLowLevelSolo } from '../engine/combatPredicates.js';
 
 const withMeta = (entry, meta) => {
     if (Object.keys(meta).length === 0) return entry;

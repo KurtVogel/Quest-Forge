@@ -10,7 +10,8 @@ import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
 import { normalizeKnownBy } from '../../engine/storyMemory.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
 import { CHRONICLE_CHAPTER_TEXT_MAX, NPC_DOSSIER_FIELD_MAX, ROLL_HISTORY_CAP } from '../../config/contentLimits.js';
-import { COMBAT_PHASES, isLowLevelSolo } from '../../engine/combatExchange.js';
+import { COMBAT_PHASES, isLowLevelSolo } from '../../engine/combatPredicates.js';
+import { healthWord } from '../../engine/enemyStats.js';
 import {
     appendBondMoments,
     appendCallbackHooks,
@@ -648,12 +649,9 @@ function companionText(value, max) {
     return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
 
+/** A companion's health word — THE ladder (`healthWord`), `downed` at 0 HP. */
 export function companionStatus(hp, maxHp) {
-    if (hp <= 0) return 'downed';
-    const pct = maxHp > 0 ? hp / maxHp : 1;
-    if (pct <= 0.25) return 'critical';
-    if (pct <= 0.5) return 'bloodied';
-    return 'healthy';
+    return healthWord(hp, maxHp, 'downed');
 }
 
 export function normalizeCompanion(payload = {}, existing = {}) {

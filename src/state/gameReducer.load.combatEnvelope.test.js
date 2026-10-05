@@ -11,7 +11,8 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { buildSystemPrompt } from '../llm/promptBuilder.js';
-import { combatNarrationPrompt, planOpeningExchange } from '../engine/combatExchange.js';
+import { planOpeningExchange } from '../engine/combatExchange.js';
+import { combatNarrationPrompt } from '../llm/combatNarration.js';
 
 const baseCharacter = {
     name: 'Survivor', race: 'human', class: 'fighter', level: 3, exp: 900, currentHP: 20, maxHP: 20, conditions: [],
@@ -205,9 +206,6 @@ describe('LOAD_GAME enemy id uniqueness (2026-09-11 combat-exchange P2, parity w
         expect(ids[1]).toBe('enemy-goblin-2');
         expect(ids[2]).toBe('enemy-wolf');
         expect(new Set(ids).size).toBe(3);
-        // One UPDATE_ENEMY now kills exactly one goblin.
-        const updated = gameReducer(next, { type: 'UPDATE_ENEMY', payload: { id: 'enemy-goblin', hp: 0 } });
-        expect(updated.combat.enemies.map(e => e.hp)).toEqual([0, 9, 9]);
         expect(promptOf(next)).not.toContain('(id: undefined)');
     });
 });

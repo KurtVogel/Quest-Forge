@@ -2,8 +2,10 @@ import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { sendMessage, streamMessage } from '../../llm/adapter.js';
 import { createTurnRunner } from '../../llm/turnOrchestrator.js';
-import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt } from '../../engine/outOfCombatRollPolicy.js';
-import { combatNarrationPrompt, COMBAT_PHASES, describeFightCost, describeFightResonance, planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
+import { COMBAT_PHASES } from '../../engine/combatPredicates.js';
+import { planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
+import { describeFightCost, describeFightResonance } from '../../engine/fightTally.js';
+import { combatNarrationPrompt } from '../../llm/combatNarration.js';
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
 import { EPILOGUE_REQUEST_MESSAGE, isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
@@ -779,12 +781,9 @@ export default function ChatPanel() {
                     setupMessageId: events._setupHidden ? events._setupMessageId : null,
                 });
             } else if (routed.route === TURN_ROUTES.ATTACK_AS_CHECK) {
-                // Unlike the no-dice correction, this re-response must carry EVENTS
-                // (combat_start + the player's attack as a queued exchange), so it is
-                // a normal turn — playerActionContext keeps the replay guards honest.
-                await runner.sendToLLM(attackAsCheckCorrectionPrompt(trimmed), null, { playerActionContext: trimmed });
+                await runner.sendRollCorrection({ attackAsCheck: true, playerAction: trimmed });
             } else if (routed.route === TURN_ROUTES.AUTHORITY_CORRECTION) {
-                await runner.sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true });
+                await runner.sendRollCorrection();
             }
             if (startedCombatIntent && !combatIntentHandled) {
                 dispatch({ type: 'CANCEL_COMBAT_INTENT' });

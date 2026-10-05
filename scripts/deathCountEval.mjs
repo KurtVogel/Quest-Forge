@@ -23,7 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sendMessage } from '../src/llm/adapter.js';
 import { buildSystemPrompt } from '../src/llm/promptBuilder.js';
-import { combatNarrationPrompt } from '../src/engine/combatExchange.js';
+import { combatNarrationPrompt } from '../src/llm/combatNarration.js';
 import { parseJsonObjectLoose } from '../src/llm/utils/jsonExtractor.js';
 import { initialGameState } from '../src/state/initialState.js';
 import { MACHINERY_MODEL } from '../src/llm/machinery.js';
