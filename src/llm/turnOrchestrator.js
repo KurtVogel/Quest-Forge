@@ -257,7 +257,7 @@ export function createTurnRunner({
             heroTells: s.heroTells || [],
             heroTellBeat: s.session?.heroTellBeat || null,
             recentRulings: pruneRecentRulings(s.recentRulings, {
-                messageCount: (s.messages || []).length,
+                messages: s.messages || [],
                 location: s.currentLocation,
             }),
         });

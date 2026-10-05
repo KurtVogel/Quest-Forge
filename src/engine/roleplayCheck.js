@@ -1,5 +1,6 @@
 import { normalizeRequestedRoll } from '../llm/eventChannels.js';
 import { MAX_ROLL_DC } from '../config/contentLimits.js';
+import { conversationalDistance } from './replayLedger.js';
 
 // String-or-empty (2026-09-18 P2): String(object) persisted "[object Object]" as a
 // ruling objective and RECENT TABLE RULINGS bound the DM to it. A finite number reads.
@@ -147,8 +148,15 @@ export function sanitizeRecentChecks(list, { maxMessageCount = Infinity } = {}) 
 // an upheld ruling was set aside). This small ledger records rulings that ended
 // WITHOUT dice and is injected into the DM prompt as binding table history.
 
-/** Ledger entries expire after this much message growth (~6-10 turns) or a location change. */
-export const RULING_MESSAGE_TTL = 24;
+/**
+ * A ruling binds the DM for this many CONVERSATIONAL messages — 8 turns, a
+ * scene — or until the hero leaves the place. Counted like every other ledger
+ * since 2026-10-05 (system lines and hidden setups do not age it): the old
+ * clock was 24 RAW rows "(~6-10 turns)", but a ruling is minted beside a hidden
+ * setup, a challenge row and a system line and each dice turn burns ~5 more,
+ * so it expired after 4–5 turns — sooner than the table had been promised.
+ */
+export const RULING_MESSAGE_TTL = 16;
 export const RECENT_RULING_LIMIT = 5;
 
 /** Same `{ maxMessageCount }` ceiling as sanitizeRecentChecks: a future `atMessageCount` clamps to "now" so it expires. An options object, never positional — `.map(normalizeRollRuling)` would pass the index. */
@@ -188,12 +196,18 @@ export function buildRollRulingRecord(proposal, outcome, { messageCount = 0, loc
     });
 }
 
-/** Only rulings from the current scene bind the DM: same location, recent turns. */
-export function pruneRecentRulings(rulings, { messageCount = 0, location = null } = {}) {
+/**
+ * Only rulings from the current scene bind the DM: same location, recent turns.
+ * `messages` is the live transcript — the age is the conversational distance
+ * from the ruling's stamp to now. Without one (`messageCount` only) the age is
+ * the raw difference: the same number when nothing but turns lies between.
+ */
+export function pruneRecentRulings(rulings, { messages = null, messageCount = null, location = null } = {}) {
+    const now = Number.isFinite(messageCount) ? messageCount : (Array.isArray(messages) ? messages.length : 0);
     return (Array.isArray(rulings) ? rulings : [])
         .map(ruling => normalizeRollRuling(ruling))
         .filter(Boolean)
-        .filter(r => messageCount - r.atMessageCount <= RULING_MESSAGE_TTL)
+        .filter(r => conversationalDistance(messages, r.atMessageCount, now) <= RULING_MESSAGE_TTL)
         .filter(r => !r.location || !location || r.location === location)
         .slice(-RECENT_RULING_LIMIT);
 }

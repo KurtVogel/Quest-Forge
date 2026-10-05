@@ -3150,7 +3150,7 @@ exchange payload literal is written three times and the opening copy omits five 
 silently, because a literal cannot default; one builder makes an omission a choice. None of (2)–(4)
 is a live bug; (1) is.
 
-### [strengthening] A table ruling ages by raw rows while every other ledger ages by turns — status: `open call for Vesa` (2026-10-05, left out of the queue sweep on purpose)
+### [strengthening] A table ruling ages by raw rows while every other ledger ages by turns — status: `shipped` (2026-10-05, on Vesa's yes the same day — `RULING_MESSAGE_TTL` 16 conversational messages = 8 turns; DECISIONS.md 2026-10-05 (later))
 `recentRulings` (withdrawn / set-aside checks that bind the DM through `## RECENT TABLE RULINGS`)
 stamps `messages.length` and expires after `RULING_MESSAGE_TTL` 24 RAW rows (`pruneRecentRulings`,
 `engine/roleplayCheck.js`; DECISIONS 2026-07-05). The 2026-07-30 rule moved every replay ledger to

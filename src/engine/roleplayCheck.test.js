@@ -121,6 +121,30 @@ describe('roleplay check proposals', () => {
         expect(pruneRecentRulings(many, { messageCount: 90, location: 'Tavern' })).toHaveLength(RECENT_RULING_LIMIT);
     });
 
+    it('a ruling ages in TURNS: the engine lines a dice turn burns do not expire it (2026-10-05)', () => {
+        const ruling = { objective: 'Talk the warden round', skill: 'persuasion', dc: 12, outcome: 'withdrawn', atMessageCount: 0, location: 'Gate' };
+        const turn = [{ role: 'user', content: 'x' }, { role: 'assistant', content: 'y' }];
+        // A dice turn as the transcript holds it: the player's line, a hidden
+        // setup, two engine roll lines, the outcome — five raw rows, two that count.
+        const diceTurn = [
+            { role: 'user', content: 'x' },
+            { role: 'assistant', content: 'setup', hidden: true },
+            { role: 'system', content: 'roll' },
+            { role: 'system', content: 'roll' },
+            { role: 'assistant', content: 'outcome' },
+        ];
+        const sixDiceTurns = Array.from({ length: 6 }, () => diceTurn).flat(); // 30 raw rows, 12 conversational
+        expect(sixDiceTurns.length).toBeGreaterThan(RULING_MESSAGE_TTL);
+        expect(pruneRecentRulings([ruling], { messages: sixDiceTurns, location: 'Gate' })).toHaveLength(1);
+
+        // Eight plain turns is the edge; one more row expires it.
+        const eightTurns = Array.from({ length: RULING_MESSAGE_TTL / 2 }, () => turn).flat();
+        expect(pruneRecentRulings([ruling], { messages: [...eightTurns, turn[0]], location: 'Gate' })).toHaveLength(1);
+        expect(pruneRecentRulings([ruling], { messages: [...eightTurns, ...turn], location: 'Gate' })).toEqual([]);
+        // Leaving the place still ends it at once.
+        expect(pruneRecentRulings([ruling], { messages: turn, location: 'Docks' })).toEqual([]);
+    });
+
     it('reminds a challenged ruling about declared-but-unapplied loot', () => {
         const proposal = buildRoleplayCheckProposal([roll], 'I pry open the reliquary.', {
             loot: { goldFound: 15, itemsFound: [{ name: 'Silver Ring', quantity: 2 }] },
