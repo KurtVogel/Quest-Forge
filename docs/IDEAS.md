@@ -3129,3 +3129,23 @@ first-line doc claim is a test to write — `cloudSync.js` opens with "both path
 serialized state" and nothing checks it; four exports with four error contracts (typed result /
 swallow-to-null / rethrow / swallow-to-false) is the 09-02 fix that reached one sibling of four. None
 of it is a live bug; all of it is the shape that makes the next one.
+
+### [strengthening] A shelf built for one lane is a shelf the sibling never learned; a test fixture the reducer cannot produce keeps dead code green; "both lanes share X" must say what X is — status: `idea` (2026-10-05 audit, roll-resolution + combat-exchange Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
+Four patterns from the fourth design-lap pair, one of them a live bug. **(1)** `canonicalRollKey`
+(2026-09-16) was built because a bare `.toLowerCase()` turned `sleightOfHand` into an untrained +0
+on the out-of-combat resolver — and `combatExchange.js` kept its private `SKILLS` set, its own
+`normalizeSkillRef`, and its own second `.toLowerCase()` at resolution (`:1127`), so a Rogue's
+Sleight of Hand check IN COMBAT still rolls `1d20+0` and the camelCase key the HERO SHEET prints is
+rejected as unsupported. When a fix mints THE lookup for a key, grep every other lowercase of that
+key the same day; the sibling lane is where the bug moved to. **(2)** `rollResolver.test.js` feeds
+`combat: { enemies: [...] }` with combat inactive; the reducer empties the list at END_COMBAT and the
+resolver refuses active combat, so the enemy half of `resolveRolls` (the live-AC override, Sneak
+Attack's ally test, the `UPDATE_ENEMY` flush DECISIONS kept the reducer for) has no caller but the
+test. Coverage of an unreachable fixture is not coverage — ask whether the state the test builds
+can exist. **(3)** The odds card and the resolver "share one lookup" — the KEY, through
+`canonicalRollKey`; the modifier LADDER (save → skill → ability → attack → +0) is written twice and
+the parity pin brute-forces the probability, so nothing proves the number on the card is the number
+the die gets. A sharing claim names the function, or it is two copies with a slogan. **(4)** The
+exchange payload literal is written three times and the opening copy omits five of fourteen keys —
+silently, because a literal cannot default; one builder makes an omission a choice. None of (2)–(4)
+is a live bug; (1) is.
