@@ -7,7 +7,17 @@ import { RACES } from '../data/races.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
 import { buildSpellSlots, isSpellcaster } from './spellcasting.js';
-import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
+import { HERO_TEXT_LIMITS, cleanTextField } from '../config/contentLimits.js';
+
+/**
+ * THE hero id mint (2026-10-06 character-vault P2): creation, the vault import
+ * and the roster store each minted their own — two shapes (`char-<ts>` and
+ * `char-<ts>-<rand>`), and a one-tab creation spree could collide on the
+ * bare timestamp. The roster is keyed by this id, so one shape everywhere.
+ */
+export function mintHeroId() {
+    return `char-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
 
 /**
  * Player-facing species/class names for PROMPT boundaries (2026-09-01
@@ -270,8 +280,10 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
     const allSkills = [...new Set([...racialSkills, ...chosenSkills])];
 
     const character = {
-        id: `char-${Date.now()}`,
-        name,
+        id: mintHeroId(),
+        // The wizard's input already caps the name at HERO_TEXT_LIMITS.name;
+        // the clamp here is the same table the load heal applies.
+        name: cleanTextField(name, HERO_TEXT_LIMITS.name),
         race: raceName,
         class: className,
         level: 1,
@@ -290,12 +302,12 @@ export function createCharacter(name, raceName, className, abilityScores, chosen
         martialArchetype: normalizeMartialArchetype(className, 1, options.martialArchetype),
         abilityScoreImprovementsApplied: 0,
         pendingAbilityScoreImprovements: 0,
-        // Player-authored identity, all optional. Appearance caps at the shared
-        // Scribe-merge clamp (a longer seed would truncate on the first merged
-        // update); background matches the notes/vault 2000 cap.
-        gender: String(options.gender || '').trim().slice(0, 60),
-        appearance: String(options.appearance || '').trim().slice(0, CHARACTER_APPEARANCE_MAX),
-        background: String(options.background || '').trim().slice(0, 2000),
+        // Player-authored identity, all optional, clamped by the ONE hero
+        // text table (HERO_TEXT_LIMITS — the vault import and the load heal
+        // read the same numbers). String-or-empty, never `String(object)`.
+        gender: cleanTextField(options.gender, HERO_TEXT_LIMITS.gender),
+        appearance: cleanTextField(options.appearance, HERO_TEXT_LIMITS.appearance),
+        background: cleanTextField(options.background, HERO_TEXT_LIMITS.background),
         notes: '',
         createdAt: Date.now(),
         startingGoldRolls,

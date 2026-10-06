@@ -12,9 +12,11 @@ import { gameReducer } from './gameReducer.js';
  * serializeGameState; `settings` persists separately via saveSettings and is
  * stripped from the snapshot entirely (DECISIONS.md 2026-08-27 — device-local
  * by design, LOAD_GAME never restored it). Must mirror serializeGameState's
- * exclusions.
+ * exclusions — `autosavePolicy.test.js` pins that the serializer strips exactly
+ * this set. Read by the runtime's changed-key diff too (2026-10-06 P2: it
+ * hard-coded the three names beside this set).
  */
-const AUTOSAVE_IGNORED_FIELDS = new Set(['user', 'ui', 'settings']);
+export const AUTOSAVE_IGNORED_FIELDS = new Set(['user', 'ui', 'settings']);
 
 /**
  * Did anything the serializer persists change between two states? A change

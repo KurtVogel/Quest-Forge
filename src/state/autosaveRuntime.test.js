@@ -58,6 +58,8 @@ describe('noteStateChange (debounced trigger)', () => {
         const { runtime } = makeHarness();
         runtime.noteStateChange(null, liveState({ session: { id: null } }));
         runtime.noteStateChange(null, liveState({ character: null }));
+        // The policy's predicate, not a restatement: a null `session` used to throw here (2026-10-06 P2).
+        expect(() => runtime.noteStateChange(null, liveState({ session: null }))).not.toThrow();
         expect(runtime.hasPendingDebounce()).toBe(false);
         expect(runtime.isDirty()).toBe(false);
     });

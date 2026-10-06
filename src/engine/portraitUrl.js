@@ -1,6 +1,6 @@
 /**
  * THE portrait URL allowlist (2026-09-09 audit P2). Three copies used to exist —
- * the NPC roster's SAFE_PORTRAIT_URL, the hero vault's sanitizeImageUrl, and
+ * the NPC roster's SAFE_PORTRAIT_URL, the hero vault's own copy, and
  * NOTHING on the hero's live save: `healLoadedCharacter` spread `portraitUrl`
  * raw and UPDATE_CHARACTER stored anything, so a shared/cloud save carrying
  * `https://tracker.example/pixel.png` rendered as an <img src> on the sheet,

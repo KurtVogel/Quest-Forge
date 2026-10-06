@@ -2,7 +2,7 @@
  * NPC roster and locations: upsert/pin/archive/portrait/migration plus the
  * canonical location registry writes.
  */
-import { buildStoryMemoryPromotion, gradeBondMoments, migrateLegacyNpc, namesMatch, normalizeNpcRecord, selectKeyBondMoments } from '../../engine/npcRoster.js';
+import { buildStoryMemoryPromotion, gradeBondMoments, namesMatch, normalizeNpcRecord, selectKeyBondMoments } from '../../engine/npcRoster.js';
 import { beatTargets, deriveRelationshipStage, sanitizeRelationshipBeat } from '../../engine/relationshipArc.js';
 
 /**
@@ -251,12 +251,6 @@ export const handlers = {
             ...state,
             npcs: state.npcs.map(npc => (npc.id === id ? normalizeNpcRecord({ ...npc, ...update }) : npc)),
         };
-    },
-
-    MIGRATE_NPC_ROSTER(state) {
-        const needsMigration = (state.npcs || []).some(npc => !npc.rosterTier);
-        if (!needsMigration) return state;
-        return { ...state, npcs: (state.npcs || []).map(npc => migrateLegacyNpc(npc)) };
     },
 
     ARCHIVE_NPC_BULK(state, action) {

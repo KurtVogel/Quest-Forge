@@ -75,7 +75,7 @@ const loadState = async (...args) => {
     const loaded = await loadGameFromCloud(...args);
     return loaded.ok ? loaded.state : null;
 };
-const { SAVE_VERSION } = await import('./persistence.js');
+const { CURRENT_SAVE_VERSION } = await import('./migrations.js');
 
 function makeGameState(overrides = {}) {
     return {
@@ -129,7 +129,7 @@ describe('saveGameToCloud / loadGameFromCloud', () => {
         // device-local by design (DECISIONS.md 2026-08-27).
         expect(loaded.settings).toBeUndefined();
         expect(loaded.user).toBeUndefined();
-        expect(loaded.saveVersion).toBe(SAVE_VERSION);
+        expect(loaded.saveVersion).toBe(CURRENT_SAVE_VERSION);
     });
 
     it('keeps the parent doc metadata-only: payload null + payloadChunks N, no payload content (2026-08-04)', async () => {

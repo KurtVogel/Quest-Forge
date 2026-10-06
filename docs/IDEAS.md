@@ -3164,7 +3164,7 @@ raw count to rewrite). **Why it waited:** it lengthens a window a dated decision
 project rule is that a decision is revisited with the human, not by a sweep. A yes makes it a
 ten-minute change.
 
-### [strengthening] A grandfather lane is dead the day its load twin lands; a store that enforces its contract at the READ holds as many shapes as it has writers; a clamp table at three boundaries is named once — status: `idea` (2026-10-06 audit, persistence + character-vault Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
+### [strengthening] A grandfather lane is dead the day its load twin lands; a store that enforces its contract at the READ holds as many shapes as it has writers; a clamp table at three boundaries is named once — status: `done` (2026-10-06 audit, persistence + character-vault Lap 4; all eleven queue lines built the same day — DECISIONS.md 2026-10-06; the three `clampInt`s were kept as three on purpose, see the queue tick)
 Four patterns from the fifth design-lap pair, none a live bug. **(1)** `GameContext.jsx` still fires
 `MIGRATE_NPC_ROSTER` whenever a roster record lacks `rosterTier` — a grandfather lane from before
 LOAD_GAME ran `migrateLegacyNpc` over every record and before every live writer stamped the tier

@@ -56,7 +56,7 @@ import { isSpellcaster, sanitizeSpellSlots, sanitizeSustainedSpell } from '../en
 import { initialGameState } from './initialState.js';
 import { coverage, tokenSet } from '../engine/textMatch.js';
 import { sanitizePortraitUrl } from '../engine/portraitUrl.js';
-import { CHARACTER_APPEARANCE_MAX, cleanTextField, MAX_COIN_HELD } from '../config/contentLimits.js';
+import { cleanTextField, HERO_TEXT_LIMITS, MAX_COIN_HELD } from '../config/contentLimits.js';
 import { applyEarlyDefeat, isLowLevelSolo, stackIdentity, systemMessage } from './handlers/shared.js';
 
 /**
@@ -378,24 +378,26 @@ function healLoadedCharacter(character) {
         remaining: Math.min(hitDiceTotal, Math.max(0, toInt(rawHitDice.remaining, hitDiceTotal))),
         die: CLASSES[character.class]?.hitDie || 8,
     };
-    // Identity fields are string-or-empty with the vault's own clamps
-    // (2026-09-09 audit P1: `gender: {}` threw `.trim is not a function` out of
-    // buildSystemPrompt on EVERY turn and out of the Character Sheet render;
-    // `appearance: {}` made Scene mode reject). sanitizeCharacter — the export
-    // sibling — always clamped these; the live save never did. The hero
-    // portrait gets the shared allowlist (P2) — see engine/portraitUrl.js.
-    const name = cleanTextField(character.name, 30) || 'Adventurer';
+    // Identity fields are string-or-empty with the ONE hero text table
+    // (HERO_TEXT_LIMITS — shared with createCharacter and the vault's
+    // sanitizeCharacter since 2026-10-06; 2026-09-09 audit P1: `gender: {}`
+    // threw `.trim is not a function` out of buildSystemPrompt on EVERY turn
+    // and out of the Character Sheet render; `appearance: {}` made Scene mode
+    // reject). The hero portrait gets the shared allowlist (P2) — see
+    // engine/portraitUrl.js.
+    const name = cleanTextField(character.name, HERO_TEXT_LIMITS.name) || 'Adventurer';
     // The portrait PROMPT is never read anywhere (2026-09-21 audit P2) — up to
     // 2,000 chars of write-only ballast on every autosave; stripped at load.
     const { portraitPrompt: _portraitPrompt, ...kept } = character;
     const healed = {
         ...kept,
         name,
-        gender: cleanTextField(character.gender, 60),
-        appearance: cleanTextField(character.appearance, CHARACTER_APPEARANCE_MAX),
-        background: cleanTextField(character.background, 2000),
+        gender: cleanTextField(character.gender, HERO_TEXT_LIMITS.gender),
+        appearance: cleanTextField(character.appearance, HERO_TEXT_LIMITS.appearance),
+        background: cleanTextField(character.background, HERO_TEXT_LIMITS.background),
+        notes: cleanTextField(character.notes, HERO_TEXT_LIMITS.notes),
         portraitUrl: sanitizePortraitUrl(character.portraitUrl),
-        portraitProvider: cleanTextField(character.portraitProvider, 40),
+        portraitProvider: cleanTextField(character.portraitProvider, HERO_TEXT_LIMITS.portraitProvider),
         // The race/class display lists and speed are typed too (2026-09-18 P1):
         // a STRING `traits` passed `?.length` and threw `.join is not a
         // function` out of every prompt build; an object element printed

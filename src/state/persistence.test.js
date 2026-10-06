@@ -30,17 +30,28 @@ const {
     listSaves,
     deleteSave,
     getSaveSessionId,
+    autoSave,
+    loadAutoSave,
+    projectSaveMetadata,
+    serializeGameState,
+} = await import('./persistence.js');
+const {
     saveRosterCharacter,
     listRosterCharacters,
     countRosterCharacters,
     loadRosterCharacter,
     deleteRosterCharacter,
-    autoSave,
-    loadAutoSave,
-    projectSaveMetadata,
-    SAVE_VERSION,
-    serializeGameState,
-} = await import('./persistence.js');
+} = await import('./rosterStore.js');
+const { CURRENT_SAVE_VERSION } = await import('./migrations.js');
+const { createCharacter } = await import('../engine/characterUtils.js');
+const { parseCharacterExport, buildCharacterExport } = await import('../engine/characterVault.js');
+
+/** A FULL hero (the roster templates every write since 2026-10-06, so a bare `{ name, race, class }` no longer saves). */
+const ROSTER_SCORES = { strength: 15, dexterity: 13, constitution: 14, intelligence: 10, wisdom: 12, charisma: 8 };
+function fullHero(overrides = {}) {
+    const created = createCharacter('Astra', 'human', 'fighter', ROSTER_SCORES, ['athletics', 'perception']);
+    return { ...created, id: 'hero-1', level: 3, ...overrides };
+}
 
 describe('settings (localStorage)', () => {
     it('round-trips settings through save/load', () => {
@@ -299,7 +310,7 @@ describe('saveGame / loadGame (IndexedDB)', () => {
         expect(loaded.appliedLootSourceIds).toEqual(['msg-1']);
         expect(loaded.recentPurchases).toEqual([expect.objectContaining({ signature: 'dagger|1|200', itemKey: 'dagger' })]);
         expect(loaded.recentSales).toEqual([expect.objectContaining({ signature: 'torch|2|1', itemKey: 'torch' })]);
-        expect(loaded.saveVersion).toBe(SAVE_VERSION);
+        expect(loaded.saveVersion).toBe(CURRENT_SAVE_VERSION);
     });
 
     it('persists future top-level state fields by default (spread, not whitelist)', async () => {
@@ -499,9 +510,7 @@ describe('metadata/payload split (DB v3, 2026-08-04)', () => {
 });
 
 describe('character roster', () => {
-    function makeHero(overrides = {}) {
-        return { id: 'hero-1', name: 'Astra', race: 'human', class: 'fighter', level: 3, ...overrides };
-    }
+    const makeHero = fullHero;
 
     it('saves and lists a roster hero; the list row is metadata and the hero loads by id', async () => {
         await saveRosterCharacter(makeHero(), [{ id: 'i1', name: 'Dagger' }]);
@@ -512,7 +521,7 @@ describe('character roster', () => {
         expect(roster[0]).not.toHaveProperty('character');
         const hero = await loadRosterCharacter('hero-1');
         expect(hero.character.name).toBe('Astra');
-        expect(hero.inventory).toEqual([{ id: 'i1', name: 'Dagger' }]);
+        expect(hero.inventory).toMatchObject([{ name: 'Dagger' }]);
         expect(await loadRosterCharacter('nobody')).toBeNull();
     });
 
@@ -549,14 +558,14 @@ describe('character roster', () => {
     });
 
     it('generates an id when the character has none', async () => {
-        const entry = await saveRosterCharacter({ name: 'No Id Hero', race: 'elf', class: 'wizard', level: 1 }, []);
-        expect(entry.id).toMatch(/^char-/);
+        const entry = await saveRosterCharacter(fullHero({ id: undefined, name: 'No Id Hero' }), []);
+        expect(entry.id).toMatch(/^char-\d+-[a-z0-9]{1,5}$/);
     });
 
     it('embeds a minted id into the stored character so callers can adopt it (2026-07-25 audit)', async () => {
         // Without adoption, a legacy pre-id-era hero duplicated a roster entry
         // on every "Save to Roster" click.
-        const entry = await saveRosterCharacter({ name: 'No Id Hero', race: 'elf', class: 'wizard', level: 1 }, []);
+        const entry = await saveRosterCharacter(fullHero({ id: undefined, name: 'No Id Hero' }), []);
         expect(entry.character.id).toBe(entry.id);
         const withId = await saveRosterCharacter(makeHero(), []);
         expect(withId.character.id).toBe('hero-1');
@@ -571,8 +580,7 @@ describe('character roster', () => {
 
 describe('roster rows carry no portrait bytes — the last inline-portrait store is split (2026-09-24 character-vault P2)', () => {
     const portrait = (seed) => `data:image/jpeg;base64,${String(seed).repeat(30_000)}`;
-    const hero = (overrides = {}) => ({
-        id: 'hero-1', name: 'Astra', race: 'human', class: 'fighter', level: 3,
+    const hero = (overrides = {}) => fullHero({
         gender: 'woman', background: 'A disgraced lamplighter.', appearance: 'Scarred.',
         portraitUrl: portrait('H'), portraitProvider: 'gemini', portraitUpdatedAt: 5,
         ...overrides,
@@ -600,12 +608,12 @@ describe('roster rows carry no portrait bytes — the last inline-portrait store
         };
     });
 
-    it('the stored row is a ref plus ~6k of hero; the picture sits once in the portraits store', async () => {
+    it('the stored row is a ref plus a few k of hero; the picture sits once in the portraits store', async () => {
         await saveRosterCharacter(hero(), [{ id: 'i1', name: 'Dagger' }]);
         const [row] = await readStore('characters');
         const rowJson = JSON.stringify(row);
         expect(rowJson).not.toContain('data:image/');
-        expect(rowJson.length).toBeLessThan(2_000); // was 97k on a live L5 wizard, 90k of it the portrait
+        expect(rowJson.length).toBeLessThan(8_000); // was 97k on a live L5 wizard, 90k of it the portrait
         expect(row.character.portraitRef).toMatch(/^p-/);
         expect(row.portraitRefs).toEqual([row.character.portraitRef]);
         expect(row.character.portraitProvider).toBe('gemini');
@@ -628,7 +636,7 @@ describe('roster rows carry no portrait bytes — the last inline-portrait store
         expect(loaded.character.portraitUrl).toBe(portrait('H'));
         expect(loaded.character.portraitProvider).toBe('gemini');
         expect(loaded.character.background).toBe('A disgraced lamplighter.');
-        expect(loaded.inventory).toEqual([{ id: 'i1', name: 'Dagger' }]);
+        expect(loaded.inventory).toMatchObject([{ name: 'Dagger' }]);
         // A ref never reaches the wizard.
         expect(JSON.stringify(loaded)).not.toContain('portraitRef');
     });
@@ -684,7 +692,7 @@ describe('roster rows carry no portrait bytes — the last inline-portrait store
 
     it('a pre-split row with an inline portrait lists and loads as-is and splits on its next save; a missing blob is a missing picture', async () => {
         expect(await countRosterCharacters()).toBe(0); // creates the stores before the raw writes below
-        await putRaw('characters', { id: 'legacy', name: 'Old', race: 'elf', class: 'wizard', level: 2, savedAt: 1, character: { id: 'legacy', name: 'Old', portraitUrl: portrait('L'), portraitProvider: 'xai' }, inventory: [] });
+        await putRaw('characters', { id: 'legacy', name: 'Old', race: 'human', class: 'fighter', level: 3, savedAt: 1, character: fullHero({ id: 'legacy', name: 'Old', portraitUrl: portrait('L'), portraitProvider: 'xai' }), inventory: [] });
         await putRaw('characters', { id: 'dangling', name: 'Lost', race: 'elf', class: 'wizard', level: 2, savedAt: 1, portraitRefs: ['p-gone'], character: { id: 'dangling', name: 'Lost', portraitRef: 'p-gone', portraitProvider: 'xai', portraitUpdatedAt: 3 }, inventory: [] });
         expect((await listRosterCharacters()).map(row => row.name).sort()).toEqual(['Lost', 'Old']);
         const legacy = await loadRosterCharacter('legacy');
@@ -1057,5 +1065,82 @@ describe('chronicle store — chapter prose does not ride the record that change
         const serialized = serializeGameState(state);
         expect(serialized.chronicle[0].text).toBe(chapterText('A'));
         expect(serialized.chronicle[0]).not.toHaveProperty('chapterRef');
+    });
+});
+
+describe('2026-10-06 audit: the queue sweep (persistence + character-vault)', () => {
+    it('a roster row saved from the Character Sheet equals one saved from an import of the same hero', async () => {
+        // The sheet saves the LIVE hero (wounded, dying, spent); the import path
+        // saves a file's hero. Since 2026-10-06 the roster templates every write,
+        // so the two rows are the same hero — the roster is a TEMPLATE
+        // (DECISIONS.md 2026-09-03), never an afterlife.
+        const live = fullHero({
+            id: 'char-live', currentHP: 0, isDead: true, deathSaves: { successes: 0, failures: 3 }, conditions: ['Unconscious'],
+            classResources: { secondWind: { used: 1, max: 1 } }, armorClass: 99, startingGoldRolls: [4, 4, 4, 4],
+        });
+        const inventory = [{ name: 'Dagger', type: 'weapon', equipped: true }, { name: 'Torch', quantity: 3 }];
+        await saveRosterCharacter(live, inventory);
+        const imported = parseCharacterExport(JSON.stringify(buildCharacterExport(live, inventory)));
+        await saveRosterCharacter({ ...imported.character, id: 'char-import' }, imported.inventory);
+
+        const fromSheet = await loadRosterCharacter('char-live');
+        const fromImport = await loadRosterCharacter('char-import');
+        const strip = c => { const { id: _id, createdAt: _c, ...rest } = c; return rest; };
+        expect(strip(fromSheet.character)).toEqual(strip(fromImport.character));
+        expect(fromSheet.character).not.toHaveProperty('isDead');
+        expect(fromSheet.character).not.toHaveProperty('startingGoldRolls');
+        expect(fromSheet.character.currentHP).toBe(fromSheet.character.maxHP);
+        expect(fromSheet.inventory.map(i => [i.name, i.equipped, i.quantity])).toEqual(fromImport.inventory.map(i => [i.name, i.equipped, i.quantity]));
+    });
+
+    it('a hero the vault cannot template is refused with the vault message and opens no transaction', async () => {
+        const opens = vi.spyOn(globalThis.indexedDB, 'open');
+        try {
+            await expect(saveRosterCharacter({ id: 'x', name: 'Nameless', race: 'gnome', class: 'fighter', level: 1 }, [])).rejects.toThrow(/race "gnome"/);
+            expect(opens).not.toHaveBeenCalled();
+        } finally {
+            opens.mockRestore();
+        }
+    });
+
+    it('deleteSave names the payload delete\'s error when that request is the one that fails', async () => {
+        await saveGame('slot-1', makeGameState());
+        const originalDelete = IDBObjectStore.prototype.delete;
+        const payloadError = new Error('payload delete failed');
+        vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (key) {
+            if (this.name !== 'savePayloads') return originalDelete.call(this, key);
+            const fake = { error: payloadError, onsuccess: null, onerror: null };
+            queueMicrotask(() => fake.onerror?.({ target: fake }));
+            return fake;
+        });
+        try {
+            await expect(deleteSave('slot-1')).rejects.toBe(payloadError);
+        } finally {
+            IDBObjectStore.prototype.delete.mockRestore?.();
+            IDBObjectStore.prototype.delete = originalDelete;
+        }
+    });
+
+    it('buildSaveMetadata types the WRITE through the same field table the read uses', async () => {
+        const meta = (await import('./persistence.js')).buildSaveMetadata({
+            session: { id: 7, name: { title: 'x' } },
+            character: { name: 'Astra', level: '4', currentHP: 'lots', gold: '12' },
+            inventory: 'none', quests: [{ status: 'active' }, { status: 'completed' }, null], party: null, messages: [{}, {}],
+            currentLocation: ['Docks'],
+        });
+        expect(meta).toEqual({
+            sessionId: null, name: 'Unnamed Save', characterName: 'Astra', characterLevel: 4, characterClass: 'Unknown',
+            characterHP: 0, characterMaxHP: 0, characterAC: 10, gold: 12, silver: 0, copper: 0, inventoryCount: 0,
+            location: null, questCount: 1, partySize: 0, messageCount: 2,
+        });
+        // The read projects the same keys (plus slotId / savedAt) — one table, no drift.
+        const row = projectSaveMetadata({ slotId: 's', ...meta, savedAt: 1 });
+        const { slotId: _s, savedAt: _a, ...fields } = row;
+        expect(fields).toEqual(meta);
+    });
+
+    it('the serializer has no combat default: the field persists as the reducer holds it', () => {
+        expect(serializeGameState(makeGameState({ combat: undefined }))).not.toHaveProperty('combat', expect.objectContaining({ active: false }));
+        expect(serializeGameState(makeGameState()).combat).toEqual(makeGameState().combat);
     });
 });

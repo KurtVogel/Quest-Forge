@@ -1,39 +1,26 @@
 /**
- * Persistence layer using LocalStorage (settings) and IndexedDB (game saves).
+ * Persistence layer: LocalStorage (settings) and IndexedDB (campaign save
+ * slots). The database plumbing lives in idb.js and the hero roster in
+ * rosterStore.js (split 2026-10-06 — this file was five concerns in 805 lines).
  */
 import { CURRENT_SAVE_VERSION } from './migrations.js';
 import { sanitizeSettings } from './settingsSchema.js';
 import { ROLL_HISTORY_CAP } from '../config/contentLimits.js';
+import { BLOB_LANES, collectLaneRefs, extractLanes, restoreLanes } from './portraitStore.js';
 import {
-    BLOB_LANES,
-    collectLaneRefs,
-    collectPortraitRefs,
-    extractLanes,
-    extractPortraits,
-    restoreLanes,
-    restorePortraits,
-} from './portraitStore.js';
+    BLOB_SWEEP_STORES,
+    PAYLOAD_STORE,
+    STORE_NAME,
+    ensureLaneBlobs,
+    metaNumber,
+    metaText,
+    metadataRefs,
+    readLaneBlobs,
+    sweepOrphanBlobs,
+    withDb,
+} from './idb.js';
 
 const SETTINGS_KEY = 'rpg-client-settings';
-const DB_NAME = 'rpg-client-saves';
-// v3 (2026-08-04): save payloads split out of the metadata records so listing
-// saves never materializes full campaign states (multi-MB on mature campaigns).
-// v4 (2026-09-21): portrait bytes split out of the payloads into a
-// content-addressed `portraits` store (state/portraitStore.js) — they were
-// ~96 % of every autosave and never change. No data migration: a payload that
-// still carries inline portraits loads as-is and is split on its next save.
-// v5 (2026-09-24): chronicle chapter prose split the same way into a
-// content-addressed `chronicleChapters` store — chapters are immutable and
-// were 23–25 % of every autosave after the portrait split. Same no-migration
-// rule: inline chapters load as-is and split on the next save.
-const DB_VERSION = 5;
-const STORE_NAME = 'saves';
-const PAYLOAD_STORE = 'savePayloads';
-// The two blob stores are named by their lanes' ids (`BLOB_LANES` in
-// portraitStore.js — the one lane table both storage paths read).
-const PORTRAIT_STORE = 'portraits';
-const CHAPTER_STORE = 'chronicleChapters';
-const ROSTER_STORE = 'characters';
 const AUTOSAVE_SLOT = '__autosave__';
 
 // === LocalStorage (Settings) ===
@@ -69,149 +56,7 @@ export function loadSettings() {
     }
 }
 
-// === IndexedDB (Game Saves) ===
-
-/** How long a blocked open may stall before we fail loudly instead of hanging forever. */
-const OPEN_BLOCKED_TIMEOUT_MS = 8000;
-
-function openDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, DB_VERSION);
-        // A DB_VERSION bump while another tab holds an older connection fires
-        // `blocked` instead of resolving — without this, every save/load (autosave
-        // included) awaits forever with no error to surface. Fail loudly instead.
-        let blockedTimer = null;
-        const clearBlocked = () => { if (blockedTimer) { clearTimeout(blockedTimer); blockedTimer = null; } };
-        request.onblocked = () => {
-            console.error('[Persistence] IndexedDB open is blocked by another tab holding an older connection. Close other Quest Forge tabs.');
-            if (!blockedTimer) {
-                blockedTimer = setTimeout(() => {
-                    reject(new Error('Save storage is blocked by another open tab. Close other Quest Forge tabs and try again.'));
-                }, OPEN_BLOCKED_TIMEOUT_MS);
-            }
-        };
-        request.onerror = () => { clearBlocked(); reject(request.error); };
-        request.onsuccess = () => { clearBlocked(); resolve(request.result); };
-        request.onupgradeneeded = (event) => {
-            const db = event.target.result;
-            if (!db.objectStoreNames.contains(STORE_NAME)) {
-                db.createObjectStore(STORE_NAME, { keyPath: 'slotId' });
-            }
-            if (!db.objectStoreNames.contains(ROSTER_STORE)) {
-                db.createObjectStore(ROSTER_STORE, { keyPath: 'id' });
-            }
-            if (!db.objectStoreNames.contains(PAYLOAD_STORE)) {
-                db.createObjectStore(PAYLOAD_STORE, { keyPath: 'slotId' });
-                migrateEmbeddedPayloads(event.target.transaction);
-            }
-            if (!db.objectStoreNames.contains(PORTRAIT_STORE)) {
-                // Out-of-line keys: the value IS the data URL string.
-                db.createObjectStore(PORTRAIT_STORE);
-            }
-            if (!db.objectStoreNames.contains(CHAPTER_STORE)) {
-                // Out-of-line keys: the value IS the chapter's prose.
-                db.createObjectStore(CHAPTER_STORE);
-            }
-        };
-    });
-}
-
-/**
- * v2 → v3: move each save's full state payload out of its metadata record,
- * one-time, inside the versionchange transaction (the open blocks until the
- * cursor finishes).
- *
- * Every step is per-record and NON-FATAL (2026-09-02 audit): a failed payload
- * put (quota — peak is ~2× every save inside this one transaction) used to
- * bubble up and abort the whole upgrade, which failed the open, re-ran the
- * upgrade on EVERY later open, and so failed every save/load/autosave forever.
- * Now a failing record simply stays legacy (state still embedded in its
- * metadata record — `loadGame`'s embedded-state fallback reads it, `listSaves`
- * strips it) and the metadata is only stripped AFTER its payload landed, so a
- * record can never lose its state to a put that never happened.
- */
-function migrateEmbeddedPayloads(transaction) {
-    const saves = transaction.objectStore(STORE_NAME);
-    const payloads = transaction.objectStore(PAYLOAD_STORE);
-    // Cancel the error's default action (aborting the transaction) and keep it
-    // from bubbling to the transaction/database handlers.
-    const keepGoing = (label) => (errorEvent) => {
-        errorEvent.preventDefault?.();
-        errorEvent.stopPropagation?.();
-        console.warn(`[Persistence] Save migration: ${label} — the record stays in its legacy layout.`, errorEvent.target?.error);
-    };
-    const cursorRequest = saves.openCursor();
-    cursorRequest.onerror = keepGoing('cursor failed');
-    cursorRequest.onsuccess = (cursorEvent) => {
-        const cursor = cursorEvent.target.result;
-        if (!cursor) return;
-        const record = cursor.value;
-        if (!record?.state) {
-            cursor.continue();
-            return;
-        }
-        let putRequest = null;
-        try {
-            putRequest = payloads.put({ slotId: record.slotId, state: record.state });
-        } catch (e) {
-            // A synchronous throw (non-cloneable value) is the same outcome: legacy.
-            console.warn('[Persistence] Save migration: payload copy threw — the record stays in its legacy layout.', e);
-            cursor.continue();
-            return;
-        }
-        putRequest.onerror = (errorEvent) => {
-            keepGoing(`payload copy for "${record.slotId}" failed`)(errorEvent);
-            cursor.continue();
-        };
-        putRequest.onsuccess = () => {
-            // Strip the embedded state only now that its copy is in place; the
-            // cursor is still positioned on this record (continue() not yet called).
-            const { state: _state, ...metadata } = record;
-            try {
-                const updateRequest = cursor.update(metadata);
-                // Both copies exist if this fails — loadGame prefers the payload.
-                updateRequest.onerror = keepGoing(`metadata strip for "${record.slotId}" failed`);
-            } catch (e) {
-                console.warn('[Persistence] Save migration: metadata strip threw — both copies remain.', e);
-            }
-            cursor.continue();
-        };
-    };
-}
-
-/**
- * Open the database, run `execute(db, resolve, reject)` as a Promise
- * executor, and guarantee the connection is closed however it ends:
- * commit, abort, a request error, OR a synchronous throw inside the executor
- * (`DataCloneError` on a non-cloneable snapshot, `InvalidStateError` while the
- * connection is closing under a cross-tab versionchange, a plain `TypeError`
- * on a bad snapshot). The per-function `db.close()` calls used to live on the
- * complete/abort handlers only, so a sync throw rejected the promise and
- * leaked the connection — and a leaked connection is exactly what blocks
- * another tab's versioned open until the 8s `onblocked` timeout (2026-09-02
- * audit). Closing here is the ONE close site; `close()` on an already-closed
- * connection is a spec no-op, and closing with a transaction still running
- * merely flags close-pending — the transaction finishes first.
- */
-async function withDb(execute) {
-    const db = await openDB();
-    // Another tab bumping DB_VERSION must not be held up by this connection.
-    db.onversionchange = () => db.close();
-    try {
-        return await new Promise((resolve, reject) => execute(db, resolve, reject));
-    } finally {
-        db.close();
-    }
-}
-
-/**
- * Save-format version stamped into every persisted state payload. Owned by the
- * load-time migration pipeline (state/migrations.js), which version-gates its
- * one-time era migrations on this stamp; `validateSaveState` keeps normalizing
- * defensively either way. Kept under the historical SAVE_VERSION name for
- * existing consumers.
- */
-export const SAVE_VERSION = CURRENT_SAVE_VERSION;
+// === The save snapshot ===
 
 /**
  * Build the persistable snapshot of the game state. Shared by BOTH save paths
@@ -221,61 +66,74 @@ export const SAVE_VERSION = CURRENT_SAVE_VERSION;
  * top-level state field must persist by default. A whitelist here is how
  * `fronts` and `pendingRoleplayCheck` silently vanished from local saves —
  * the hidden-fronts system was dead in every reloaded campaign until 2026-07-03.
- * Excluded on purpose:
+ * Excluded on purpose (`AUTOSAVE_IGNORED_FIELDS` in autosavePolicy.js is the
+ * same set, pinned equal by its test):
  *  - `user`: live auth session, never restored from a save (LOAD_GAME keeps the live one)
  *  - `ui`: transient panel/modal state
  *  - `settings`: device-local by design, persisted separately via saveSettings()
  *    (DECISIONS.md 2026-08-27: LOAD_GAME's "live settings win" rule always
  *    overrode the embedded copy, so it was write-only ballast — multi-KB of
  *    customSystemPrompt in every autosave — and is now stripped like user/ui)
+ *
+ * The save-format version stamped here is owned by the load-time migration
+ * pipeline (state/migrations.js), which version-gates its one-time era
+ * migrations on it; `validateSaveState` keeps normalizing defensively either way.
  */
 export function serializeGameState(gameState) {
     const { user: _user, ui: _ui, settings: _settings, ...persisted } = gameState;
     return {
         ...persisted,
-        saveVersion: SAVE_VERSION,
+        saveVersion: CURRENT_SAVE_VERSION,
         // Wall-clock stamp on the PAYLOAD (2026-09-16, the return card): the
         // slot metadata already carries one, but the loaded state never did,
         // so LOAD_GAME could not heal a pre-stamp campaign's lastPlayedAt.
         savedAt: Date.now(),
         rollHistory: (gameState.rollHistory || []).slice(-ROLL_HISTORY_CAP),
-        combat: gameState.combat || { active: false, enemies: [], turnOrder: [], currentTurn: 0, round: 1 },
     };
 }
 
-/** Shared slot-list metadata for a save (local and cloud add their own savedAt/slot fields). */
+// === Slot metadata: ONE field table for the write and the read ===
+
+/**
+ * THE slot metadata fields (2026-10-06 persistence P2): `read` is the typed
+ * reader (`metaText` / `metaNumber`), `fallback` what an absent or junk value
+ * becomes, `from` where the live state carries it. `buildSaveMetadata` writes
+ * the table and `projectSaveMetadata` reads it back, so the two cannot drift
+ * (the 08-27 queue fixed exactly that drift once, by hand). Local and cloud
+ * add their own `slotId` / `savedAt` / lane ref lists around these.
+ */
+const SAVE_METADATA_FIELDS = [
+    // Campaign identity stamp: lets deletion decide whether any slot still
+    // holds a campaign before purging its embedding cache (vectorMemory.js).
+    // Absent on legacy saves.
+    { field: 'sessionId', read: metaText, fallback: null, from: s => s.session?.id },
+    { field: 'name', read: metaText, fallback: 'Unnamed Save', from: s => s.session?.name },
+    { field: 'characterName', read: metaText, fallback: 'Unknown', from: s => s.character?.name },
+    { field: 'characterLevel', read: metaNumber, fallback: 1, from: s => s.character?.level },
+    { field: 'characterClass', read: metaText, fallback: 'Unknown', from: s => s.character?.class },
+    { field: 'characterHP', read: metaNumber, fallback: 0, from: s => s.character?.currentHP },
+    { field: 'characterMaxHP', read: metaNumber, fallback: 0, from: s => s.character?.maxHP },
+    { field: 'characterAC', read: metaNumber, fallback: 10, from: s => s.character?.armorClass },
+    { field: 'gold', read: metaNumber, fallback: 0, from: s => s.character?.gold },
+    { field: 'silver', read: metaNumber, fallback: 0, from: s => s.character?.silver },
+    { field: 'copper', read: metaNumber, fallback: 0, from: s => s.character?.copper },
+    { field: 'inventoryCount', read: metaNumber, fallback: 0, from: s => countOf(s.inventory) },
+    { field: 'location', read: metaText, fallback: null, from: s => s.currentLocation },
+    { field: 'questCount', read: metaNumber, fallback: 0, from: s => countOf(s.quests, q => q?.status === 'active') },
+    { field: 'partySize', read: metaNumber, fallback: 0, from: s => countOf(s.party) },
+    { field: 'messageCount', read: metaNumber, fallback: 0, from: s => countOf(s.messages) },
+];
+
+/** A list's count, or nothing for a non-list (a string has a `.length` too). */
+function countOf(list, predicate = () => true) {
+    return Array.isArray(list) ? list.filter(predicate).length : undefined;
+}
+
+/** Shared slot-list metadata for a save (local and cloud add their own savedAt/slot fields). Typed at the WRITE through the same table the read uses. */
 export function buildSaveMetadata(gameState) {
-    return {
-        // Campaign identity stamp: lets deletion decide whether any slot still
-        // holds a campaign before purging its embedding cache (vectorMemory.js).
-        sessionId: gameState.session?.id || null,
-        name: gameState.session?.name || 'Unnamed Save',
-        characterName: gameState.character?.name || 'Unknown',
-        characterLevel: gameState.character?.level || 1,
-        characterClass: gameState.character?.class || 'Unknown',
-        characterHP: gameState.character?.currentHP || 0,
-        characterMaxHP: gameState.character?.maxHP || 0,
-        characterAC: gameState.character?.armorClass || 10,
-        gold: gameState.character?.gold || 0,
-        silver: gameState.character?.silver || 0,
-        copper: gameState.character?.copper || 0,
-        inventoryCount: gameState.inventory?.length || 0,
-        location: gameState.currentLocation || null,
-        questCount: gameState.quests?.filter(q => q.status === 'active')?.length || 0,
-        partySize: gameState.party?.length || 0,
-    };
+    const state = gameState && typeof gameState === 'object' ? gameState : {};
+    return Object.fromEntries(SAVE_METADATA_FIELDS.map(({ field, read, fallback, from }) => [field, read(from(state), fallback)]));
 }
-
-const META_TEXT_MAX = 200;
-const metaText = (value, fallback) => {
-    if (typeof value !== 'string') return fallback;
-    const trimmed = value.trim().slice(0, META_TEXT_MAX);
-    return trimmed || fallback;
-};
-const metaNumber = (value, fallback) => {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : fallback;
-};
 
 /**
  * ONE typed projection for a save-list row, shared by `listSaves` (IndexedDB)
@@ -294,95 +152,8 @@ export function projectSaveMetadata(data, fallbackSlotId = null) {
     const savedAt = typeof record.savedAt === 'number' || typeof record.savedAt === 'string' ? record.savedAt : 0;
     return {
         slotId,
-        sessionId: metaText(record.sessionId, null), // absent on legacy saves
-        name: metaText(record.name, 'Unnamed Save'),
-        characterName: metaText(record.characterName, 'Unknown'),
-        characterLevel: metaNumber(record.characterLevel, 1),
-        characterClass: metaText(record.characterClass, 'Unknown'),
-        characterHP: metaNumber(record.characterHP, 0),
-        characterMaxHP: metaNumber(record.characterMaxHP, 0),
-        characterAC: metaNumber(record.characterAC, 10),
-        gold: metaNumber(record.gold, 0),
-        silver: metaNumber(record.silver, 0),
-        copper: metaNumber(record.copper, 0),
-        inventoryCount: metaNumber(record.inventoryCount, 0),
-        location: metaText(record.location, null),
-        questCount: metaNumber(record.questCount, 0),
-        partySize: metaNumber(record.partySize, 0),
-        messageCount: metaNumber(record.messageCount, 0),
+        ...Object.fromEntries(SAVE_METADATA_FIELDS.map(({ field, read, fallback }) => [field, read(record[field], fallback)])),
         savedAt,
-    };
-}
-
-const metadataPortraitRefs = (record) =>
-    (Array.isArray(record?.portraitRefs) ? record.portraitRefs.filter(ref => typeof ref === 'string') : []);
-
-/**
- * Every store a transaction must include to sweep orphan PORTRAITS: the slot
- * metadata records, the roster (its rows carry their hero's ref since
- * 2026-09-24 — the roster was the last inline-portrait store, and a hero saved
- * to the roster and to a slot shares ONE blob, so both sides are live sets),
- * and the portraits themselves. Requests run in order, so the sweep's
- * `getAll`s already see the caller's own put/delete, and overlapping
- * readwrite transactions serialize, so a concurrent save can never have its
- * fresh blob swept between its blob put and its metadata put.
- */
-const PORTRAIT_SWEEP_STORES = [STORE_NAME, ROSTER_STORE, PORTRAIT_STORE];
-
-/**
- * Every store a transaction must include to sweep ALL blob stores (a save
- * slot's write/delete can orphan a portrait or a chapter). A transaction that
- * carries only some of them sweeps only those — a roster save's scope is
- * `PORTRAIT_SWEEP_STORES`, and a roster save cannot orphan a chapter.
- */
-export const BLOB_SWEEP_STORES = [...PORTRAIT_SWEEP_STORES, CHAPTER_STORE];
-
-const metadataRefs = (record, refsField) =>
-    (Array.isArray(record?.[refsField]) ? record[refsField].filter(ref => typeof ref === 'string') : []);
-
-/**
- * The 09-21 portrait sweep, generalized (2026-09-24) to every blob store the
- * transaction has in scope: live sets are read from every slot's metadata
- * record (+ a legacy embedded state) and, for portraits, every roster row.
- */
-function sweepOrphanBlobs(tx) {
-    const quiet = (event) => { event.preventDefault?.(); event.stopPropagation?.(); };
-    const lanes = BLOB_LANES
-        .filter(lane => tx.objectStoreNames.contains(lane.id))
-        .map(lane => ({ ...lane, live: new Set() }));
-    if (lanes.length === 0) return;
-    const sweepStores = () => {
-        for (const lane of lanes) {
-            const store = tx.objectStore(lane.id);
-            const keysRequest = store.getAllKeys();
-            keysRequest.onerror = quiet;
-            keysRequest.onsuccess = () => {
-                for (const key of keysRequest.result || []) {
-                    if (!lane.live.has(key)) store.delete(key).onerror = quiet;
-                }
-            };
-        }
-    };
-    const allRequest = tx.objectStore(STORE_NAME).getAll();
-    allRequest.onerror = quiet;
-    allRequest.onsuccess = () => {
-        for (const record of allRequest.result || []) {
-            for (const lane of lanes) {
-                metadataRefs(record, lane.refsField).forEach(ref => lane.live.add(ref));
-                if (record?.state) lane.collect(record.state).forEach(ref => lane.live.add(ref));
-            }
-        }
-        const portraitLane = lanes.find(lane => lane.id === PORTRAIT_STORE);
-        if (!portraitLane) { sweepStores(); return; }
-        const rosterRequest = tx.objectStore(ROSTER_STORE).getAll();
-        rosterRequest.onerror = quiet;
-        rosterRequest.onsuccess = () => {
-            for (const record of rosterRequest.result || []) {
-                metadataPortraitRefs(record).forEach(ref => portraitLane.live.add(ref));
-                collectPortraitRefs({ character: record?.character }).forEach(ref => portraitLane.live.add(ref));
-            }
-            sweepStores();
-        };
     };
 }
 
@@ -402,11 +173,12 @@ export function prepareSavePayload(slotId, gameState, savedAt) {
         slotId,
         ...buildSaveMetadata(gameState),
         savedAt,
-        messageCount: (gameState.messages || []).length,
         ...Object.fromEntries(lanes.map(lane => [lane.refsField, lane.refs])),
     };
     return { state, lanes, metadata };
 }
+
+// === IndexedDB (campaign save slots) ===
 
 /**
  * Save game state to a named slot: a metadata-only record in `saves` plus the
@@ -430,9 +202,8 @@ export function saveGame(slotId, gameState) {
         let payloadRequest = null;
 
         // The slot's PREVIOUS record is read FIRST (2026-09-23 audit P2, minor):
-        // a ref it lists is on disk and live (the sweep only ever deletes what
-        // no record lists, inside serialized transactions), so only refs it
-        // did NOT list are probed — a steady-state autosave makes zero
+        // a ref it lists is on disk and live, so only refs it did NOT list are
+        // probed (`ensureLaneBlobs`) — a steady-state autosave makes zero
         // `getKey` requests. Its refs also decide whether anything can have
         // been orphaned (a reroll, a removed NPC, a dropped chapter, a
         // different campaign in the slot).
@@ -442,20 +213,10 @@ export function saveGame(slotId, gameState) {
             const previous = previousRequest.result;
             let released = false;
             for (const lane of lanes) {
-                const listed = new Set(metadataRefs(previous, lane.refsField));
                 const kept = new Set(lane.refs);
-                if ([...listed].some(ref => !kept.has(ref))) released = true;
-                // A blob is immutable under its content key: write it only when
-                // absent (getKey reads no bytes). A failed put aborts the
-                // transaction — the save fails loudly rather than committing a
-                // payload whose picture or chapter never landed.
-                const store = tx.objectStore(lane.id);
-                for (const [key, bytes] of lane.blobs) {
-                    if (listed.has(key)) continue;
-                    const probe = store.getKey(key);
-                    probe.onsuccess = () => { if (probe.result === undefined) store.put(bytes, key); };
-                }
+                if (metadataRefs(previous, lane.refsField).some(ref => !kept.has(ref))) released = true;
             }
+            ensureLaneBlobs(tx, lanes, lane => new Set(metadataRefs(previous, lane.refsField)));
 
             metadataRequest = saves.put(metadata);
             payloadRequest = tx.objectStore(PAYLOAD_STORE).put({ slotId, state: slimState });
@@ -502,21 +263,7 @@ export function loadGame(slotId) {
         // dropped chapter, never a failed load.
         const hydrate = (stored) => {
             const state = asSaveObject(stored);
-            const wanted = collectLaneRefs(state);
-            let pending = wanted.reduce((count, entry) => count + entry.refs.length, 0);
-            if (pending === 0) { resolve(state); return; }
-            const found = new Map(wanted.map(({ lane }) => [lane.id, new Map()]));
-            const settle = () => {
-                if (--pending > 0) return;
-                resolve(restoreLanes(state, (lane, key) => found.get(lane.id)?.get(key)));
-            };
-            for (const { lane, refs } of wanted) {
-                for (const ref of refs) {
-                    const blobRequest = tx.objectStore(lane.id).get(ref);
-                    blobRequest.onsuccess = () => { found.get(lane.id).set(ref, blobRequest.result); settle(); };
-                    blobRequest.onerror = (event) => { event.preventDefault?.(); event.stopPropagation?.(); settle(); };
-                }
-            }
+            readLaneBlobs(tx, collectLaneRefs(state), lookup => resolve(state ? restoreLanes(state, lookup) : state));
         };
         const request = tx.objectStore(PAYLOAD_STORE).get(slotId);
         request.onsuccess = () => {
@@ -590,191 +337,9 @@ export function deleteSave(slotId) {
         request.onerror = () => reject(request.error);
         payloadRequest.onerror = () => reject(payloadRequest.error);
         tx.oncomplete = () => resolve();
-        tx.onabort = () => reject(tx.error || request.error);
-    });
-}
-
-// === Character roster (heroes, not campaigns — see engine/characterVault.js) ===
-
-/**
- * Save a hero snapshot (character + inventory) to the roster.
- * Keyed by character.id, so re-saving the same hero updates its entry;
- * imports get a fresh id and create a new entry.
- *
- * The hero's portrait rides the content-addressed `portraits` store, not the
- * row (2026-09-24 character-vault P2): the roster was the LAST inline-portrait
- * store — 93 % of a row was a second copy of the blob the campaign's save
- * already held. The row carries `character.portraitRef` + `portraitRefs`
- * (the sweep's metadata read, like a save slot); the blob is put only when
- * its key is absent, so a hero already in a slot moves zero portrait bytes.
- * Resolves the STORED row (slim); callers wanting the picture use
- * `loadRosterCharacter`.
- */
-export function saveRosterCharacter(character, inventory) {
-    return withDb((db, resolve, reject) => {
-        const tx = db.transaction(PORTRAIT_SWEEP_STORES, 'readwrite');
-        const store = tx.objectStore(ROSTER_STORE);
-        // A legacy pre-id-era hero gets an id minted here; the caller must write it
-        // back into live state (see CharacterSheet.handleSaveToRoster) or every
-        // later "Save to Roster" click mints a fresh id and duplicates the entry.
-        const id = character.id || `char-${Date.now()}`;
-        const { state, blobs, refs } = extractPortraits({ character: character.id ? character : { ...character, id } });
-        const entry = {
-            id,
-            name: character.name,
-            race: character.race,
-            class: character.class,
-            level: character.level,
-            savedAt: Date.now(),
-            portraitRefs: refs,
-            character: state.character,
-            inventory: inventory || [],
-        };
-        const portraits = tx.objectStore(PORTRAIT_STORE);
-        for (const [key, url] of blobs) {
-            const probe = portraits.getKey(key);
-            probe.onsuccess = () => { if (probe.result === undefined) portraits.put(url, key); };
-        }
-        // A reroll since the last roster save releases the old blob — unless a
-        // slot still shows it, which the sweep checks.
-        let released = false;
-        const previousRequest = store.get(id);
-        previousRequest.onsuccess = () => {
-            const kept = new Set(refs);
-            released = metadataPortraitRefs(previousRequest.result).some(ref => !kept.has(ref));
-        };
-        const request = store.put(entry);
-        request.onsuccess = () => { if (released) sweepOrphanBlobs(tx); };
-        // Resolve on COMMIT (see saveGame) so a list refresh right after sees the entry.
-        request.onerror = () => reject(request.error);
-        tx.oncomplete = () => resolve(entry);
-        tx.onabort = () => reject(tx.error || request.error);
-    });
-}
-
-/**
- * ONE typed projection for a roster LIST row (2026-09-11 persistence P2 — the
- * 09-10 "a render is a trust boundary" class, one list over): the hero picker
- * renders `name` / `level` / race / class as React children with no boundary
- * of its own. Text is string-or-fallback, level finite, savedAt a number; a
- * record without a string id (the store's key) or a non-object record is
- * dropped. Metadata ONLY (2026-09-24, the `saves`/`savePayloads` split's
- * pattern): the list never hands out `character`/`inventory` — a row is
- * hydrated on select / begin / export through `loadRosterCharacter`.
- */
-export function projectRosterEntry(record) {
-    if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
-    const id = metaText(record.id, null);
-    if (!id) return null;
-    const character = record.character && typeof record.character === 'object' && !Array.isArray(record.character)
-        ? record.character
-        : null;
-    return {
-        id,
-        name: metaText(record.name, null) || metaText(character?.name, 'Unnamed hero'),
-        race: metaText(record.race, ''),
-        class: metaText(record.class, ''),
-        level: metaNumber(record.level, 1),
-        savedAt: metaNumber(record.savedAt, 0),
-    };
-}
-
-/**
- * The full roster hero: the list row plus the stored `character` (portrait
- * restored inline) and `inventory`. The embedded `character` is otherwise
- * untouched — the picker runs it through the vault's sanitizeCharacter,
- * which is the real gate.
- */
-export function projectRosterHero(record, lookup = () => undefined) {
-    const entry = projectRosterEntry(record);
-    if (!entry) return null;
-    const hydrated = restorePortraits({ character: record.character }, lookup);
-    const character = hydrated.character && typeof hydrated.character === 'object' && !Array.isArray(hydrated.character)
-        ? hydrated.character
-        : null;
-    return { ...entry, character, inventory: Array.isArray(record.inventory) ? record.inventory : [] };
-}
-
-/**
- * List all roster heroes, newest first — metadata rows only. Reads no
- * portrait blob: the wizard mounts this on every hero pick and a live roster
- * row used to be 97k chars, 90k of it the picture.
- */
-export function listRosterCharacters() {
-    return withDb((db, resolve, reject) => {
-        const tx = db.transaction(ROSTER_STORE, 'readonly');
-        const store = tx.objectStore(ROSTER_STORE);
-        const request = store.getAll();
-        request.onsuccess = () => {
-            resolve((Array.isArray(request.result) ? request.result : [])
-                .map(projectRosterEntry)
-                .filter(Boolean)
-                .sort((a, b) => b.savedAt - a.savedAt));
-        };
-        request.onerror = () => reject(request.error);
-        tx.onabort = () => reject(tx.error || request.error);
-    });
-}
-
-/**
- * How many heroes the roster holds — the start card's "N in roster" — read
- * through `count()`, which deserializes no row. The Forge-a-New-Hero path
- * never needs a row (2026-09-24: the wizard `getAll()`ed the roster on mount
- * on BOTH paths).
- */
-export function countRosterCharacters() {
-    return withDb((db, resolve, reject) => {
-        const tx = db.transaction(ROSTER_STORE, 'readonly');
-        const request = tx.objectStore(ROSTER_STORE).count();
-        request.onsuccess = () => resolve(metaNumber(request.result, 0));
-        request.onerror = () => reject(request.error);
-        tx.onabort = () => reject(tx.error || request.error);
-    });
-}
-
-/**
- * Load ONE roster hero with its portrait restored inline (the row carries a
- * ref). Resolves null for an unknown id. A blob that cannot be read is a
- * missing picture (stamps stripped, see portraitStore), never a failed load;
- * a legacy row still carrying an inline portraitUrl loads as-is and is split
- * on its next save.
- */
-export function loadRosterCharacter(id) {
-    return withDb((db, resolve, reject) => {
-        const tx = db.transaction([ROSTER_STORE, PORTRAIT_STORE], 'readonly');
-        const request = tx.objectStore(ROSTER_STORE).get(id);
-        request.onsuccess = () => {
-            const record = request.result;
-            if (!record || typeof record !== 'object') { resolve(null); return; }
-            const refs = collectPortraitRefs({ character: record.character });
-            if (refs.length === 0) { resolve(projectRosterHero(record)); return; }
-            const found = new Map();
-            let pending = refs.length;
-            const settle = () => { if (--pending === 0) resolve(projectRosterHero(record, key => found.get(key))); };
-            for (const ref of refs) {
-                const blobRequest = tx.objectStore(PORTRAIT_STORE).get(ref);
-                blobRequest.onsuccess = () => { found.set(ref, blobRequest.result); settle(); };
-                blobRequest.onerror = (event) => { event.preventDefault?.(); event.stopPropagation?.(); settle(); };
-            }
-        };
-        request.onerror = () => reject(request.error);
-        tx.onabort = () => reject(tx.error || request.error);
-    });
-}
-
-/**
- * Delete a roster hero. Its portrait goes with it unless a save slot (or
- * another roster row) still shows it.
- */
-export function deleteRosterCharacter(id) {
-    return withDb((db, resolve, reject) => {
-        const tx = db.transaction(PORTRAIT_SWEEP_STORES, 'readwrite');
-        const store = tx.objectStore(ROSTER_STORE);
-        const request = store.delete(id);
-        request.onsuccess = () => sweepOrphanBlobs(tx);
-        request.onerror = () => reject(request.error);
-        tx.oncomplete = () => resolve();
-        tx.onabort = () => reject(tx.error || request.error);
+        // Either delete's failure is the abort's reason (2026-10-06 P2: the
+        // payload delete's error was never named here).
+        tx.onabort = () => reject(tx.error || request.error || payloadRequest.error);
     });
 }
 

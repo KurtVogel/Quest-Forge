@@ -679,18 +679,9 @@ describe('gameReducer NPC archive/migration actions', () => {
 
     // ARCHIVE_GENERIC_FODDER was removed in the 2026-07-31 dead-code sweep — the
     // live archive path is JournalPanel's suggest-fodder review + ARCHIVE_NPC_BULK.
-
-    it('MIGRATE_NPC_ROSTER backfills rosterTier on legacy records missing it', () => {
-        const state = { ...initialGameState, npcs: [{ id: 'npc-1', name: 'Captain Voss', disposition: 'hostile' }] };
-        const next = gameReducer(state, { type: 'MIGRATE_NPC_ROSTER' });
-        expect(next.npcs[0].rosterTier).toBeTruthy();
-    });
-
-    it('MIGRATE_NPC_ROSTER is a no-op when every NPC already has a rosterTier', () => {
-        const state = { ...initialGameState, npcs: [{ id: 'npc-1', name: 'Captain Voss', rosterTier: 'character' }] };
-        const next = gameReducer(state, { type: 'MIGRATE_NPC_ROSTER' });
-        expect(next).toBe(state);
-    });
+    // MIGRATE_NPC_ROSTER went the same way on 2026-10-06: LOAD_GAME's
+    // migrateLegacyNpc stamps every record's rosterTier at load and every live
+    // writer keeps it, so the GameContext grandfather effect never fired.
 });
 describe('cadence-stamped relationship arcs (2026-08-28 — "+9 hops in one tavern evening")', () => {
     const withNpc = (extra = {}) => gameReducer(initialGameState, {

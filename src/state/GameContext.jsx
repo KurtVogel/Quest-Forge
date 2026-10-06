@@ -122,13 +122,6 @@ export function GameProvider({ children }) {
         };
     }, []);
 
-    // Grandfather legacy NPC records from long-running saves without requiring a reload.
-    useEffect(() => {
-        if ((state.npcs || []).some(npc => !npc.rosterTier)) {
-            dispatch({ type: 'MIGRATE_NPC_ROSTER' });
-        }
-    }, [state.npcs]);
-
     // Initialize Firebase and Auth listener when config is present
     useEffect(() => {
         let unsubscribe = null;
@@ -201,7 +194,7 @@ export function useSaveToast() {
  */
 export function useGameState() {
     const context = useContext(GameContext);
-    if (context === undefined) {
+    if (!context) {
         throw new Error('useGameState must be used within a GameProvider');
     }
     return context;

@@ -9,7 +9,7 @@ import { combatNarrationPrompt } from '../../llm/combatNarration.js';
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
 import { EPILOGUE_REQUEST_MESSAGE, isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
-import { saveRosterCharacter } from '../../state/persistence.js';
+import { saveRosterCharacter } from '../../state/rosterStore.js';
 import { addMemory, findSubjectsInText, retractMemoriesFromMessage, seedMemories } from '../../engine/vectorMemory.js';
 import { describeMemorySeedIncomplete, getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';

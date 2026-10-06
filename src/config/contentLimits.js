@@ -92,6 +92,23 @@ export const ROLL_HISTORY_CAP = 50;
  */
 export const MAX_ROLL_DC = 30;
 
+/**
+ * THE hero identity clamp table (2026-10-06 character-vault P2): the creation
+ * wizard (`createCharacter`), the vault import (`sanitizeCharacter`) and the
+ * LOAD_GAME heal (`healLoadedCharacter`) each wrote these six numbers by hand
+ * — `NPC_LANE_TEXT_LIMITS`'s pattern, for the hero. Appearance is the Scribe
+ * merge clamp (CHARACTER_APPEARANCE_MAX); background and notes share the
+ * player-authored 2000 cap; the provider label is a short tag.
+ */
+export const HERO_TEXT_LIMITS = Object.freeze({
+    name: 30,
+    gender: 60,
+    appearance: CHARACTER_APPEARANCE_MAX,
+    background: 2000,
+    notes: 2000,
+    portraitProvider: 40,
+});
+
 export function cleanTextField(value, max = Infinity) {
     if (typeof value !== 'string') return '';
     return value.trim().slice(0, max);

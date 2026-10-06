@@ -30,7 +30,7 @@
  * state hasn't moved past the re-render) the flag goes clean; if it fails,
  * the skipped re-render gets the ordinary dirty + debounce it would have had.
  */
-import { buildAutosaveSnapshot, hasGameplayChange, isBackgroundOnlyChange } from './autosavePolicy.js';
+import { AUTOSAVE_IGNORED_FIELDS, buildAutosaveSnapshot, hasGameplayChange, isAutosavableState, isBackgroundOnlyChange } from './autosavePolicy.js';
 
 export const AUTOSAVE_DEBOUNCE_MS = 2000;
 
@@ -57,7 +57,7 @@ export const AUTOSAVE_BACKGROUND_DEBOUNCE_MS = 15000;
 function changedPersistedKeys(prev, next) {
     const keys = new Set();
     for (const key of new Set([...Object.keys(prev), ...Object.keys(next)])) {
-        if (key === 'user' || key === 'ui' || key === 'settings') continue;
+        if (AUTOSAVE_IGNORED_FIELDS.has(key)) continue;
         if (key === 'session') {
             if (sessionChanged(prev.session, next.session)) keys.add(key);
             continue;
@@ -173,7 +173,8 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
     };
 
     const noteStateChange = (prev, state) => {
-        if (!state.session.id || !state.character) return;
+        // The policy's own predicate (a null `session` used to throw here).
+        if (!isAutosavableState(state)) return;
         if (prev && !hasGameplayChange(prev, state)) {
             // A settings/user/ui-only change between the flush and its
             // re-render must not break the lineage.

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getModifier, formatModifier, getProficiencyBonus, getAllSkills } from '../../engine/rules.js';
 import { ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
-import { downloadCharacterExport } from '../../engine/characterVault.js';
-import { saveRosterCharacter } from '../../state/persistence.js';
+import { downloadCharacterExport } from './exportFile.js';
+import { saveRosterCharacter } from '../../state/rosterStore.js';
 import { getExperienceThreshold, isMaxLevel } from '../../engine/progression.js';
 import { requestPortrait } from '../../llm/providers/imageGen.js';
 import { RACES } from '../../data/races.js';
@@ -131,7 +131,14 @@ export default function CharacterSheet() {
     };
 
     const handleExportHero = () => {
-        downloadCharacterExport(character, state.inventory);
+        setRosterError('');
+        try {
+            // The file is the TEMPLATE (rested, rebuilt — never campaign state);
+            // the vault throws its own message for a hero it cannot template.
+            downloadCharacterExport(character, state.inventory);
+        } catch (e) {
+            setRosterError(`Could not export ${character.name || 'the hero'} — ${e?.message || e}`);
+        }
     };
 
     const handleConfirmLook = () => {

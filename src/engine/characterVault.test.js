@@ -12,8 +12,9 @@ import {
     sanitizeCharacter,
     sanitizeInventory,
     parseCharacterExport,
+    toHeroTemplate,
 } from './characterVault.js';
-import { classDisplayName, createCharacter, createStartingInventory, isKnownClass, isKnownRace, normalizeFightingStyle, raceDisplayName } from './characterUtils.js';
+import { classDisplayName, createCharacter, createStartingInventory, isKnownClass, isKnownRace, mintHeroId, normalizeFightingStyle, raceDisplayName } from './characterUtils.js';
 import { getProficiencyBonus } from './rules.js';
 import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
 
@@ -24,6 +25,9 @@ function makeFighter() {
     const inventory = createStartingInventory('fighter');
     return { character, inventory };
 }
+
+/** A hero file written by hand (NOT through buildCharacterExport, which templates — 2026-10-06): the import gate's own input. */
+const rawExport = (character, inventory = []) => ({ format: EXPORT_FORMAT, version: EXPORT_VERSION, exportedAt: 1, character, inventory });
 
 describe('export round-trip', () => {
     it('a freshly created character survives export → JSON → import', () => {
@@ -152,7 +156,7 @@ describe('export round-trip', () => {
         // one click regenerates the portrait.
         const { character, inventory } = makeFighter();
         const bloated = `data:image/jpeg;base64,${'A'.repeat(400_000)}`;
-        const file = JSON.stringify(buildCharacterExport({ ...character, portraitUrl: bloated }, inventory));
+        const file = JSON.stringify(rawExport({ ...character, portraitUrl: bloated }, inventory));
         const imported = parseCharacterExport(file);
         expect(imported.character.portraitUrl).toBe('');
         expect(imported.character.name).toBe(character.name);
@@ -161,7 +165,7 @@ describe('export round-trip', () => {
     it('strips a hand-edited data URL with embedded whitespace instead of keeping it', () => {
         const { character, inventory } = makeFighter();
         const mangled = 'data:image/png;base64,iVBOR\nw0KGgo AAAA==';
-        const file = JSON.stringify(buildCharacterExport({ ...character, portraitUrl: mangled }, inventory));
+        const file = JSON.stringify(rawExport({ ...character, portraitUrl: mangled }, inventory));
         expect(parseCharacterExport(file).character.portraitUrl).toBe('');
     });
 
@@ -183,10 +187,12 @@ describe('parseCharacterExport rejections', () => {
 
     it('rejects characters with cut/unknown races or classes', () => {
         const { character, inventory } = makeFighter();
-        const asBard = buildCharacterExport({ ...character, class: 'bard' }, inventory);
+        const asBard = rawExport({ ...character, class: 'bard' }, inventory);
         expect(() => parseCharacterExport(JSON.stringify(asBard))).toThrow(/class "bard"/);
-        const asGnome = buildCharacterExport({ ...character, race: 'gnome' }, inventory);
+        const asGnome = rawExport({ ...character, race: 'gnome' }, inventory);
         expect(() => parseCharacterExport(JSON.stringify(asGnome))).toThrow(/race "gnome"/);
+        // The export side templates too, so it refuses the same hero with the same message.
+        expect(() => buildCharacterExport({ ...character, class: 'bard' }, inventory)).toThrow(/class "bard"/);
     });
 
     it('rejects a character missing a name or an ability score', () => {
@@ -571,5 +577,67 @@ describe('portrait provider rides the hero file like portraitUpdatedAt (2026-09-
         expect(sanitizeCharacter({ ...character, portraitProvider: { name: 'gemini' } }).portraitProvider).toBe('');
         expect(sanitizeCharacter({ ...character }).portraitProvider).toBe('');
         expect(sanitizeCharacter({ ...character, portraitProvider: '  p'.repeat(40) }).portraitProvider).toHaveLength(40);
+    });
+});
+
+describe('2026-10-06 audit: ONE roster shape — the template at the write', () => {
+    it('toHeroTemplate rests and rebuilds the hero, keeps the live id, mints one only when absent', () => {
+        const { character, inventory } = makeFighter();
+        const corpse = {
+            ...character, id: 'char-live-1', currentHP: 0, isDead: true, dying: true, lowLevelDefeat: true,
+            deathSaves: { successes: 0, failures: 3 }, conditions: ['Unconscious'],
+            classResources: { secondWind: { used: 1, max: 1 }, actionSurge: { used: 1, max: 1 } },
+            sustainedSpell: { spellKey: 'shield', acBonus: 5 }, startingGoldRolls: [4, 4, 4, 4],
+        };
+        const template = toHeroTemplate(corpse, inventory);
+        expect(template.character.id).toBe('char-live-1');
+        expect(template.character).not.toHaveProperty('isDead');
+        expect(template.character).not.toHaveProperty('dying');
+        expect(template.character).not.toHaveProperty('lowLevelDefeat');
+        expect(template.character).not.toHaveProperty('startingGoldRolls');
+        expect(template.character.sustainedSpell).toBeUndefined();
+        expect(template.character.currentHP).toBe(template.character.maxHP);
+        expect(template.character.conditions).toEqual([]);
+        expect(template.character.classResources.secondWind.used).toBe(0);
+        expect(template.inventory).toHaveLength(inventory.length);
+        // No id → the one mint.
+        const { id: _id, ...noId } = corpse;
+        expect(toHeroTemplate(noId, inventory).character.id).toMatch(/^char-\d+-[a-z0-9]{1,5}$/);
+        expect(toHeroTemplate({ ...corpse, id: '  ' }, inventory).character.id).toMatch(/^char-\d+-[a-z0-9]{1,5}$/);
+    });
+
+    it('a hero file is the template: both Export File buttons ship no campaign state', () => {
+        const { character, inventory } = makeFighter();
+        const corpse = { ...character, currentHP: 0, isDead: true, deathSaves: { successes: 0, failures: 3 }, armorClass: 99 };
+        const file = buildCharacterExport(corpse, inventory);
+        expect(file.character).not.toHaveProperty('isDead');
+        expect(file.character).not.toHaveProperty('deathSaves');
+        expect(file.character.currentHP).toBe(file.character.maxHP);
+        expect(file.character.id).toBe(character.id);
+        // Templating is idempotent: a file of a file is the same hero.
+        const again = buildCharacterExport(file.character, file.inventory);
+        const strip = c => { const { createdAt: _c, ...rest } = c; return rest; };
+        expect(strip(again.character)).toEqual(strip(file.character));
+        expect(again.inventory.map(i => [i.name, i.equipped, i.quantity])).toEqual(file.inventory.map(i => [i.name, i.equipped, i.quantity]));
+    });
+
+    it('the three hero id mints agree in shape (creation, import, the roster template)', () => {
+        const shape = /^char-\d+-[a-z0-9]{1,5}$/;
+        const { character, inventory } = makeFighter();
+        expect(character.id).toMatch(shape);
+        expect(sanitizeCharacter(character).id).toMatch(shape);
+        const { id: _id, ...noId } = character;
+        expect(toHeroTemplate(noId, inventory).character.id).toMatch(shape);
+        expect(mintHeroId()).toMatch(shape);
+    });
+
+    it('createCharacter clamps identity text through the one hero table, never String(object)', () => {
+        const hero = createCharacter('N'.repeat(40), 'human', 'fighter', BASE_SCORES, [], {
+            gender: { not: 'text' }, appearance: 'a'.repeat(700), background: 'b'.repeat(2500),
+        });
+        expect(hero.name).toHaveLength(30);
+        expect(hero.gender).toBe('');
+        expect(hero.appearance).toHaveLength(600);
+        expect(hero.background).toHaveLength(2000);
     });
 });

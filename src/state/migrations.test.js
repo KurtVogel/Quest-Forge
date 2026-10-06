@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CURRENT_SAVE_VERSION, getSaveVersion, MIGRATIONS, migrateLoadedSave } from './migrations.js';
-import { SAVE_VERSION, serializeGameState } from './persistence.js';
+import { serializeGameState } from './persistence.js';
 import { gameReducer, initialGameState } from './gameReducer.js';
 
 const fighterSave = (overrides = {}) => ({
@@ -18,9 +18,8 @@ const retirementNotice = save =>
     (save.messages || []).some(m => (m.content || '').includes('flat level bonus to hit and damage has been retired'));
 
 describe('save-version machinery', () => {
-    it('persistence stamps the pipeline version (SAVE_VERSION is CURRENT_SAVE_VERSION)', () => {
+    it('persistence stamps the pipeline version (the SAVE_VERSION alias went on 2026-10-06)', () => {
         expect(CURRENT_SAVE_VERSION).toBe(3);
-        expect(SAVE_VERSION).toBe(CURRENT_SAVE_VERSION);
         expect(serializeGameState(initialGameState).saveVersion).toBe(CURRENT_SAVE_VERSION);
     });
 

@@ -4,8 +4,17 @@
  * nothing-to-save guards — GameContext's wiring was 0% covered before this.
  */
 import { describe, expect, it } from 'vitest';
-import { AUTOSAVE_FOREGROUND_FIELDS, buildAutosaveSnapshot, hasGameplayChange, isAutosavableState, isBackgroundOnlyChange } from './autosavePolicy.js';
+import { AUTOSAVE_FOREGROUND_FIELDS, AUTOSAVE_IGNORED_FIELDS, buildAutosaveSnapshot, hasGameplayChange, isAutosavableState, isBackgroundOnlyChange } from './autosavePolicy.js';
 import { initialGameState } from './initialState.js';
+import { serializeGameState } from './persistence.js';
+
+describe('AUTOSAVE_IGNORED_FIELDS mirrors the serializer (2026-10-06 persistence P2)', () => {
+    it('the fields the serializer strips are exactly the fields a change to which never schedules a save', () => {
+        const persisted = new Set(Object.keys(serializeGameState(initialGameState)));
+        const stripped = Object.keys(initialGameState).filter(key => !persisted.has(key));
+        expect(new Set(stripped)).toEqual(AUTOSAVE_IGNORED_FIELDS);
+    });
+});
 
 function liveState(overrides = {}) {
     return {

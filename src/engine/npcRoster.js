@@ -123,9 +123,6 @@ const GENERIC_EPITHETS = new Set([
 
 const DISAMBIGUATOR = /^(?:[a-z]|\d{1,3}|i{1,3}|iv|v|vi{0,3}|ix|x|one|two|three|four|five)$/i;
 
-// Mirror of characterVault's sanitizeImageUrl allowlist, kept local so this
-// module stays dependency-free. A loaded save is untrusted input: only the two
-// sources portraits can legitimately come from survive normalization.
 
 const COMBAT_ONLY_NOTE = /\b(attack|fought|slain|killed|defeated|stabbed|shot|arrow|spear|sword|combat|battle|ambush|patrol)\b/i;
 

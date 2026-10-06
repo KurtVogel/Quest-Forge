@@ -11,10 +11,10 @@ import { RACES } from '../data/races.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
 import { getMaxHitPoints, getModifier } from './rules.js';
-import { ABILITY_NAMES, SKILL_LABELS, buildDerivedCharacterFields, isKnownClass, isKnownRace, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from './characterUtils.js';
+import { ABILITY_NAMES, SKILL_LABELS, buildDerivedCharacterFields, isKnownClass, isKnownRace, mintHeroId, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from './characterUtils.js';
 import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
 import { normalizeEquippedSlots } from './equipment.js';
-import { CHARACTER_APPEARANCE_MAX, MAX_COIN_HELD, cleanTextField } from '../config/contentLimits.js';
+import { HERO_TEXT_LIMITS, MAX_COIN_HELD, cleanTextField } from '../config/contentLimits.js';
 import { sanitizePortraitUrl } from './portraitUrl.js';
 
 export const EXPORT_FORMAT = 'quest-forge-character';
@@ -41,22 +41,47 @@ const ROGUE_EXPERTISE_ALLOWANCE = 2;
 // regenerates. The allowlist + ceiling live in engine/portraitUrl.js since
 // 2026-09-09 (shared with the NPC roster and the live hero save).
 
-/** Clamp to an integer in [min, max]; non-numeric input yields `fallback`. */
+/**
+ * Clamp to an integer in [min, max]; non-numeric input yields `fallback`.
+ * Deliberately NOT the wire clampInt in llm/eventChannels.js (which coerces
+ * numeric strings with a "[ResponseParser] Coerced…" log — wrong label for a
+ * hero file) nor fronts.js's (which ROUNDS a director's 2.6 to clock 3): three
+ * sites, three semantics (2026-10-06 audit, left as three on purpose).
+ */
 function clampInt(value, min, max, fallback) {
     const n = Number(value);
     if (!Number.isFinite(n)) return fallback;
     return Math.max(min, Math.min(max, Math.trunc(n)));
 }
 
-const sanitizeImageUrl = sanitizePortraitUrl;
+/**
+ * THE hero template (2026-10-06 character-vault P2): what the roster stores and
+ * what a hero file carries — `sanitizeCharacter`'s rested, rebuilt hero with
+ * the live id KEPT (the roster is keyed by it; a hero without one is minted
+ * one here) plus the sanitized inventory. The sheet and the ending card used
+ * to write the LIVE hero whole (HP, conditions, `isDead`, spent slots,
+ * `armorClass`, `startingGoldRolls`) while the import path wrote the template,
+ * so a dead hero's row read `isDead: true` in the TEMPLATE store (DECISIONS.md
+ * 2026-09-03) and both Export File buttons shipped campaign state. One shape
+ * at the WRITE; `handleBeginFromRoster` re-sanitizes on the way out as before.
+ * Throws the vault's own player-readable message for a hero that cannot be
+ * templated (no name, unknown race/class, a missing ability score).
+ */
+export function toHeroTemplate(character, inventory) {
+    const rested = sanitizeCharacter(character);
+    const id = typeof character?.id === 'string' && character.id.trim() ? character.id : rested.id;
+    return { character: { ...rested, id }, inventory: sanitizeInventory(inventory) };
+}
 
+/** The versioned hero file: the TEMPLATE (never campaign state), stamped. */
 export function buildCharacterExport(character, inventory) {
+    const template = toHeroTemplate(character, inventory);
     return {
         format: EXPORT_FORMAT,
         version: EXPORT_VERSION,
         exportedAt: Date.now(),
-        character,
-        inventory: inventory || [],
+        character: template.character,
+        inventory: template.inventory,
     };
 }
 
@@ -66,18 +91,6 @@ export function characterExportFilename(character) {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '');
     return `questforge-${slug || 'hero'}.json`;
-}
-
-/** Trigger a browser download of a hero as a versioned JSON file. */
-export function downloadCharacterExport(character, inventory) {
-    const data = buildCharacterExport(character, inventory);
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = characterExportFilename(character);
-    link.click();
-    URL.revokeObjectURL(url);
 }
 
 /**
@@ -99,7 +112,7 @@ export function sanitizeCharacter(raw) {
     // idiom imported `name: {}` as "[object Object]" past the no-name check and
     // fed the same to the DM prompt, the art director's identity line, and the
     // Scribe merge base. The hand-editable file gets the LOAD heal's typing.
-    const name = cleanTextField(raw.name, 30);
+    const name = cleanTextField(raw.name, HERO_TEXT_LIMITS.name);
     if (!name) throw new Error('This character has no name.');
 
     // Own-key gate (2026-09-12 P1): `race: 'constructor'` passed a truthiness
@@ -156,7 +169,7 @@ export function sanitizeCharacter(raw) {
         : [];
 
     const rebuilt = {
-        id: `char-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: mintHeroId(),
         name,
         race: raw.race,
         class: raw.class,
@@ -182,17 +195,18 @@ export function sanitizeCharacter(raw) {
         expertiseSkills,
         fightingStyle: normalizeFightingStyle(raw.class, raw.fightingStyle),
         martialArchetype: normalizeMartialArchetype(raw.class, level, raw.martialArchetype),
-        gender: cleanTextField(raw.gender, 60),
-        background: cleanTextField(raw.background, 2000),
-        appearance: cleanTextField(raw.appearance, CHARACTER_APPEARANCE_MAX),
-        portraitUrl: sanitizeImageUrl(raw.portraitUrl),
+        // The ONE hero text table (HERO_TEXT_LIMITS, config/contentLimits.js)
+        // — createCharacter and the load heal read the same numbers.
+        gender: cleanTextField(raw.gender, HERO_TEXT_LIMITS.gender),
+        background: cleanTextField(raw.background, HERO_TEXT_LIMITS.background),
+        appearance: cleanTextField(raw.appearance, HERO_TEXT_LIMITS.appearance),
+        portraitUrl: sanitizePortraitUrl(raw.portraitUrl),
         // The provider label rides with the picture like portraitUpdatedAt
         // (2026-09-24 Lap-1 spill): dropping it lost the "Rendered by Gemini"
-        // fallback note on every roster or imported hero. Same 40-char type as
-        // the load heal (migrations.js).
-        portraitProvider: cleanTextField(raw.portraitProvider, 40),
+        // fallback note on every roster or imported hero.
+        portraitProvider: cleanTextField(raw.portraitProvider, HERO_TEXT_LIMITS.portraitProvider),
         portraitUpdatedAt: Number.isFinite(raw.portraitUpdatedAt) ? raw.portraitUpdatedAt : null,
-        notes: cleanTextField(raw.notes, 2000),
+        notes: cleanTextField(raw.notes, HERO_TEXT_LIMITS.notes),
         createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),
     };
 
