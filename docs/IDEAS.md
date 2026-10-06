@@ -3163,3 +3163,28 @@ now) <= RULING_MESSAGE_TTL`, the stamp unchanged; `roleplayCheck.test.js` has on
 raw count to rewrite). **Why it waited:** it lengthens a window a dated decision set, and the
 project rule is that a decision is revisited with the human, not by a sweep. A yes makes it a
 ten-minute change.
+
+### [strengthening] A grandfather lane is dead the day its load twin lands; a store that enforces its contract at the READ holds as many shapes as it has writers; a clamp table at three boundaries is named once — status: `idea` (2026-10-06 audit, persistence + character-vault Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
+Four patterns from the fifth design-lap pair, none a live bug. **(1)** `GameContext.jsx` still fires
+`MIGRATE_NPC_ROSTER` whenever a roster record lacks `rosterTier` — a grandfather lane from before
+LOAD_GAME ran `migrateLegacyNpc` over every record and before every live writer stamped the tier
+through `upsertNpc` / `normalizeNpcRecord`. The effect scans the roster on every `npcs` change,
+the handler is reachable from nowhere else, and two tests keep it green. The 10-02 rule ("for every
+marker READ, grep the WRITER") has a twin: for every grandfather lane, grep the load twin, and
+delete the tests that keep a dead lane green. **(2)** The character roster is documented as a
+TEMPLATE (DECISIONS 2026-09-03) and enforces it at the READ (`handleBeginFromRoster` re-sanitizes),
+so it holds as many record shapes as it has writers: the sheet and the ending card store the LIVE
+hero (HP, death state, spent slots, `isDead: true` for the hero who just died), the import path
+stores the rested template, and both Export File buttons ship campaign state in the hero file. A
+template store sanitizes at the WRITE; the read-side sanitize becomes the belt its doc already
+calls it. **(3)** The hero identity clamps (name 30 / gender 60 / background 2000 / notes 2000 /
+portraitProvider 40 / appearance) are written at three boundaries — `createCharacter` (still as
+`String(x || '').trim().slice()`), `sanitizeCharacter`, `healLoadedCharacter` — with only
+appearance named. `NPC_LANE_TEXT_LIMITS` solved this for the roster on 2026-09-16; `HERO_TEXT_LIMITS`
+is the same shelf for the hero. **(4)** The one `document` / `Blob` / `URL.createObjectURL` call under
+`src/engine/` (`downloadCharacterExport`) is exactly the vault's uncovered lines — the pure layer's
+one DOM call is where the coverage gap is; move it to the components layer rather than mock it.
+Smaller shapes of the same kind, all in the queue: the read fan-in and the blob-ensure loop written
+twice in `persistence.js`, a slot's metadata record with three shapers, the autosave runtime
+restating the policy's two predicates, `clampInt` in three private copies, a `SAVE_VERSION` alias
+whose only consumers are tests.
