@@ -30,6 +30,19 @@
  * - `retractedAtMessage` — source-stamped retraction: a fact minted from a
  *   DM message the player later removed (✕, a refusal) leaves the LIVE set
  *   with the message, so scrubbing a refusal scrubs its canon.
+ *
+ * And a third aspect since 2026-10-07 (memory-research M0, Lane A run):
+ * - `aspect: 'intent'` — "an intent is not a deed" (AgentMemGate, arXiv
+ *   2610.07707: memory writers store an unresolved PLAN as a current fact —
+ *   Mem0 35 %, Graphiti 27 % of them — and readers act on it). A fact whose
+ *   head clause is a plan, promise, threat, appointment, or forward modal
+ *   ("the baron plans to seize the mill", "Tammo swore to return the knife")
+ *   is marked `intent` and rendered with its age (`planned (as of N turns
+ *   ago): …`), a restatement re-stamps the age, and the DEED closes it: a
+ *   lane that read KNOWN OPEN PLANS writes the outcome with `supersedes:
+ *   <the plan's id>`, and `findOpenPlan` lets the reducer stamp the plan
+ *   `supersededBy` exactly as a FLIP does. Only an INTENT closes by ref — a
+ *   standing truth closes by a flip alone, so no lane can bury canon by id.
  */
 import { containment, tokenSet } from './textMatch.js';
 import { conversationalDistance } from './replayLedger.js';
@@ -101,16 +114,54 @@ const STATE_PREDICATE_RE = new RegExp(
     'i',
 );
 
+// ——— An intent is not a deed (2026-10-07) ———
+
+/** The aspects the record whitelists at load (`state` / `intent`; anything else is a standing truth). */
+export const FACT_ASPECTS = Object.freeze(['state', 'intent']);
+
+// A determiner after "to" makes it a destination or an allegiance ("is going
+// to the capital", "is sworn to the Pike", "agreed to the terms"), not a plan.
+const DETERMINER = '(?:the|a|an|his|her|their|its|our|my|your|that|this|these|those)';
 /**
- * `'state'` when the fact describes a condition that will pass (a flood, a
- * siege, a fever, a closed gate), `null` for a standing truth (a death, a
- * name, a history). Lexical, deliberately small: a marker word, or a copula
- * followed by a progressive or a state predicate. A death is never a state.
+ * A plan, promise, threat, appointment, or expectation: a verb of intention +
+ * `to` + a verb, a copula + going / planning / about / due + `to` + a verb, or
+ * a forward modal (`will` / `shall` / `might`). `may` / `can` / `could` /
+ * `would` stay out — permission, ability, and past habit read the same —
+ * and a past-tense "planned to" is history. "promised / swore / vowed /
+ * agreed to" are OPEN commitments and count.
+ */
+const INTENT_RE = new RegExp(
+    String.raw`\b(?:plans?|intends?|means|aims?|hopes?|wants?|wishes|expects?|promises?|promised|swears?|swore|sworn|vows?|vowed|threatens?|threatened|offers?|offered|agrees?|agreed|resolves?|resolved|has agreed|have agreed|has promised|have promised|has sworn|have sworn|has vowed|have vowed)\s+to\s+(?!${DETERMINER}\b)\w+`
+    + String.raw`|\b(?:is|are)\s+(?:(?:still|now|also)\s+)?(?:going|planning|preparing|intending|meaning|about|poised|due|set|expected|bound|sworn)\s+to\s+(?!${DETERMINER}\b)\w+`
+    + String.raw`|\b(?:will|shall|might)\s+(?:not\s+|never\s+|soon\s+)?\w+`,
+    'i',
+);
+
+/**
+ * The live INTENT fact a lane's `supersedes` ref names — the open plan this
+ * new fact settles (carried out, failed, or abandoned). Null for a junk ref,
+ * an unknown id, a buried fact, or a STANDING truth: those close only by a
+ * FLIP, so no lane can retire canon by naming its id.
+ */
+export function findOpenPlan(liveFacts, ref) {
+    if (typeof ref !== 'string' || !ref.trim()) return null;
+    const id = ref.trim();
+    return (Array.isArray(liveFacts) ? liveFacts : []).find(f => f && f.id === id && f.aspect === 'intent' && isLiveFact(f)) || null;
+}
+
+/**
+ * `'intent'` when the fact is a plan, promise, threat, or expectation not
+ * yet carried out; `'state'` when it describes a condition that will pass
+ * (a flood, a siege, a fever, a closed gate); `null` for a standing truth
+ * (a death, a name, a history, a deed done). Lexical, deliberately small.
+ * A death is never a state or an intent; intent is judged before state so
+ * "is planning to seize" is a plan, not a progressive.
  */
 export function classifyFactAspect(text) {
     const fact = String(text || '');
     if (!fact.trim()) return null;
     if (/\b(?:is|are|was|were)\s+(?:now\s+)?dead\b/i.test(fact)) return null;
+    if (INTENT_RE.test(fact)) return 'intent';
     if (STATE_MARKER_RE.test(fact)) return 'state';
     if (STATE_PREDICATE_RE.test(fact)) return 'state';
     return null;
@@ -129,15 +180,18 @@ function describeTurns(turns) {
 }
 
 /**
- * The live readers' tag for a state fact: `for now (N turns ago): ` — the
- * age in conversational turns from the fact's `atMessage` (re-stamped by
- * every restatement), or `for now: ` for a legacy row without one. '' for a
+ * The live readers' tag for an aspected fact: `for now (as of N turns ago): `
+ * on a state, `planned (as of N turns ago): ` on an intent — the age in
+ * conversational turns from the fact's `atMessage` (re-stamped by every
+ * restatement), or the bare word for a legacy row without one. '' for a
  * standing fact.
  */
 export function describeStateTag(fact, { messages = null, messageCount } = {}) {
-    if (!fact || fact.aspect !== 'state') return '';
+    const aspect = fact?.aspect;
+    if (aspect !== 'state' && aspect !== 'intent') return '';
+    const word = aspect === 'intent' ? 'planned' : 'for now';
     const turns = turnsSince(fact.atMessage, { messages, messageCount });
-    return turns === null ? 'for now: ' : `for now (as of ${describeTurns(turns)}): `;
+    return turns === null ? `${word}: ` : `${word} (as of ${describeTurns(turns)}): `;
 }
 
 /**

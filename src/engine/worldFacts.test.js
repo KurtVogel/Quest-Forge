@@ -74,4 +74,21 @@ describe('the DM prompt carries only the present', () => {
         expect(prompt).toContain('The bridge at Ashford is not passable.');
         expect(prompt).not.toContain('- The bridge at Ashford is passable.');
     });
+
+    it('WORLD FACTS renders a plan as planned with its age under a header that says a plan is not a deed, and omits a closed plan (2026-10-07)', () => {
+        const prompt = buildSystemPrompt({
+            character: null, inventory: [], quests: [], rollHistory: [], preset: 'classicFantasy', ruleset: 'simplified5e',
+            customSystemPrompt: '', journal: [], npcs: [], party: [], currentLocation: 'Ashford', combat: null,
+            worldFacts: [
+                fact('p1', 'The Guild means to seize the Ashford mill at the new moon.', { aspect: 'intent', atMessage: 0 }),
+                fact('p2', 'Tammo promised to return the knife.', { aspect: 'intent', atMessage: 0, supersededBy: 'd2', supersededAtMessage: 0 }),
+                fact('d2', 'Tammo returned the knife.', { supersedes: 'p2' }),
+            ],
+            fronts: [], storyMemory: [], retrievedMemories: [], premise: '',
+        });
+        expect(prompt).toContain('- planned (as of this turn): The Guild means to seize the Ashford mill at the new moon.');
+        expect(prompt).toContain('a line opening "planned (as of N turns ago)" is an INTENT');
+        expect(prompt).toContain('- Tammo returned the knife.');
+        expect(prompt).not.toContain('Tammo promised to return the knife.');
+    });
 });

@@ -155,8 +155,15 @@ export const handlers = {
         if (touched && seen) {
             const marks = describeBondMarks(before, touched);
             if (marks.length > 0) messages = stampLastDmMessage(state.messages, marks);
-            if (session?.relationshipBeat && beatTargets(session.relationshipBeat, touched)
-                && (state.messages || []).length >= (sanitizeRelationshipBeat(session.relationshipBeat)?.opensAtMessage ?? Infinity)) {
+            // Consumed once the window is open AND the mint is at least one
+            // row behind: a turn beat minted with no delay opens at the
+            // current count, and a second update of the same person in the
+            // same scene (the DM lane and the Scribe lane both touching her)
+            // used to eat it before the DM ever rendered it (2026-10-07).
+            const pendingBeat = session?.relationshipBeat ? sanitizeRelationshipBeat(session.relationshipBeat) : null;
+            const rows = (state.messages || []).length;
+            if (pendingBeat && beatTargets(pendingBeat, touched) && rows >= pendingBeat.opensAtMessage
+                && !(Number.isFinite(pendingBeat.mintedAtMessage) && rows <= pendingBeat.mintedAtMessage)) {
                 session = { ...session, relationshipBeat: null };
             }
             // The bond turns into a scene (2026-10-07, wow npc-relationships):

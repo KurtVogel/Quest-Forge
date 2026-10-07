@@ -16,7 +16,7 @@ import {
     buildKnownAppearances,
     buildKnownHeroTells,
     buildKnownLocations,
-    buildKnownStances,
+    buildKnownOpenPlans, buildKnownStances,
     buildKnownStoryCards,
     projectJournalForReflection,
     runNpcFrontReflection,
@@ -198,6 +198,7 @@ describe('the Scribe user message — KNOWN blocks at their caps', () => {
             knownAppearances: buildKnownAppearances(state, turnText),
             knownStances: buildKnownStances(state, turnText),
             knownStoryCards: buildKnownStoryCards(state, turnText),
+            knownOpenPlans: buildKnownOpenPlans(state),
             knownHeroTells: buildKnownHeroTells(state),
             knownLocations: buildKnownLocations(state),
         };

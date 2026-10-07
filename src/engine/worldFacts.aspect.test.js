@@ -4,7 +4,7 @@
  * two record-lane tags.
  */
 import { describe, expect, it } from 'vitest';
-import { classifyFactAspect, describeRetractedTag, describeStateTag, isLiveFact, liveWorldFacts } from './worldFacts.js';
+import { classifyFactAspect, describeRetractedTag, describeStateTag, findOpenPlan, isLiveFact, liveWorldFacts } from './worldFacts.js';
 
 describe('classifyFactAspect — a passing state vs a standing truth', () => {
     it('marks progressive and state predicates and explicit temporariness as state', () => {
@@ -63,5 +63,51 @@ describe('describeStateTag / isLiveFact / describeRetractedTag', () => {
         expect(liveWorldFacts([live, retracted, superseded, null])).toEqual([live]);
         expect(describeRetractedTag(retracted)).toBe('[RETRACTED — its message was removed] ');
         expect(describeRetractedTag(live)).toBe('');
+    });
+});
+
+describe('classifyFactAspect — an intent is not a deed (2026-10-07)', () => {
+    it('marks plans, promises, threats, appointments, and forward modals as intent', () => {
+        const intents = [
+            'The baron plans to seize the Ashford mill at the new moon.',
+            'Tammo intends to leave for Ashford when the roads clear.',
+            'Saima will marry the miller in spring.',
+            'The Guild means to hire the hero to escort the salt caravan.',
+            'Maren might sell the inn if the harvest fails.',
+            'The council has agreed to meet the hero at dawn by the old mill.',
+            'The baron is going to burn the granary.',
+            'The baron is planning to seize the mill.',
+            "Tammo promised to return the hero's knife by midsummer.",
+            'The Pike threatens to burn the chandlery.',
+            'Odo is about to confess to the reeve.',
+            'The ferry is due to sail at first light.',
+        ];
+        for (const fact of intents) expect(classifyFactAspect(fact), fact).toBe('intent');
+    });
+
+    it('a deed done, a destination, an allegiance, accepted terms, and a death stay standing; a passing state stays state', () => {
+        expect(classifyFactAspect('The baron seized the Ashford mill.')).toBeNull();
+        expect(classifyFactAspect('The baron agreed to the terms.')).toBeNull();
+        expect(classifyFactAspect('The reeve is sworn to the Pike.')).toBeNull();
+        expect(classifyFactAspect('The goblin captain Rarg is dead.')).toBeNull();
+        expect(classifyFactAspect('Tammo is going to the capital.')).toBe('state');
+        expect(classifyFactAspect('The harbor road is flooded.')).toBe('state');
+    });
+
+    it('describeStateTag renders an intent as planned with its age, and findOpenPlan answers only to a live intent id', () => {
+        const messages = Array.from({ length: 20 }, (_, i) => ({ id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: 'x' }));
+        expect(describeStateTag({ fact: 'x', aspect: 'intent', atMessage: 10 }, { messages, messageCount: 20 })).toBe('planned (as of 5 turns ago): ');
+        expect(describeStateTag({ fact: 'x', aspect: 'intent' }, { messages, messageCount: 20 })).toBe('planned: ');
+        const plan = { id: 'p1', fact: 'The baron plans to seize the mill.', aspect: 'intent' };
+        const buried = { id: 'p2', fact: 'Tammo promised to return the knife.', aspect: 'intent', supersededBy: 'd2' };
+        const standing = { id: 's1', fact: 'Odo is dead.' };
+        const live = [plan, buried, standing];
+        expect(findOpenPlan(live, 'p1')).toBe(plan);
+        expect(findOpenPlan(live, ' p1 ')).toBe(plan);
+        expect(findOpenPlan(live, 'p2')).toBeNull();
+        expect(findOpenPlan(live, 's1')).toBeNull();
+        expect(findOpenPlan(live, { evil: true })).toBeNull();
+        expect(findOpenPlan(live, '')).toBeNull();
+        expect(findOpenPlan(null, 'p1')).toBeNull();
     });
 });

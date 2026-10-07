@@ -1247,6 +1247,8 @@ function buildWorldFactsBlock(worldFacts, { messages = null, messageCount } = {}
         // keeps the canon, the CHARACTERS get the boundary (rule 9).
         // A state is not a fact (2026-09-30): a passing state carries its age
         // so the DM judges whether it still holds — never expired by the engine.
+        // An intent is not a deed (2026-10-07): a plan carries its age the same
+        // way and reads "planned", so a scheme never hardens into history.
         byCategory[cat].push(`${describeStateTag(f, { messages, messageCount })}${formatSecrecyTag(f.knownBy)}${String(f.fact ?? '')}`);
     }
     const lines = Object.entries(byCategory)
@@ -1257,7 +1259,7 @@ function buildWorldFactsBlock(worldFacts, { messages = null, messageCount } = {}
         ? `\n*(${hiddenCount} older facts available via RETRIEVED MEMORIES when relevant)*`
         : '';
 
-    return `## WORLD FACTS (canonical — never contradict these; a line opening "for now (as of N turns ago)" is a passing STATE, true when last seen — judge from the fiction whether it still holds, and let a character report the change if it has)\n${lines}${overflow}`;
+    return `## WORLD FACTS (canonical — never contradict these; a line opening "for now (as of N turns ago)" is a passing STATE, true when last seen — judge from the fiction whether it still holds, and let a character report the change if it has; a line opening "planned (as of N turns ago)" is an INTENT — a plan, promise, threat, or expectation stated then, NOT a deed: only the fiction or a later fact says whether it happened, and it may still be pending, failed, or abandoned)\n${lines}${overflow}`;
 }
 
 /**

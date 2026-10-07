@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildKnownAppearances, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runNpcFrontReflection, runScribe, shouldScribeCombatBeat } from './scribe.js';
+import { buildKnownAppearances, buildKnownLocations, buildKnownOpenPlans, buildKnownStances, buildKnownStoryCards, runNpcFrontReflection, runScribe, shouldScribeCombatBeat } from './scribe.js';
 import { composeScenePrompt, preserveSceneSituation } from './sceneDirector.js';
 import { sendMessage } from './adapter.js';
 
@@ -2254,5 +2254,53 @@ describe('shouldScribeCombatBeat — the per-beat Scribe gate (2026-09-23 combat
         ];
         const scribeCalls = beats.filter(result => shouldScribeCombatBeat(result, 'Marsh bandit 2 falls into the reeds.', state)).length;
         expect(scribeCalls).toBe(1);
+    });
+});
+
+describe('KNOWN OPEN PLANS — an intent is not a deed (2026-10-07)', () => {
+    const state = {
+        worldFacts: [
+            { id: 'fact-plan', fact: 'The baron plans to seize the Ashford mill at the new moon.', aspect: 'intent', atMessage: 4 },
+            { id: 'fact-old', fact: 'Tammo promised to return the knife.', aspect: 'intent', atMessage: 2, supersededBy: 'fact-done' },
+            { id: 'fact-done', fact: 'Tammo returned the knife.', atMessage: 6, supersedes: 'fact-old' },
+            { id: 'fact-standing', fact: 'Saltmere lies on the coast.', atMessage: 1 },
+            { id: 'fact-later', fact: 'Odo will hang at dawn.', aspect: 'intent', atMessage: 9 },
+        ],
+    };
+
+    it('lists only LIVE intent facts by id, newest first; null when none is open', () => {
+        const block = buildKnownOpenPlans(state);
+        expect(block).toBe('- id: fact-later | "Odo will hang at dawn."\n- id: fact-plan | "The baron plans to seize the Ashford mill at the new moon."');
+        expect(buildKnownOpenPlans({ worldFacts: [state.worldFacts[3]] })).toBeNull();
+        expect(buildKnownOpenPlans({ worldFacts: [state.worldFacts[1]] })).toBeNull();
+        expect(buildKnownOpenPlans()).toBeNull();
+    });
+
+    it('rides the Scribe user message with the outcome rule, and the system prompt carries the intent rule and the supersedes field', async () => {
+        sendMessage.mockReset();
+        sendMessage.mockResolvedValue(JSON.stringify({ world_facts: [] }));
+        await runScribe({
+            playerMessage: 'I watch the mill from the ridge.',
+            dmNarrative: "The baron's men take the mill at dusk.",
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
+            dispatch: vi.fn(),
+            knownOpenPlans: buildKnownOpenPlans(state),
+        });
+        const request = sendMessage.mock.calls[0][0];
+        expect(request.userMessage).toContain('KNOWN OPEN PLANS');
+        expect(request.userMessage).toContain('id: fact-plan');
+        expect(request.systemPrompt).toContain('AN INTENT IS NOT A DEED');
+        expect(request.systemPrompt).toContain('"supersedes": "ONLY when this fact is the OUTCOME of a plan listed under KNOWN OPEN PLANS');
+    });
+
+    it('a campaign without open plans carries no block', async () => {
+        sendMessage.mockReset();
+        sendMessage.mockResolvedValue(JSON.stringify({ world_facts: [] }));
+        await runScribe({
+            playerMessage: 'I buy bread.', dmNarrative: 'The baker nods.',
+            settings: { apiKey: 'test-key', llmProvider: 'gemini' }, dispatch: vi.fn(),
+            knownOpenPlans: buildKnownOpenPlans({ worldFacts: [] }),
+        });
+        expect(sendMessage.mock.calls[0][0].userMessage).not.toContain('KNOWN OPEN PLANS');
     });
 });

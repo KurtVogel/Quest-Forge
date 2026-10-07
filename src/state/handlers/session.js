@@ -3,6 +3,7 @@
  * LOAD_GAME / NEW_GAME bulk paths (validateSaveState + migration pipeline).
  */
 import { initialGameState } from '../initialState.js';
+import { FACT_ASPECTS } from '../../engine/worldFacts.js';
 import { migrateLoadedSave } from '../migrations.js';
 import { createInitialFronts, normalizeFront } from '../../engine/fronts.js';
 import { normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
@@ -90,7 +91,9 @@ function typeLoadedMessage(message, index) {
  * engine stamps typed here: `supersedes` / `supersededBy` string-or-drop,
  * `supersededAtMessage` clamped to the transcript, and a `supersededBy`
  * whose superseding fact is not on record is cleared — the fact is LIVE
- * again rather than buried by a dangling pointer from a hostile save.
+ * again rather than buried by a dangling pointer from a hostile save. The
+ * aspect is whitelisted to `FACT_ASPECTS` (`state` 2026-09-30, `intent`
+ * 2026-10-07); anything else loads as a standing truth.
  */
 function typeLoadedWorldFacts(list, maxMessageCount) {
     const typed = (Array.isArray(list) ? list : [])
@@ -101,7 +104,7 @@ function typeLoadedWorldFacts(list, maxMessageCount) {
             const out = { ...rest, ...sanitized };
             // The 2026-09-30 stamps: aspect whitelisted, message stamps clamped
             // to the transcript, the source message id string-or-drop.
-            if (aspect === 'state') out.aspect = 'state';
+            if (FACT_ASPECTS.includes(aspect)) out.aspect = aspect;
             const born = Number(atMessage);
             if (Number.isFinite(born)) out.atMessage = Math.max(0, Math.min(Math.floor(born), maxMessageCount));
             if (typeof sourceMessage === 'string' && sourceMessage) out.sourceMessage = sourceMessage.slice(0, 80);

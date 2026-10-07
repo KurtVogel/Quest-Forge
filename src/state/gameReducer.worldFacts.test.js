@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
+import { liveWorldFacts } from '../engine/worldFacts.js';
 
 function stateWithFacts(facts) {
     return {
@@ -172,5 +173,67 @@ describe('polarity-aware supersession (2026-09-29 — a fact can stop being true
         expect(byId.f3.supersededAtMessage).toBeUndefined();
         expect(byId.f4.supersededBy).toBeUndefined();
         expect(byId.f4.supersedes).toBeUndefined();
+    });
+});
+
+describe('an intent is not a deed (2026-10-07 — a plan ages, a restatement re-stamps it, the deed closes it)', () => {
+    const msgs = n => Array.from({ length: n }, (_, i) => ({ id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: 'x' }));
+
+    it('stores a plan with aspect intent and its birth stamp; a restatement re-stamps the age instead of being dropped', () => {
+        const born = gameReducer({ ...stateWithFacts([]), messages: msgs(2) }, { type: 'ADD_WORLD_FACTS', payload: [{ fact: 'The baron plans to seize the Ashford mill at the new moon.' }] });
+        expect(born.worldFacts).toHaveLength(1);
+        expect(born.worldFacts[0].aspect).toBe('intent');
+        expect(born.worldFacts[0].atMessage).toBe(2);
+        const restated = gameReducer({ ...born, messages: msgs(8) }, { type: 'ADD_WORLD_FACTS', payload: [{ fact: 'The baron still plans to seize the Ashford mill at the new moon' }] });
+        expect(restated.worldFacts).toHaveLength(1);
+        expect(restated.worldFacts[0].atMessage).toBe(8);
+    });
+
+    it('a deed naming the plan closes it: the plan leaves the live set and stays on the record, the deed stands', () => {
+        const born = gameReducer({ ...stateWithFacts([]), messages: msgs(2) }, { type: 'ADD_WORLD_FACTS', payload: [{ fact: 'The baron plans to seize the Ashford mill at the new moon.' }] });
+        const planId = born.worldFacts[0].id;
+        const done = gameReducer({ ...born, messages: msgs(12) }, { type: 'ADD_WORLD_FACTS', payload: [{ fact: 'The baron seized the Ashford mill.', supersedes: planId }] });
+        expect(done.worldFacts).toHaveLength(2);
+        const [plan, deed] = done.worldFacts;
+        expect(plan.supersededBy).toBe(deed.id);
+        expect(plan.supersededAtMessage).toBe(12);
+        expect(deed.supersedes).toBe(planId);
+        expect(deed.aspect).toBeUndefined();
+        expect(liveWorldFacts(done.worldFacts).map(f => f.id)).toEqual([deed.id]);
+        // A failed plan closes the same way — the outcome is the fact, the plan is history.
+        const failed = gameReducer({ ...born, messages: msgs(12) }, { type: 'ADD_WORLD_FACTS', payload: [{ fact: 'The baron gave up the Ashford mill after the militia mustered.', supersedes: planId }] });
+        expect(failed.worldFacts[0].supersededBy).toBe(failed.worldFacts[1].id);
+    });
+
+    it('the ref closes only a LIVE INTENT fact — a standing truth, a buried plan, or junk is ignored and the new fact still lands', () => {
+        const standing = stateWithFacts(['Odo is dead.']);
+        const ignored = gameReducer({ ...standing, messages: msgs(2) }, { type: 'ADD_WORLD_FACTS', payload: [{ fact: 'Odo lived in Ashford all his life.', supersedes: 'fact-0' }] });
+        expect(ignored.worldFacts).toHaveLength(2);
+        expect(ignored.worldFacts[0].supersededBy).toBeUndefined();
+        expect(ignored.worldFacts[1].supersedes).toBeUndefined();
+        const junk = gameReducer({ ...standing, messages: msgs(2) }, { type: 'ADD_WORLD_FACTS', payload: [{ fact: 'The weir failed in the spring flood.', supersedes: { evil: true } }] });
+        expect(junk.worldFacts).toHaveLength(2);
+        expect(junk.worldFacts[1].supersedes).toBeUndefined();
+    });
+
+    it('LOAD_GAME keeps aspect intent, drops an unknown aspect, and a plan whose closing deed is missing is live again', () => {
+        const next = gameReducer(initialGameState, {
+            type: 'LOAD_GAME',
+            payload: {
+                character: { ...initialGameState.character, name: 'A', race: 'human', class: 'fighter', level: 1 },
+                inventory: [],
+                messages: msgs(4),
+                worldFacts: [
+                    { id: 'p1', fact: 'The baron plans to seize the mill.', aspect: 'intent', atMessage: 2 },
+                    { id: 'p2', fact: 'Tammo promised to return the knife.', aspect: 'intent', atMessage: 1, supersededBy: 'gone' },
+                    { id: 's1', fact: 'Odo is dead.', aspect: 'bogus' },
+                ],
+            },
+        });
+        const byId = Object.fromEntries(next.worldFacts.map(f => [f.id, f]));
+        expect(byId.p1.aspect).toBe('intent');
+        expect(byId.p2.aspect).toBe('intent');
+        expect(byId.p2.supersededBy).toBeUndefined();
+        expect(byId.s1.aspect).toBeUndefined();
     });
 });

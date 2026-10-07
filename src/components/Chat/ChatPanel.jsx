@@ -7,7 +7,7 @@ import { planCombatExchange, planOpeningExchange } from '../../engine/combatExch
 import { describeFightCost, describeFightResonance } from '../../engine/fightTally.js';
 import { combatNarrationPrompt } from '../../llm/combatNarration.js';
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
-import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownStoryCards, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
+import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownOpenPlans, buildKnownStoryCards, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
 import { EPILOGUE_REQUEST_MESSAGE, isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
 import { saveRosterCharacter } from '../../state/rosterStore.js';
 import { addMemory, findSubjectsInText, retractMemoriesFromMessage, seedMemories } from '../../engine/vectorMemory.js';
@@ -619,6 +619,7 @@ export default function ChatPanel() {
                         knownAppearances: buildKnownAppearances(latest, narrative),
                         knownStances: buildKnownStances(latest, narrative),
                         knownStoryCards: buildKnownStoryCards(latest, narrative),
+                        knownOpenPlans: buildKnownOpenPlans(latest),
                         knownHeroTells: buildKnownHeroTells(latest),
                         knownLocations: buildKnownLocations(latest),
                         authoritativeContext: {

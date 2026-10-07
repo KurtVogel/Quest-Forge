@@ -2,7 +2,7 @@
  * Long-term memory: world facts (near-duplicate rejection), story-memory
  * cards, journal entries/summarization marks, and the campaign chronicle.
  */
-import { classifyFactAspect, classifyFactCandidate, factTokenSet, liveWorldFacts } from '../../engine/worldFacts.js';
+import { classifyFactAspect, classifyFactCandidate, factTokenSet, findOpenPlan, liveWorldFacts } from '../../engine/worldFacts.js';
 import {
     applyStoryMemoryDormancy,
     findStoryMemoryMatch,
@@ -128,8 +128,10 @@ export const handlers = {
             if (verdict.kind === 'duplicate') {
                 // A state is not a fact (M0, 2026-09-30): a restatement of a
                 // STATE fact ("the road is still flooded") re-stamps its age
-                // instead of being dropped — the DM reads the freshness.
-                if (verdict.of?.aspect === 'state' && verdict.of.id) {
+                // instead of being dropped — the DM reads the freshness. An
+                // INTENT restated ("he still means to…") re-stamps the same way
+                // (2026-10-07).
+                if ((verdict.of?.aspect === 'state' || verdict.of?.aspect === 'intent') && verdict.of.id) {
                     const ofId = verdict.of.id;
                     worldFacts = worldFacts.map(existing => (existing.id === ofId
                         ? { ...existing, atMessage: messageCount, timestamp: Date.now() }
@@ -156,6 +158,20 @@ export const handlers = {
                 worldFacts = worldFacts.map(existing => (existing.id === verdict.of.id
                     ? { ...existing, supersededBy: id, supersededAtMessage: messageCount }
                     : existing));
+            } else {
+                // An intent is not a deed (memory-research M0, 2026-10-07): a
+                // lane that read KNOWN OPEN PLANS names the plan this fact
+                // settles (`supersedes: <id>`) and the plan closes exactly as a
+                // flipped twin does. Only a live INTENT fact answers to the ref
+                // (engine/worldFacts.js `findOpenPlan`) — a standing truth
+                // closes by a FLIP alone, so the ref can never bury canon.
+                const plan = findOpenPlan(live, f?.supersedes);
+                if (plan && plan.id !== id) {
+                    next.supersedes = plan.id;
+                    worldFacts = worldFacts.map(existing => (existing.id === plan.id
+                        ? { ...existing, supersededBy: id, supersededAtMessage: messageCount }
+                        : existing));
+                }
             }
             worldFacts = [...worldFacts, next];
             live = liveWorldFacts(worldFacts);

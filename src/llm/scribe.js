@@ -39,7 +39,7 @@ const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keeper. Giv
 Output ONLY valid JSON:
 {
   "world_facts": [
-    { "fact": "A canonical statement of something now true in this world", "category": "lore|character|location|event|relationship", "knownBy": ["ONLY for private information: exactly who knows it (use 'the hero' for the player) — omit entirely for common knowledge"] }
+    { "fact": "A canonical statement of something now true in this world", "category": "lore|character|location|event|relationship", "knownBy": ["ONLY for private information: exactly who knows it (use 'the hero' for the player) — omit entirely for common knowledge"], "supersedes": "ONLY when this fact is the OUTCOME of a plan listed under KNOWN OPEN PLANS — carried out, failed, or abandoned — that plan's exact id; omit otherwise" }
   ],
   "npc_updates": [
     {
@@ -97,6 +97,7 @@ Rules:
 - World facts are durable, campaign-level truths a DM would still need many sessions later: deaths, alliances, betrayals, discoveries, curses, historical facts revealed
 - Do NOT record transient action descriptions, scene-level detail, prices, purchases, minor chatter, or restatements of anything already implied by an existing fact ("Player attacked goblin" is not a world fact)
 - A STATE THAT WILL PASS — a flooded road, a siege, a fever, a wound healing, a gate shut for the night, a person away or in hiding — is written in its progressive or temporary form exactly as the fiction has it ("The harbor road is flooded", "Tammo is recovering from the fever"), NEVER flattened into a standing truth ("The harbor road floods", "Tammo was ill"). When the state is local to one place or one person, it belongs in location_profile.last_state or that NPC's lastNotes rather than world_facts. Never rewrite an existing state fact as permanent.
+- AN INTENT IS NOT A DEED — a plan, promise, threat, appointment, or expectation ("the baron plans to seize the mill", "Tammo swore to return the knife", "Odo will hang at dawn") is never written as a standing truth. A personal commitment belongs in story_memory (type promise or npcAgenda) or that NPC's agenda / openThread; only a CAMPAIGN-LEVEL plan goes to world_facts, and then in its own forward-looking words exactly as the fiction has it ("The Guild means to seize the mill at the new moon"), never as if already done. When this turn's narrative shows a plan under KNOWN OPEN PLANS carried out, failed, or abandoned, write the OUTCOME as its own fact with "supersedes": that plan's exact id — never re-report the plan itself.
 - DO record outcomes: "The goblin captain Rarg is dead", "The village of Millhaven burned to the ground"
 - Story memory is for emotionally or dramatically useful callbacks: promises, debts, named objects, scars, injuries, insults, flirtation, fears, private vows, unresolved clues, player-authored proper nouns, foreshadowing, NPC agendas, and relationship tension. A card must earn its slot: if you cannot picture the DM paying it off in a later scene, do not write it.
 - Capture player-authored canon from the player's action when it concerns their own compatible backstory, vows, names, and personal attachments the DM should remember later.
@@ -342,6 +343,23 @@ export function buildKnownStoryCards({ storyMemory = [] } = {}, ...texts) {
 }
 
 /**
+ * KNOWN OPEN PLANS — the live INTENT facts (a plan, promise, threat, or
+ * appointment on record and not yet carried out), newest first, by id, so the
+ * Scribe writes the OUTCOME with `supersedes: <id>` and the reducer closes the
+ * plan (memory-research M0, 2026-10-07 — "an intent is not a deed"). Null
+ * when none is open, so the block costs nothing on a campaign without plans.
+ */
+const KNOWN_OPEN_PLAN_CAP = 8;
+export function buildKnownOpenPlans({ worldFacts = [] } = {}) {
+    const plans = liveWorldFacts(worldFacts)
+        .filter(f => f.aspect === 'intent' && typeof f.id === 'string' && f.id && f.fact.trim())
+        .sort((a, b) => (b.atMessage || 0) - (a.atMessage || 0))
+        .slice(0, KNOWN_OPEN_PLAN_CAP)
+        .map(f => `- id: ${f.id} | "${f.fact.trim().slice(0, 160)}"`);
+    return plans.length > 0 ? plans.join('\n') : null;
+}
+
+/**
  * Run the Scribe after a DM response to extract world-state updates.
  * Dispatches updates silently — the player never sees this.
  *
@@ -409,7 +427,7 @@ export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'story_memor
  */
 export const RECALL_TURN_RULE = 'RECALL TURN: the player asked about the PAST and the DM answered from the engine\'s own record of this campaign. Extract NOTHING new from the answer — no world_facts, no story cards, no location change, no loot, no payment, no appearance — everything it recounts is already on record. The ONE exception: if the remembering itself visibly moved someone (warmth, grief, a grudge surfacing), report that as an npc_updates bondMoment or stanceToPlayer for that person. Emit "world_facts": [] and leave every other field empty.';
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownHeroTells = null, knownLocations = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownHeroTells = null, knownLocations = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null }) {
     // Source-stamped retraction (memory-research M0, 2026-09-30): every
     // record this pass writes remembers the DM message it was read from.
     const laneMeta = typeof sourceMessageId === 'string' && sourceMessageId ? { sourceMessage: sourceMessageId } : null;
@@ -456,6 +474,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     : null,
                 knownStoryCards
                     ? `KNOWN STORY CARDS (beats already on record for the people and threads in this exchange — update one by its exact "id" instead of minting a duplicate; a resolved card is paid off and must NOT be re-reported):\n${knownStoryCards}`
+                    : null,
+                knownOpenPlans
+                    ? `KNOWN OPEN PLANS (plans, promises, and threats on record that have NOT yet happened — when this turn's narrative shows one carried out, failed, or abandoned, write the outcome as its own world fact with "supersedes": that plan's exact id; never re-report the plan itself):\n${knownOpenPlans}`
                     : null,
                 knownHeroTells
                     ? `KNOWN HERO TELLS (patterns of the hero's manner already on record — another sighting of one is reported with its exact "id", never as a new tell):\n${knownHeroTells}`
