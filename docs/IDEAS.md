@@ -3189,3 +3189,28 @@ Smaller shapes of the same kind, all in the queue: the read fan-in and the blob-
 twice in `persistence.js`, a slot's metadata record with three shapers, the autosave runtime
 restating the policy's two predicates, `clampInt` in three private copies, a `SAVE_VERSION` alias
 whose only consumers are tests.
+
+### [strengthening] A cross-channel guard signs with the channels' own identity; a per-line rule is a per-line tax; a KNOWN context echoes only what the schema asks back — status: `idea` (2026-10-07 audit, hero-tells Lap 3 + inventory-economy Lap 4; one P1 and nine P2 in the strengthening queue)
+Three patterns from the sixth lap pair, one of them a live double grant. **(1)** `applyEvents` guards
+the purchase↔`items_found` and sell↔`items_lost` pairs with a private compact-token identity written
+in 2026-07 — while `normalizeItemKey`, the identity every ledger signs with, grew five rungs since
+(own key, display name, compact, inverted word set, descriptor prefix, plural). A purchase keyed
+`potionHealing` beside `items_found: ["Healing Potion"]` now buys one potion and grants a second,
+because the guard and the reducer disagree on what "the same item" is. Rule: a guard that sits ABOVE
+two channels reads identity from the function those channels' ledgers use — never a copy — so it
+learns every rung the day the reducer does. The same shape at load: `healDuplicateInventoryRows`
+folds weapons by exact name while the live `stackIdentity` exempts them, so a reload reshapes the
+pack (two Daggers → `Dagger ×2`). One identity, read at the orchestrator boundary, the reducer and
+the load heal — pinned by a key-vs-name pair on each. **(2)** The hero-tells HEARSAY rung appends the
+rule for using a hearsay line to every such line (210 chars × up to 5) although CRITICAL RULE 10 in
+the cached prefix already states it: a line carries a TAG, the prefix carries the rule — the 09-25
+"what event changes this byte" rule read from the other side: a byte that never changes is prefix
+even when it rides a dynamic line. **(3)** KNOWN HERO TELLS lists each tell's witnesses and scene
+count for the Scribe, whose schema asks it to echo an `id` and report THIS turn's witnesses — 10k
+chars at the caps for an id index worth 1.2k. A KNOWN context is an echo table: it carries exactly
+the fields the schema asks the LLM to send back, and nothing it only reads. Smaller shapes of the
+same kind, all in the queue: `equipment.js`'s kind predicates with zero importers beside twelve
+inline copies (one of them stricter than the rest), `economy.js`'s seventeen longhand suppression
+returns and four inline copies of a cover predicate the file already names, two spend windows (8 and
+12) for one rule, a resolver ladder walked twice for an error message, four dead exports, and a
+voiced-only hero-tell report that mints witnesses who saw nothing on the new-tell branch only.
