@@ -62,7 +62,7 @@ asks where do we stand, what is alive between us now, and what would move it. Sl
 - [x] **A quiet tell in the chat** — shipped 2026-09-14 (`bondMarks`, ✦ chip) — a small mark beside the message when a key moment lands;
   no text, no score screen.
 
-### [wow] NPC relationships: the bond turns into a scene, and people have ties to each other — status: `idea` (wow audit 2026-10-07, `docs/SCHEDULED_WOW.md` entry 2026-10-07, two W1 slices)
+### [wow] NPC relationships: the bond turns into a scene, and people have ties to each other — status: slice A `shipped` (2026-10-07, same day — DECISIONS.md 2026-10-07: `detectBondTurn` / `mintTurnBeat` / the `turn` mode of the relationship beat, `## THE BOND HAS TURNED — PRIVATE`; live proof pending), slice B `idea` (wow audit 2026-10-07, `docs/SCHEDULED_WOW.md` entry 2026-10-07)
 Lap-1 finding (npc-relationships): the hero↔NPC edge is genre-best and engine-read end to end (stance, graded moments,
 derived stage, open thread, absence, initiative, epistemics, hero tells — proved in the 10-02 / 10-03 grand playtests),
 and the two things Baldur's Gate 3 / Dragon Age: Origins / Hades / Crusader Kings 3 / Pentiment add on top are missing by

@@ -3,7 +3,8 @@
  * canonical location registry writes.
  */
 import { buildStoryMemoryPromotion, gradeBondMoments, namesMatch, normalizeNpcRecord, selectKeyBondMoments } from '../../engine/npcRoster.js';
-import { beatTargets, deriveRelationshipStage, sanitizeRelationshipBeat } from '../../engine/relationshipArc.js';
+import { TURN_BEAT_TIMING_DIE_SIDES, beatTargets, deriveRelationshipStage, detectBondTurn, isRelationshipBeatExpired, mintTurnBeat, sanitizeRelationshipBeat } from '../../engine/relationshipArc.js';
+import { rollDie } from '../../engine/dice.ts';
 
 /**
  * The quiet tell (2026-09-13 overhaul): what changed in the bond between
@@ -157,6 +158,31 @@ export const handlers = {
             if (session?.relationshipBeat && beatTargets(session.relationshipBeat, touched)
                 && (state.messages || []).length >= (sanitizeRelationshipBeat(session.relationshipBeat)?.opensAtMessage ?? Infinity)) {
                 session = { ...session, relationshipBeat: null };
+            }
+            // The bond turns into a scene (2026-10-07, wow npc-relationships):
+            // a turning point EARNED BY A MOMENT hands the NPC one beat of
+            // their own — a turn beat in the initiative lane, opening this
+            // scene or the next (crypto die 0–1). It outranks a pending
+            // absence beat (the fiction already brought these two together)
+            // and refreshes an unexpired turn beat for the SAME person in
+            // place (one window, the latest stage). The cooldown stamp makes
+            // the cadence's next reach-out wait its 40 rows. Never for a
+            // non-roster record; the render re-judges combat and liveness.
+            const turn = (!touched.rosterTier || touched.rosterTier === 'character') ? detectBondTurn(before, touched) : null;
+            if (turn) {
+                const count = (state.messages || []).length;
+                const pending = sanitizeRelationshipBeat(session?.relationshipBeat);
+                const sameTurn = pending && pending.mode === 'turn' && beatTargets(pending, touched) && !isRelationshipBeatExpired(pending, count);
+                const beat = sameTurn
+                    ? { ...pending, stage: turn.stage, since: turn.since }
+                    : mintTurnBeat(touched, turn, { messageCount: count, delayScenes: rollDie(TURN_BEAT_TIMING_DIE_SIDES) - 1 });
+                if (beat) {
+                    session = {
+                        ...(session || {}),
+                        relationshipBeat: beat,
+                        lastRelationshipBeatMessage: sameTurn ? session.lastRelationshipBeatMessage : count,
+                    };
+                }
             }
         }
         let storyMemory = state.storyMemory || [];

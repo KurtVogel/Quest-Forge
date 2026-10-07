@@ -7,9 +7,11 @@ import {
     deriveRelationshipStage,
     describeAbsence,
     describeStageForPrompt,
+    detectBondTurn,
     isRelationshipBeatOpen,
     listKnownByNpc,
     mintRelationshipBeat,
+    mintTurnBeat,
     resolveOpenThread,
     sanitizeRelationshipBeat,
     selectRelationshipBeatCandidate,
@@ -98,7 +100,7 @@ describe('NPC initiative — someone reaches out (2026-09-13)', () => {
         const candidate = selectRelationshipBeatCandidate([maren], [], { messages: messagesOf(40), messageCount: 40 });
         const beat = mintRelationshipBeat(candidate, { messageCount: 40, delayScenes: 2 });
         expect(beat).toEqual({
-            npcId: 'npc-maren', npcName: 'Maren', stage: 'intimate', thread: 'Waiting to hear about the caravan.',
+            mode: 'absence', npcId: 'npc-maren', npcName: 'Maren', stage: 'intimate', thread: 'Waiting to hear about the caravan.', since: null,
             mintedAtMessage: 40, opensAtMessage: 52, closesAtMessage: 52 + BEAT_WINDOW_MESSAGES,
         });
         expect(isRelationshipBeatOpen(beat, 51)).toBe(false);
@@ -235,5 +237,78 @@ describe('resolveOpenThread — the Scribe thread wins, an active linked promise
         expect(resolveOpenThread({ name: 'Maren', openThread: { evil: true } }, cards).source).toBe('promise');
         expect(resolveOpenThread({ name: 'Maren' }, 'junk')).toBeNull();
         expect(resolveOpenThread(null, [null, 4, { type: 'promise' }])).toBeNull();
+    });
+});
+
+describe('The bond turns into a scene (2026-10-07, wow npc-relationships) — a turning point earned by a moment hands the NPC one beat of their own', () => {
+    const bare = { id: 'npc-tammo', name: 'Tammo', rosterTier: 'character', disposition: 'friendly' };
+    const rescue = m('Tammo pulled the hero from the weir and said nothing of it to anyone.', 'rescue', 5, 3);
+    const trusted = { ...bare, bondMoments: [rescue] };
+    const intimate = { ...bare, bondMoments: [rescue, m('Their first night, in the loft over the net shed.', 'intimacy', 5, 9)] };
+    const hostile = { ...bare, disposition: 'hostile', bondMoments: [m('Tammo swore the hero would answer for the boat.', 'quarrel', 4, 3)] };
+
+    it('detects trusted / intimate / rival / estranged earned by a moment, never familiar, never the trust-number route, never a stage that did not move', () => {
+        expect(detectBondTurn(bare, trusted)).toEqual({ stage: 'trusted', since: rescue.text });
+        expect(detectBondTurn(trusted, intimate)).toMatchObject({ stage: 'intimate' });
+        expect(detectBondTurn(bare, hostile)).toMatchObject({ stage: 'rival' });
+        expect(detectBondTurn(null, trusted)).toMatchObject({ stage: 'trusted' });
+        // The Scribe's trust number lifts the stage (the chip) but earns no scene.
+        expect(deriveRelationshipStage({ ...bare, trust: 80 }).stage).toBe('trusted');
+        expect(detectBondTurn(bare, { ...bare, trust: 80 })).toBeNull();
+        // Familiar is not news; a stage that stayed is not a turn.
+        expect(detectBondTurn(bare, { ...bare, bondMoments: [m('A drink.', 'other', 2, 3)] })).toBeNull();
+        expect(detectBondTurn(trusted, { ...trusted, lastNotes: 'Still here.' })).toBeNull();
+        expect(detectBondTurn(bare, null)).toBeNull();
+        expect(detectBondTurn(bare, 'junk')).toBeNull();
+    });
+
+    it('mints a turn beat in the one beat shape, opening this scene or the next; sanitizes complete-or-null with the mode whitelisted', () => {
+        const turn = detectBondTurn(bare, trusted);
+        const beat = mintTurnBeat(trusted, turn, { messageCount: 40, delayScenes: 1 });
+        expect(beat).toEqual({
+            mode: 'turn', npcId: 'npc-tammo', npcName: 'Tammo', stage: 'trusted', thread: null, since: rescue.text,
+            mintedAtMessage: 40, opensAtMessage: 46, closesAtMessage: 46 + BEAT_WINDOW_MESSAGES,
+        });
+        expect(sanitizeRelationshipBeat(beat)).toEqual(beat);
+        // A legacy beat (no mode) is an absence beat; a turn beat without its moment or at a non-turning stage is junk.
+        const legacy = mintRelationshipBeat({ npc: trusted, stage: 'trusted', thread: null }, { messageCount: 40 });
+        expect(legacy.mode).toBe('absence');
+        const { mode, since, ...stripped } = legacy; // eslint-disable-line no-unused-vars
+        expect(sanitizeRelationshipBeat(stripped)).toMatchObject({ mode: 'absence', since: null });
+        expect(sanitizeRelationshipBeat({ ...beat, mode: 'summons' }).mode).toBe('absence');
+        expect(sanitizeRelationshipBeat({ ...beat, since: '' })).toBeNull();
+        expect(sanitizeRelationshipBeat({ ...beat, stage: 'familiar' })).toBeNull();
+        expect(sanitizeRelationshipBeat({ ...beat, since: 'x'.repeat(500) }).since).toHaveLength(220);
+        expect(mintTurnBeat(trusted, { stage: 'familiar', since: 'x' }, { messageCount: 40 })).toBeNull();
+        expect(mintTurnBeat(trusted, null, { messageCount: 40 })).toBeNull();
+        expect(mintTurnBeat(null, turn, { messageCount: 40 })).toBeNull();
+    });
+
+    it('renders THE BOND HAS TURNED by the minted stage with the moment that earned it — in the window, off the live roster, never in combat', () => {
+        const beat = mintTurnBeat(trusted, detectBondTurn(bare, trusted), { messageCount: 40 });
+        const block = buildRelationshipBeatBlock(beat, [trusted], { messageCount: 41 });
+        expect(block).toContain('## THE BOND HAS TURNED — PRIVATE');
+        expect(block).toContain('now trusted — earned by: Tammo pulled the hero from the weir and said nothing of it to anyone.');
+        expect(block).not.toContain('anyone..');
+        expect(block).toContain('something of their OWN');
+        expect(block).toContain('open it as a quest');
+        expect(block).toContain('never force the hero\'s reply');
+        expect(block).not.toContain('SOMEONE REACHES OUT');
+        expect(buildRelationshipBeatBlock(beat, [trusted], { messageCount: 41, combatActive: true })).toBe('');
+        expect(buildRelationshipBeatBlock(beat, [trusted], { messageCount: 39 })).toBe('');
+        expect(buildRelationshipBeatBlock(beat, [trusted], { messageCount: 41 + BEAT_WINDOW_MESSAGES + 1 })).toBe('');
+        expect(buildRelationshipBeatBlock(beat, [], { messageCount: 41 })).toBe('');
+        expect(buildRelationshipBeatBlock(beat, [{ ...trusted, rosterTier: 'archived_creature' }], { messageCount: 41 })).toBe('');
+        const night = buildRelationshipBeatBlock(mintTurnBeat(intimate, detectBondTurn(trusted, intimate), { messageCount: 40 }), [intimate], { messageCount: 40 });
+        expect(night).toContain('now intimate');
+        expect(night).toContain('the morning-after word');
+        const rift = buildRelationshipBeatBlock(mintTurnBeat(hostile, detectBondTurn(bare, hostile), { messageCount: 40 }), [hostile], { messageCount: 40 });
+        expect(rift).toContain('a claim or a warning');
+        const cold = { ...bare, bondMoments: [rescue, m('Tammo found the hero had sold his boat and turned his back.', 'betrayal', 5, 9)] };
+        const shut = buildRelationshipBeatBlock(mintTurnBeat(cold, detectBondTurn(trusted, cold), { messageCount: 40 }), [cold], { messageCount: 40 });
+        expect(shut).toContain('now estranged');
+        expect(shut).toContain('the door shuts');
+        // The block is sized for the dynamic half: one paragraph.
+        expect(block.length).toBeLessThan(1200);
     });
 });

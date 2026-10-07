@@ -14,7 +14,7 @@
  * KNOWN NPCs line and the companion party line so the DM plays TOWARD the
  * thread every scene, and both lead the Journal / Companions cards.
  */
-import { namesMatch, normalizeBondMoments, selectKeyBondMoments } from './npcRoster.js';
+import { NPC_BOND_MOMENT_MAX, namesMatch, normalizeBondMoments, selectKeyBondMoments } from './npcRoster.js';
 import { conversationalDistance } from './replayLedger.js';
 import { liveWorldFacts } from './worldFacts.js';
 
@@ -239,6 +239,34 @@ export const BEAT_WINDOW_MESSAGES = 24;
 export const BEAT_COOLDOWN_MESSAGES = 40;
 /** The engine-rolled timing die: 0–4 scenes of delay. */
 export const BEAT_TIMING_DIE_SIDES = 5;
+/**
+ * The two reasons a beat is minted (2026-10-07, wow npc-relationships):
+ * `absence` — the cadence's reach-out after a long time apart (above);
+ * `turn` — the bond just reached a turning point and the NPC gets ONE beat
+ * of their own about it (below). Whitelisted at load; a legacy beat is `absence`.
+ */
+export const RELATIONSHIP_BEAT_MODES = new Set(['absence', 'turn']);
+/** A turning point is NEWS: these stages, never familiar and below. */
+export const TURNING_POINT_STAGES = new Set(['trusted', 'intimate', 'rival', 'estranged']);
+/** The turn beat's timing die: 0–1 scenes (this scene or the next). */
+export const TURN_BEAT_TIMING_DIE_SIDES = 2;
+
+/**
+ * Did this update TURN the bond? `{ stage, since }` when the derived stage
+ * moved to a turning point EARNED BY A MOMENT — the `since` text — else
+ * null. The trust-number route (`trust >= 70`, a Scribe-written number)
+ * lifts the stage and marks the chip but never fires the scene: a beat a
+ * number could talk into existence is the failure the derived stage was
+ * built against. Pure; the reducer reads it beside describeBondMarks.
+ */
+export function detectBondTurn(before, after) {
+    if (!after || typeof after !== 'object' || !text(after.name)) return null;
+    const next = deriveRelationshipStage(after);
+    if (!TURNING_POINT_STAGES.has(next.stage) || !text(next.since)) return null;
+    const prev = before && typeof before === 'object' ? deriveRelationshipStage(before).stage : 'stranger';
+    if (prev === next.stage) return null;
+    return { stage: next.stage, since: text(next.since).slice(0, NPC_BOND_MOMENT_MAX) };
+}
 
 /**
  * The one NPC who may reach out on their own: a bond at an eligible stage
@@ -269,10 +297,35 @@ export function mintRelationshipBeat(candidate, { messageCount, delayScenes = 0 
     if (!candidate?.npc || !Number.isFinite(messageCount)) return null;
     const opens = Math.floor(messageCount) + Math.max(0, Math.floor(delayScenes)) * BEAT_SCENE_MESSAGES;
     return {
+        mode: 'absence',
         npcId: text(candidate.npc.id) || null,
         npcName: text(candidate.npc.name),
         stage: candidate.stage,
         thread: candidate.thread ? candidate.thread.text : null,
+        since: null,
+        mintedAtMessage: Math.floor(messageCount),
+        opensAtMessage: opens,
+        closesAtMessage: opens + BEAT_WINDOW_MESSAGES,
+    };
+}
+
+/**
+ * The turn beat: `{ mode: 'turn', stage, since, … }` for the NPC whose bond
+ * just turned (detectBondTurn). Same window and shape as the absence beat so
+ * every reader (render, consume, load) is one path; opens this scene or the
+ * next (delayScenes 0–1, engine-rolled).
+ */
+export function mintTurnBeat(npc, turn, { messageCount, delayScenes = 0 } = {}) {
+    if (!npc || typeof npc !== 'object' || !text(npc.name) || !turn || !Number.isFinite(messageCount)) return null;
+    if (!TURNING_POINT_STAGES.has(turn.stage) || !text(turn.since)) return null;
+    const opens = Math.floor(messageCount) + Math.max(0, Math.floor(delayScenes)) * BEAT_SCENE_MESSAGES;
+    return {
+        mode: 'turn',
+        npcId: text(npc.id) || null,
+        npcName: text(npc.name),
+        stage: turn.stage,
+        thread: null,
+        since: text(turn.since).slice(0, NPC_BOND_MOMENT_MAX),
         mintedAtMessage: Math.floor(messageCount),
         opensAtMessage: opens,
         closesAtMessage: opens + BEAT_WINDOW_MESSAGES,
@@ -289,11 +342,18 @@ export function sanitizeRelationshipBeat(raw) {
     const stage = RELATIONSHIP_STAGES.includes(raw.stage) ? raw.stage : null;
     if (!stage) return null;
     const minted = Number(raw.mintedAtMessage);
+    const mode = RELATIONSHIP_BEAT_MODES.has(raw.mode) ? raw.mode : 'absence';
+    const since = text(raw.since).slice(0, NPC_BOND_MOMENT_MAX) || null;
+    // A turn beat without the moment that earned it is junk: the block
+    // renders from `since`, and a number-earned stage never mints one.
+    if (mode === 'turn' && (!since || !TURNING_POINT_STAGES.has(stage))) return null;
     return {
+        mode,
         npcId: text(raw.npcId) || null,
         npcName,
         stage,
         thread: text(raw.thread).slice(0, NPC_OPEN_THREAD_MAX) || null,
+        since: mode === 'turn' ? since : null,
         mintedAtMessage: Number.isFinite(minted) ? Math.max(0, Math.floor(minted)) : Math.max(0, Math.floor(opens)),
         opensAtMessage: Math.max(0, Math.floor(opens)),
         closesAtMessage: Math.max(0, Math.floor(closes)),
@@ -336,9 +396,32 @@ export function buildRelationshipBeatBlock(beat, npcs = [], { messageCount, comb
     if (!b || combatActive || !isRelationshipBeatOpen(b, messageCount)) return '';
     const npc = (Array.isArray(npcs) ? npcs : []).find(n => n && beatTargets(b, n));
     if (!npc || (npc.rosterTier && npc.rosterTier !== 'character')) return '';
+    if (b.mode === 'turn') return buildTurnBeatBlock(b, npc);
     const { stage } = deriveRelationshipStage(npc);
     const moves = BEAT_MOVES[stage] || BEAT_MOVES.trusted;
     const thread = b.thread ? ` Between them now: ${b.thread}.` : '';
     return `## SOMEONE REACHES OUT — PRIVATE
 ${npc.name} (${stage} toward the hero) has been apart from the hero for a long while and may act on their OWN initiative in this scene or the next — ONCE, in fiction, only if the scene allows it: ${moves}.${thread} Play it from ${npc.name}'s side and want, at the register the bond has earned (a rival's reach is a threat or a claim, an estranged one's is cold, a friend's is warm). Never interrupt combat with it, never force the hero's reaction, and never repeat it once done. The hero learns nothing the fiction does not show.`;
+}
+
+
+const TURN_MOVES = {
+    trusted: 'they bring the hero something of their OWN — the ask they would only make of someone they now trust, drawn from their wants / agenda / secret on their KNOWN NPCs line: a confidence, a favor, help with the thing they want most, a door opened. If the hero takes it up, open it as a quest.',
+    intimate: 'what this is, from their side — the morning-after word: a wish, a condition, a fear, a claim, or a joke that is really a question.',
+    rival: 'a claim or a warning in their own words — what they will take, what the hero will pay, or the line they now draw.',
+    estranged: 'the door shuts where it can be seen — a refusal, something returned, a name not used, a courtesy withdrawn in front of others.',
+};
+
+/**
+ * The turning-point cue (2026-10-07): the bond just reached a stage the
+ * player saw as a ✦ chip; the NPC gets ONE beat of their own about it. The
+ * stage is the one the beat was minted with (the turn is the news, not the
+ * live reading — a same-night second turn re-mints). Never names the stage
+ * word in prose; never narrates the hero's side.
+ */
+function buildTurnBeatBlock(beat, npc) {
+    const moves = TURN_MOVES[beat.stage];
+    if (!moves) return '';
+    return `## THE BOND HAS TURNED — PRIVATE
+Between ${npc.name} and the hero something has just changed: where they stand is now ${beat.stage} — earned by: ${beat.since.replace(/[.!?]+$/, '')}. ${npc.name} gets ONE beat of their own about it, in this scene or the next, only if the scene allows it: ${moves} Play it from ${npc.name}'s side and want, in their own register, as a thing they DO or SAY — never as narration of what the hero feels, and never the stage word itself. ONCE: never interrupt combat with it, never force the hero's reply, and never repeat it once done.`;
 }

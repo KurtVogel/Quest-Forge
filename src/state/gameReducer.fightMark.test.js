@@ -201,8 +201,11 @@ describe('the fight is remembered (2026-09-28) — witnesses, the encounter mark
             enemies: [{ ...goblin, hp: 0, condition: 'dead' }], party: state.party,
         });
         expect(state.combat.fightTally.saves).toEqual([{ how: 'felled', by: 'Garrick', saved: 'Astra', detail: 'Goblin Cutter', round: 2 }]);
+        // The rescue TURNS the bond (trusted, earned by a moment): the turn beat's timing die (2026-10-07).
+        rollQueue.push(1);
         state = gameReducer(state, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'x2' } });
         expect(state.combat.active).toBe(false);
+        expect(state.session.relationshipBeat).toMatchObject({ mode: 'turn', npcName: 'Garrick', stage: 'trusted' });
         const garrick = state.npcs.find(n => n.name === 'Garrick');
         expect(garrick.bondMoments).toHaveLength(1);
         expect(garrick.bondMoments[0]).toMatchObject({
@@ -226,6 +229,7 @@ describe('the fight is remembered (2026-09-28) — witnesses, the encounter mark
             events: [attack('Astra', 'Goblin Cutter', { critical: true, damage: 9, remainingHp: 0, maxHp: 7 })],
             enemies: [{ ...goblin, hp: 0, condition: 'dead' }], party: state.party,
         });
+        rollQueue.push(1); // shared danger at salience 4 turns the bond: the turn beat's timing die
         state = gameReducer(state, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'x1' } });
         expect(state.npcs[0].bondMoments).toHaveLength(1);
         expect(state.npcs[0].bondMoments[0]).toMatchObject({ kind: 'shared_danger', salience: 4 });

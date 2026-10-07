@@ -461,6 +461,54 @@ describe('gameReducer tiered bond moments (2026-09-12 — one scene, one moment;
         expect(rollRelationshipBeat({ ...state, npcs: [] }, { roll: () => 0 })).toBe(state.session);
     });
 
+    it('the bond turns into a scene (2026-10-07): a turning point earned by a moment mints a turn beat, a trust number does not, unseen lanes never do', () => {
+        const state = { ...initialGameState, messages: messagesOf(30) };
+        const rescue = { text: 'Maren pulled the hero from the weir and said nothing of it to anyone.', kind: 'rescue', salience: 5 };
+        const turned = scribe(state, rescue);
+        const beat = turned.session.relationshipBeat;
+        expect(beat).toMatchObject({ mode: 'turn', npcName: 'Maren', stage: 'trusted', since: rescue.text, mintedAtMessage: 30, thread: null });
+        expect([30, 36]).toContain(beat.opensAtMessage); // a crypto die: this scene or the next
+        expect(beat.closesAtMessage).toBe(beat.opensAtMessage + 24);
+        expect(turned.session.lastRelationshipBeatMessage).toBe(30);
+        // The chip landed too; a re-mention neither re-marks nor re-mints.
+        expect(turned.messages.some(msg => Array.isArray(msg.bondMarks) && msg.bondMarks.some(mark => mark.kind === 'stage'))).toBe(true);
+        const again = gameReducer(turned, { type: 'UPDATE_NPC', payload: { name: 'Maren', lastNotes: 'Still here.' } });
+        expect(again.session.relationshipBeat).toEqual(beat);
+        // A Scribe-written trust number lifts the stage and marks the chip, but earns no scene.
+        const numbered = gameReducer(state, { type: 'UPDATE_NPC', payload: { name: 'Maren', disposition: 'friendly', lastNotes: 'x', trust: 85 } });
+        expect(numbered.messages.some(msg => Array.isArray(msg.bondMarks) && msg.bondMarks.some(mark => mark.label === 'Maren: now trusted'))).toBe(true);
+        expect(numbered.session.relationshipBeat).toBeFalsy();
+        // Journal re-mentions and absence-drift installs (_seen: false) never mint.
+        const unseen = gameReducer(state, { type: 'UPDATE_NPC', payload: { name: 'Maren', disposition: 'friendly', lastNotes: 'x', bondMoment: rescue, _seen: false } });
+        expect(unseen.session.relationshipBeat).toBeFalsy();
+    });
+
+    it('a turn beat outranks a pending absence beat, refreshes an unexpired turn beat for the same person in place, and is consumed when that person is next seen after it opens', async () => {
+        const absence = { mode: 'absence', npcId: 'npc-bran', npcName: 'Bran', stage: 'trusted', thread: 'x', since: null, mintedAtMessage: 10, opensAtMessage: 40, closesAtMessage: 64 };
+        const state = { ...initialGameState, messages: messagesOf(30), session: { ...initialGameState.session, relationshipBeat: absence, lastRelationshipBeatMessage: 10 } };
+        const rescue = { text: 'Maren pulled the hero from the weir and said nothing of it to anyone.', kind: 'rescue', salience: 5 };
+        const turned = scribe(state, rescue);
+        expect(turned.session.relationshipBeat).toMatchObject({ mode: 'turn', npcName: 'Maren', stage: 'trusted' });
+        expect(turned.session.lastRelationshipBeatMessage).toBe(30);
+        // The same night turns again before the window opens: one window, the latest stage, the cooldown stamp untouched.
+        const first = { ...turned.session.relationshipBeat, opensAtMessage: 36, closesAtMessage: 60 };
+        const pending = { ...turned, session: { ...turned.session, relationshipBeat: first } };
+        const night = scribe({ ...pending, messages: messagesOf(32) }, { text: 'Their first night, in the loft.', kind: 'intimacy', salience: 5 });
+        expect(night.session.relationshipBeat).toMatchObject({ mode: 'turn', stage: 'intimate', since: 'Their first night, in the loft.', opensAtMessage: 36, closesAtMessage: 60 });
+        expect(night.session.lastRelationshipBeatMessage).toBe(30);
+        // Once the window has opened, a second turn is new news: the open beat is consumed and a fresh one minted.
+        const later = scribe({ ...night, messages: messagesOf(40) }, { text: 'Maren found the hero had sold her boat and turned her back.', kind: 'betrayal', salience: 5 });
+        expect(later.session.relationshipBeat).toMatchObject({ mode: 'turn', stage: 'estranged', mintedAtMessage: 40 });
+        expect(later.session.lastRelationshipBeatMessage).toBe(40);
+        // Consumed by the first seen update once the window is open — the DM had its call.
+        const open = { ...night, messages: messagesOf(night.session.relationshipBeat.opensAtMessage + 2) };
+        const seen = gameReducer(open, { type: 'UPDATE_NPC', payload: { name: 'Maren', lastNotes: 'She asked the hero to come to the weir at dusk.' } });
+        expect(seen.session.relationshipBeat).toBeNull();
+        // The cadence's absence tick honors the turn beat's cooldown stamp.
+        const { rollRelationshipBeat } = await import('./handlers/worldMemory.js');
+        expect(rollRelationshipBeat({ ...seen, messages: messagesOf(50) }, { roll: () => 0 }).relationshipBeat).toBeFalsy();
+    });
+
     it('a DM-lane string bondMoment is still recorded, ungraded', () => {
         const state = scribe({ ...initialGameState, messages: messagesOf(6) }, 'Maren laughed and undercharged the hero for the room.');
         expect(state.npcs[0].bondMoments).toEqual([
