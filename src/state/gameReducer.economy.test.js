@@ -178,6 +178,31 @@ describe('PURCHASE_ITEM', () => {
         expect(replayed.messages.at(-1).content).toMatch(/Duplicate purchase ignored/);
     });
 
+    it('the spend side has ONE window: a purchase re-emitted as `purchase` 9–12 conversational messages later is suppressed like its gold_lost recap (2026-10-07 P2)', () => {
+        const bought = gameReducer(makeState(), {
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-buy-1', playerMessage: 'I buy a dagger.' } },
+        });
+        let later = bought;
+        for (let i = 0; i < 10; i += 1) {
+            later = gameReducer(later, { type: 'ADD_MESSAGE', payload: { id: `msg-${i}`, role: i % 2 ? 'assistant' : 'user', content: `Travel turn ${i}.` } });
+        }
+        const replayed = gameReducer(later, {
+            type: 'PURCHASE_ITEM',
+            payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-buy-late', playerMessage: 'I check my pack.' } },
+        });
+        expect(replayed.character.gold).toBe(3);
+        expect(replayed.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(1);
+        expect(replayed.messages.at(-1).content).toMatch(/Duplicate purchase ignored/);
+        // The mirror through the loose channel suppresses at the same distance.
+        const recapped = gameReducer(later, {
+            type: 'APPLY_COIN_LOSS',
+            payload: { gold: 2, _meta: { sourceId: 'msg-recap', playerMessage: 'I check my pack.' } },
+        });
+        expect(recapped.character.gold).toBe(3);
+        expect(recapped.messages.at(-1).content).toMatch(/Duplicate coin charge ignored/);
+    });
+
     it('ignores an exact same-message purchase replay even if metadata is repeated', () => {
         const state = makeState();
         const bought = gameReducer(state, {

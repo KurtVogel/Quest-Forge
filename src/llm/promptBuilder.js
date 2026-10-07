@@ -12,6 +12,7 @@ import { buildWonderBlock } from '../engine/wonder.js';
 import { buildPresenceText } from './narrativeMessages.js';
 import { buildStoryMemoryPromptBlock, formatSecrecyTag } from '../engine/storyMemory.js';
 import { describeCatalogForPrompt } from '../data/items.js';
+import { isShieldItem } from '../engine/equipment.js';
 import { formatCurrency } from '../engine/currency.js';
 import { CLASSES } from '../data/classes.js';
 import { cleanTextField, normalizeCampaignPremise } from '../config/contentLimits.js';
@@ -1017,11 +1018,11 @@ function buildInventoryBlock(inventory, character) {
             // ONE AC read with the engine (2026-09-26 rules-math P2): the
             // annotation used to skip the magicBonus fallback getArmorClass
             // honors, so a non-catalog magic armor showed two numbers in one prompt.
-            if (i.baseAC && !i.isShield) {
+            if (i.baseAC && !isShieldItem(i)) {
                 const armorAc = describeArmorAc(i);
                 if (armorAc !== null) desc += ` [AC ${armorAc}, ${i.armorType || 'unknown'} armor]`;
             }
-            if (i.isShield || i.type === 'shield') desc += ` [+${describeShieldAc(i)} AC shield]`;
+            if (isShieldItem(i)) desc += ` [+${describeShieldAc(i)} AC shield]`;
             if (i.damage) desc += ` [${i.damage}${i.damageType ? ' ' + i.damageType : ''}${i.attackBonus ? `, +${i.attackBonus} hit` : ''}${i.damageBonus ? `, +${i.damageBonus} dmg` : ''}]`;
         }
         if (Number.isFinite(i.valueCp)) desc += ` [value ${formatCurrency(i.valueCp)}]`;
@@ -1059,7 +1060,7 @@ function buildInventoryBlock(inventory, character) {
 const CARRIED_PROMPT_CAP = 25;
 
 function isMechanicalItem(i) {
-    return !!(i.damage || i.baseAC || i.isShield || i.type === 'shield' || i.type === 'consumable' || i.magicBonus);
+    return !!(i.damage || i.baseAC || isShieldItem(i) || i.type === 'consumable' || i.magicBonus);
 }
 
 // Genuinely static (closes over nothing but the app's item catalog data), so

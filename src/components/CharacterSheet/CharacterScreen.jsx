@@ -8,6 +8,7 @@
  */
 import { createPortal } from 'react-dom';
 import { formatModifier, getAllSkills, getModifier, getProficiencyBonus, getSavingThrowModifier } from '../../engine/rules.js';
+import { isShieldItem } from '../../engine/equipment.js';
 import { ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
 import { getExperienceThreshold, isMaxLevel } from '../../engine/progression.js';
 import { getKnownSpells, getSpellAttackBonus, getSpellSaveDC, isSpellcaster } from '../../engine/spellcasting.js';
@@ -196,7 +197,7 @@ export default function CharacterScreen({ character, inventory = [], isOpen, onC
                                         <div key={item.id} className="char-kv">
                                             <span>{item.name}</span>
                                             <span className="char-kv-value">
-                                                {item.type === 'weapon' ? (item.damage || '') : item.baseAC ? `AC ${item.baseAC}` : item.isShield ? '+2 AC' : ''}
+                                                {item.type === 'weapon' ? (item.damage || '') : item.baseAC ? `AC ${item.baseAC}` : isShieldItem(item) ? '+2 AC' : ''}
                                             </span>
                                         </div>
                                     ))

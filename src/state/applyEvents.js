@@ -12,8 +12,10 @@
  */
 
 import { CLASSES } from '../data/classes.js';
-import { normalizeItem, toFlag } from '../data/items.js';
+import { normalizeItem, normalizeItemKey, toFlag } from '../data/items.js';
 import { isLowLevelSolo } from '../engine/combatPredicates.js';
+import { itemIdentityMatches } from '../engine/textMatch.js';
+import { normalizeRefToken } from './handlers/shared.js';
 
 const withMeta = (entry, meta) => {
     if (Object.keys(meta).length === 0) return entry;
@@ -211,33 +213,44 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
 
     // A `purchase`/`sell` already adds/removes the traded item atomically. If the DM ALSO
     // lists that same item in items_found/items_lost (the prompt forbids it), the item gets
-    // duplicated or removed twice. Drop found/lost entries that match a traded item by
-    // normalized key or name — the item-side twin of the coin guard below.
-    const normToken = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    // duplicated or removed twice. Drop found/lost entries that are the traded item —
+    // the item-side twin of the coin guard below. "The same item" is the identity
+    // buildPurchaseTransaction and the ledgers sign with (2026-10-07 inventory-economy
+    // P1): the catalog key when one resolves, else the compact name token, plus the
+    // audits' fuzzy containment for a drifted spelling. A compact-token compare let
+    // `purchase: { itemKey: 'potionHealing' }` beside `items_found: ["Healing Potion"]`
+    // buy one potion and grant a second, and `sell: "Hempen Rope (50 ft)"` beside
+    // `items_lost: ["hempen rope"]` sell one and silently remove the other.
+    const tradeIdentity = (ref) => normalizeItemKey(ref) || normalizeRefToken(ref);
     const itemKeyOf = (it) => (typeof it === 'string' ? '' : (it.itemKey || it.key || ''));
     const itemNameOf = (it) => (typeof it === 'string' ? it : (it.name || ''));
-    const tradedTokenSet = (entries, getKey, getName) => {
-        const set = new Set();
+    const tradedRefs = (entries, getKey, getName) => {
+        const identities = new Set();
+        const names = [];
         for (const e of entries) {
-            if (getKey(e)) set.add(normToken(getKey(e)));
-            if (getName(e)) set.add(normToken(getName(e)));
+            if (getKey(e)) identities.add(tradeIdentity(getKey(e)));
+            if (getName(e)) {
+                identities.add(tradeIdentity(getName(e)));
+                names.push(getName(e));
+            }
         }
-        return set;
+        return { identities, names };
     };
-    const dropMatching = (entries, tokens, action) => {
-        if (tokens.size === 0) return entries;
+    const dropMatching = (entries, traded, action) => {
+        if (traded.identities.size === 0) return entries;
         return entries.filter((it) => {
             const k = itemKeyOf(it);
             const n = itemNameOf(it);
-            const dup = (k && tokens.has(normToken(k))) || (n && tokens.has(normToken(n)));
+            const dup = (k && traded.identities.has(tradeIdentity(k)))
+                || (n && (traded.identities.has(tradeIdentity(n)) || traded.names.some(name => itemIdentityMatches(n, name))));
             if (dup) console.warn(`[applyEvents] Ignored a found/lost "${n || k}" already handled by the atomic ${action}.`);
             return !dup;
         });
     };
-    const purchasedTokens = tradedTokenSet(events.purchases, (p) => p.itemKey || p.item?.itemKey || p.key, (p) => p.name || p.item?.name);
-    const soldTokens = tradedTokenSet(events.sells, (s) => s.itemKey || s.key, (s) => s.name);
-    const itemsFoundRaw = dropMatching(events.itemsFound, purchasedTokens, 'purchase');
-    const itemsLost = dropMatching(events.itemsLost, soldTokens, 'sale');
+    const purchased = tradedRefs(events.purchases, (p) => p.itemKey || p.item?.itemKey || p.key, (p) => p.name || p.item?.name);
+    const sold = tradedRefs(events.sells, (s) => s.itemKey || s.key, (s) => s.name);
+    const itemsFoundRaw = dropMatching(events.itemsFound, purchased, 'purchase');
+    const itemsLost = dropMatching(events.itemsLost, sold, 'sale');
 
     // Aggregate same-identity items_found entries into one dispatch (playtest #8):
     // a DM listing "Dagger" twice for two guards produces two identical dispatches
@@ -247,7 +260,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     const itemsFound = [];
     const foundByToken = new Map();
     for (const entry of itemsFoundRaw) {
-        const token = normToken(itemKeyOf(entry) || itemNameOf(entry));
+        const token = tradeIdentity(itemKeyOf(entry) || itemNameOf(entry));
         const prior = token ? foundByToken.get(token) : null;
         if (!prior) {
             const normalized = typeof entry === 'string' ? { name: entry } : { ...entry };

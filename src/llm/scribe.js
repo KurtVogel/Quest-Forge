@@ -290,9 +290,12 @@ export function buildKnownStances({ npcs = [] } = {}, ...texts) {
 
 /**
  * The hero's tells already on record (2026-09-23): every pattern, since the
- * hero is in every exchange — id / kind / text / how many scenes it has been
- * seen in / who saw it. Compact and capped; established ones first so the
- * Scribe re-reports a sighting by id instead of re-wording it into a twin.
+ * hero is in every exchange — id / kind / text, the whole id index the
+ * schema asks the Scribe to re-report against. Scene counts and witness
+ * lists were dropped 2026-10-07 (hero-tells P2): the Scribe reads neither
+ * (its `witnesses` is who saw it THIS turn), and at the caps they were 9 KB
+ * per pass. Compact and capped; established ones first so the Scribe
+ * re-reports a sighting by id instead of re-wording it into a twin.
  */
 const KNOWN_HERO_TELL_CAP = 12;
 export function buildKnownHeroTells({ heroTells = [] } = {}) {
@@ -302,11 +305,7 @@ export function buildKnownHeroTells({ heroTells = [] } = {}) {
             || (b.lastSeenMessage || 0) - (a.lastSeenMessage || 0))
         .slice(0, KNOWN_HERO_TELL_CAP);
     if (tells.length === 0) return null;
-    return tells.map(tell => {
-        const scenes = Array.isArray(tell.sightings) ? tell.sightings.length : 0;
-        const witnesses = Array.isArray(tell.witnesses) && tell.witnesses.length > 0 ? tell.witnesses.join(', ') : 'nobody named';
-        return `${tell.id} | ${tell.kind || 'manner'} | "${tell.text.slice(0, 160)}" | seen in ${scenes} scene${scenes === 1 ? '' : 's'} | seen by: ${witnesses}`;
-    }).join('\n');
+    return tells.map(tell => `${tell.id} | ${tell.kind || 'manner'} | "${tell.text.slice(0, 160)}"`).join('\n');
 }
 
 /**

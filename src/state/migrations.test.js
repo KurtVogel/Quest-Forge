@@ -45,7 +45,23 @@ describe('save-version machinery', () => {
     });
 });
 
-describe('healDuplicateInventoryRows (queue P2, live playtests #7-#8 stale-twin ghosts)', () => {
+describe('duplicate inventory rows at load (live playtests #7-#8 stale-twin ghosts — folded by healStackedInventoryRows under the live stacking rule since 2026-10-07)', () => {
+    it('load never folds what add never does: two equipment rows stay two rows (2026-10-07 P2)', () => {
+        const save = migrateLoadedSave(fighterSave({
+            inventory: [
+                { id: 'd-1', itemKey: 'dagger', name: 'Dagger', type: 'weapon', damage: '1d4', quantity: 1 },
+                { id: 'd-2', itemKey: 'dagger', name: 'Dagger', type: 'weapon', damage: '1d4', quantity: 1 },
+                { id: 'a-1', name: 'Leather Armor', itemKey: 'leatherArmor', type: 'armor', quantity: 1 },
+                { id: 'a-2', name: 'Leather Armor', itemKey: 'leatherArmor', type: 'armor', quantity: 1 },
+                { id: 's-1', itemKey: 'shield', name: 'Shield', type: 'shield', isShield: true, quantity: 1 },
+                { id: 's-2', itemKey: 'shield', name: 'Shield', type: 'shield', isShield: true, quantity: 1 },
+            ],
+        }));
+        expect(save.inventory.filter(i => i.name === 'Dagger').map(i => i.quantity)).toEqual([1, 1]);
+        expect(save.inventory.filter(i => i.name === 'Leather Armor')).toHaveLength(2);
+        expect(save.inventory.filter(i => i.name === 'Shield')).toHaveLength(2);
+    });
+
     it('merges exact case-insensitive duplicate qty-1 unequipped rows into one stack', () => {
         const save = migrateLoadedSave(fighterSave({
             inventory: [

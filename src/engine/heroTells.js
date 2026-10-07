@@ -46,6 +46,8 @@ export const HERO_TELL_FADE_MESSAGES = 200;
 export const HERO_TELL_REPORT_CAP = 2;
 /** Established tells the standing prompt line may carry. */
 export const HERO_TELL_PROMPT_CAP = 5;
+/** Of those, lines a stranger scene may carry as HEARSAY (witnessed lines rank first). */
+export const HERO_TELL_HEARSAY_CAP = 2;
 export const HERO_TELL_BEAT_COOLDOWN_MESSAGES = BEAT_COOLDOWN_MESSAGES;
 /** Names on record as having said a tell aloud (the sheet's "said by"). */
 export const MAX_HERO_TELL_VOICES = 6;
@@ -277,12 +279,18 @@ export function recordHeroTells(existing = [], reports = [], { messageCount } = 
             ? { lastVoicedMessage: now, voicedBy: normalizeWitnesses([...voicedBy]).slice(0, MAX_HERO_TELL_VOICES) }
             : {};
         if (idx === -1) {
-            // A remark about a pattern nobody has recorded is still a first
-            // sighting: the character saw it before the Scribe did.
+            // A new pattern joins with its first sighting — unless the report
+            // is a REMARK alone (2026-10-07 hero-tells P2, the held branch's
+            // 09-29 rule applied at the mint): a character naming a pattern
+            // nobody recorded is not the hero doing it, so the tell is born
+            // with its voice and no sighting, no witness, never public. The
+            // next genuine sighting attaches to it by text.
             tells = [...tells, {
                 ...report,
                 id: mintHeroTellId(),
-                sightings: [now],
+                witnesses: sighted ? report.witnesses : [],
+                public: sighted && report.public,
+                sightings: sighted ? [now] : [],
                 firstSeenMessage: now,
                 lastSeenMessage: now,
                 ...voiceStamp,
@@ -344,17 +352,25 @@ export function recordHeroTells(existing = [], reports = [], { messageCount } = 
 /**
  * The reducer's preparation of one Scribe pass (2026-09-24 sweep): party
  * companions are present by the game's own rule, so they WITNESS every
- * non-intimate sighting whether or not the Scribe named them (an intimate
+ * non-intimate SIGHTING whether or not the Scribe named them (an intimate
  * tell's witnesses stay exactly the partner(s)); whoever NAMED a pattern
- * aloud has, by the fiction, seen it, so a `voicedBy` is a witness too. A
- * report left with no witness at all is dropped — a witness-less tell
- * could never render, mint, or travel and only spent a slot.
+ * aloud while the hero did it has, by the fiction, seen it, so a `voicedBy`
+ * beside `sighted` is a witness too. A sighting left with no witness at all
+ * is dropped — a witness-less tell could never render, mint, or travel and
+ * only spent a slot. A remark ALONE (`voiced` without `sighted`) is not a
+ * sighting (2026-09-29 playtest, 2026-10-07 P2): nobody saw anything, so it
+ * carries no witnesses at all and passes through on its voice.
  */
 export function prepareHeroTellReports(reports = [], { partyNames = [] } = {}) {
     const party = normalizeWitnesses(partyNames);
     const out = [];
     for (const report of (Array.isArray(reports) ? reports : [])) {
         if (!report || typeof report !== 'object' || Array.isArray(report)) continue;
+        const voicedOnly = report.voiced === true && report.sighted !== true;
+        if (voicedOnly) {
+            out.push({ ...report, witnesses: [] });
+            continue;
+        }
         const intimate = normalizeHeroTellKind(report.kind) === 'intimate';
         const witnesses = normalizeWitnesses([
             ...(Array.isArray(report.witnesses) ? report.witnesses : (typeof report.witnesses === 'string' ? [report.witnesses] : [])),
@@ -477,7 +493,10 @@ export function listVoiceableTells(tells = [], { presentNames = [], messages = n
     }
     out.sort((a, b) => (a.hearsay ? 1 : 0) - (b.hearsay ? 1 : 0)
         || (b.tell.sightings?.length || 0) - (a.tell.sightings?.length || 0));
-    return out.slice(0, limit);
+    // Hearsay is a touch, never the hero's whole public reputation listed for
+    // a stranger: at most HERO_TELL_HEARSAY_CAP such lines, after the witnessed ones.
+    let hearsayLeft = HERO_TELL_HEARSAY_CAP;
+    return out.filter(entry => !entry.hearsay || hearsayLeft-- > 0).slice(0, limit);
 }
 
 // ---------------------------------------------------------------------------
@@ -626,11 +645,13 @@ const KIND_LABELS = {
     intimate: 'intimate — known only to the one who shared the bed',
 };
 
+// A hearsay line carries a TAG, not the rule (2026-10-07 hero-tells P2): the
+// standing rule in the cached prefix already says what HEARSAY means, and the
+// 210-char restatement rode every public tell in every stranger scene (five
+// of them: 1,454 chars against 544 witnessed).
 function describeTell(tell, witnesses, hearsay = false) {
     const label = KIND_LABELS[normalizeHeroTellKind(tell.kind)];
-    if (hearsay) {
-        return `- ${tell.text} [${label} — HEARSAY: nobody present saw this; a character may have HEARD of it — repeat it only as hearsay ("they say…", "I heard…"), never as their own observation, and the telling may have drifted a little]`;
-    }
+    if (hearsay) return `- ${tell.text} [${label} — HEARSAY]`;
     const who = witnesses.length > 0 ? ` (seen by ${witnesses.join(', ')})` : '';
     return `- ${tell.text} [${label}${who}]`;
 }

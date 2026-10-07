@@ -3,6 +3,7 @@ import { useGame } from '../../state/GameContext.jsx';
 import { formatCurrency } from '../../engine/currency.js';
 import { isProficientWithWeapon } from '../../engine/rules.js';
 import { deriveGiftAC } from '../../engine/companionGear.js';
+import { isEquippableItem, isShieldItem } from '../../engine/equipment.js';
 import './Inventory.css';
 
 export default function InventoryPanel() {
@@ -147,8 +148,7 @@ function InventoryItem({ item, nonProficient, character, combatActive, isPlayerC
         : [];
     // Out of combat, weapons/armor/shields can be handed to a standing companion —
     // the engine-owned mirror of the DM's update_companions gear path.
-    const isGearItem = item.type === 'weapon' || item.type === 'armor' || item.type === 'shield' || item.isShield;
-    const gearTargets = isGearItem && !combatActive
+    const gearTargets = isEquippableItem(item) && !combatActive
         ? party.filter(c => c.status !== 'dead' && c.status !== 'downed')
         : [];
     const isHealingPotion = item.consumableType === 'healing' && item.healing;
@@ -177,8 +177,8 @@ function InventoryItem({ item, nonProficient, character, combatActive, isPlayerC
                 {item.damage && <span className="inv-item-detail">{item.damage}</span>}
                 {item.attackBonus > 0 && <span className="inv-item-detail">+{item.attackBonus} hit</span>}
                 {item.damageBonus > 0 && <span className="inv-item-detail">+{item.damageBonus} dmg</span>}
-                {item.baseAC && !item.isShield && <span className="inv-item-detail">AC {item.baseAC + (item.acBonus || 0)}</span>}
-                {(item.type === 'shield' || item.isShield) && <span className="inv-item-detail">+{(item.shieldAC || 2) + (item.acBonus || 0)} AC</span>}
+                {item.baseAC && !isShieldItem(item) && <span className="inv-item-detail">AC {item.baseAC + (item.acBonus || 0)}</span>}
+                {isShieldItem(item) && <span className="inv-item-detail">+{(item.shieldAC || 2) + (item.acBonus || 0)} AC</span>}
                 {Number.isFinite(item.valueCp) && <span className="inv-item-detail">{formatCurrency(item.valueCp)}</span>}
                 {nonProficient && (
                     <span className="inv-item-warn" title="Your class is not proficient with this weapon — attacks don't gain your proficiency bonus.">

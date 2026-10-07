@@ -5,6 +5,7 @@
 import { computeACFromInventory, normalizeConditionList, normalizeConditionName } from '../../engine/rules.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
 import { itemIdentityMatches } from '../../engine/textMatch.js';
+import { isArmorItem, isShieldItem, isWeaponItem } from '../../engine/equipment.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName, MAX_ITEM_QUANTITY } from '../../data/items.js';
 import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
 import { normalizeKnownBy } from '../../engine/storyMemory.js';
@@ -299,10 +300,10 @@ export function sanitizeWorldFactPayload(payload) {
     return { fact, category, knownBy: normalizeKnownBy(payload.knownBy ?? payload.known_by), ...(pinned && { pinned: true }) };
 }
 
-export const RECENT_TRANSACTION_LIMIT = 20;
+const RECENT_TRANSACTION_LIMIT = 20;
 
 // Explicit repeat-intent phrasing: "another", "one/two/a few more", "more of those", etc.
-export const REPEAT_TRANSACTION_RE = /\b(another|second|same|again|(?:one|two|three|four|five|six|a couple(?: of)?|a few|several|some)\s+more|more of (?:those|these|them))\b/i;
+const REPEAT_TRANSACTION_RE = /\b(another|second|same|again|(?:one|two|three|four|five|six|a couple(?: of)?|a few|several|some)\s+more|more of (?:those|these|them))\b/i;
 
 // Proximity beats co-occurrence (live 2026-08-22 double-grant: "Another time,
 // Odo… I count three silver out of my purse" read as repeat-grant intent because
@@ -324,7 +325,7 @@ export function repeatIntentNearNoun(playerMessage, nounRe) {
     return trailing.test(text);
 }
 
-export function sanitizeRecentTransaction(entry) {
+function sanitizeRecentTransaction(entry) {
     if (!entry || typeof entry !== 'object') return null;
     const signature = String(entry.signature || '').slice(0, 200);
     if (!signature) return null;
@@ -465,7 +466,7 @@ const STACK_EXEMPT_TYPES = new Set(['weapon', 'armor', 'shield']);
  */
 export function stackIdentity(item) {
     if (!item || typeof item !== 'object' || item.equipped) return null;
-    if (STACK_EXEMPT_TYPES.has(item.type) || item.isShield) return null;
+    if (STACK_EXEMPT_TYPES.has(item.type) || isShieldItem(item)) return null;
     const key = item.itemKey || String(item.name || '').trim().toLowerCase();
     if (!key) return null;
     return `${key}|${Number(item.magicBonus) || 0}`;
@@ -978,63 +979,74 @@ export function upsertNpc(npcs, rawPayload, { messageCount } = {}) {
 
 function equipmentKindMatches(item, kind) {
     const k = String(kind || '').toLowerCase();
-    if (!k) return false;
-    if (k === 'armor') return item.type === 'armor' && !item.isShield;
-    if (k === 'shield') return item.type === 'shield' || item.isShield;
-    if (k === 'weapon') return item.type === 'weapon';
+    if (k === 'armor') return isArmorItem(item);
+    if (k === 'shield') return isShieldItem(item);
+    if (k === 'weapon') return isWeaponItem(item);
     return false;
 }
 
 /**
  * Resolve a DM-supplied item reference (id, catalog key, name, or generic
- * armor/shield/weapon kind) against the live inventory. Shared by the
- * equip/unequip channel, name-referenced removal, and sales — one resolution
- * ladder so a name that equips also sells and removes (2026-08-28 audit).
+ * armor/shield/weapon kind) against the live inventory — ONE ladder for the
+ * equip/unequip channel, name-referenced removal, and sales, so a name that
+ * equips also sells and removes (2026-08-28 audit). Rungs: id → the given
+ * catalog key → the exact name (compact token — a row named exactly what
+ * was said is the row, before a catalog key that two rows may share) → the
+ * name's catalog key → fuzzy token containment, UNAMBIGUOUS only (a narrated
+ * "hempen rope" resolves to "Hempen Rope (50 ft)" — the Scribe audits' own
+ * identity rule — but two candidate stacks resolve to nothing rather than a
+ * guess) → a generic equipment kind.
+ * Returns `{ item, ambiguous }`: `ambiguous` is the number of fuzzy
+ * candidates when the ladder stopped on more than one (removal names it —
+ * "matches N stacks"), else 0. Walked once (2026-10-07 inventory-economy P2:
+ * REMOVE_ITEM_BY_NAME re-ran the exact and fuzzy rungs itself to count them).
  */
-export function findInventoryItemByRef(inventory, ref, { preferEquipped = false } = {}) {
+export function resolveInventoryItemRef(inventory, ref, { preferEquipped = false } = {}) {
     const payload = typeof ref === 'string' ? { name: ref } : (ref || {});
     const candidates = preferEquipped
         ? [...inventory].sort((a, b) => Number(!!b.equipped) - Number(!!a.equipped))
         : inventory;
+    const found = (item) => ({ item: item || null, ambiguous: 0 });
 
     const id = payload.itemId || payload.id;
     if (id) {
         const byId = candidates.find(i => i.id === id);
-        if (byId) return byId;
+        if (byId) return found(byId);
     }
 
     const itemKey = normalizeItemKey(payload.itemKey || payload.key || '');
     if (itemKey) {
         const byKey = candidates.find(i => i.itemKey === itemKey);
-        if (byKey) return byKey;
+        if (byKey) return found(byKey);
     }
 
     const name = payload.name || payload.item || '';
-    const nameKey = normalizeItemKey(name);
-    if (nameKey) {
-        const byNameKey = candidates.find(i => i.itemKey === nameKey);
-        if (byNameKey) return byNameKey;
-    }
-
     const nameToken = normalizeRefToken(name);
     if (nameToken) {
         const byName = candidates.find(i =>
             normalizeRefToken(i.name) === nameToken ||
             normalizeRefToken(i.itemKey) === nameToken
         );
-        if (byName) return byName;
+        if (byName) return found(byName);
     }
 
-    // Fuzzy token-containment, UNAMBIGUOUS only (2026-08-28): a narrated
-    // "hempen rope" resolves to "Hempen Rope (50 ft)" — the same identity rule
-    // the Scribe audits use — but two candidate stacks resolve to nothing
-    // rather than a guess.
+    const nameKey = normalizeItemKey(name);
+    if (nameKey) {
+        const byNameKey = candidates.find(i => i.itemKey === nameKey);
+        if (byNameKey) return found(byNameKey);
+    }
+
     if (name) {
         const fuzzy = candidates.filter(i =>
             itemIdentityMatches(name, i.name) || (i.itemKey && itemIdentityMatches(name, i.itemKey)));
-        if (fuzzy.length === 1) return fuzzy[0];
+        if (fuzzy.length === 1) return found(fuzzy[0]);
+        if (fuzzy.length > 1) return { item: null, ambiguous: fuzzy.length };
     }
 
     const kind = payload.type || payload.slot || payload.category || name;
-    return candidates.find(i => equipmentKindMatches(i, kind)) || null;
+    return found(candidates.find(i => equipmentKindMatches(i, kind)));
+}
+
+export function findInventoryItemByRef(inventory, ref, options) {
+    return resolveInventoryItemRef(inventory, ref, options).item;
 }

@@ -4,6 +4,7 @@
  */
 import { CLASSES } from '../data/classes.js';
 import { MAX_ROLL_DC } from '../config/contentLimits.js';
+import { isArmorItem, isShieldItem } from './equipment.js';
 
 /**
  * Calculate ability modifier from ability score.
@@ -185,13 +186,9 @@ export function computeACFromInventory(inventory, character) {
     // run the vault sanitizer, so guard here rather than crash the AC recompute.
     const items = Array.isArray(inventory) ? inventory : [];
 
-    const equippedArmor = items.find(i =>
-        i.equipped && i.baseAC && !i.isShield && (i.type === 'armor')
-    ) || null;
+    const equippedArmor = items.find(i => i.equipped && i.baseAC && isArmorItem(i)) || null;
 
-    const equippedShield = items.find(i =>
-        i.equipped && (i.type === 'shield' || i.isShield)
-    ) || null;
+    const equippedShield = items.find(i => i.equipped && isShieldItem(i)) || null;
 
     const styleBonus = character.class === 'fighter'
         && character.fightingStyle === 'defense'

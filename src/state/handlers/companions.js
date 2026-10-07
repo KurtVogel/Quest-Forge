@@ -4,8 +4,8 @@
  */
 import { deriveGiftAC } from '../../engine/companionGear.js';
 import { namesMatch } from '../../engine/npcRoster.js';
-import { gameReducer } from '../gameReducer.js';
 import { ensureCompanionRosterRecord, normalizeCompanion, systemMessage, withInventoryAndAC } from './shared.js';
+import { isShieldItem, isWeaponItem } from '../../engine/equipment.js';
 
 const MAX_PARTY_SIZE = 4;
 
@@ -112,8 +112,8 @@ export const handlers = {
         const companion = (state.party || []).find(c => c.id === companionId);
         if (!item || !companion || companion.status === 'dead' || companion.status === 'downed') return state;
 
-        const isWeapon = item.type === 'weapon';
-        const isShield = !isWeapon && (item.type === 'shield' || item.isShield);
+        const isWeapon = isWeaponItem(item);
+        const isShield = isShieldItem(item);
         // Shield memory (2026-09-03 P2): `shieldBonus` is what the companion's
         // current shield contributes to `ac`. A gifted shield REPLACES it (never
         // stacks — three +1 shields used to walk a companion to the 21 cap), and
@@ -155,7 +155,7 @@ export const handlers = {
             gearPayload = { id: companion.id, ac: newAc, ...(isShield ? { shieldBonus: shieldValue } : {}) };
         }
 
-        const updated = gameReducer(state, { type: 'UPDATE_COMPANION', payload: gearPayload });
+        const updated = handlers.UPDATE_COMPANION(state, { type: 'UPDATE_COMPANION', payload: gearPayload });
         // Exactly one unit leaves the hero's possession; AC recomputes in case
         // the hero handed over their own equipped protection.
         const remaining = (item.quantity || 1) > 1

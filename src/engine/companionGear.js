@@ -5,6 +5,7 @@
  * keepsake list for sentimental gifts.
  */
 import { isNearDuplicateText } from './npcRoster.js';
+import { isArmorItem, isShieldItem } from './equipment.js';
 
 export const MAX_COMPANION_KEEPSAKES = 5;
 const KEEPSAKE_MAX_LENGTH = 100;
@@ -22,10 +23,10 @@ const KEEPSAKE_MAX_LENGTH = 100;
  */
 export function deriveGiftAC(item, currentAc = 12) {
     if (!item || typeof item !== 'object') return null;
-    if (item.type === 'shield' || item.isShield) {
+    if (isShieldItem(item)) {
         return (Number.isFinite(currentAc) ? currentAc : 12) + (item.shieldAC || 2) + (item.acBonus || 0);
     }
-    if (item.type === 'armor' && Number.isFinite(item.baseAC)) {
+    if (isArmorItem(item) && Number.isFinite(item.baseAC)) {
         const dexAllowance = item.armorType === 'heavy' ? 0 : 2;
         return item.baseAC + dexAllowance + (item.acBonus || 0);
     }

@@ -16,6 +16,29 @@ export function isEquippableItem(item) {
     return isWeaponItem(item) || isArmorItem(item) || isShieldItem(item);
 }
 
+/** Is `item`'s slot (weapon / armor / shield) already held by an equipped row? */
+export function isSlotHeld(inventory = [], item) {
+    const sameSlot = isWeaponItem(item) ? isWeaponItem : isArmorItem(item) ? isArmorItem : isShieldItem(item) ? isShieldItem : null;
+    return !!sameSlot && inventory.some(row => row?.equipped && sameSlot(row));
+}
+
+/**
+ * ONE auto-equip rule for ADD_ITEM and the load heal (2026-10-07
+ * inventory-economy P2 — each had its own copy, and they disagreed: a
+ * non-catalog armor with no baseAC auto-equipped on add and came back
+ * unequipped after a reload). Armor and shields fill an EMPTY slot of their
+ * kind; a shield never joins an active two-handed weapon; a weapon never
+ * auto-equips (the premise `equipOnAdd` channel is the one sanctioned path).
+ * Armor must carry a baseAC: an "armor" row with no AC is a costume, and it
+ * must not take the slot the next real armor would otherwise auto-fill.
+ */
+export function shouldAutoEquip(inventory = [], item) {
+    if (!item || item.equipped || isSlotHeld(inventory, item)) return false;
+    if (isArmorItem(item)) return Number.isFinite(item.baseAC) && item.baseAC > 0;
+    if (isShieldItem(item)) return !inventory.some(row => row?.equipped && isWeaponItem(row) && row.twoHanded);
+    return false;
+}
+
 /**
  * Normalize equipped slots while preserving inventory order.
  * - one active weapon

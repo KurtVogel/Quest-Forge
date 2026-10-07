@@ -55,7 +55,7 @@ function narrativePrefixCounts(messages) {
 
 /** "sourceId|key|messageIndex" → parts. Legacy two-part entries (pre-index
  * spell casts) parse with messageIndex null; non-strings parse to null. */
-export function parseLedgerEntry(entry) {
+function parseLedgerEntry(entry) {
     if (typeof entry !== 'string') return null;
     const [sourceId = '', key = '', rawIndex] = entry.split('|');
     const messageIndex = Number(rawIndex);

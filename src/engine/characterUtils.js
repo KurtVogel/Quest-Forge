@@ -6,6 +6,7 @@ import { rollDice } from './dice.ts';
 import { RACES } from '../data/races.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
+import { isArmorItem, isShieldItem } from './equipment.js';
 import { buildSpellSlots, isSpellcaster } from './spellcasting.js';
 import { HERO_TEXT_LIMITS, cleanTextField } from '../config/contentLimits.js';
 
@@ -338,7 +339,7 @@ export function createStartingInventory(className) {
         return {
             id: `item-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
             quantity: 1,
-            equipped: item.type === 'armor' || item.type === 'shield' || item.isShield || equipWeapon,
+            equipped: isArmorItem(item) || isShieldItem(item) || equipWeapon,
             ...normalizeItem(item),
         };
     });

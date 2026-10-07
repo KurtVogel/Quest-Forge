@@ -188,14 +188,16 @@ describe('hero tells — reducer, cadence tick, load, prompt (2026-09-23)', () =
         expect(rollHeroTellBeat({ ...loaded, messages: messagesOf(100) }, { roll: () => 0 }).session.heroTellBeat?.tellId).toBe(loaded.heroTells[0].id);
     });
 
-    it('the Scribe context lists tells by id with scene counts and witnesses, established first', () => {
+    it('the Scribe context lists tells as id | kind | "text" and nothing more, established first (2026-10-07 P2: the Scribe reads neither scene counts nor witnesses)', () => {
         const state = sighted([10, 40, 70]);
         const withThin = gameReducer({ ...state, messages: messagesOf(80) }, { type: 'ADD_HERO_TELLS', payload: [{ text: 'jokes the moment things get serious', kind: 'manner', witnesses: ['Bran'] }] });
         const context = buildKnownHeroTells(withThin);
         const lines = context.split('\n');
         expect(lines).toHaveLength(2);
-        expect(lines[0]).toContain(`${state.heroTells[0].id} | habit | "${PIPE.text}" | seen in 3 scenes | seen by: Maren`);
-        expect(lines[1]).toContain('seen in 1 scene | seen by: Bran');
+        expect(lines[0]).toBe(`${state.heroTells[0].id} | habit | "${PIPE.text}"`);
+        expect(lines[1]).toBe(`${withThin.heroTells[1].id} | manner | "jokes the moment things get serious"`);
+        expect(context).not.toContain('seen by');
+        expect(context).not.toContain('Maren');
         expect(buildKnownHeroTells({ heroTells: [] })).toBeNull();
         expect(buildKnownHeroTells({})).toBeNull();
     });

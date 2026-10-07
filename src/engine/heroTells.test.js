@@ -3,6 +3,7 @@ import {
     HERO_TELLS_BLOCK_CHAR_CEILING,
     HERO_TELLS_STANDING_RULE,
     HERO_TELL_FADE_MESSAGES,
+    HERO_TELL_HEARSAY_CAP,
     HERO_TELL_PROMPT_CAP,
     HERO_TELL_SCENE_MESSAGES,
     MAX_HERO_TELLS,
@@ -196,9 +197,18 @@ describe('hero tells — follow-up slices (2026-09-23): the sheet, hearsay, voic
         expect(isHeroTellLive(struck[0], { messageCount: 140 })).toBe(false);
         expect(setHeroTellDormant(struck, struck[0].id, true)).toBe(struck);
         expect(isHeroTellLive(setHeroTellDormant(struck, struck[0].id, false)[0], { messageCount: 140 })).toBe(true);
-        // A remark about an unrecorded pattern is its first sighting AND its first voice.
-        const fresh = recordHeroTells([], [{ text: 'never draws first', kind: 'principle', witnesses: ['Maren'], voiced: true, voicedBy: 'Maren' }], { messageCount: 5 });
-        expect(fresh[0]).toMatchObject({ sightings: [5], voicedCount: 1, voicedBy: ['Maren'] });
+        // A remark about an unrecorded pattern mints the tell with its VOICE only
+        // (2026-10-07 P2): no sighting, no witness, never public — the held
+        // branch's 09-29 rule, applied at the mint. The next sighting attaches.
+        const fresh = recordHeroTells([], [{ text: 'never draws first', kind: 'principle', witnesses: ['Tammo', 'Maren'], public: true, voiced: true, voicedBy: 'Tammo' }], { messageCount: 5 });
+        expect(fresh[0]).toMatchObject({ sightings: [], witnesses: [], public: false, voicedCount: 1, voicedBy: ['Tammo'], lastVoicedMessage: 5 });
+        expect(isHeroTellEstablished(fresh[0])).toBe(false);
+        const seenLater = recordHeroTells(fresh, [{ text: 'never draws first', kind: 'principle', witnesses: ['Maren'], public: true }], { messageCount: 40 });
+        expect(seenLater).toHaveLength(1);
+        expect(seenLater[0]).toMatchObject({ sightings: [40], witnesses: ['Maren'], public: true, voicedCount: 1 });
+        // With `sighted` beside the voice, the mint is a sighting as before.
+        const both = recordHeroTells([], [{ text: 'never draws first', kind: 'principle', witnesses: ['Maren'], voiced: true, voicedBy: 'Maren', sighted: true }], { messageCount: 5 });
+        expect(both[0]).toMatchObject({ sightings: [5], witnesses: ['Maren'], voicedCount: 1 });
         // Load twin.
         const loaded = sanitizeHeroTells([{ text: 'x', kind: 'intimate', public: true, dormant: 'yes', voicedBy: ['A', { name: 'B' }], lastAbsenceRemarkMessage: '900' }], { maxMessageCount: 50 });
         expect(loaded[0]).toMatchObject({ public: false, dormant: false, voicedBy: ['A'], lastAbsenceRemarkMessage: 50 });
@@ -307,15 +317,20 @@ describe('hero tells — queue sweep 2026-09-24 (scene window, id claim, witness
         expect(findHeroTellMatch(jokes, { id: 'nope', text: JOKES.text, kind: 'manner' })).toBe(0);
     });
 
-    it('prepareHeroTellReports: companions witness every non-intimate sighting, the speaker of a voiced report is a witness, and a witness-less report is dropped', () => {
+    it('prepareHeroTellReports: companions witness every non-intimate sighting, the speaker of a SIGHTED voiced report is a witness, a witness-less sighting is dropped, and a remark alone carries no witness', () => {
         expect(prepareHeroTellReports([{ text: 'never draws first', kind: 'principle' }], { partyNames: [] })).toEqual([]);
         expect(prepareHeroTellReports([{ text: 'never draws first', kind: 'principle', witnesses: [] }], { partyNames: ['Osma', 'Osma', 42] })[0].witnesses).toEqual(['Osma']);
         expect(prepareHeroTellReports([{ text: 'never draws first', kind: 'principle', witnesses: 'Bran' }], { partyNames: ['Osma'] })[0].witnesses).toEqual(['Bran', 'Osma']);
         // An intimate tell's witnesses stay exactly the partner(s): a companion is not in the bed.
         expect(prepareHeroTellReports([{ text: 'likes to be held afterwards', kind: 'intimate' }], { partyNames: ['Osma'] })).toEqual([]);
         expect(prepareHeroTellReports([{ text: 'likes to be held afterwards', kind: 'intimate', witnesses: ['Maren'] }], { partyNames: ['Osma'] })[0].witnesses).toEqual(['Maren']);
-        // Whoever named the pattern aloud has seen it.
-        expect(prepareHeroTellReports([{ text: 'the pipe', kind: 'habit', voiced: true, voicedBy: 'Maren' }], { partyNames: [] })[0].witnesses).toEqual(['Maren']);
+        // Whoever named the pattern aloud WHILE the hero did it has seen it.
+        expect(prepareHeroTellReports([{ text: 'the pipe', kind: 'habit', voiced: true, voicedBy: 'Maren', sighted: true }], { partyNames: ['Osma'] })[0].witnesses).toEqual(['Maren', 'Osma']);
+        // A remark alone is not a sighting (2026-10-07 P2): the Scribe's list, the
+        // speaker and the party all saw nothing — it passes through on its voice.
+        const remark = prepareHeroTellReports([{ text: 'the pipe', kind: 'habit', witnesses: ['Tammo'], voiced: true, voicedBy: 'Maren' }], { partyNames: ['Osma'] });
+        expect(remark).toHaveLength(1);
+        expect(remark[0]).toMatchObject({ witnesses: [], voiced: true, voicedBy: 'Maren' });
         expect(prepareHeroTellReports([null, 'x', [], { text: 'y', kind: 'habit', witnesses: ['Maren'] }], {})).toHaveLength(1);
     });
 
@@ -394,10 +409,31 @@ describe('hero tells — hearsay (Vesa, 2026-09-30): a PUBLIC pattern may be rep
         expect(voiceable[0]).toMatchObject({ hearsay: true, witnesses: [] });
         expect(voiceable[0].tell.text).toBe(PUBLIC_COIN.text);
         const block = buildHeroTellsBlock(tells, { presentNames: ['Orsa Pellwyn'], messageCount: 100 });
-        expect(block).toContain('HEARSAY: nobody present saw this');
-        expect(block).toContain('never as their own observation');
+        // A tag, not the rule (2026-10-07 P2): the standing rule in the cached
+        // prefix says what HEARSAY means; the line used to restate it per tell.
+        expect(block).toContain(`- ${PUBLIC_COIN.text} [habit — HEARSAY]`);
+        expect(block).not.toContain('never as their own observation');
         expect(block).not.toContain(PRIVATE_PIPE.text);
         expect(block).not.toContain(INTIMATE.text);
+    });
+
+    it('a hearsay line costs a tag, and a stranger scene carries at most HERO_TELL_HEARSAY_CAP of them after the witnessed lines', () => {
+        const publicTells = ['coin', 'pipe', 'jokes', 'double'].map(word => ({
+            text: `${word} ${'pattern the whole harbor has watched form over many months of trade and '.repeat(3)}`.slice(0, 160),
+            kind: 'habit', witnesses: ['Tammo'], public: true,
+        }));
+        let tells = [];
+        for (const report of publicTells) tells = [...tells, ...sightings([report], [10, 40, 70])];
+        tells = [...tells, ...sightings([{ text: 'answers a question with a question when cornered', kind: 'manner', witnesses: ['Orsa Pellwyn'], public: true }], [11, 41, 71])];
+        const stranger = listVoiceableTells(tells, { presentNames: ['Orsa Pellwyn'], messageCount: 100 });
+        expect(stranger.map(v => v.hearsay)).toEqual([false, true, true]);
+        expect(stranger).toHaveLength(1 + HERO_TELL_HEARSAY_CAP);
+        const block = buildHeroTellsBlock(tells, { presentNames: ['Orsa Pellwyn'], messageCount: 100 });
+        const hearsayLines = block.split('\n').filter(line => line.includes('HEARSAY'));
+        expect(hearsayLines).toHaveLength(HERO_TELL_HEARSAY_CAP);
+        for (const line of hearsayLines) expect(line.length).toBeLessThanOrEqual(2 + 160 + ' [principle — HEARSAY]'.length);
+        // Every witness present: the hearsay cap never bites, the prompt cap does.
+        expect(listVoiceableTells(tells, { presentNames: ['Tammo', 'Orsa Pellwyn'], messageCount: 100 }).every(v => !v.hearsay)).toBe(true);
     });
 
     it('a present witness makes it a witnessed line, and witnessed lines rank before hearsay ones', () => {

@@ -4,10 +4,13 @@
  * The reducer body is a merged table of per-domain handler maps from
  * src/state/handlers/ (each module exports `handlers` keyed by ACTION_TYPE;
  * multi-domain helpers live in handlers/shared.js). Handlers that re-enter the
- * reducer (EQUIP_ITEM_BY_REF, GIVE_GEAR_TO_COMPANION, APPLY_COMBAT_EXCHANGE,
+ * reducer for ANOTHER domain's action (APPLY_COMBAT_EXCHANGE,
  * COMPLETE_COMBAT_NARRATION, ADD_STORY_MEMORY_CARDS) import this module's
  * hoisted `gameReducer` directly — the ESM circular import resolves because
- * the function binding exists before any handler can run.
+ * the function binding exists before any handler can run. A handler calling
+ * a SIBLING in its own module (EQUIP_ITEM_BY_REF → EQUIP_ITEM,
+ * GIVE_GEAR_TO_COMPANION → UPDATE_COMPANION) calls it on the module's own
+ * `handlers` table instead (2026-10-07).
  */
 import { initialGameState } from './initialState.js';
 import { handlers as characterHandlers } from './handlers/character.js';

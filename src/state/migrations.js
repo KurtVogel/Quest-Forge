@@ -50,7 +50,7 @@ import {
     normalizeMartialArchetype,
 } from '../engine/characterUtils.js';
 import { awardExperience, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
-import { normalizeEquippedSlots } from '../engine/equipment.js';
+import { normalizeEquippedSlots, shouldAutoEquip } from '../engine/equipment.js';
 import { createInitialFronts } from '../engine/fronts.js';
 import { isSpellcaster, sanitizeSpellSlots, sanitizeSustainedSpell } from '../engine/spellcasting.js';
 import { initialGameState } from './initialState.js';
@@ -77,49 +77,12 @@ export function getSaveVersion(save) {
 
 // --- Unconditional heals (hostile-input defense; self-guarded era backfills) ---
 
-/**
- * Merge duplicate inventory ROWS left by the fixed stale-Scribe re-grant bug
- * (live playtests #7-#8: "Rusted iron keys"×2 case-identical rows, lodestone×2
- * — and the Guild robbery's items_lost then removed only ONE of each twin, so
- * "confiscated" ghosts survived the whole capture arc). Deliberately narrow:
- * only rows whose names match exactly (case-insensitive), every copy
- * unequipped and quantity 1, merge into the first row with quantity = row
- * count. Distinct quantities, equipped copies, and near-name variants
- * ("brick of bog-wax" vs "Brick of raw bog-wax") are left alone — a second
- * rope can be legitimate, and REMOVE_ITEM_BY_NAME's whole-stack semantics
- * mean a merged stack is confiscated in one events pass, which is the point.
- */
-function healDuplicateInventoryRows(save) {
-    const inventory = save.inventory || [];
-    const rowsByName = new Map();
-    for (const item of inventory) {
-        const name = String(item?.name || '').trim().toLowerCase();
-        if (!name) continue;
-        if (!rowsByName.has(name)) rowsByName.set(name, []);
-        rowsByName.get(name).push(item);
-    }
-    const mergeNames = new Set();
-    for (const [name, rows] of rowsByName) {
-        if (rows.length > 1 && rows.every(row => !row.equipped && (row.quantity ?? 1) === 1)) {
-            mergeNames.add(name);
-        }
-    }
-    if (mergeNames.size === 0) return save;
-    const seen = new Set();
-    const healed = [];
-    for (const item of inventory) {
-        const name = String(item?.name || '').trim().toLowerCase();
-        if (!mergeNames.has(name)) {
-            healed.push(item);
-            continue;
-        }
-        if (seen.has(name)) continue;
-        seen.add(name);
-        healed.push({ ...item, quantity: rowsByName.get(name).length });
-    }
-    console.log(`[Migrations] Merged ${inventory.length - healed.length} duplicate inventory row(s) into stacks.`);
-    return { ...save, inventory: healed };
-}
+// The exact-name duplicate-row heal (live playtests #7-#8: "Rusted iron
+// keys"×2 case-identical rows) was retired 2026-10-07 (inventory-economy P2):
+// it predated `stackIdentity` and still folded WEAPONS and armor, which the
+// live stacking rule exempts by design (equip flags are per row) — two Dagger
+// grants were two rows live and `Dagger ×2` after a reload. Its non-equipment
+// half is `healStackedInventoryRows` below, under the one identity rule.
 
 const shadowRowTokens = name => tokenSet(String(name || ''), { minLength: 2 });
 
@@ -127,12 +90,11 @@ const shadowRowTokens = name => tokenSet(String(name || ''), { minLength: 2 });
  * Merge narrated SHADOW rows into their CATALOG twins (live playtest
  * 2026-08-20): the fixed Scribe loot-audit matcher minted lowercase raw-named
  * duplicates of same-turn catalog grants ("hempen rope" beside "Hempen Rope
- * (50 ft)") that the exact-name heal above can never fold. Deliberately
- * narrow: the shadow row must be unequipped, quantity 1, carry NO itemKey,
- * its name tokens must be a subset of EXACTLY ONE catalog-KEYED row's name
- * tokens — two candidate twins means two genuinely distinct stacks. Keyless
- * near-name variants ("brick of bog-wax" vs "Brick of raw bog-wax") stay
- * separate rows, preserving healDuplicateInventoryRows' documented design.
+ * (50 ft)") that no exact-identity fold can reach. Deliberately narrow: the
+ * shadow row must be unequipped, quantity 1, carry NO itemKey, its name
+ * tokens must be a subset of EXACTLY ONE catalog-KEYED row's name tokens —
+ * two candidate twins means two genuinely distinct stacks. Keyless near-name
+ * variants ("brick of bog-wax" vs "Brick of raw bog-wax") stay separate rows.
  */
 function healShadowInventoryRows(save) {
     const inventory = save.inventory || [];
@@ -169,10 +131,11 @@ function healShadowInventoryRows(save) {
 /**
  * Fold same-identity NON-EQUIPMENT rows into one stack (2026-09-03 P2): before
  * ADD_ITEM/PURCHASE_ITEM stacked on add, "buy 2 → buy 3 → find 1" left three
- * Torch rows that the two heals above never touch (they demand quantity 1 or a
- * keyless shadow). Uses the handlers' one `stackIdentity` rule — catalog key
- * or case-folded name, same magic bonus, never weapons/armor/shields, never an
- * equipped row — so load and add agree on what "the same item" is.
+ * Torch rows that the shadow heal above never touches (it demands a keyless
+ * shadow). Uses the handlers' one `stackIdentity` rule — catalog key or
+ * case-folded name, same magic bonus, never weapons/armor/shields, never an
+ * equipped row — so load and add agree on what "the same item" is: the ONE
+ * fold on the load path since 2026-10-07.
  */
 function healStackedInventoryRows(save) {
     const inventory = save.inventory || [];
@@ -204,27 +167,15 @@ function healStackedInventoryRows(save) {
 
 /**
  * Auto-equip armor/shield when nothing of that type is equipped (fixes old
- * saves and hand-stripped ones), then collapse invalid equipped combinations:
+ * saves and hand-stripped ones) through ADD_ITEM's own rule (`shouldAutoEquip`,
+ * one function since 2026-10-07), then collapse invalid equipped combinations:
  * one active weapon, one armor, one shield, and no shield while a two-handed
  * weapon is active.
  */
 function healEquippedSlots(save) {
     const inventory = (save.inventory || []).map(item => normalizeItem(item));
-    const hasEquippedArmor = inventory.some(i => i.equipped && i.type === 'armor' && !i.isShield);
-    const hasEquippedShield = inventory.some(i => i.equipped && (i.type === 'shield' || i.isShield));
-    if (!hasEquippedArmor || !hasEquippedShield) {
-        for (const item of inventory) {
-            if (!hasEquippedArmor && item.type === 'armor' && !item.isShield && item.baseAC) {
-                item.equipped = true;
-                break;
-            }
-        }
-        for (const item of inventory) {
-            if (!hasEquippedShield && (item.type === 'shield' || item.isShield)) {
-                item.equipped = true;
-                break;
-            }
-        }
+    for (const item of inventory) {
+        if (shouldAutoEquip(inventory, item)) item.equipped = true;
     }
     return { ...save, inventory: normalizeEquippedSlots(inventory) };
 }
@@ -583,7 +534,6 @@ function healOverfullStacks(save) {
 
 const UNCONDITIONAL_HEALS = [
     healUnknownClassRace,
-    healDuplicateInventoryRows,
     healShadowInventoryRows,
     healStackedInventoryRows,
     healOverfullStacks,

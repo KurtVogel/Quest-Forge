@@ -3190,7 +3190,7 @@ twice in `persistence.js`, a slot's metadata record with three shapers, the auto
 restating the policy's two predicates, `clampInt` in three private copies, a `SAVE_VERSION` alias
 whose only consumers are tests.
 
-### [strengthening] A cross-channel guard signs with the channels' own identity; a per-line rule is a per-line tax; a KNOWN context echoes only what the schema asks back — status: `idea` (2026-10-07 audit, hero-tells Lap 3 + inventory-economy Lap 4; one P1 and nine P2 in the strengthening queue)
+### [strengthening] A cross-channel guard signs with the channels' own identity; a per-line rule is a per-line tax; a KNOWN context echoes only what the schema asks back — status: `built 2026-10-07` (all ten queue items shipped the same day — DECISIONS.md 2026-10-07; from the 2026-10-07 audit, hero-tells Lap 3 + inventory-economy Lap 4; one P1 and nine P2 in the strengthening queue)
 Three patterns from the sixth lap pair, one of them a live double grant. **(1)** `applyEvents` guards
 the purchase↔`items_found` and sell↔`items_lost` pairs with a private compact-token identity written
 in 2026-07 — while `normalizeItemKey`, the identity every ledger signs with, grew five rungs since
