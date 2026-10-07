@@ -62,6 +62,32 @@ asks where do we stand, what is alive between us now, and what would move it. Sl
 - [x] **A quiet tell in the chat** — shipped 2026-09-14 (`bondMarks`, ✦ chip) — a small mark beside the message when a key moment lands;
   no text, no score screen.
 
+### [wow] NPC relationships: the bond turns into a scene, and people have ties to each other — status: `idea` (wow audit 2026-10-07, `docs/SCHEDULED_WOW.md` entry 2026-10-07, two W1 slices)
+Lap-1 finding (npc-relationships): the hero↔NPC edge is genre-best and engine-read end to end (stance, graded moments,
+derived stage, open thread, absence, initiative, epistemics, hero tells — proved in the 10-02 / 10-03 grand playtests),
+and the two things Baldur's Gate 3 / Dragon Age: Origins / Hades / Crusader Kings 3 / Pentiment add on top are missing by
+construction. Why: a bond that TURNS should be a scene the NPC brings, and a cast is a web, not a star around the hero.
+- **Slice A — the bond turns into a scene.** `describeBondMarks` (`handlers/npcs.js`) already detects a stage turning
+  point (trusted / intimate / rival / estranged) and stamps the ✦ chip; the DM is told nothing and no scene follows (the
+  beat lane is absence-gated, `selectRelationshipBeatCandidate`). Mint `session.relationshipBeat` with `mode: 'turn'`
+  (whitelisted like `HERO_TELL_BEAT_MODES`; crypto die 0–1 scenes; the shared 24-row window / 40-row cooldown; a pending
+  absence beat yields) and render `## THE BOND HAS TURNED — PRIVATE` by stage: trusted → the NPC brings the hero
+  something of their OWN drawn from `wants:` / `agenda:` / `secret:` (the DM may open it as a quest — DA:O's personal
+  quest, BG3's camp scene), intimate → what-this-is from the NPC's side, rival → a claim or a warning, estranged → the
+  door shuts visibly. Once, never forcing the hero's reply, never in combat, consumed when seen. Zero calls.
+- **Slice B — people have ties to each other.** `NPC_RECORD_KEYS` has no NPC↔NPC field, so Tammo's distrust of Hesper or
+  a companion's dislike of the hero's new friend lives only in the DM window. Scribe `npc_updates.ties: [{ name, regard }]`
+  (≤ 2 per update, regard ≤ 120, only when the fiction SHOWED it; `name` must resolve to a roster record via `namesMatch`,
+  else dropped — a tie never mints a person), merged on the record (cap 4, clause-merge like stance, oldest fall off, typed
+  at load), rendered on the KNOWN NPCs line ONLY when the tied person is present or scene-named (presence-first) and on
+  the Journal card as "With others"; one header clause — when two tied people share the hero's scene, the tie is in the
+  room. Rule 9 governs what people KNOW; a tie is what they FEEL about each other. Zero calls; ~+60 chars per rendered tie.
+- Proof (both slices): scripted runs on Gemini Pro + GPT Sol — the trusted NPC raises an ask of their own within two
+  scenes in 4/5; in a triangle (intimate partner present while the hero flirts with a second person) the partner reacts to
+  the second person BY NAME in 4/5 later shared scenes; fixtures pin the mint / mode / consumption and the non-roster drop.
+- Later slices, not proposed: a tie that MOVES (an NPC↔NPC stage), a tie the hero can act on (CK3's hook — call in a
+  favor), the ✦ chip's "approves / disapproves" score screen (rejected by DECISIONS 2026-09-14 — the quiet tell stays quiet).
+
 ### Tiered character cards — permanent core, key moments, lately — status: `shipped` (2026-09-12)
 Vesa: cards filled "from four different positions in the latest sex scene or details of one
 tavern conversation". Shipped engine-owned tiers (DECISIONS.md 2026-09-12): personality/stance
@@ -81,7 +107,15 @@ Follow-ups:
   key-moment list as one paragraph; the overflow-archival idea below is now cheaper because the
   key moments already ARE the milestones.
 
-### Relationship timeline view — status: partially `shipped` (2026-07-25), archival still `idea`
+### ~~Relationship timeline view~~ — status: disposition half `shipped` (2026-07-25); the bondMoments archival `superseded` (2026-10-07 wow audit [wow])
+**Superseded 2026-10-07 (wow audit, npc-relationships Lap 1):** the loss this idea feared — "long romances lose their
+earliest beats" — no longer happens to the beats that matter: since the tiered cards (2026-09-12) eviction is by SALIENCE,
+not age, a key moment (salience ≥ 4 or first of its kind) survives every fold, the derived stage names the moment that
+earned it (`since`), the recall lane reads a person's key moments and open thread on demand ("remember when…"), and the
+Chronicle holds the full narrative. An archive of the evicted ORDINARY moments would be a second record nobody reads.
+The one living piece — "How you got here" as a paragraph narrated from the key moments — is listed under the tiered-cards
+entry's follow-ups. Original note kept for the reasoning:
+
 `bondMoments` is capped (10 since 2026-09-12, evicted by salience — see the tiered-cards entry above) for prompt economy, but the full history could be archived (e.g.
 oldest moments folded into a compact "relationship chronicle" paragraph on overflow instead of
 dropped) and shown as a scrollable timeline in the Journal card. Why: long romances/rivalries
