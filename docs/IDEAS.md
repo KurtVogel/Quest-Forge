@@ -3249,3 +3249,26 @@ inline copies (one of them stricter than the rest), `economy.js`'s seventeen lon
 returns and four inline copies of a cover predicate the file already names, two spend windows (8 and
 12) for one rule, a resolver ladder walked twice for an error message, four dead exports, and a
 voiced-only hero-tell report that mints witnesses who saw nothing on the new-tell branch only.
+
+### [strengthening] A record with two writers has two composers; a wire fix has a sibling wire — status: `idea` (from the 2026-10-08 audit, spellcasting + chronicler Lap 4; seven P2 in the strengthening queue, three of them measured)
+Two patterns from the seventh lap pair. **(1)** The sustained-spell record is composed in THREE
+places — CAST_SPELL, the exchange's `resolveSupportSpell`, and `sanitizeSustainedSpell` (only the
+last clamps) — and the chronicle chapter in TWO (`appendChronicleChapter` on the write,
+`healChronicleChapter` on the load), and the pairs already disagree: the chapter's write side drops a
+numeric-string index to 0 and titles an object as "[object Object]" where the load side coerces and
+clamps. The hero template (2026-10-06) was the same finding on the roster. Rule: for every persisted
+record, grep its literal shape across `src/` — the load heal, the reducer write and any engine lane
+that builds it belong to ONE function, and the load twin is where it lives (`normalizeLocationRecord`,
+`normalizeStoryMemoryCard`, `toHeroTemplate` are the precedents). **(2)** The two casting lanes
+resolve a spell's recipients with two bodies: the exchange forces `self` for a self-side spell,
+rejects a dead companion and posts an overflow note; CAST_SPELL does none of the three, so a DM
+`spell_cast` out of combat sustains the wizard's Mage Armor on a companion (measured — the hero's AC
+recomputed without it) and keeps "sparing" a dead companion. And the 09-26 dedupe-before-cap fix on
+the COMBAT cast wire (`normalizeCastTargets`) never reached the out-of-combat `spell_cast.targets`
+wire, so a repeated name still eats the third ally of a Mass Healing Word silently. Rule: a wire
+normalizer that gains a rule has a sibling normalizer of the same field on the other lane — grep it
+the same day; and a ladder (modifier, recipient, item ref) walked by two lanes is one engine function
+(`resolvePlayerRollModifier`, 2026-10-05, is the shape). The build: `resolveSpellRecipients(spell,
+character, party, refs)` → `{ recipients, invalid, overflow }` and `buildSustainedSpell(spell, target)`
+in `engine/spellcasting.js`, `normalizeChronicleChapter(entry, { maxMessageCount })` beside
+`healChronicleChapter`, `CHRONICLE_TITLE_MAX` in `config/contentLimits.js`, and the parity pins.
