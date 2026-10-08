@@ -5,8 +5,11 @@
 import { computeACFromInventory, getIncapacitatingCondition } from '../../engine/rules.js';
 import { rollNotation } from '../../engine/dice.ts';
 import {
+    buildSustainedSpell,
     chooseSlotLevel,
+    describeRecipientClamp,
     resolveSpellForCharacter,
+    resolveSpellRecipients,
     spellHealingNotation,
     spendSpellSlot,
     summarizeSpellSlots,
@@ -138,36 +141,18 @@ export const handlers = {
         // ally spells (Mass Healing Word / Mass Cure Wounds) accept a `targets`
         // list of up to 3 allies — the combat resolver's per-ally loop finally
         // has an out-of-combat parallel; a promised group heal used to be
-        // mechanically impossible outside a fight (2026-08-29 audit P1).
-        const resolveRecipient = (ref) => {
-            const targetRef = String(ref || '').trim();
-            const lcTarget = targetRef.toLowerCase();
-            const targetsSelf = !targetRef || ['self', 'me', 'player'].includes(lcTarget)
-                || lcTarget === String(character.name || '').toLowerCase();
-            if (targetsSelf) return { type: 'self' };
-            const found = (state.party || []).find(c => c.id === targetRef || c.name?.toLowerCase() === lcTarget);
-            if (spell.targeting.side === 'ally' && (!found || found.status === 'dead')) {
-                return { type: 'invalid', ref: targetRef };
-            }
-            return found ? { type: 'companion', companion: found } : { type: 'self' };
-        };
-        const targetLimit = spell.targeting.mode === 'upTo3' ? 3 : 1;
-        const targetRefs = targetLimit > 1 && Array.isArray(payload.targets) && payload.targets.length > 0
-            ? payload.targets.slice(0, targetLimit)
+        // mechanically impossible outside a fight (2026-08-29 audit P1). THE
+        // ladder is the exchange's own since 2026-10-08 (resolveSpellRecipients):
+        // a self-only spell lands on the caster whatever was named, a dead
+        // companion is never a recipient, dedupe then the spell's cap.
+        const targetRefs = Array.isArray(payload.targets) && payload.targets.length > 0
+            ? payload.targets
             : [payload.target];
-        const recipients = [];
-        const invalidRefs = [];
-        for (const ref of targetRefs) {
-            const resolved = resolveRecipient(ref);
-            if (resolved.type === 'invalid') {
-                invalidRefs.push(resolved.ref);
-            } else if (!recipients.some(r => r.type === resolved.type && r.companion?.id === resolved.companion?.id)) {
-                recipients.push(resolved);
-            }
-        }
+        const { recipients, invalid: invalidRefs, overflow, redirected } = resolveSpellRecipients(spell, character, state.party, targetRefs);
         if (recipients.length === 0) {
             return { ...state, messages: [...state.messages, spellLine(`${spell.name} has no valid recipient "${invalidRefs.join('", "')}" — nothing was spent or applied.`)] };
         }
+        const clampNote = describeRecipientClamp(spell, { overflow, redirected });
         // The dead-hero heal guard that lived here (2026-08-29) is subsumed by
         // casterIncapacity above: a dead or dying hero never reaches this point,
         // so a self-heal can never mint a currentHP>0 corpse state.
@@ -181,6 +166,7 @@ export const handlers = {
         // potion's (the membership rule in appendRollHistory, 2026-10-04).
         const healingRolls = [];
         const lines = [`**${character.name || 'The hero'} casts ${spell.name}**${slotLevel > spell.level ? ` using a level ${slotLevel} slot` : ''}${spell.level > 0 ? ` (slots left: ${summarizeSpellSlots(spellSlots)})` : ''}.`];
+        if (clampNote) lines.push(clampNote);
 
         if (spell.healing) {
             // One roll per recipient — the combat resolver's per-ally pattern.
@@ -223,15 +209,7 @@ export const handlers = {
             const released = clearSustainedSpellState(nextCharacter, nextParty, state.inventory);
             nextCharacter = released.character;
             nextParty = released.party;
-            const sustained = {
-                key: spell.key,
-                name: spell.name,
-                ...(spell.acBonus && { acBonus: spell.acBonus }),
-                ...(spell.condition && { condition: spell.condition }),
-                targetType: companion ? 'companion' : 'self',
-                ...(companion && { targetId: companion.id, targetName: companion.name }),
-            };
-            nextCharacter = { ...nextCharacter, sustainedSpell: sustained };
+            nextCharacter = { ...nextCharacter, sustainedSpell: buildSustainedSpell(spell, companion) };
             if (companion) {
                 nextParty = nextParty.map(c => {
                     if (c.id !== companion.id) return c;
@@ -250,7 +228,8 @@ export const handlers = {
             // while dying (gate above) and companions never bleed out ("down but
             // stable"), so the creature it keeps alive is always an NPC in the
             // DM's fiction — no engine clock exists to stop.
-            const spared = companion ? companion.name : (String(payload.target || '').trim().slice(0, 60) || 'the dying creature');
+            const first = recipients[0];
+            const spared = first.type === 'companion' ? first.companion.name : (first.type === 'other' ? first.name : 'the dying creature');
             lines.push(`${spared} is kept from death's door — no HP restored; the DM narrates who was spared.`);
         } else {
             lines.push('The magic takes hold — the DM narrates what it reveals, opens, or aids.');

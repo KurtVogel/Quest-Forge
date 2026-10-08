@@ -5,6 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { buildSpellSlots } from '../engine/spellcasting.js';
+import { findSpell } from '../data/spells.js';
+import { normalizeEvents } from '../llm/responseParser.js';
 import { COMBAT_PHASES } from '../engine/combatPredicates.js';
 
 function clericState(overrides = {}) {
@@ -318,7 +320,7 @@ describe('CAST_SPELL (out of combat)', () => {
         expect(line).toMatch(/Brann recovers/);
     });
 
-    it('a single-target spell ignores a stray targets list beyond its first entry', () => {
+    it('a single-target spell takes the first of a stray targets list and SAYS the rest are unaffected (2026-10-08)', () => {
         const state = clericState({
             party: [{ id: 'mara', name: 'Mara', hp: 2, maxHp: 12, status: 'wounded', conditions: [] }],
         });
@@ -328,6 +330,7 @@ describe('CAST_SPELL (out of combat)', () => {
         });
         expect(next.party[0].hp).toBeGreaterThan(2);
         expect(next.character.currentHP).toBe(10); // the hero was NOT healed
+        expect(next.messages.at(-1).content).toMatch(/Cure Wounds affects only one recipient; extra targets are unaffected/);
     });
 
     it('a dead hero never casts — the 2026-08-29 corpse-heal guard is subsumed by the caster gate (2026-09-04)', () => {
@@ -520,5 +523,60 @@ describe('exchange commits and save loading', () => {
         };
         const next = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: bogus });
         expect(next.character.sustainedSpell).toBeNull();
+    });
+});
+
+describe('one recipient ladder for both lanes (2026-10-08 spellcasting Lap-4 P2)', () => {
+    function wizardState(overrides = {}) {
+        return clericState({
+            ...overrides,
+            character: {
+                race: 'human',
+                class: 'wizard',
+                armorClass: 10,
+                abilityScores: { strength: 10, dexterity: 10, constitution: 12, intelligence: 16, wisdom: 10, charisma: 10 },
+                classResources: {},
+                ...overrides.character,
+            },
+        });
+    }
+
+    it('Mage Armor aimed at a companion out of combat settles on the CASTER, as the fight lane always did', () => {
+        // Measured on the old ladder: sustainedSpell.targetType 'companion',
+        // Jorun spellAcBonus 3, the wizard's own AC recomputed WITHOUT it.
+        const state = wizardState({
+            party: [{ id: 'jorun', name: 'Jorun', hp: 12, maxHp: 12, ac: 14, status: 'healthy', conditions: [] }],
+        });
+        const next = gameReducer(state, { type: 'CAST_SPELL', payload: { spell: 'mage armor', target: 'Jorun' } });
+        expect(next.character.sustainedSpell).toMatchObject({ key: 'mageArmor', targetType: 'self' });
+        expect(next.character.sustainedSpell.targetId).toBeUndefined();
+        expect(next.party[0].spellAcBonus).toBeUndefined();
+        expect(next.character.armorClass).toBe(10 + findSpell('mageArmor').acBonus);
+        expect(next.messages.at(-1).content).toMatch(/Mage Armor can only settle on the caster — "Jorun" is unaffected/);
+    });
+
+    it('Spare the Dying never takes a DEAD companion as its recipient', () => {
+        const state = clericState({ party: [{ id: 'mara', name: 'Mara', hp: 0, maxHp: 12, status: 'dead', conditions: [] }] });
+        const next = gameReducer(state, { type: 'CAST_SPELL', payload: { spell: 'spare the dying', target: 'Mara' } });
+        expect(next.messages.at(-1).content).toMatch(/Spare the Dying has no valid recipient "Mara"/);
+        expect(next.party[0]).toEqual(state.party[0]);
+    });
+
+    it('a repeated name on the spell_cast wire never eats a recipient: Mass Healing Word with "Jorun" twice still heals Mika', () => {
+        // Measured on the old wire: the raw slice(0, 3) delivered
+        // ["self", "Jorun", "Jorun"] and Mika stayed at 5 HP with no line.
+        const state = clericState({
+            character: { currentHP: 5 },
+            party: [
+                { id: 'jorun', name: 'Jorun', hp: 4, maxHp: 12, status: 'bloodied', conditions: [] },
+                { id: 'mika', name: 'Mika', hp: 5, maxHp: 12, status: 'bloodied', conditions: [] },
+            ],
+        });
+        const [payload] = normalizeEvents({ spell_cast: { spell: 'mass healing word', targets: ['self', 'Jorun', 'Jorun', 'Mika'] } }).spellCasts;
+        const next = gameReducer(state, { type: 'CAST_SPELL', payload });
+        expect(next.character.currentHP).toBeGreaterThan(5);
+        expect(next.party.find(c => c.id === 'jorun').hp).toBeGreaterThan(4);
+        expect(next.party.find(c => c.id === 'mika').hp).toBeGreaterThan(5);
+        expect(next.messages.at(-1).content).not.toMatch(/extra targets are unaffected/);
     });
 });

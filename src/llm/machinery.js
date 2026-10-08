@@ -138,6 +138,21 @@ export function getBackgroundConfig(settings) {
 }
 
 /**
+ * THE DM-model call config (2026-10-08 chronicler Lap-4 P2): the player's
+ * chosen provider / key / model, for the DM turn, the missing-events nudge,
+ * the six directors and the chronicler — creative work on the DM model, as
+ * opposed to getBackgroundConfig's extraction lane. Five sites hand-built
+ * the same three fields; a fourth field would have landed on some of them.
+ */
+export function dmCallConfig(settings) {
+    return {
+        provider: settings?.llmProvider,
+        apiKey: settings?.apiKey,
+        model: settings?.model,
+    };
+}
+
+/**
  * Stall budget for the two machinery calls that sit BETWEEN the DM's last
  * streamed token and the commit — the roll arbiter and the semantic roll
  * detector (2026-09-29 providers-adapter P2). The background lane's three

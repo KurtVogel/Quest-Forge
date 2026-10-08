@@ -11,9 +11,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendMessage } from './adapter.js';
 import {
-    writeChronicleChapters, planChroniclePassages, passageWordAim, collectChapterEntries,
+    writeChronicleChapters, planChroniclePassages, passageWordAim,
     CHRONICLE_CHUNK_CHARS, CHRONICLE_CHUNK_SIZE,
 } from './chronicler.js';
+import { collectNarrativeEntries } from './narrativeMessages.js';
 
 vi.mock('./adapter.js', () => ({
     sendMessage: vi.fn(),
@@ -34,7 +35,7 @@ const aimOf = (userMessage) => userMessage.match(/LENGTH AIM: (\d+)–(\d+) word
 describe('planChroniclePassages — a chunk is at most CHRONICLE_CHUNK_CHARS of transcript', () => {
     it('30 clipped narrations become several chunks, each under the character ceiling, nothing lost or reordered', () => {
         const messages = Array.from({ length: 30 }, (_, i) => fatRow(i));
-        const chunks = planChroniclePassages(collectChapterEntries(messages, 0), 'Eero');
+        const chunks = planChroniclePassages(collectNarrativeEntries(messages, 0), 'Eero');
         // Pre-fix this was ONE 122k-char chunk.
         expect(chunks.length).toBeGreaterThanOrEqual(6);
         for (const chunk of chunks) {
@@ -52,10 +53,10 @@ describe('planChroniclePassages — a chunk is at most CHRONICLE_CHUNK_CHARS of 
     });
 
     it('the message count is only the belt: 30 curt rows are one chunk, 31 are two', () => {
-        const thirty = planChroniclePassages(collectChapterEntries(Array.from({ length: 30 }, (_, i) => curtRow(i)), 0), 'Eero');
+        const thirty = planChroniclePassages(collectNarrativeEntries(Array.from({ length: 30 }, (_, i) => curtRow(i)), 0), 'Eero');
         expect(thirty).toHaveLength(1);
         expect(thirty[0].chars).toBeLessThan(1000);
-        const thirtyOne = planChroniclePassages(collectChapterEntries(Array.from({ length: 31 }, (_, i) => curtRow(i)), 0), 'Eero');
+        const thirtyOne = planChroniclePassages(collectNarrativeEntries(Array.from({ length: 31 }, (_, i) => curtRow(i)), 0), 'Eero');
         expect(thirtyOne).toHaveLength(2);
         expect(thirtyOne[1].entries).toHaveLength(1);
     });
@@ -97,7 +98,7 @@ describe('writeChronicleChapters — every call rides the plan', () => {
             messages,
             chronicle: [],
         };
-        const plan = planChroniclePassages(collectChapterEntries(messages, 0), 'Eero');
+        const plan = planChroniclePassages(collectNarrativeEntries(messages, 0), 'Eero');
         const { chapters } = await writeChronicleChapters({ state });
 
         expect(calls).toHaveLength(plan.length);

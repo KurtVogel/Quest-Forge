@@ -19,13 +19,14 @@ describe('LOAD_GAME chronicle heal (2026-09-04 audit)', () => {
                     { id: 'ch-1', title: 'Ashes', text: 'The village burned.', fromIndex: 0, toIndex: 11 },
                     null,
                     'garbage',
-                    { id: 'ch-2', title: 42, text: 'She rode north.', fromIndex: '12', toIndex: '12' },
+                    { id: 'ch-2', title: { evil: true }, text: 'She rode north.', fromIndex: '12', toIndex: '12' },
                     { id: 'ch-3', title: 'Empty', text: '', fromIndex: 13, toIndex: 20 },
                 ],
             },
         });
         expect(next.chronicle.map(c => c.id)).toEqual(['ch-1', 'ch-2']);
-        expect(next.chronicle[1]).toMatchObject({ title: '42', fromIndex: 12, toIndex: 12 });
+        // An object title is no title — string-or-drop, never "[object Object]" (2026-10-08).
+        expect(next.chronicle[1]).toMatchObject({ title: '', fromIndex: 12, toIndex: 12 });
         // The readers' `last.toIndex + 1` arithmetic now yields a number, not "121".
         expect(next.chronicle[next.chronicle.length - 1].toIndex + 1).toBe(13);
     });

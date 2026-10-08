@@ -11,8 +11,138 @@ import { getModifier, getProficiencyBonus } from './rules.js';
 
 export const MAX_SPELL_LEVEL = 5;
 
+// A caster is a class the spell catalog lists at least once (2026-10-08
+// spellcasting Lap-4 P2): the old two-name literal beside a catalog that
+// already names each spell's `classes` made a new caster class three edits.
+const CASTER_CLASSES = new Set(SPELL_LIST.flatMap(spell => spell.classes || []));
+
 export function isSpellcaster(className) {
-    return className === 'wizard' || className === 'cleric';
+    return typeof className === 'string' && CASTER_CLASSES.has(className);
+}
+
+/** Most distinct cast targets either wire keeps; each lane clamps to the SPELL's own limit with a visible note. */
+export const MAX_CAST_TARGETS = 6;
+/** Raw wire entries scanned for those targets (a flooded list is not walked). */
+const MAX_CAST_TARGET_SCAN = 30;
+
+/**
+ * Dedupe-THEN-cap a cast's target refs — the one rule behind both wires
+ * (the combat slot's `targets`, 2026-09-26; the out-of-combat `spell_cast`
+ * list, 2026-10-08 — it sliced three RAW entries first, so Mass Healing Word
+ * with `["self", "Jorun", "Jorun", "Mika"]` healed two and left Mika at 5 HP
+ * with no line). `toRef` types one raw entry to a string or null; the cap
+ * sits above every catalog limit so the lanes post the "extra targets are
+ * unaffected" note instead of a wire silently losing a recipient.
+ */
+export function dedupeCastTargets(raw, toRef) {
+    const unique = [];
+    for (const value of (Array.isArray(raw) ? raw : []).slice(0, MAX_CAST_TARGET_SCAN)) {
+        const target = toRef(value);
+        if (!target || unique.includes(target)) continue;
+        unique.push(target);
+        if (unique.length >= MAX_CAST_TARGETS) break;
+    }
+    return unique;
+}
+
+/** How many recipients a spell's catalog targeting allows. */
+export function spellTargetLimit(spell) {
+    return spell?.targeting?.mode === 'upTo3' ? 3 : 1;
+}
+
+const SELF_ALIASES = new Set(['', 'self', 'me', 'player']);
+
+/**
+ * THE recipient ladder for a self/ally/any-side cast — read by CAST_SPELL
+ * (out of combat) and the exchange's support lane alike (2026-10-08
+ * spellcasting Lap-4 P2: two bodies disagreed — out of combat, Mage Armor
+ * aimed at "Jorun" settled on the COMPANION with the hero's AC recomputed
+ * without it, a sheet the fight lane could never produce, and Spare the
+ * Dying accepted a DEAD companion as its recipient). The rules, once:
+ * - a `side: 'self'` spell lands on the caster whatever was named
+ *   (`redirected` carries the first other name so the lane can say so);
+ * - '' / self / me / player / the hero's own name resolve to the hero;
+ * - a party member matches by exact id or case-folded name — dead never,
+ *   on every side;
+ * - a `side: 'any'` spell may name a creature outside the party (Spare the
+ *   Dying's NPC): `{ type: 'other', name }`, the fiction's own;
+ * - invalid refs never cost a slot: recipients dedupe by identity, THEN the
+ *   first `spellTargetLimit` win and `overflow` counts the rest.
+ * Companion recipients are the caller's own objects (the exchange mutates
+ * its working copies in place).
+ */
+export function resolveSpellRecipients(spell, character, party, refs) {
+    const side = spell?.targeting?.side;
+    const heroName = String(character?.name || '').trim().toLowerCase();
+    const named = (Array.isArray(refs) ? refs : [refs])
+        .map(ref => String(ref ?? '').trim())
+        .filter(Boolean);
+    const requested = named.length > 0 ? named : [''];
+    const resolveOne = (ref) => {
+        const lc = ref.toLowerCase();
+        if (SELF_ALIASES.has(lc) || (heroName && lc === heroName)) return { type: 'self' };
+        const companion = (party || []).find(c => c && (c.id === ref || String(c.name || '').toLowerCase() === lc)) || null;
+        if (companion) return companion.status === 'dead' ? null : { type: 'companion', companion };
+        return side === 'any' ? { type: 'other', name: ref.slice(0, 60) } : null;
+    };
+    let redirected = null;
+    if (side === 'self') {
+        redirected = requested.find(ref => resolveOne(ref)?.type !== 'self') ?? null;
+        return { recipients: [{ type: 'self' }], invalid: [], overflow: 0, redirected };
+    }
+    const valid = [];
+    const invalid = [];
+    for (const ref of requested) {
+        const resolved = resolveOne(ref);
+        if (!resolved) {
+            invalid.push(ref);
+        } else if (!valid.some(r => r.type === resolved.type && r.companion?.id === resolved.companion?.id && r.name === resolved.name)) {
+            valid.push(resolved);
+        }
+    }
+    const limit = spellTargetLimit(spell);
+    return { recipients: valid.slice(0, limit), invalid, overflow: Math.max(0, valid.length - limit), redirected };
+}
+
+/**
+ * The note a lane posts when the DM named more recipients than the spell
+ * takes, or aimed a self-only spell elsewhere — one wording on both lanes.
+ */
+export function describeRecipientClamp(spell, { overflow = 0, redirected = null } = {}) {
+    if (redirected) return `${spell.name} can only settle on the caster — "${redirected}" is unaffected.`;
+    if (overflow > 0) {
+        const limit = spellTargetLimit(spell);
+        return `${spell.name} affects ${limit === 1 ? 'only one recipient' : `up to ${limit} recipients`}; extra targets are unaffected.`;
+    }
+    return null;
+}
+
+/** `conditions` without `condition`, case-folded — the sustained release's one filter. */
+export function dropCondition(conditions, condition) {
+    const lc = String(condition || '').toLowerCase();
+    return (conditions || []).filter(c => String(c).toLowerCase() !== lc);
+}
+
+/**
+ * THE sustained-spell record (2026-10-08 spellcasting Lap-4 P2: it had three
+ * composers — CAST_SPELL, the exchange's support lane, and the load twin,
+ * which alone clamped the target fields). Mechanics come from the catalog
+ * entry, never from a caller; `companion` is the party record it settles on,
+ * or null for the caster. Returns null for a spell that is not sustained.
+ */
+export function buildSustainedSpell(spell, companion = null) {
+    if (!spell?.sustained) return null;
+    const targetId = typeof companion?.id === 'string' && companion.id ? companion.id.slice(0, 100) : '';
+    const targetName = typeof companion?.name === 'string' && companion.name ? companion.name.slice(0, 100) : '';
+    return {
+        key: spell.key,
+        name: spell.name,
+        ...(spell.acBonus && { acBonus: spell.acBonus }),
+        ...(spell.condition && { condition: spell.condition }),
+        targetType: companion ? 'companion' : 'self',
+        ...(targetId && { targetId }),
+        ...(targetName && { targetName }),
+    };
 }
 
 export function getCastingAbility(className) {
@@ -77,18 +207,11 @@ export function sanitizeSpellSlots(level, value) {
  */
 export function sanitizeSustainedSpell(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const spell = findSpell(raw.key);
-    if (!spell?.sustained) return null;
-    const targetType = raw.targetType === 'companion' ? 'companion' : 'self';
-    return {
-        key: spell.key,
-        name: spell.name,
-        ...(spell.acBonus && { acBonus: spell.acBonus }),
-        ...(spell.condition && { condition: spell.condition }),
-        targetType,
-        ...(targetType === 'companion' && typeof raw.targetId === 'string' && raw.targetId && { targetId: raw.targetId.slice(0, 100) }),
-        ...(targetType === 'companion' && raw.targetName && { targetName: String(raw.targetName).slice(0, 100) }),
-    };
+    // The load twin IS the composer: the same builder the two casting lanes
+    // call, fed the stored target (typed string-or-drop inside it).
+    return buildSustainedSpell(findSpell(raw.key), raw.targetType === 'companion'
+        ? { id: raw.targetId, name: raw.targetName }
+        : null);
 }
 
 export function getSpellSaveDC(character) {
@@ -264,15 +387,4 @@ export function describeSpellbookForPrompt(character) {
             : spell.combatAvailable ? ' [combat only]' : ' [out of combat only]';
         return `- ${spell.name} (${cost}${timing}${targetingTag(spell.targeting)})${scope}: ${spell.summary}`;
     }).join('\n');
-}
-
-/**
- * Compact spell catalog + slot state as ONE block (slots line first). The DM
- * prompt now renders the two halves apart (prefix vs live); this composition
- * remains for the sheet-style consumers and the older tests.
- */
-export function describeSpellcastingForPrompt(character) {
-    const slots = describeSpellSlotsForPrompt(character);
-    if (!slots) return '';
-    return [slots, describeSpellbookForPrompt(character)].filter(Boolean).join('\n');
 }

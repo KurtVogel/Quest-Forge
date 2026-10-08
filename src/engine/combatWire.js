@@ -11,6 +11,7 @@ import { canonicalRollKey, findSkillInText } from './rules.js';
 import { normalizeEnemyConditions } from './enemyStats.js';
 import { cleanText } from './text.js';
 import { isEnemyActive } from './combatPredicates.js';
+import { dedupeCastTargets } from './spellcasting.js';
 
 const PLAYER_ACTIONS = new Set(['attack', 'cast', 'channel', 'check', 'save', 'dodge', 'dash', 'disengage', 'flee', 'interact', 'pass', 'death_save', 'second_wind']);
 const ENEMY_ACTIONS = new Set(['attack', 'defend', 'flee', 'surrender']);
@@ -44,33 +45,21 @@ function normalizeStrikes(slot) {
     return raw.slice(0, 4).map(strike => ({ target: ref(strike?.target || strike) })).filter(s => s.target);
 }
 
-/** Most distinct cast targets the wire keeps; each resolver clamps to the SPELL's own limit with a visible note. */
-const MAX_CAST_TARGETS = 6;
-/** Raw wire entries scanned for those targets (a flooded list is not walked). */
-const MAX_CAST_TARGET_SCAN = 30;
-
 /**
  * Deduped target refs for a cast slot ("targets" array or single "target").
  * Dedupe BEFORE the cap (2026-09-26): the old `slice(0, 3)` ran first, so a
  * repeated name or a junk entry among the first three ate a legitimate
  * recipient's slot — `["self", "Jorun", "Jorun", "Mika"]` on Mass Healing
  * Word healed two and dropped Mika without a word, and a level-2 Magic
- * Missile (4 darts) could never name its fourth foe. The cap sits above every
- * catalog limit so the resolvers' own clamp posts the "extra targets are
- * unaffected" note instead of the wire silently losing them.
+ * Missile (4 darts) could never name its fourth foe. The rule itself lives
+ * in engine/spellcasting.js since 2026-10-08, shared with the out-of-combat
+ * `spell_cast` wire.
  */
 function normalizeCastTargets(slot) {
     const raw = Array.isArray(slot?.targets)
         ? slot.targets
         : (slot?.target != null ? [slot.target] : []);
-    const unique = [];
-    for (const value of raw.slice(0, MAX_CAST_TARGET_SCAN)) {
-        const target = ref(value?.target ?? value);
-        if (!target || unique.includes(target)) continue;
-        unique.push(target);
-        if (unique.length >= MAX_CAST_TARGETS) break;
-    }
-    return unique;
+    return dedupeCastTargets(raw, value => ref(value?.target ?? value));
 }
 
 function normalizeConditionDelta(raw, targetValue) {

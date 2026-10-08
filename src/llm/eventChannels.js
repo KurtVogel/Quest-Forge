@@ -19,6 +19,7 @@
 
 import { canonicalEnemyId, validateEnemyAttackBonus, validateEnemySaveBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, isDeclaredDowned, normalizeEnemyConditions } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatWire.js';
+import { dedupeCastTargets } from '../engine/spellcasting.js';
 import { LOCATION_NAME_MAX, MAX_COIN_EVENT, MAX_ROLL_DC } from '../config/contentLimits.js';
 import { toFiniteNumber, toFlag } from '../data/items.js';
 import { normalizeConditionName, findSkillInText, CONDITION_LIST_CAP } from '../engine/rules.js';
@@ -290,14 +291,10 @@ function normalizeSpellCasts(raw) {
             const rawLevel = toFiniteNumber(entry.slot_level ?? entry.slotLevel);
             // upTo3 ally spells (Mass Healing Word / Mass Cure Wounds) name
             // their recipients via `targets` — the darts pattern's ally twin.
-            // CAST_SPELL honors the list only for spells whose catalog entry
-            // actually allows multiple targets.
-            const targets = Array.isArray(entry.targets)
-                ? entry.targets
-                    .filter(t => typeof t === 'string' && t.trim())
-                    .map(t => t.trim().slice(0, 100))
-                    .slice(0, 3)
-                : [];
+            // Dedupe THEN cap, the combat wire's own rule (2026-10-08): the
+            // old raw `slice(0, 3)` let a repeated name eat a real recipient.
+            // CAST_SPELL clamps to the spell's limit with a visible note.
+            const targets = dedupeCastTargets(entry.targets, t => (typeof t === 'string' && t.trim() ? t.trim().slice(0, 100) : null));
             return {
                 spell,
                 slotLevel: Number.isFinite(rawLevel) ? Math.max(1, Math.min(5, Math.round(rawLevel))) : null,

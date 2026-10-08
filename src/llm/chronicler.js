@@ -17,7 +17,11 @@
  */
 import { sendMessage } from './adapter.js';
 import { collectNarrativeEntries } from './narrativeMessages.js';
-import { CHRONICLE_CHAPTER_TEXT_MAX, CHRONICLE_PART_CHAR_BUDGET } from '../config/contentLimits.js';
+import { CHRONICLE_CHAPTER_TEXT_MAX, CHRONICLE_PART_CHAR_BUDGET, CHRONICLE_TITLE_MAX } from '../config/contentLimits.js';
+import { dmCallConfig } from './machinery.js';
+
+// Room a multi-part title keeps for its " — Part NN" suffix inside CHRONICLE_TITLE_MAX.
+const PART_SUFFIX_RESERVE = 12;
 
 export const CHRONICLE_MIN_MESSAGES = 6;
 /**
@@ -37,12 +41,10 @@ export const CHRONICLE_MIN_MESSAGES = 6;
  */
 export const CHRONICLE_CHUNK_CHARS = 20000;
 export const CHRONICLE_CHUNK_SIZE = 30; // the message-count belt
-const CHUNK_CHARS = CHRONICLE_CHUNK_CHARS;
-const CHUNK_SIZE = CHRONICLE_CHUNK_SIZE;
 const MESSAGE_CLIP = 4000;
 const TRANSCRIPT_LINE_GAP = 2; // the '\n\n' between rendered rows
 const TAIL_CONTEXT = 700;
-// A run closes a chapter every CHUNKS_PER_CHAPTER chunks (~300 messages,
+// A run closes a chapter every CHRONICLE_CHUNKS_PER_CHAPTER chunks (~300 messages,
 // ~30–45k chars of prose) — safely under the reducer's 60k text clamp. The
 // old design joined ALL passages into one chapter and sliced to 60k: a
 // 59-chunk first close of a long campaign silently discarded two-thirds of
@@ -55,9 +57,6 @@ const TAIL_CONTEXT = 700;
 // past CHRONICLE_PART_CHAR_BUDGET; a single passage over the chapter ceiling
 // is clipped with a visible warning.
 export const CHRONICLE_CHUNKS_PER_CHAPTER = 10;
-const CHUNKS_PER_CHAPTER = CHRONICLE_CHUNKS_PER_CHAPTER;
-const PART_CHAR_BUDGET = CHRONICLE_PART_CHAR_BUDGET;
-const PASSAGE_CLIP = CHRONICLE_CHAPTER_TEXT_MAX;
 
 const CHRONICLER_PROMPT = `You are the CHRONICLER of a tabletop RPG campaign. You receive the raw table transcript of one span of play and retell it as a single continuous narrative passage — a chapter of the saga the player will keep and reread.
 
@@ -88,22 +87,6 @@ function stripEventBlocks(text) {
     return String(text || '').replace(/```json[\s\S]*?```/g, '').trim();
 }
 
-/**
- * The chronicle-eligible entries of a raw span with their RAW message indexes
- * (salvaged shorter-span chapters need the true toIndex): visible play only,
- * minus OOC table talk — a table-talk turn is excluded from RAG, the Scribe,
- * and the DM window by design, and its recap/rules exchange must not be retold
- * as story either (2026-08-29 audit). The predicate is THE shared
- * narrative-eligibility rule in narrativeMessages.js (SceneArt and
- * sessionPriming read through the same one — 2026-09-01 P1).
- */
-export const collectChapterEntries = collectNarrativeEntries;
-
-/** The chronicle-eligible messages of a raw span: visible play only. */
-export function collectChapterMessages(messages = [], fromIndex = 0, toIndex = Infinity) {
-    return collectChapterEntries(messages, fromIndex, toIndex).map(entry => entry.message);
-}
-
 function renderTranscriptLine(m, heroName) {
     const content = stripEventBlocks(m.content).slice(0, MESSAGE_CLIP);
     if (m.role === 'user') return `PLAYER (${heroName}): ${content}`;
@@ -113,8 +96,8 @@ function renderTranscriptLine(m, heroName) {
 
 /**
  * Cut the eligible entries into passage chunks: a chunk closes before the
- * entry that would push its rendered transcript past CHUNK_CHARS or its row
- * count past CHUNK_SIZE (an empty chunk always takes the entry, so a lone
+ * entry that would push its rendered transcript past CHRONICLE_CHUNK_CHARS or its row
+ * count past CHRONICLE_CHUNK_SIZE (an empty chunk always takes the entry, so a lone
  * clipped row is the only way past the budget — and it never is, since a
  * row is at most MESSAGE_CLIP + its label). Each chunk carries its rendered
  * `transcript` so the call and the UI estimate read one plan. Pure and
@@ -126,7 +109,7 @@ export function planChroniclePassages(entries = [], heroName = 'the hero') {
     for (const entry of entries) {
         const line = renderTranscriptLine(entry.message, heroName);
         const added = current ? current.chars + TRANSCRIPT_LINE_GAP + line.length : line.length;
-        if (!current || current.entries.length >= CHUNK_SIZE || added > CHUNK_CHARS) {
+        if (!current || current.entries.length >= CHRONICLE_CHUNK_SIZE || added > CHRONICLE_CHUNK_CHARS) {
             current = { entries: [], lines: [], chars: 0 };
             chunks.push(current);
             current.chars = line.length;
@@ -145,7 +128,7 @@ export function planChroniclePassages(entries = [], heroName = 'the hero') {
 
 /**
  * Retell every message played since the last chapter. A span longer than
- * CHUNKS_PER_CHAPTER chunks closes as MULTIPLE chapters (Part 1, Part 2, …)
+ * CHRONICLE_CHUNKS_PER_CHAPTER chunks closes as MULTIPLE chapters (Part 1, Part 2, …)
  * with honest contiguous fromIndex/toIndex — no text is ever discarded.
  * Returns { chapters: [{ title, text, fromIndex, toIndex }], salvaged?,
  * warning? } — the caller dispatches the whole array as one action.
@@ -158,7 +141,7 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
     const chapters = state.chronicle || [];
     const fromIndex = chapters.length > 0 ? (chapters[chapters.length - 1].toIndex ?? -1) + 1 : 0;
     const toIndex = (state.messages || []).length - 1;
-    const eligible = collectChapterEntries(state.messages, fromIndex, toIndex);
+    const eligible = collectNarrativeEntries(state.messages, fromIndex, toIndex);
     if (eligible.length < CHRONICLE_MIN_MESSAGES) {
         throw new Error('Not enough new play to close a chapter yet — keep adventuring first.');
     }
@@ -177,9 +160,9 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
     // the first part is retitled into the part form at that moment.
     const customTitle = String(title || '').trim();
     const partTitle = (partNumber, multiPart) => {
-        if (!multiPart) return customTitle.slice(0, 80) || `Chapter ${chapters.length + 1}`;
+        if (!multiPart) return customTitle.slice(0, CHRONICLE_TITLE_MAX) || `Chapter ${chapters.length + 1}`;
         return customTitle
-            ? `${customTitle.slice(0, 68)} — Part ${partNumber}`
+            ? `${customTitle.slice(0, CHRONICLE_TITLE_MAX - PART_SUFFIX_RESERVE)} — Part ${partNumber}`
             : `Chapter ${chapters.length + partNumber}`;
     };
 
@@ -221,9 +204,7 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
 
         try {
             const response = await sendMessage({
-                provider: settings.llmProvider,
-                apiKey: settings.apiKey,
-                model: settings.model,
+                ...dmCallConfig(settings),
                 systemPrompt: CHRONICLER_PROMPT,
                 messageHistory: [],
                 userMessage,
@@ -231,14 +212,14 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
             });
             let passage = stripEventBlocks(response);
             if (!passage) throw new Error('The chronicler returned an empty passage.');
-            if (passage.length > PASSAGE_CLIP) {
-                passage = passage.slice(0, PASSAGE_CLIP);
+            if (passage.length > CHRONICLE_CHAPTER_TEXT_MAX) {
+                passage = passage.slice(0, CHRONICLE_CHAPTER_TEXT_MAX);
                 clipped = true;
             }
             // Close the part BEFORE this passage would push it past the
             // character budget: the previous chunk's last retold message is
             // the honest boundary, and this passage opens the next part.
-            if (passages.length > 0 && partChars + 2 + passage.length > PART_CHAR_BUDGET) {
+            if (passages.length > 0 && partChars + 2 + passage.length > CHRONICLE_PART_CHAR_BUDGET) {
                 closePart(lastIndexOf(chunks[i - 1]));
             }
             passages.push(passage);
@@ -258,7 +239,7 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
         }
 
         const lastChunkOfRun = i === chunks.length - 1;
-        if (passages.length === CHUNKS_PER_CHAPTER || lastChunkOfRun) {
+        if (passages.length === CHRONICLE_CHUNKS_PER_CHAPTER || lastChunkOfRun) {
             // The final part of a clean run claims the RAW span end so trailing
             // hidden/system messages never stay "pending"; every earlier
             // boundary lands on the last message its chunk retold.

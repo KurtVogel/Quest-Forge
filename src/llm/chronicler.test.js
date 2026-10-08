@@ -5,8 +5,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendMessage } from './adapter.js';
-import { writeChronicleChapters, collectChapterMessages, chronicleToMarkdown, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNK_SIZE, CHRONICLE_CHUNKS_PER_CHAPTER } from './chronicler.js';
-import { gameReducer, initialGameState } from '../state/gameReducer.js';
+import { writeChronicleChapters, chronicleToMarkdown, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNK_SIZE, CHRONICLE_CHUNKS_PER_CHAPTER } from './chronicler.js';
+import { collectNarrativeEntries } from './narrativeMessages.js';
+
+const collectChapterMessages = (messages, fromIndex, toIndex) => collectNarrativeEntries(messages, fromIndex, toIndex).map(entry => entry.message);
+import { appendChronicleChapter, gameReducer, initialGameState } from '../state/gameReducer.js';
+import { normalizeChronicleChapter } from '../state/handlers/shared.js';
 
 vi.mock('./adapter.js', () => ({
     sendMessage: vi.fn(),
@@ -276,8 +280,12 @@ describe('writeChronicleChapters', () => {
 });
 
 describe('ADD_CHRONICLE_CHAPTER + export', () => {
+    // The write clamps a chapter's span to the live transcript like the load
+    // heal does (one composer, 2026-10-08) — so the reducer state carries one.
+    const withTranscript = { ...initialGameState, messages: makeMessages(400) };
+
     it('appends chapters to state and renders markdown with titles', () => {
-        const next = gameReducer(initialGameState, {
+        const next = gameReducer(withTranscript, {
             type: 'ADD_CHRONICLE_CHAPTER',
             payload: { title: 'The Ferry Debt', text: 'The courier came at dusk.', fromIndex: 0, toIndex: 11 },
         });
@@ -297,7 +305,7 @@ describe('ADD_CHRONICLE_CHAPTER + export', () => {
     });
 
     it('appends a multi-part close from ONE array action, numbering defaults in sequence', () => {
-        const next = gameReducer(initialGameState, {
+        const next = gameReducer(withTranscript, {
             type: 'ADD_CHRONICLE_CHAPTER',
             payload: [
                 { text: 'Part one prose.', fromIndex: 0, toIndex: 299 },
@@ -307,6 +315,25 @@ describe('ADD_CHRONICLE_CHAPTER + export', () => {
         expect(next.chronicle).toHaveLength(2);
         expect(next.chronicle.map(c => c.title)).toEqual(['Chapter 1', 'Chapter 2']);
         expect(next.chronicle[1].fromIndex).toBe(300);
+    });
+
+    it('the write side and the load side are ONE composer: a numeric-string index and an object title land the same (2026-10-08)', () => {
+        // The old write composer dropped "12" to 0 — a 0/0 span made the next
+        // close re-retell everything from the start — and titled through
+        // String(x): an object title was "[object Object]".
+        const entry = { title: { evil: true }, text: 'She rode north.', fromIndex: '12', toIndex: '40' };
+        const written = appendChronicleChapter([], entry, { maxMessageCount: 400 })[0];
+        const loaded = normalizeChronicleChapter(entry, { maxMessageCount: 400 });
+        expect(written).toMatchObject({ fromIndex: 12, toIndex: 40, title: 'Chapter 1', text: 'She rode north.' });
+        expect(loaded).toMatchObject({ fromIndex: 12, toIndex: 40, title: '', text: 'She rode north.' });
+        expect(Object.keys(written).sort()).toEqual(Object.keys(loaded).sort());
+        expect(written.id).toMatch(/^chapter-/);
+        // A span beyond the transcript clamps on the write too.
+        const far = appendChronicleChapter([], { text: 'x', fromIndex: 10, toIndex: 1e15 }, { maxMessageCount: 400 })[0];
+        expect(far.toIndex).toBe(399);
+        // The title clamp is the one constant.
+        const long = appendChronicleChapter([], { title: 'T'.repeat(200), text: 'x' })[0];
+        expect(long.title).toHaveLength(80);
     });
 
     it('clamps a runaway chapter text to the 60k character ceiling at the reducer boundary', () => {

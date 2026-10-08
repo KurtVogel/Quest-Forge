@@ -126,19 +126,33 @@ describe('event-channel registry agreement', () => {
         }]);
     });
 
-    it('spell_cast accepts a bounded targets list for multi-ally casts', () => {
+    it('spell_cast keeps a bounded, typed targets list for multi-ally casts — the SPELL clamps, not the wire (2026-10-08)', () => {
+        // The wire keeps up to MAX_CAST_TARGETS distinct names (the combat
+        // wire's rule); CAST_SPELL clamps to the spell's own limit with a
+        // visible note. Junk entries are dropped, not counted.
         const events = normalizeEvents({
             spell_cast: {
                 spell: 'mass healing word',
-                targets: ['self', 'Mara', 'Brann', 'FourthDropped', 42, null],
+                targets: ['self', 'Mara', 'Brann', 'Fourth', 42, null],
             },
         });
         expect(events.spellCasts).toEqual([{
             spell: 'mass healing word',
             slotLevel: null,
             target: 'self',
-            targets: ['self', 'Mara', 'Brann'],
+            targets: ['self', 'Mara', 'Brann', 'Fourth'],
         }]);
+    });
+
+    it('spell_cast dedupes targets BEFORE the cap — a repeated name never eats a recipient (2026-10-08, the 09-26 combat-wire twin)', () => {
+        const events = normalizeEvents({
+            spell_cast: { spell: 'mass healing word', targets: ['self', 'Jorun', 'Jorun', 'Mika'] },
+        });
+        expect(events.spellCasts[0].targets).toEqual(['self', 'Jorun', 'Mika']);
+        const flooded = normalizeEvents({
+            spell_cast: { spell: 'mass healing word', targets: Array.from({ length: 40 }, (_, i) => `Ally${i}`) },
+        });
+        expect(flooded.spellCasts[0].targets).toHaveLength(6);
     });
 
     it('keeps an id-only companion removal instead of dropping it', () => {

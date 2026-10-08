@@ -10,8 +10,9 @@ import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromNam
 import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
 import { normalizeKnownBy } from '../../engine/storyMemory.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
-import { CHRONICLE_CHAPTER_TEXT_MAX, NPC_DOSSIER_FIELD_MAX, ROLL_HISTORY_CAP } from '../../config/contentLimits.js';
+import { CHRONICLE_CHAPTER_TEXT_MAX, CHRONICLE_TITLE_MAX, NPC_DOSSIER_FIELD_MAX, ROLL_HISTORY_CAP } from '../../config/contentLimits.js';
 import { COMBAT_PHASES, isLowLevelSolo } from '../../engine/combatPredicates.js';
+import { dropCondition } from '../../engine/spellcasting.js';
 import { healthWord } from '../../engine/enemyStats.js';
 import {
     appendBondMoments,
@@ -183,16 +184,22 @@ export function applyEarlyDefeat(character) {
 
 /** Bring a dying/stable character back to consciousness (healing or a nat-20 death save). */
 /**
- * Load-side heal for one persisted chronicle chapter (2026-09-04 audit): the
- * chronicle was the one persisted collection validateSaveState never
- * shape-guarded, while both readers index its last element unguarded —
- * ChronicleTab and writeChronicleChapters — so a null entry crashed the whole
- * Journal panel on open and a string toIndex ("12") string-concatenated the
- * next chapter's fromIndex into "121" (every close said "Not enough new play").
- * Plain objects with text survive; from/toIndex are coerced to finite
- * integers; junk drops.
+ * THE chronicle chapter record — the body of the LOAD heal and of the WRITE
+ * (2026-10-08 chronicler Lap-4 P2: the write side had its own composer that
+ * dropped a numeric-string index to 0 — a 0/0 span makes the next close
+ * re-retell everything from the start — and titled through `String(x)`, the
+ * "[object Object]" class; the 09-17 rule is that the load twin IS the
+ * normalizer). Born 2026-09-04 as the load heal: the chronicle was the one
+ * persisted collection validateSaveState never shape-guarded, while both
+ * readers index its last element unguarded — ChronicleTab and
+ * writeChronicleChapters — so a null entry crashed the whole Journal panel on
+ * open and a string toIndex ("12") string-concatenated the next chapter's
+ * fromIndex into "121" (every close said "Not enough new play").
+ * Plain objects with text survive; title string-or-empty, clamped; from/toIndex
+ * coerced to finite integers and clamped to the live transcript; an absent id
+ * or createdAt is minted; junk drops.
  */
-export function healChronicleChapter(entry, { maxMessageCount = Infinity } = {}) {
+export function normalizeChronicleChapter(entry, { maxMessageCount = Infinity } = {}) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
     const text = typeof entry.text === 'string' ? entry.text.trim().slice(0, CHRONICLE_CHAPTER_TEXT_MAX) : '';
     if (!text) return null;
@@ -207,7 +214,7 @@ export function healChronicleChapter(entry, { maxMessageCount = Infinity } = {})
     };
     return {
         id: typeof entry.id === 'string' && entry.id ? entry.id.slice(0, 80) : `chapter-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        title: String(entry.title ?? '').trim().slice(0, 80),
+        title: typeof entry.title === 'string' ? entry.title.trim().slice(0, CHRONICLE_TITLE_MAX) : '',
         text,
         fromIndex: index(entry.fromIndex),
         toIndex: index(entry.toIndex),
@@ -513,17 +520,13 @@ export function clearSustainedSpellState(character, party, inventory) {
     if (!sustained) return { character, party };
     let nextCharacter = { ...character, sustainedSpell: null };
     if (sustained.condition && sustained.targetType !== 'companion') {
-        nextCharacter.conditions = (nextCharacter.conditions || [])
-            .filter(c => String(c).toLowerCase() !== String(sustained.condition).toLowerCase());
+        nextCharacter.conditions = dropCondition(nextCharacter.conditions, sustained.condition);
     }
     nextCharacter = { ...nextCharacter, armorClass: computeACFromInventory(inventory || [], nextCharacter) };
     const nextParty = (party || []).map(companion => {
         if (companion.id !== sustained.targetId) return companion;
         const { spellAcBonus: _droppedBonus, ...cleaned } = companion;
-        if (sustained.condition) {
-            cleaned.conditions = (cleaned.conditions || [])
-                .filter(c => String(c).toLowerCase() !== String(sustained.condition).toLowerCase());
-        }
+        if (sustained.condition) cleaned.conditions = dropCondition(cleaned.conditions, sustained.condition);
         return cleaned;
     });
     return { character: nextCharacter, party: nextParty };

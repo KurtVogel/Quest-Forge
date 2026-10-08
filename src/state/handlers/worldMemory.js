@@ -12,8 +12,7 @@ import {
     stripStoryMemoryEngineStamps,
 } from '../../engine/storyMemory.js';
 import { gameReducer } from '../gameReducer.js';
-import { isStaleCampaignAction, sanitizeWorldFactPayload, stampNpcRelationshipArcs, systemMessage } from './shared.js';
-import { CHRONICLE_CHAPTER_TEXT_MAX } from '../../config/contentLimits.js';
+import { isStaleCampaignAction, normalizeChronicleChapter, sanitizeWorldFactPayload, stampNpcRelationshipArcs, systemMessage } from './shared.js';
 import { rollHeroTellBeat } from './heroTells.js';
 import { rollDie } from '../../engine/dice.ts';
 import {
@@ -86,21 +85,19 @@ export function rollWonderRequest(state, { onDemand = false } = {}) {
  * a very long "Close chapter" span arrives as multiple parts in ONE action so
  * the flushAutoSave action-replay persists them all atomically (2026-08-29).
  */
-export function appendChronicleChapter(chronicle = [], payload = {}) {
+export function appendChronicleChapter(chronicle = [], payload = {}, { maxMessageCount = Infinity } = {}) {
     const items = Array.isArray(payload) ? payload : [payload];
     let chapters = chronicle || [];
     for (const item of items) {
-        const text = String(item?.text || '').trim();
-        if (!text) continue;
-        chapters = [...chapters, {
-            id: `chapter-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            title: String(item.title || '').trim().slice(0, 80) || `Chapter ${chapters.length + 1}`,
-            text: text.slice(0, CHRONICLE_CHAPTER_TEXT_MAX),
-            // Non-negative integers on the write side too (2026-09-13 audit P2 nit).
-            fromIndex: Number.isFinite(item.fromIndex) ? Math.max(0, Math.trunc(item.fromIndex)) : 0,
-            toIndex: Number.isFinite(item.toIndex) ? Math.max(0, Math.trunc(item.toIndex)) : 0,
-            createdAt: Date.now(),
-        }];
+        // ONE composer with the load heal (2026-10-08): the write mints its own
+        // id and stamp — a chapter is born here, never carried in — and only
+        // the write defaults an empty title to its number.
+        const chapter = normalizeChronicleChapter(
+            { title: item?.title, text: item?.text, fromIndex: item?.fromIndex, toIndex: item?.toIndex },
+            { maxMessageCount }
+        );
+        if (!chapter) continue;
+        chapters = [...chapters, { ...chapter, title: chapter.title || `Chapter ${chapters.length + 1}` }];
     }
     return chapters;
 }
@@ -404,7 +401,7 @@ export const handlers = {
                 )],
             };
         }
-        const chronicle = appendChronicleChapter(state.chronicle, action.payload);
+        const chronicle = appendChronicleChapter(state.chronicle, action.payload, { maxMessageCount: (state.messages || []).length });
         if (chronicle === (state.chronicle || [])) return state;
         // Writing a chapter consumes the front-resolution ceremony nudge.
         const session = state.session?.chapterCloseSuggested

@@ -32,7 +32,7 @@ import {
     ROLL_HISTORY_CAP,
     sanitizeRollHistoryEntry,
     sanitizeWorldFactPayload,
-    healChronicleChapter,
+    normalizeChronicleChapter,
     systemMessage,
 } from './shared.js';
 
@@ -460,10 +460,10 @@ function validateSaveState(payload) {
         fronts: Array.isArray(payload.fronts)
             ? payload.fronts.filter(f => f && typeof f === 'object' && !Array.isArray(f)).map(f => normalizeFront(f))
             : [],
-        // Player-facing saga chapters: entry heal (see healChronicleChapter) —
+        // Player-facing saga chapters: entry heal (see normalizeChronicleChapter) —
         // a poisoned entry crashed the Journal panel on open (2026-09-04 audit).
         chronicle: Array.isArray(payload.chronicle)
-            ? payload.chronicle.map(entry => healChronicleChapter(entry, { maxMessageCount: messageCount })).filter(Boolean)
+            ? payload.chronicle.map(entry => normalizeChronicleChapter(entry, { maxMessageCount: messageCount })).filter(Boolean)
             : [],
         // Companions get the same load sanitizer as the hero (healLoadedCharacter)
         // and enemies (sanitizeLoadedEnemy) — 2026-09-09 audit P1: an object-only

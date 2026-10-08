@@ -34,7 +34,7 @@ import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildK
 import { EPILOGUE_RESPONSE_MODE, isEpilogueRequest, TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
 import { findSubjectsInText, flushMemoryQueue, queueMemory, retrieveRelevant } from '../engine/vectorMemory.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
-import { describeMemoryUnavailable, getMachineryGeminiKey } from './machinery.js';
+import { describeMemoryUnavailable, dmCallConfig, getMachineryGeminiKey } from './machinery.js';
 import { curateStoryMemory, formatSecrecyTag } from '../engine/storyMemory.js';
 import { captureInjection, captureProviderNote, captureUsage } from '../debug/memoryInspectorStore.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from '../components/Chat/turnVisibility.js';
@@ -426,9 +426,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         let firstChunkAt = null;
 
         const fullResponse = await streamMessage({
-            provider: s.settings.llmProvider,
-            apiKey: s.settings.apiKey,
-            model: s.settings.model,
+            ...dmCallConfig(s.settings),
             systemPrompt,
             messageHistory,
             userMessage,
@@ -697,9 +695,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             // Stop used to be inert here — the nudge ran to the 90s stall guard
             // (times retries) while isLoading kept the Stop button showing.
             const response = await sendMessage({
-                provider: s.settings.llmProvider,
-                apiKey: s.settings.apiKey,
-                model: s.settings.model,
+                ...dmCallConfig(s.settings),
                 systemPrompt: buildCurrentSystemPrompt(s, [], []),
                 messageHistory: history,
                 userMessage: buildNudgePrompt(cue),

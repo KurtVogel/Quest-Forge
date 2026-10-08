@@ -49,11 +49,15 @@ import {
 } from './enemyStats.js';
 import { COMBAT_PHASES, isCompanionActive, isEnemyActive, isLowLevelSolo } from './combatPredicates.js';
 import {
+    buildSustainedSpell,
     chooseSlotLevel,
+    describeRecipientClamp,
+    dropCondition,
     getSpellAttackBonus,
     getSpellSaveDC,
     isSpellcaster,
     resolveSpellForCharacter,
+    resolveSpellRecipients,
     spellDamageNotation,
     spellHealingNotation,
     spendSpellSlot,
@@ -242,18 +246,6 @@ function resolveCastSpell(character, slot) {
     return resolveSpellForCharacter(character, slot?.spell || fallback);
 }
 
-/** An ally target for support spells: the hero ('self'/name/'player') or a living companion. */
-function resolveAllyTarget(character, companions, targetRef) {
-    const raw = String(targetRef || '').trim().toLowerCase();
-    if (!raw || raw === 'self' || raw === 'me' || raw === 'player'
-        || raw === String(character?.name || '').trim().toLowerCase()) {
-        return { type: 'player' };
-    }
-    const companion = findByRef(companions, targetRef);
-    if (companion && companion.status !== 'dead') return { type: 'companion', companion };
-    return null;
-}
-
 function isBonusCastSlot(character, slot) {
     if (slot?.action !== 'cast') return false;
     return resolveCastSpell(character, slot)?.castTime === 'bonus';
@@ -374,7 +366,7 @@ function validateCastSlot(slot, state, living) {
         const missing = targets.find(target => !findByRef(living, target));
         if (missing) return `Spell target "${missing}" is not an active enemy in this fight.`;
     } else if (spell.targeting.side === 'ally') {
-        const missing = castTargetRefs(slot, ['self']).find(target => !resolveAllyTarget(state.character, state.party || [], target));
+        const [missing] = resolveSpellRecipients(spell, state.character, state.party || [], castTargetRefs(slot, ['self'])).invalid;
         if (missing) return `Spell target "${missing}" is not the hero or a living companion.`;
     }
     return null;
@@ -573,30 +565,23 @@ function stripConditionList(conditions, toRemove) {
  */
 function resolveSupportSpell({ character, companions, events, rolls }, support, { spell, slotLevel, slot }) {
     const updates = support.characterUpdates;
-    const targetLimit = spell.targeting.mode === 'upTo3' ? 3 : 1;
-    const refs = spell.targeting.side === 'self' ? ['self'] : castTargetRefs(slot, ['self']);
-    if (refs.length > targetLimit) {
-        events.push({ type: 'note', text: `${spell.name} affects ${targetLimit === 1 ? 'only one recipient' : `up to ${targetLimit} recipients`}; extra targets are unaffected.` });
-    }
-    const resolved = [];
-    for (const targetRef of refs.slice(0, targetLimit)) {
-        const ally = resolveAllyTarget(character, companions, targetRef);
-        if (ally && !resolved.some(existing => existing.type === ally.type && existing.companion?.id === ally.companion?.id)) {
-            resolved.push(ally);
-        }
-    }
-    if (resolved.length === 0) {
+    // THE recipient ladder, shared with CAST_SPELL out of combat (2026-10-08):
+    // self-only forced, dead never, dedupe then the spell's cap, one note.
+    const { recipients, overflow, redirected } = resolveSpellRecipients(spell, character, companions, castTargetRefs(slot, ['self']));
+    const clampNote = describeRecipientClamp(spell, { overflow, redirected });
+    if (clampNote) events.push({ type: 'note', text: clampNote });
+    if (recipients.length === 0) {
         events.push({ type: 'note', text: `${spell.name} has no valid recipient.` });
         return;
     }
 
-    for (const ally of resolved) {
-        const allyName = ally.type === 'player' ? (character.name || 'the hero') : ally.companion.name;
+    for (const ally of recipients) {
+        const allyName = ally.type === 'self' ? (character.name || 'the hero') : ally.companion.name;
 
         if (spell.healing) {
             const healRoll = rollDamage(spellHealingNotation(spell, character, slotLevel), `${spell.name} healing`, {});
             rolls.push(healRoll.roll);
-            if (ally.type === 'player') {
+            if (ally.type === 'self') {
                 support.playerHealing += healRoll.total;
                 const preview = Math.min(character.maxHP, (character.currentHP || 0) + support.playerHealing);
                 events.push({ type: 'note', text: `**${spell.name}** — ${allyName} recovers **${healRoll.total}** HP (now ${preview}/${character.maxHP}).` });
@@ -615,7 +600,7 @@ function resolveSupportSpell({ character, companions, events, rolls }, support, 
         // in-combat note was decorative.
 
         if (spell.removeConditions) {
-            if (ally.type === 'player') {
+            if (ally.type === 'self') {
                 const { removed } = stripConditionList(character.conditions, spell.removeConditions);
                 if (removed.length > 0) {
                     updates.removeConditions = [...(updates.removeConditions || []), ...removed];
@@ -638,15 +623,7 @@ function resolveSupportSpell({ character, companions, events, rolls }, support, 
 
         if (spell.sustained) {
             clearPreviousSustained({ character, companions, updates, events });
-            const sustained = {
-                key: spell.key,
-                name: spell.name,
-                ...(spell.acBonus && { acBonus: spell.acBonus }),
-                ...(spell.condition && { condition: spell.condition }),
-                targetType: ally.type === 'player' ? 'self' : 'companion',
-                ...(ally.type === 'companion' && { targetId: ally.companion.id, targetName: ally.companion.name }),
-            };
-            updates.sustainedSpell = sustained;
+            updates.sustainedSpell = buildSustainedSpell(spell, ally.type === 'companion' ? ally.companion : null);
             if (ally.type === 'companion') {
                 if (spell.acBonus) ally.companion.spellAcBonus = spell.acBonus;
                 if (spell.condition) {
@@ -671,9 +648,7 @@ function clearPreviousSustained({ character, companions, updates, events }) {
         const companion = companions.find(c => c.id === previous.targetId);
         if (companion) {
             delete companion.spellAcBonus;
-            if (previous.condition) {
-                companion.conditions = (companion.conditions || []).filter(c => String(c).toLowerCase() !== String(previous.condition).toLowerCase());
-            }
+            if (previous.condition) companion.conditions = dropCondition(companion.conditions, previous.condition);
         }
     } else if (previous.condition) {
         updates.removeConditions = [...(updates.removeConditions || []), previous.condition];

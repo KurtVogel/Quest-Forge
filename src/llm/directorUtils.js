@@ -9,6 +9,7 @@
  */
 import { extractBalancedJson, repairJson, scanBalancedObject, stripMarkdownFences } from './utils/jsonExtractor.js';
 import { sendMessage } from './adapter.js';
+import { dmCallConfig } from './machinery.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
 import { liveWorldFacts } from '../engine/worldFacts.js';
 
@@ -47,9 +48,7 @@ export function isDirectorReady(state, marker) {
  */
 export async function runDirector(state, { prompt, context, anchor, label, temperature = 0.7, errors }) {
     const response = await sendMessage({
-        provider: state.settings.llmProvider,
-        apiKey: state.settings.apiKey,
-        model: state.settings.model,
+        ...dmCallConfig(state.settings),
         systemPrompt: prompt,
         messageHistory: [],
         userMessage: JSON.stringify(context),

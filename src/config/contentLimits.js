@@ -48,6 +48,8 @@ export const NPC_SPECIES_MAX = 40;
  */
 export const CHRONICLE_CHAPTER_TEXT_MAX = 60000;
 export const CHRONICLE_PART_CHAR_BUDGET = 50000;
+/** A chapter's title — the record, the chronicler's part titling, and the Journal input (2026-10-08). */
+export const CHRONICLE_TITLE_MAX = 80;
 
 /**
  * The live `currentLocation` ceiling — ONE constant for the DM `location`

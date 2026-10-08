@@ -3250,7 +3250,7 @@ returns and four inline copies of a cover predicate the file already names, two 
 12) for one rule, a resolver ladder walked twice for an error message, four dead exports, and a
 voiced-only hero-tell report that mints witnesses who saw nothing on the new-tell branch only.
 
-### [strengthening] A record with two writers has two composers; a wire fix has a sibling wire — status: `idea` (from the 2026-10-08 audit, spellcasting + chronicler Lap 4; seven P2 in the strengthening queue, three of them measured)
+### [strengthening] A record with two writers has two composers; a wire fix has a sibling wire — status: `built 2026-10-08` (the seven queue items, DECISIONS.md 2026-10-08; from the 2026-10-08 audit, spellcasting + chronicler Lap 4; seven P2 in the strengthening queue, three of them measured)
 Two patterns from the seventh lap pair. **(1)** The sustained-spell record is composed in THREE
 places — CAST_SPELL, the exchange's `resolveSupportSpell`, and `sanitizeSustainedSpell` (only the
 last clamps) — and the chronicle chapter in TWO (`appendChronicleChapter` on the write,
