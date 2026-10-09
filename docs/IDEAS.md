@@ -3272,3 +3272,30 @@ the same day; and a ladder (modifier, recipient, item ref) walked by two lanes i
 character, party, refs)` → `{ recipients, invalid, overflow }` and `buildSustainedSpell(spell, target)`
 in `engine/spellcasting.js`, `normalizeChronicleChapter(entry, { maxMessageCount })` beside
 `healChronicleChapter`, `CHRONICLE_TITLE_MAX` in `config/contentLimits.js`, and the parity pins.
+
+### [strengthening] A vocabulary has as many shelves as it has readers; a composer per boundary is the record rule's other face — status: `idea` (from the 2026-10-09 audit, rules-math + enemy-stats-conditions Lap 4; seven P2 in the strengthening queue, three of them measured)
+Two patterns from the eighth lap pair. **(1)** The condition names are spelled on FOUR shelves —
+`CONDITION_EFFECTS` (with `exhausted` AND `exhaustion` as two keys for one effect), the hand-copied
+`SUPPORTED_ENEMY_CONDITIONS` Set, the prompt's prose "Supported enemy conditions are …" sentence, and
+the long rest's clear list (which names `deafened`, a word no table carries) — and two already
+disagree in play: a hero who rests long with `exhaustion` keeps its check disadvantage forever
+(measured; the rest clears `exhausted`), and a companion's free-form condition is wiped the moment a
+sustained spell lands on them, because the exchange re-normalizes the whole list through the enemy
+whitelist where the party record kept it free-form (measured: `['cursed', 'poisoned']` + Invisibility →
+`['poisoned', 'invisible']`). Rule: a word list that gates a mechanic is ONE table; a sibling lane's
+list is a FILTER of it (enemies never make checks = the rows with `attack` / `save` / `incomingAttack`),
+the prose the DM reads is rendered from it at module load (a prefix constant stays byte-stable), and an
+alias folds at the canonicalizer, never as a second key. The same shape at the hero's AC: three
+ceilings (18 / 3 / +3) written as literals in `rules.js` and as named constants in `items.js`, pinned
+nowhere. **(2)** The enemy record has THREE composers — the parser's `validateCombatStart`, the
+reducer's `normalizeCombatEnemy`, the load's `sanitizeLoadedEnemy` — and the middle one is the lax
+one (`String(name)`, `!!isUndead`: a `{ name: {}, isUndead: 'false' }` fields "[object Object]" as a
+turnable undead on the reducer lane), because the parser and the load twin were each hardened on
+their own day while START_COMBAT sat between them; `normalizeEnemyAttackProfile` was written for
+exactly this triple and only one of the three calls it. The fourth sighting of "a record with N
+writers has N composers" (hero template 10-06, sustained spell + chapter 10-08). Rule: for a record
+that crosses a parser, a reducer and a load, grep all three bodies; the middle one is the one to
+check. The build: `composeEnemy(raw, { index, usedIds, initiative })` with the load twin's body at
+all three boundaries, the Set derived from the table and the prompt sentence from the Set, the alias
+fold + `LONG_REST_CLEARS`, one ceiling shelf for the hero's AC, a `damageEnemy(enemy, amount)` owning
+the stored health word, and the parity pins.
