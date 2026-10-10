@@ -986,6 +986,24 @@ describe('applyEvents dispatch coverage', () => {
         });
     });
 
+    it('an id-only quest update may close an arc but never open one (2026-10-10 quests P2)', () => {
+        const { events } = parseResponse(fence({
+            quest_updates: [
+                { id: 'q-7', status: 'new' },
+                { id: 'q-8', status: 'updated' },
+                { id: 'q-9' },
+                { id: 'q-1', status: 'completed' },
+                { id: 'q-2', status: 'failed' },
+                { name: 'Mend the mill wheel' },
+            ],
+        }));
+        expect(events.questUpdates).toEqual([
+            { id: 'q-1', status: 'completed' },
+            { id: 'q-2', status: 'failed' },
+            { name: 'Mend the mill wheel', status: 'new' },
+        ]);
+    });
+
     it('caps a quest_updates flood at 8 entries', () => {
         const { events } = parseResponse(fence({
             quest_updates: Array.from({ length: 40 }, (_, i) => ({ status: 'new', name: `Quest ${i}` })),

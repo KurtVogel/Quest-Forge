@@ -16,7 +16,7 @@
  */
 
 import { rollWithModifier } from './dice.ts';
-import { computeACFromInventory, getConditionRollEffects, combineRollModifiers, resolvePlayerRollModifier } from './rules.js';
+import { computeACFromInventory, formatModifier, getConditionRollEffects, combineRollModifiers, resolvePlayerRollModifier } from './rules.js';
 import { ENEMY_DEFAULT_DAMAGE, validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
 import { applyUncannyDodge, conditionAwareAttackModifiers, getAttackCount, rollD20Kept, rollDamage, stampCriticalRoll } from './combatMath.js';
 import { isCompanionActive, isLowLevelSolo } from './combatPredicates.js';
@@ -474,7 +474,7 @@ function applyPlayerAttackCritical(character, result) {
 
 /** One chat line for a damage roll, whichever lane rolled it. */
 function damageLine({ label, notation, result, crit = false, rerolls = [] }) {
-    const mod = result.modifier ? `, mod: ${result.modifier >= 0 ? '+' : ''}${result.modifier}` : '';
+    const mod = result.modifier ? `, mod: ${formatModifier(result.modifier)}` : '';
     const style = rerolls.length > 0
         ? `; Great Weapon Fighting rerolls: ${rerolls.map(r => r.replace('→', '->')).join(', ')}`
         : '';

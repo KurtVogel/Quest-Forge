@@ -6,10 +6,17 @@
  * injects the *_AUDIT_RULES into the extraction prompt and hands the parsed
  * report to runNarrationAudits.
  */
-import { conversationalDistance } from '../engine/replayLedger.js';
+import { conversationalDistance, RECENT_ITEM_GRANT_EXTENDED_WINDOW } from '../engine/replayLedger.js';
 import { coverage, itemIdentityMatches, overlapCount, tokenSet } from '../engine/textMatch.js';
 import { isSpellcaster, resolveSpellForCharacter } from '../engine/spellcasting.js';
-import { MAX_COIN_EVENT, NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
+import { namesMatch } from '../engine/npcRoster.js';
+import { MAX_ITEM_QUANTITY } from '../data/items.js';
+import { MAX_COIN_EVENT } from '../config/contentLimits.js';
+
+// The PARTY COMPANIONS' CURRENT GEAR context line: a name + weapon + AC +
+// keepsakes per companion, four companions at most — 600 chars is the line's
+// own budget (it used to borrow the NPC dossier FIELD clamp, 2026-10-10 P2).
+const PARTY_GEAR_CONTEXT_MAX = 600;
 export const LOOT_AUDIT_RULES = `
 
 ADDITIONAL TASK — LOOT & PAYMENT PERSISTENCE AUDIT:
@@ -146,7 +153,7 @@ export function describePartyGear(state) {
         })
         .filter(Boolean)
         .join('; ');
-    return lines ? lines.slice(0, NPC_DOSSIER_FIELD_MAX) : null;
+    return lines ? lines.slice(0, PARTY_GEAR_CONTEXT_MAX) : null;
 }
 
 
@@ -178,6 +185,23 @@ function claimAuditSource(lootAudit, dispatch, suffix, label) {
 
 const GEAR_HANDOFF_KINDS = new Set(['weapon', 'armor', 'shield', 'keepsake']);
 
+/**
+ * The companion a narrated handoff names — REMOVE_COMPANION's own ladder
+ * (2026-10-10 scribe P2): an exact name first, then the roster's `namesMatch`
+ * when it is UNAMBIGUOUS. The old first-token twin matched "Old Marn" to
+ * "Old Hesk" (a handoff narrated to Hesk armed Marn) and missed "Brother Odo"
+ * ↔ "Odo"; a bare "Old" now routes nothing instead of the first greybeard.
+ */
+function findCompanionByName(party, reported) {
+    const wanted = String(reported || '').trim().toLowerCase();
+    if (!wanted) return null;
+    const named = (Array.isArray(party) ? party : []).filter(c => typeof c?.name === 'string' && c.name.trim());
+    const exact = named.filter(c => c.name.trim().toLowerCase() === wanted);
+    if (exact.length === 1) return exact[0];
+    const fuzzy = named.filter(c => namesMatch(c.name, reported));
+    return fuzzy.length === 1 ? fuzzy[0] : null;
+}
+
 /** Sentinel: a narrated name matched several owned stacks — never guess. */
 const AMBIGUOUS = Symbol('ambiguous-item');
 
@@ -198,15 +222,6 @@ function resolveOwnedItem(inventory, name, label) {
         return AMBIGUOUS;
     }
     return null;
-}
-
-function companionNameMatches(companionName, reportedName) {
-    const known = String(companionName || '').trim().toLowerCase();
-    const reported = String(reportedName || '').trim().toLowerCase();
-    if (!known || !reported) return false;
-    if (known === reported) return true;
-    // First-name reporting ("Kaarina" for "Kaarina Tammi") and vice versa.
-    return known.split(/\s+/)[0] === reported.split(/\s+/)[0];
 }
 
 /**
@@ -237,7 +252,7 @@ function applyMissingGearHandoffs(missing, lootAudit, dispatch) {
     let applied = 0;
     const handedOffItemIds = new Set();
     for (const entry of entries) {
-        const companion = (state?.party || []).find(c => companionNameMatches(c.name, entry.companion));
+        const companion = findCompanionByName(state?.party, entry.companion);
         if (!companion || companion.status === 'dead') continue;
         if (entry.kind === 'keepsake') {
             dispatch({ type: 'UPDATE_COMPANION', payload: { id: companion.id, keepsake: entry.item } });
@@ -295,35 +310,31 @@ function matchesAnyItemIdentity(item, identities) {
         itemIdentityMatches(item.name, value) || (item.itemKey && itemIdentityMatches(item.itemKey, value)));
 }
 
-/** Identity strings for every item the event path already granted this narration. */
-function appliedItemIdentities(events) {
-    const identities = [];
-    const add = entry => {
-        if (!entry) return;
-        const values = typeof entry === 'string'
-            ? [entry]
-            : [entry.name, entry.itemKey, entry.key, entry.item?.name, entry.item?.itemKey];
-        for (const value of values) {
-            if (value && String(value).trim()) identities.push(String(value));
-        }
-    };
-    for (const list of [events?.itemsFound, events?.startingItems, events?.purchases]) {
-        (list || []).forEach(add);
-    }
-    return identities;
-}
-
-/** Display names (no item keys) of the items the event path granted this narration. */
-function appliedItemNames(events) {
-    const names = [];
+/**
+ * The strings the event path granted this narration, read off the three
+ * grant lists ONCE (2026-10-10 scribe P2: two walkers over the same lists):
+ * `pick` names which strings of an entry count — every identity (name + the
+ * item keys) for the dedupe, display names only for the drift pairing.
+ */
+function appliedItemStrings(events, pick) {
+    const out = [];
     for (const list of [events?.itemsFound, events?.startingItems, events?.purchases]) {
         for (const entry of list || []) {
-            const value = typeof entry === 'string' ? entry : (entry?.name || entry?.item?.name);
-            if (value && String(value).trim()) names.push(String(value));
+            if (!entry) continue;
+            const values = typeof entry === 'string' ? [entry] : pick(entry);
+            for (const value of values) {
+                if (value && String(value).trim()) out.push(String(value));
+            }
         }
     }
-    return names;
+    return out;
 }
+
+/** Identity strings for every item the event path already granted this narration. */
+const appliedItemIdentities = events => appliedItemStrings(events, entry => [entry.name, entry.itemKey, entry.key, entry.item?.name, entry.item?.itemKey]);
+
+/** Display names (no item keys) of the items the event path granted this narration. */
+const appliedItemNames = events => appliedItemStrings(events, entry => [entry.name || entry.item?.name]);
 
 /**
  * Same-narration NAME DRIFT (live playtest 2026-09-20, Gemini 3.8 Flash: BOTH
@@ -407,16 +418,16 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
     // fuzzy identity match strictly broader than the reducer's exact-signature
     // check (which audit dispatches therefore skip — they carry `audit: true`
     // meta so the reducer ledgers them without double-checking or
-    // double-announcing). Window mirrors RECENT_ITEM_GRANT_EXTENDED_WINDOW in
-    // state/handlers/inventory.js (2026-08-31 P1: the old 4 let a victory-loot
-    // reward re-emit at quest completion, >4 conversational messages later).
-    const ITEM_GRANT_LEDGER_WINDOW = 12;
+    // double-announcing). Window IS the reducer's
+    // RECENT_ITEM_GRANT_EXTENDED_WINDOW (2026-08-31 P1: the old 4 let a
+    // victory-loot reward re-emit at quest completion, >4 conversational
+    // messages later; one constant since 2026-10-10).
     const recentGrantIdentities = [];
     const currentIndex = (state?.messages || []).length;
     for (const entry of state?.recentItemGrants || []) {
         if (entry?.status !== 'applied') continue;
         const distance = conversationalDistance(state.messages, entry.messageIndex, currentIndex);
-        if (!(distance >= 0 && distance <= ITEM_GRANT_LEDGER_WINDOW)) continue;
+        if (!(distance >= 0 && distance <= RECENT_ITEM_GRANT_EXTENDED_WINDOW)) continue;
         for (const value of [entry.name, entry.itemKey]) {
             if (value && String(value).trim()) recentGrantIdentities.push(String(value));
         }
@@ -601,7 +612,7 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
         const raw = typeof entry === 'string' ? undefined : entry?.quantity;
         if (typeof raw === 'string' && /^all$/i.test(raw.trim())) return 'all';
         const n = Number(raw);
-        return Number.isFinite(n) && n > 1 ? Math.min(999, Math.trunc(n)) : null;
+        return Number.isFinite(n) && n > 1 ? Math.min(MAX_ITEM_QUANTITY, Math.trunc(n)) : null;
     };
     const items = (Array.isArray(narrated?.items) ? narrated.items : [])
         .map(entry => ({
@@ -659,6 +670,9 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
             type: 'ADD_MESSAGE',
             payload: {
                 role: 'system',
+                // dmVisible like the loot recovery receipt (2026-10-10 scribe P2):
+                // the DM must see the loss was banked, or it re-narrates the item.
+                dmVisible: true,
                 content: `**Losses recorded from narration:** ${removed.join(', ')} removed from your possessions.`,
             },
         });

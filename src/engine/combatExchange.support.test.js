@@ -242,3 +242,17 @@ describe('the cast-target wire dedupes before it caps (2026-09-26)', () => {
         expect(slot.targets).toEqual(['A', 'B', 'C', 'D']);
     });
 });
+
+describe("a companion's free-form condition survives a sustained cast (enemy-stats P2, 2026-10-09)", () => {
+    it('Invisibility on a companion APPENDS its condition instead of re-normalizing the whole list through the enemy whitelist', () => {
+        rollQueue.push(1, 1, 1);
+        const party = [companion('jorun', { conditions: ['cursed', 'poisoned'] })];
+        const plan = planCombatExchange(clericState({ character: { class: 'wizard' }, party }), normalizeCombatExchange({
+            player_slots: [{ action: 'cast', spell: 'invisibility', target: 'Jorun' }],
+            companion_intents: passAll(party),
+        }));
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.party.find(c => c.id === 'jorun').conditions).toEqual(['cursed', 'poisoned', 'invisible']);
+        expect(notes(plan)).toContainEqual(expect.stringContaining('**Invisibility** settles over Jorun'));
+    });
+});

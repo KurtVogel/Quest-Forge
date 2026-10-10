@@ -19,10 +19,12 @@ import {
     SKILL_KEY_SET,
     combineRollModifiers,
     computeACFromInventory,
+    formatModifier,
     getConditionRollEffects,
     getIncapacitatingCondition,
     getWeaponAttackBonus,
     getWeaponDamageNotation,
+    normalizeConditionList,
     normalizeDeathSaves,
     resolvePlayerRollModifier,
 } from './rules.js';
@@ -39,7 +41,6 @@ import {
     ENEMY_DEFAULT_ATTACK_BONUS,
     ENEMY_DEFAULT_DAMAGE,
     ENEMY_DEFAULT_SAVE_BONUS,
-    enemyHealthCondition,
     enemyOutcome,
     healthWord,
     normalizeEnemyConditions,
@@ -455,8 +456,7 @@ function resolveEnemySpell({ character, enemies, events, rolls }, { spell, slotL
                 rolls,
             });
             if (outcome.hit) {
-                enemy.hp = Math.max(0, enemy.hp - outcome.damage);
-                enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
+                damageEnemy(enemy, outcome.damage);
                 if (spell.condition && isEnemyActive(enemy)) {
                     applyEnemyConditionDelta(enemy, { add: [spell.condition], remove: [] }, events);
                 }
@@ -499,11 +499,10 @@ function resolveEnemySpell({ character, enemies, events, rolls }, { spell, slotL
                     ? (spell.saveEffect === 'half' ? Math.floor(damageRoll.total / 2) : 0)
                     : damageRoll.total;
                 if (damage > 0) {
-                    enemy.hp = Math.max(0, enemy.hp - damage);
-                    enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
+                    const standing = damageEnemy(enemy, damage);
                     events.push({
                         type: 'note',
-                        text: `**${spell.name}** ${success ? 'grazes' : 'strikes'} ${enemy.name} for **${damage}** damage${success ? ' (half on the save)' : ''}. ${enemy.hp <= 0 ? `${enemy.name} is down.` : `${enemy.name} remains alive at ${enemy.hp}/${enemy.maxHp} HP.`}`,
+                        text: `**${spell.name}** ${success ? 'grazes' : 'strikes'} ${enemy.name} for **${damage}** damage${success ? ' (half on the save)' : ''}. ${standing}`,
                     });
                 }
             }
@@ -523,11 +522,10 @@ function resolveEnemySpell({ character, enemies, events, rolls }, { spell, slotL
             const darts = Math.floor(dartCount / targets.length) + (index < dartCount % targets.length ? 1 : 0);
             const damageRoll = rollDamage(`${darts}d4+${darts}`, `${spell.name} (${darts} dart${darts === 1 ? '' : 's'}) at ${enemy.name}`, {});
             rolls.push(damageRoll.roll);
-            enemy.hp = Math.max(0, enemy.hp - damageRoll.total);
-            enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
+            const standing = damageEnemy(enemy, damageRoll.total);
             events.push({
                 type: 'note',
-                text: `**${spell.name}** sends ${darts} unerring dart${darts === 1 ? '' : 's'} into ${enemy.name} for **${damageRoll.total}** damage. ${enemy.hp <= 0 ? `${enemy.name} is down.` : `${enemy.name} remains alive at ${enemy.hp}/${enemy.maxHp} HP.`}`,
+                text: `**${spell.name}** sends ${darts} unerring dart${darts === 1 ? '' : 's'} into ${enemy.name} for **${damageRoll.total}** damage. ${standing}`,
             });
         });
         return;
@@ -537,13 +535,24 @@ function resolveEnemySpell({ character, enemies, events, rolls }, { spell, slotL
     for (const enemy of targets) {
         const damageRoll = rollDamage(spellDamageNotation(spell, character, slotLevel), `${spell.name} damage`, {});
         rolls.push(damageRoll.roll);
-        enemy.hp = Math.max(0, enemy.hp - damageRoll.total);
-        enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
+        const standing = damageEnemy(enemy, damageRoll.total);
         events.push({
             type: 'note',
-            text: `**${spell.name}** strikes ${enemy.name} unerringly for **${damageRoll.total}** damage. ${enemy.hp <= 0 ? `${enemy.name} is down.` : `${enemy.name} remains alive at ${enemy.hp}/${enemy.maxHp} HP.`}`,
+            text: `**${spell.name}** strikes ${enemy.name} unerringly for **${damageRoll.total}** damage. ${standing}`,
         });
     }
+}
+
+/**
+ * ONE writer for an enemy's `hp` / health word after damage, and the
+ * "is down / remains alive at X/Y HP" sentence the note lanes print
+ * (2026-10-09 enemy-stats nit: seven inline writers, one of them a literal
+ * 'dead'). Returns the standing sentence; damage ≥ hp kills.
+ */
+function damageEnemy(enemy, amount) {
+    enemy.hp = Math.max(0, enemy.hp - amount);
+    enemy.condition = healthWord(enemy.hp, enemy.maxHp);
+    return enemy.hp <= 0 ? `${enemy.name} is down.` : `${enemy.name} remains alive at ${enemy.hp}/${enemy.maxHp} HP.`;
 }
 
 function stripConditionList(conditions, toRemove) {
@@ -627,7 +636,11 @@ function resolveSupportSpell({ character, companions, events, rolls }, support, 
             if (ally.type === 'companion') {
                 if (spell.acBonus) ally.companion.spellAcBonus = spell.acBonus;
                 if (spell.condition) {
-                    ally.companion.conditions = normalizeEnemyConditions([...(ally.companion.conditions || []), spell.condition]);
+                    // The companion's list is free-form like the hero's (normalizeCompanion),
+                    // so the one condition APPENDS in that form — re-normalizing the
+                    // WHOLE list through the enemy whitelist wiped a companion's
+                    // `cursed` the moment Invisibility settled (2026-10-09 P2).
+                    ally.companion.conditions = normalizeConditionList([...(ally.companion.conditions || []), spell.condition]);
                 }
             } else if (spell.condition) {
                 updates.addConditions = [...(updates.addConditions || []), spell.condition];
@@ -772,8 +785,7 @@ function resolveChannelSlot({ character, enemies, events, rolls }, turn) {
         });
         if (success) continue;
         if ((character.level || 1) >= 5 && (enemy.maxHp || 0) <= 20) {
-            enemy.hp = 0;
-            enemy.condition = 'dead';
+            damageEnemy(enemy, enemy.hp);
             events.push({ type: 'note', text: `**${enemy.name} is destroyed outright by the divine radiance.**` });
         } else {
             applyEnemyConditionDelta(enemy, { add: ['frightened'], remove: [] }, events);
@@ -862,10 +874,7 @@ function resolveAttackSlot({ state, character, inventory, enemies, events, rolls
             },
             rolls,
         });
-        if (outcome.hit) {
-            enemy.hp = Math.max(0, enemy.hp - outcome.damage);
-            enemy.condition = enemyHealthCondition(enemy.hp, enemy.maxHp);
-        }
+        if (outcome.hit) damageEnemy(enemy, outcome.damage);
         events.push({
             type: 'attack', actor: character.name || 'Player', target: enemy.name,
             rolled: outcome.attack.roll.total, natural: outcome.natural, dc: enemy.ac,
@@ -933,7 +942,7 @@ function companionDamageNotation(companion) {
     const match = notation.trim().match(/^(.*?)([+-]\d+)\s*$/);
     if (match) {
         const combined = Number(match[2]) + bonus;
-        return combined === 0 ? match[1] : `${match[1]}${combined >= 0 ? '+' : ''}${combined}`;
+        return combined === 0 ? match[1] : `${match[1]}${formatModifier(combined)}`;
     }
     return `${notation.trim()}+${bonus}`;
 }
@@ -957,10 +966,7 @@ function resolveCompanionAttack({ companion, target, events, situationalRuling =
         targetAc: target.ac,
         damage: { notation: companionDamageNotation(companion), description: `${companion.name} damage` },
     });
-    if (outcome.hit) {
-        target.hp = Math.max(0, target.hp - outcome.damage);
-        target.condition = enemyHealthCondition(target.hp, target.maxHp);
-    }
+    if (outcome.hit) damageEnemy(target, outcome.damage);
     events.push({
         type: 'attack', actor: companion.name, target: target.name, rolled: outcome.attack.roll.total,
         natural: outcome.natural, dc: target.ac, mode: rollModeLabel(outcome.attack, modifiers, effectiveRuling),

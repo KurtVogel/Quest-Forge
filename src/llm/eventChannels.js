@@ -17,7 +17,7 @@
  * Application (events → dispatches) lives in src/state/applyEvents.js.
  */
 
-import { canonicalEnemyId, validateEnemyAttackBonus, validateEnemySaveBonus, sanitizeEnemyDamage, clampEnemyAC, clampEnemyHP, isDeclaredDowned, normalizeEnemyConditions } from '../engine/enemyStats.js';
+import { canonicalEnemyId, validateEnemyAttackBonus, clampEnemyAC, clampEnemyHP, isDeclaredDowned, typeEnemyFields } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatWire.js';
 import { dedupeCastTargets } from '../engine/spellcasting.js';
 import { LOCATION_NAME_MAX, MAX_COIN_EVENT, MAX_ROLL_DC } from '../config/contentLimits.js';
@@ -83,34 +83,17 @@ export function validateCombatStart(combatStart) {
             console.warn(`[eventChannels] Dropped combat_start enemy "${e.name.trim()}" declared at 0 HP.`);
             return false;
         })
-        .map((e, index) => {
-            // Enemy turns are engine-owned, so capture the foe's stats once here, validated at
-            // this boundary via the shared sanitizer. Out-of-range offensive stats are dropped
-            // (→ engine default), HP/AC are clamped into a safe band.
-            // The validators coerce leading-number strings ("+4") themselves;
-            // a typeof-number pre-filter here used to discard them (2026-09-05).
-            const attackBonus = validateEnemyAttackBonus(e.attack_bonus ?? e.attackBonus);
-            const damage = sanitizeEnemyDamage(e.damage);
-            const saveBonus = validateEnemySaveBonus(e.save_bonus ?? e.saveBonus);
-            return {
-                id: canonicalEnemyId(e, index, usedIds),
-                name: e.name.trim().slice(0, 100),
-                hp: clampEnemyHP(e.hp),
-                ac: clampEnemyAC(e.ac),
-                // A scalar `conditions: "prone"` is a one-item list (the
-                // exchange's normalizeConditionDelta already read it so).
-                conditions: normalizeEnemyConditions(e.conditions),
-                ...(attackBonus !== undefined && { attackBonus }),
-                ...(damage !== undefined && { damage }),
-                ...(saveBonus !== undefined && { saveBonus }),
-                // `"is_undead": "true"` was strict-false, and undeadness gates
-                // Turn Undead (2026-09-15 audit P2). `boss` stays strict by policy.
-                isUndead: toFlag(e.is_undead ?? e.isUndead),
-                // Untrusted narrative flag — the XP estimator independently gates it
-                // on the enemy's raw statline before honoring the boss tier.
-                boss: e.boss === true || e.isBoss === true,
-            };
-        });
+        .map((e, index) => ({
+            // Enemy turns are engine-owned, so capture the foe's stats once here,
+            // validated at this boundary through the ONE typed composer
+            // (typeEnemyFields: name, conditions, flags, offensive stats — the
+            // validators coerce leading-number strings themselves, out-of-range
+            // offensive stats drop to the engine default). HP / AC clamp here.
+            id: canonicalEnemyId(e, index, usedIds),
+            ...typeEnemyFields(e),
+            hp: clampEnemyHP(e.hp),
+            ac: clampEnemyAC(e.ac),
+        }));
 
     if (sanitizedEnemies.length === 0) return null;
 
@@ -265,12 +248,19 @@ function normalizeQuestUpdate(raw) {
     if (!id && !name) return null;
     const description = typeof raw.description === 'string' ? raw.description.trim().slice(0, 800) : '';
     const rawStatus = typeof raw.status === 'string' ? raw.status.trim().toLowerCase() : '';
-    const status = QUEST_STATUS_ALIASES[rawStatus] || rawStatus;
+    const aliased = QUEST_STATUS_ALIASES[rawStatus] || rawStatus;
+    const status = QUEST_UPDATE_STATUSES.has(aliased) ? aliased : 'new';
+    // A row that OPENS needs a name (2026-10-10 quests P2): an id-only `new`
+    // used to mint a nameless live row — `- **** [id: q-7]: No details` in
+    // ACTIVE QUESTS every turn, an empty panel row — that the load twin
+    // (sanitizeQuestRecord) silently dropped at the next LOAD_GAME. A terminal
+    // update may still close a tracked arc by its id alone.
+    if (!name && (status === 'new' || status === 'updated')) return null;
     return {
         ...(id && { id }),
         ...(name && { name }),
         ...(description && { description }),
-        status: QUEST_UPDATE_STATUSES.has(status) ? status : 'new',
+        status,
     };
 }
 

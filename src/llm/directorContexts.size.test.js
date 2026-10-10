@@ -6,6 +6,7 @@
  * The fixture is a worst-case campaign: every list long, every text at its cap.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { baseDirectorContext } from './directorUtils.js';
 
 const { sendMessageMock } = vi.hoisted(() => ({ sendMessageMock: vi.fn() }));
 vi.mock('./adapter.js', () => ({ sendMessage: sendMessageMock }));
@@ -154,6 +155,9 @@ describe('background director contexts — worst-case ceilings and key sets', ()
             expect(quest.description.length).toBeLessThanOrEqual(400);
         }
         expect(size(migration.quests)).toBeLessThan(5600);
+        // ONE quest projection (2026-10-10 quests P2): the upgrade reads the
+        // shared director slice at its own width instead of a second copy.
+        expect(migration.quests).toEqual(baseDirectorContext(state, { quests: 10, questChars: 400 }).activeQuests);
     });
 
     it('campaign fronts: a fixed key set, bounded by the premise', async () => {

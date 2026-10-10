@@ -6,7 +6,10 @@
  * not the source of truth.
  */
 
-const MAGIC_BONUS_MAX = 3;
+// The hero's magic-bonus ceiling, read by `clampMagicBonus` here AND by the
+// AC / attack reads in engine/rules.js (one shelf since 2026-10-10 — rules-math
+// P2: the three ceilings were literal twins nothing pinned equal).
+export const MAGIC_BONUS_MAX = 3;
 
 const GP = 100;
 const SP = 10;
@@ -275,8 +278,8 @@ const MAX_ITEM_VALUE_CP = 1000000;
 // the only combatant with no other ceiling (companions clamp at 21, enemies are
 // band-validated), so bound them here. Ceilings mirror the best catalog gear:
 // plate 18, shield 2 (+1 headroom), magic bonuses ≤ +3.
-const MAX_ARMOR_BASE_AC = 18;
-const MAX_SHIELD_AC = 3;
+export const MAX_ARMOR_BASE_AC = 18;
+export const MAX_SHIELD_AC = 3;
 const ARMOR_TYPES = ['light', 'medium', 'heavy'];
 // Non-catalog weapon damage was the one mechanical field with no bound (2026-09-03
 // P1): "99d12" imported, equipped, and reached the roll kernel intact — dice.ts's

@@ -12,7 +12,7 @@ import {
     clampEnemyAC,
     clampEnemyCurrentHP,
     clampEnemyHP,
-    enemyHealthCondition,
+    healthWord,
     isDeclaredDowned,
     normalizeEnemyAttackProfile,
     normalizeEnemyConditions,
@@ -253,13 +253,13 @@ describe('sanitizeLoadedEnemy', () => {
     });
 });
 
-describe('enemyHealthCondition thresholds', () => {
+describe('healthWord thresholds (the enemy down word is the default)', () => {
     it('switches exactly at 25% and 50%', () => {
-        expect(enemyHealthCondition(0, 40)).toBe('dead');
-        expect(enemyHealthCondition(10, 40)).toBe('critical'); // exactly 25%
-        expect(enemyHealthCondition(11, 40)).toBe('bloodied');
-        expect(enemyHealthCondition(20, 40)).toBe('bloodied'); // exactly 50%
-        expect(enemyHealthCondition(21, 40)).toBe('healthy');
+        expect(healthWord(0, 40)).toBe('dead');
+        expect(healthWord(10, 40)).toBe('critical'); // exactly 25%
+        expect(healthWord(11, 40)).toBe('bloodied');
+        expect(healthWord(20, 40)).toBe('bloodied'); // exactly 50%
+        expect(healthWord(21, 40)).toBe('healthy');
     });
 });
 

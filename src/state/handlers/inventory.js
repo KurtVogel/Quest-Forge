@@ -3,6 +3,7 @@
  * equip/unequip including the by-ref resolution used by DM equipment_changes.
  */
 import { normalizeItem, normalizeItemKey, MAX_ITEM_QUANTITY } from '../../data/items.js';
+import { RECENT_ITEM_GRANT_EXTENDED_WINDOW } from '../../engine/replayLedger.js';
 import { isEquippableItem, isSlotHeld, normalizeEquippedSlots, shouldAutoEquip } from '../../engine/equipment.js';
 import { rollNotation } from '../../engine/dice.ts';
 import {
@@ -36,12 +37,10 @@ import {
 // the very next turns, and two identical legitimate finds further apart stay
 // untouched.
 const RECENT_ITEM_GRANT_MESSAGE_WINDOW = 4;
-// Grants riding a quest-completion response guard wider (2026-08-31 P1, item
-// twin of the coin double-pay): a reward item granted at the handover gets
-// re-emitted at quest completion >4 conversational messages later. Matches the
-// spend side's 12; the ITEM_ACQUIRE_VERB_RE player-phrasing bypass stays intact
-// so a genuine "I grab another torch" still applies.
-const RECENT_ITEM_GRANT_EXTENDED_WINDOW = 12;
+// Grants riding a quest-completion response guard wider — the shared
+// RECENT_ITEM_GRANT_EXTENDED_WINDOW (engine/replayLedger.js); the
+// ITEM_ACQUIRE_VERB_RE player-phrasing bypass stays intact so a genuine "I grab
+// another torch" still applies.
 // Verbs that show the player's own message re-acquiring an item this turn —
 // broader than the coin-loss commerce set on purpose: "I take/grab/pick up
 // another torch" is a genuine second acquisition.

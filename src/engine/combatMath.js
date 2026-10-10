@@ -17,7 +17,7 @@
  */
 
 import { rollDice, rollWithModifier, parseNotation } from './dice.ts';
-import { getEquippedWeapon, getSneakAttackDice, getConditionRollEffects, combineRollModifiers } from './rules.js';
+import { fightingStyleEffects, getEquippedWeapon, getSneakAttackDice, getConditionRollEffects, combineRollModifiers } from './rules.js';
 
 /**
  * Combine base advantage/disadvantage with the condition effects of BOTH sides
@@ -67,10 +67,12 @@ export function rollD20Kept(modifier, description, advantage = false, disadvanta
     };
 }
 
-function shouldUseGreatWeaponFighting(character, inventory = []) {
-    if (character?.class !== 'fighter' || character.fightingStyle !== 'greatWeaponFighting') return false;
+/** The Great Weapon Fighting reroll threshold when it applies (two-handed melee weapon in hand), else 0. */
+function greatWeaponRerollThreshold(character, inventory = []) {
+    const threshold = fightingStyleEffects(character)?.rerollDamageDiceAtOrBelow || 0;
+    if (!threshold) return 0;
     const weapon = getEquippedWeapon(inventory);
-    return !!weapon && !weapon.ranged && weapon.twoHanded;
+    return weapon && !weapon.ranged && weapon.twoHanded ? threshold : 0;
 }
 
 /**
@@ -143,9 +145,10 @@ export function rollDamage(notation, description, {
     }
     const roll = rollWithModifier(critical ? parsed.count * 2 : parsed.count, parsed.sides, parsed.modifier, description);
     const rerolls = [];
-    if (character && shouldUseGreatWeaponFighting(character, inventory) && parsed.sides > 2) {
+    const rerollAtOrBelow = character ? greatWeaponRerollThreshold(character, inventory) : 0;
+    if (rerollAtOrBelow && parsed.sides > rerollAtOrBelow) {
         roll.rolls = roll.rolls.map(value => {
-            if (value > 2) return value;
+            if (value > rerollAtOrBelow) return value;
             const replacement = rollWithModifier(1, parsed.sides, 0, `${description} reroll`).rolls[0];
             rerolls.push(`${value}→${replacement}`);
             return replacement;

@@ -1375,7 +1375,10 @@ async function runFullProbe(page) {
     for (const [kind, action] of FULL_PLAN) {
         if (kind === 'fight' && combatSeen) continue; // the fight already happened; skip the follow-up line
         const r = await fullTurn(page, kind, action);
-        if (r.row.combatIters || r.row.delta.combatStarted) combatSeen = true;
+        // A fight that opens and closes inside one turn (a queued Magic Missile kill) leaves no
+        // live combat and no iterations — the Initiative line is the one trace (2026-10-10).
+        const fought = (r.after?.messages || []).slice(r.before?.msgCount ?? 0).some(m => /\*\*Initiative\*\*/.test(m.content || ''));
+        if (r.row.combatIters || r.row.delta.combatStarted || fought) combatSeen = true;
     }
     if (!combatSeen) {
         await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'START_COMBAT', payload: { enemies: [

@@ -3,7 +3,7 @@
  * spending, and the short/long rest pipeline (with the rest replay guard).
  */
 import { CLASSES } from '../../data/classes.js';
-import { getModifier } from '../../engine/rules.js';
+import { getModifier, LONG_REST_CLEARS, normalizeConditionName } from '../../engine/rules.js';
 import { rollNotation, rollWithModifier } from '../../engine/dice.ts';
 import { applyArcaneRecovery, buildSpellSlots, isSpellcaster, refillSpellSlots, summarizeSpellSlots } from '../../engine/spellcasting.js';
 import { findExactSourceReplay, findNearbyReplay, rememberLedgerEntry } from '../../engine/replayLedger.js';
@@ -316,12 +316,13 @@ export const handlers = {
         // path (2026-08-29 audit).
         const endedSustained = state.character.sustainedSpell || null;
 
-        // Long Rests clear common minor conditions
+        // Long Rests clear common minor conditions — the table's own list,
+        // judged in the canonical form (2026-10-09 rules-math P2: a private
+        // list cleared `exhausted` and left `exhaustion`, disadvantage no rest
+        // ever cleared).
         let currentConditions = state.character.conditions || [];
         if (isLong) {
-            currentConditions = currentConditions.filter(c =>
-                !['exhausted', 'poisoned', 'blinded', 'deafened'].includes(c.toLowerCase())
-            );
+            currentConditions = currentConditions.filter(c => !LONG_REST_CLEARS.includes(normalizeConditionName(c)));
         }
         const clearsEarlyDefeat = state.character.lowLevelDefeat && healed > 0;
         if (clearsEarlyDefeat) {

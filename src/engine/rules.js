@@ -2,9 +2,10 @@
  * Simplified D&D 5e-inspired rules engine.
  * Handles stat calculations, skill checks, and combat math.
  */
-import { CLASSES } from '../data/classes.js';
+import { CLASSES, FIGHTING_STYLE_EFFECTS } from '../data/classes.js';
+import { MAGIC_BONUS_MAX, MAX_ARMOR_BASE_AC, MAX_SHIELD_AC } from '../data/items.js';
 import { MAX_ROLL_DC } from '../config/contentLimits.js';
-import { isArmorItem, isShieldItem } from './equipment.js';
+import { isShieldItem, isWeaponItem, isWornArmor } from './equipment.js';
 
 /**
  * Calculate ability modifier from ability score.
@@ -48,7 +49,7 @@ export function getProficiencyBonus(level) {
  */
 function clampItemBonus(value) {
     const n = Number(value);
-    return Number.isFinite(n) ? Math.max(0, Math.min(3, Math.trunc(n))) : 0;
+    return Number.isFinite(n) ? Math.max(0, Math.min(MAGIC_BONUS_MAX, Math.trunc(n))) : 0;
 }
 
 /** The largest sustained-spell AC buff the catalog grants (Mage Armor +3). */
@@ -100,15 +101,15 @@ export function normalizeProficiencyLists(character) {
 function clampedArmorBase(armor) {
     // Number() first: a string "12" from a hand-edited save string-concatenated
     // straight through the old clamp into AC "122000" (2026-08-28 audit).
-    // Ceiling mirrors plate (18).
+    // Ceiling IS the catalog's (plate 18) — one shelf, data/items.js.
     const rawBase = Number(armor?.baseAC);
-    return Number.isFinite(rawBase) ? Math.max(0, Math.min(18, Math.trunc(rawBase))) : null;
+    return Number.isFinite(rawBase) ? Math.max(0, Math.min(MAX_ARMOR_BASE_AC, Math.trunc(rawBase))) : null;
 }
 
 function clampedShieldBase(shield) {
     // Junk degrades to the plain +2 shield instead of NaN-poisoning the AC.
     const rawShield = Number(shield?.shieldAC);
-    return Number.isFinite(rawShield) && rawShield > 0 ? Math.min(3, Math.trunc(rawShield)) : 2;
+    return Number.isFinite(rawShield) && rawShield > 0 ? Math.min(MAX_SHIELD_AC, Math.trunc(rawShield)) : 2;
 }
 
 /** The +1..+3 an armor-like item adds: `acBonus` first, the `magicBonus` channel as the fallback. */
@@ -179,6 +180,16 @@ export function getArmorClass(dexMod, armor = null, shield = false) {
  * @param {object} character - Character with abilityScores
  * @returns {number} Computed Armor Class
  */
+/**
+ * The numeric effects of the hero's Fighting Style — a Fighter's row of
+ * FIGHTING_STYLE_EFFECTS, else null. The weapon / armor condition each
+ * effect applies under is judged by the caller.
+ */
+export function fightingStyleEffects(character) {
+    if (character?.class !== 'fighter') return null;
+    return FIGHTING_STYLE_EFFECTS[character.fightingStyle] || null;
+}
+
 export function computeACFromInventory(inventory, character) {
     if (!character?.abilityScores) return 10;
     const dexMod = getModifier(character.abilityScores.dexterity);
@@ -186,15 +197,13 @@ export function computeACFromInventory(inventory, character) {
     // run the vault sanitizer, so guard here rather than crash the AC recompute.
     const items = Array.isArray(inventory) ? inventory : [];
 
-    const equippedArmor = items.find(i => i.equipped && i.baseAC && isArmorItem(i)) || null;
+    // Worn armor is ONE read (isWornArmor) for the AC and the auto-equip slot.
+    const equippedArmor = items.find(i => i.equipped && isWornArmor(i)) || null;
 
     const equippedShield = items.find(i => i.equipped && isShieldItem(i)) || null;
 
-    const styleBonus = character.class === 'fighter'
-        && character.fightingStyle === 'defense'
-        && equippedArmor
-        ? 1
-        : 0;
+    // Defense: +1 AC while wearing armor.
+    const styleBonus = equippedArmor ? (fightingStyleEffects(character)?.acBonus || 0) : 0;
 
     // Sustained self-buff (Mage Armor / Shield of Faith on self). Computed here so
     // the character sheet, the DM prompt, and enemy attack rolls all see one AC.
@@ -212,7 +221,7 @@ export function computeACFromInventory(inventory, character) {
 
 export function getEquippedWeapon(inventory = []) {
     if (!Array.isArray(inventory)) return null;
-    return inventory.find(i => i.equipped && i.type === 'weapon') || null;
+    return inventory.find(i => i.equipped && isWeaponItem(i)) || null;
 }
 
 export function getWeaponAbilityModifier(character, weapon = null) {
@@ -265,11 +274,8 @@ export function getWeaponAttackBonus(character, inventory = []) {
     const weapon = getEquippedWeapon(inventory);
     const abilityMod = getWeaponAbilityModifier(character, weapon);
     const proficient = isProficientWithWeapon(character, weapon);
-    const styleBonus = character?.class === 'fighter'
-        && character.fightingStyle === 'archery'
-        && weapon?.ranged
-        ? 2
-        : 0;
+    // Archery: +N to hit with a ranged weapon.
+    const styleBonus = weapon?.ranged ? (fightingStyleEffects(character)?.attackBonus || 0) : 0;
     return abilityMod
         + (proficient ? getProficiencyBonus(character.level) : 0)
         + (clampItemBonus(weapon?.attackBonus) || clampItemBonus(weapon?.magicBonus))
@@ -280,12 +286,9 @@ export function getWeaponDamageNotation(character, inventory = [], fallback = '1
     const weapon = getEquippedWeapon(inventory);
     const abilityMod = getWeaponAbilityModifier(character, weapon);
     const itemBonus = clampItemBonus(weapon?.damageBonus) || clampItemBonus(weapon?.magicBonus);
-    const styleBonus = character?.class === 'fighter'
-        && character.fightingStyle === 'dueling'
-        && weapon
-        && !weapon.ranged
-        && !weapon.twoHanded
-        ? 2
+    // Dueling: +N damage with a one-handed melee weapon.
+    const styleBonus = weapon && !weapon.ranged && !weapon.twoHanded
+        ? (fightingStyleEffects(character)?.damageBonus || 0)
         : 0;
 
     // Full-shape validation, not a prefix check (2026-08-28 audit): "1d8
@@ -346,8 +349,8 @@ export function getSkillModifier(character, skill) {
     const ability = SKILL_ABILITIES[skill];
     if (!ability) return 0;
 
-    const abilityMod = getModifier(character.abilityScores[ability]);
-    const profBonus = getProficiencyBonus(character.level);
+    const abilityMod = getModifier(character?.abilityScores?.[ability] ?? 10);
+    const profBonus = getProficiencyBonus(character?.level);
     // Belt on the read side: only an ARRAY can grant proficiency (a string's
     // substring `.includes` was a free +prof — 2026-09-14 audit P1).
     const isProficient = hasListEntry(character.skillProficiencies, skill);
@@ -405,8 +408,9 @@ export const CONDITION_EFFECTS = {
     restrained: { attack: 'disadvantage', save: 'disadvantage', incomingAttack: 'advantage' },
     prone: { attack: 'disadvantage', incomingAttack: 'advantage' },
     invisible: { attack: 'advantage', incomingAttack: 'disadvantage' },
+    // ONE key per condition: `exhaustion` folds to this at normalizeConditionName
+    // (2026-10-09 rules-math P2 — two keys, and the long rest cleared one).
     exhausted: { check: 'disadvantage' },
-    exhaustion: { check: 'disadvantage' },
     stunned: { incomingAttack: 'advantage' },
     paralyzed: { incomingAttack: 'advantage' },
     unconscious: { incomingAttack: 'advantage' },
@@ -419,6 +423,17 @@ export const CONDITION_EFFECTS = {
  * effectiveness on its own turn was a silent half-implementation (2026-07-13 audit).
  */
 export const INCAPACITATING_CONDITIONS = ['stunned', 'paralyzed', 'unconscious'];
+
+/**
+ * What a Long Rest clears off the hero (read by TAKE_REST): the table's
+ * minor afflictions plus `deafened`, which no table models (prose-only, kept
+ * because a night's rest plausibly ends it). Lives beside the table so a
+ * renamed key cannot leave a condition no rest ever clears.
+ */
+export const LONG_REST_CLEARS = ['exhausted', 'poisoned', 'blinded', 'deafened'];
+
+/** Spellings the fiction uses for one table key. */
+const CONDITION_ALIASES = { exhaustion: 'exhausted' };
 
 /** Longest condition name the hero's list stores; the DM channel is free-form prose otherwise. */
 export const CONDITION_NAME_MAX = 40;
@@ -438,7 +453,7 @@ export const CONDITION_LIST_CAP = 10;
 export function normalizeConditionName(value) {
     if (typeof value !== 'string') return null;
     const name = value.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, CONDITION_NAME_MAX).trim();
-    return name || null;
+    return (CONDITION_ALIASES[name] || name) || null;
 }
 
 /** A hero condition list in canonical form: strings only, deduped, capped. */
@@ -527,9 +542,14 @@ export function canonicalRollKey(value) {
  * resolver grants (`result.isCritical`). A natural 1 is NOT an auto-failure
  * outside attacks (the resolver compares the total) — matched here.
  */
+/** The one DC clamp behind the odds: a finite DC inside 0..MAX_ROLL_DC, else the standard 10. */
+function clampRollDc(dc) {
+    return Number.isFinite(dc) ? Math.min(MAX_ROLL_DC, Math.max(0, dc)) : 10;
+}
+
 export function d20SuccessChance(modifier, dc, { advantage = false, disadvantage = false } = {}) {
     const mod = Number.isFinite(modifier) ? modifier : 0;
-    const target = Number.isFinite(dc) ? Math.min(MAX_ROLL_DC, Math.max(0, dc)) : 10;
+    const target = clampRollDc(dc);
     let faces = 0;
     for (let face = 1; face <= 20; face += 1) {
         if (face === 20 || face + mod >= target) faces += 1;
@@ -620,7 +640,7 @@ export function describeCheckOdds(character, inventory, roll) {
 
     const conditionEffects = getConditionRollEffects(character.conditions, kind);
     const eff = combineRollModifiers(roll.advantage, roll.disadvantage, conditionEffects);
-    const dc = Number.isFinite(roll.dc) ? Math.min(MAX_ROLL_DC, Math.max(0, roll.dc)) : 10;
+    const dc = clampRollDc(roll.dc);
     return {
         key,
         kind,

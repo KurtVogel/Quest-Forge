@@ -15,6 +15,16 @@
  * the raw-index coin windows — the DM's "very next turn" re-emission landed 8
  * raw messages later and re-paid a 20 gp fee (live finding 2026-07-22).
  */
+/**
+ * The wider item-grant replay window (2026-08-31 P1): a reward item granted at
+ * the handover is re-emitted at quest completion > 4 conversational messages
+ * later. Read by the reducer's grant ledger (quest-completion responses) AND
+ * the Scribe loot audit's own dedupe — one constant since 2026-10-10 (scribe
+ * P2: the audit kept a private 12 the 10-07 spend-window unification missed).
+ * Matches the spend side's RECENT_SPEND_MESSAGE_WINDOW.
+ */
+export const RECENT_ITEM_GRANT_EXTENDED_WINDOW = 12;
+
 export function conversationalDistance(messages, fromIndex, toIndex) {
     if (!Array.isArray(messages)) return Math.max(0, toIndex - fromIndex);
     const lo = Math.max(0, Math.floor(fromIndex + 1));

@@ -30,7 +30,7 @@ import { applyEvents } from '../state/applyEvents.js';
 import { handleRequestedRolls } from '../engine/rollResolver.js';
 import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../engine/outOfCombatRollPolicy.js';
 import { maybeAutoSummarize } from '../engine/worldJournal.js';
-import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownOpenPlans, buildKnownStoryCards, runScribe } from './scribe.js';
+import { buildScribeContext, runScribe } from './scribe.js';
 import { EPILOGUE_RESPONSE_MODE, isEpilogueRequest, TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
 import { findSubjectsInText, flushMemoryQueue, queueMemory, retrieveRelevant } from '../engine/vectorMemory.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
@@ -777,12 +777,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             // The message every record from this pass is stamped with (M0,
             // 2026-09-30): removing it retracts them.
             sourceMessageId: typeof finalNarration.id === 'string' ? finalNarration.id : null,
-            knownAppearances: buildKnownAppearances(latest, playerMessage, finalNarration.content),
-            knownStances: buildKnownStances(latest, playerMessage, finalNarration.content),
-            knownStoryCards: buildKnownStoryCards(latest, playerMessage, finalNarration.content),
-            knownOpenPlans: buildKnownOpenPlans(latest),
-            knownHeroTells: buildKnownHeroTells(latest),
-            knownLocations: buildKnownLocations(latest),
+            ...buildScribeContext(latest, playerMessage, finalNarration.content),
             // The DM's own location event (already applied) outranks the async
             // Scribe for this turn: the Scribe's location downgrades to
             // confirm-or-fill so it can never relocate the hero backwards.

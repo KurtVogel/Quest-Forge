@@ -1,4 +1,4 @@
-import { cleanText, compactMessage, runDirector } from './directorUtils.js';
+import { baseDirectorContext, cleanText, compactMessage, runDirector } from './directorUtils.js';
 import { FRONTS_VERSION, normalizeFaction, normalizeFrontProposal } from '../engine/fronts.js';
 import { MAX_ACTIVE_FRONTS, WEB_TARGET_FRONTS } from '../engine/worldTempo.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH, CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
@@ -95,14 +95,11 @@ export function buildFrontUpgradeContext(state) {
         })),
         // Parity with the three live director lanes (2026-09-27 quests P2): active
         // rows only, the 10 newest, 120 / 400 clamps — this one-shot call used to
-        // ship 20 rows INCLUDING completed / failed ones at 600 chars each.
-        quests: (state.quests || [])
-            .filter(quest => !['completed', 'failed'].includes(quest.status))
-            .slice(-10)
-            .map(quest => ({
-                name: cleanText(quest.name, 120),
-                description: cleanText(quest.description, 400),
-            })),
+        // ship 20 rows INCLUDING completed / failed ones at 600 chars each. The
+        // projection is the shared director one, not a second copy of its
+        // filter and clamps (2026-10-10 quests P2); the upgrade keeps its own
+        // wider slice and its historical `quests` key.
+        quests: baseDirectorContext(state, { quests: 10, questChars: 400 }).activeQuests,
         dramaticMemory: (state.storyMemory || []).filter(memory => memory.status !== 'resolved').slice(-24).map(memory => ({
             type: cleanText(memory.type, 40),
             subject: cleanText(memory.subject, 100),

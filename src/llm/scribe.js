@@ -24,6 +24,7 @@ import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 import { HERO_TELL_REPORT_CAP, isHeroTellEstablished } from '../engine/heroTells.js';
 import { liveWorldFacts } from '../engine/worldFacts.js';
+import { cleanText } from '../engine/text.js';
 import {
     CAST_AUDIT_RULES,
     describeAppliedLoot,
@@ -34,7 +35,7 @@ import {
     runNarrationAudits,
 } from './scribeAudits.js';
 
-const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keeper. Given a DM's narrative response and the player's action that prompted it, extract any new canonical facts about the game world. Every field you output is an UNVARNISHED record: complete and frank about every fact the fiction establishes, never a censored, selective, or tastefully vague account — written in neutral, matter-of-fact language (see the REGISTER rule).
+export const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keeper. Given a DM's narrative response and the player's action that prompted it, extract any new canonical facts about the game world. Every field you output is an UNVARNISHED record: complete and frank about every fact the fiction establishes, never a censored, selective, or tastefully vague account — written in neutral, matter-of-fact language (see the REGISTER rule).
 
 Output ONLY valid JSON:
 {
@@ -360,6 +361,26 @@ export function buildKnownOpenPlans({ worldFacts = [] } = {}) {
 }
 
 /**
+ * The Scribe's merge context, assembled ONCE from the live state and the
+ * turn's texts (2026-10-10 scribe P2): the ordinary turn (turnOrchestrator)
+ * and the combat beat (ChatPanel) each used to call the six `buildKnown*`
+ * builders with the same arguments and feed them back as six named options —
+ * two copies, one of them untestable in a 0 %-coverage file. The ordinary
+ * turn passes the player's line AND the narration; the combat beat passes the
+ * narration only (it has no player line). Spread into `runScribe`.
+ */
+export function buildScribeContext(state, ...texts) {
+    return {
+        knownAppearances: buildKnownAppearances(state, ...texts),
+        knownStances: buildKnownStances(state, ...texts),
+        knownStoryCards: buildKnownStoryCards(state, ...texts),
+        knownOpenPlans: buildKnownOpenPlans(state),
+        knownHeroTells: buildKnownHeroTells(state),
+        knownLocations: buildKnownLocations(state),
+    };
+}
+
+/**
  * Run the Scribe after a DM response to extract world-state updates.
  * Dispatches updates silently — the player never sees this.
  *
@@ -414,7 +435,7 @@ function npcUpdateContradictsAuthoritativeCombat(npc, authoritativeContext) {
  */
 export const SCRIBE_ANCHORS = [
     'world_facts', 'npc_updates', 'story_memory', 'player_appearance', 'location',
-    'location_profile', 'travel', 'narrated_loot', 'narrated_payment', 'narrated_losses', 'narrated_casts', 'hero_tells',
+    'location_profile', 'travel', 'narrated_loot', 'narrated_payment', 'narrated_losses', 'missing_gear_handoffs', 'narrated_casts', 'hero_tells',
 ];
 /** The reflection schema's keys — a quiet cadence honestly answers with the tempo directive alone. */
 export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'story_memory', 'tempo_directive', 'front_proposals'];
@@ -576,8 +597,12 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         // Evidence gate (live playtest #6): the hero can only be relocated to a
         // place this turn's text actually names — "market square" arrived from
         // stale model context while the narration entered the chandlery.
+        // The turn's text, composed ONCE for the three evidence gates below
+        // (2026-10-10 scribe P2 — it was built three times, once unclamped).
+        const turnText = `${playerMessage || ''}\n${dmNarrative || ''}`;
+        const evidenceText = turnText.slice(0, 6000);
         const location = sanitizeExtractedLocation(extracted.location);
-        if (location && isLocationEvidencedInText(location, `${playerMessage}\n${dmNarrative}`)) {
+        if (location && isLocationEvidencedInText(location, turnText)) {
             // When the DM's OWN events already relocated the hero this turn, that
             // explicit call is the narrator's authoritative statement — the async
             // Scribe may confirm or refine it but never relocate away from it
@@ -607,7 +632,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     },
                     // The turn's own text, inspected by the reducer's first-seen
                     // region evidence gate at dispatch time — never stored.
-                    evidenceText: `${playerMessage || ''}\n${dmNarrative || ''}`.slice(0, 6000),
+                    evidenceText,
                 },
             });
         }
@@ -627,7 +652,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     direction: typeof travel.direction === 'string' ? travel.direction : null,
                     travelTime: typeof travel.travel_time === 'string' ? travel.travel_time : null,
                     route: typeof travel.route === 'string' ? travel.route : null,
-                    evidenceText: `${playerMessage || ''}\n${dmNarrative || ''}`.slice(0, 6000),
+                    evidenceText,
                 },
             });
         }
@@ -730,9 +755,9 @@ Rules:
 - stanceToPlayer evolves slowly off-screen: refine or drift it only when established events support it, and emit the complete stance (it replaces the record). Never invent romance or hostility the canon does not support.
 - Keep everything compact. Omit empty arrays when nothing changes.`;
 
-function reflectionText(value, maxLength) {
-    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
-}
+// The reflection's text clamp IS the engine's type-strict shelf (2026-10-10 scribe P2):
+// the private twin stringified an object to "[object Object]".
+const reflectionText = cleanText;
 /** A bounded list of reflection strings: string elements only, each clamped, empties dropped. */
 function reflectionList(list, count, maxLength) {
     return (Array.isArray(list) ? list : [])

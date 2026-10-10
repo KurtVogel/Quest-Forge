@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
+import { sanitizeQuestRecord } from './handlers/quests.js';
 
 describe('quest identity', () => {
     it('updates an existing active quest instead of duplicating its normalized name', () => {
@@ -382,5 +383,49 @@ describe('finished quests stay closed (documented 2026-07-23)', () => {
         expect(next.quests[0]).toMatchObject({ id: 'q1', status: 'completed' }); // history intact
         expect(next.quests[1]).toMatchObject({ name: 'Guard the Caravan', status: 'active', description: 'A second run north.' });
         expect(next.quests[1].id).not.toBe('q1');
+    });
+});
+
+describe('the name is identity, a DM-chosen id only a hint (2026-10-10 quests P2)', () => {
+    it('an id reused for a DIFFERENT arc opens a second row and leaves the first untouched', () => {
+        const first = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q1', name: 'Find the Relic of Kel' } });
+        const second = gameReducer(first, { type: 'ADD_QUEST', payload: { id: 'q1', name: 'Escort the salt caravan' } });
+        expect(second.quests.map(q => q.name)).toEqual(['Find the Relic of Kel', 'Escort the salt caravan']);
+        expect(second.quests[0]).toMatchObject({ id: 'q1', status: 'active' });
+        // The invented id is re-minted — it may not collide with the live arc.
+        expect(second.quests[1].id).not.toBe('q1');
+        expect(second.quests[1].id).toMatch(/^quest-/);
+    });
+
+    it('an id with a drifted but compatible name refreshes the tracked arc', () => {
+        const first = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q1', name: 'Find the Relic of Kel' } });
+        const second = gameReducer(first, { type: 'ADD_QUEST', payload: { id: 'q1', name: 'The Relic of Kel', description: 'The trail leads to the sunken vault.' } });
+        expect(second.quests).toHaveLength(1);
+        expect(second.quests[0]).toMatchObject({ id: 'q1', description: 'The trail leads to the sunken vault.' });
+    });
+
+    it('a nameless ADD_QUEST inserts nothing — no ghost row for the prompt, the panel, or the count', () => {
+        expect(gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q-7' } }).quests).toHaveLength(0);
+        expect(gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q-7', name: { x: 1 } } }).quests).toHaveLength(0);
+        expect(gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { name: '   ' } }).quests).toHaveLength(0);
+    });
+
+    it('both live inserts are their own load twin (one row composer)', () => {
+        const opened = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { name: '  Find the   ledger ', description: 'Recover it.', source: 'dm', status: 'completed', junk: true },
+        }).quests[0];
+        expect(opened).toMatchObject({ name: 'Find the ledger', source: 'dm', status: 'active', openedAtMessage: 0 });
+        expect(opened).not.toHaveProperty('junk');
+        expect(sanitizeQuestRecord(opened)).toEqual(opened);
+
+        const closed = gameReducer(initialGameState, {
+            type: 'COMPLETE_QUEST',
+            payload: { name: 'Deliver the letter', description: 'To the mill.' },
+        }).quests[0];
+        expect(closed).toMatchObject({ name: 'Deliver the letter', status: 'completed' });
+        expect(sanitizeQuestRecord(closed)).toEqual(closed);
+        // A nameless terminal ref still records nothing.
+        expect(gameReducer(initialGameState, { type: 'COMPLETE_QUEST', payload: { id: 'q-9' } }).quests).toHaveLength(0);
     });
 });

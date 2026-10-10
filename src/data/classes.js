@@ -56,6 +56,8 @@ export const CLASSES = {
             19: ['Ability Score Improvement'],
         },
         fightingStyles: {
+            // The NUMBERS live in FIGHTING_STYLE_EFFECTS below (one row per style);
+            // these entries are the player-facing prose.
             defense: {
                 label: 'Defense',
                 description: '+1 AC while wearing armor',
@@ -252,3 +254,19 @@ export const CLASSES = {
 };
 
 export const CLASS_LIST = Object.keys(CLASSES);
+
+/**
+ * What each Fighting Style DOES, as numbers the engine reads (2026-10-09
+ * rules-math nit — the `isSpellcaster` shape): one row per style in
+ * CLASSES.fighter.fightingStyles, which keeps the prose. Read through
+ * `fightingStyleEffects(character)` in engine/rules.js by the AC read, the
+ * attack and damage bonuses, and the Great Weapon Fighting reroll; the
+ * WEAPON condition each applies under (armor worn / ranged / one-handed
+ * melee / two-handed melee) is judged at the read site.
+ */
+export const FIGHTING_STYLE_EFFECTS = {
+    defense: { acBonus: 1 },
+    dueling: { damageBonus: 2 },
+    greatWeaponFighting: { rerollDamageDiceAtOrBelow: 2 },
+    archery: { attackBonus: 2 },
+};

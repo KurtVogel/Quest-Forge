@@ -5,6 +5,7 @@
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
 import { ABILITY_SHORT, classDisplayName, getFightingStyleLabel, getMartialArchetypeLabel, raceDisplayName } from '../engine/characterUtils.js';
 import { describeArmorAc, describeShieldAc, formatModifier, getModifier, getProficiencyBonus, getSavingThrowModifier, hasListEntry, isProficientWithWeapon } from '../engine/rules.js';
+import { SUPPORTED_ENEMY_CONDITIONS_SENTENCE } from '../engine/enemyStats.js';
 import { getDmBonusXpCap, getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
 import { buildRetrievedMemoriesBlock, findSubjectsInText } from '../engine/vectorMemory.js';
@@ -700,7 +701,7 @@ const RESPONSE_FORMAT_TAIL = `COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANIC
 - **A Fighter's Second Wind can ride the exchange.** When the player's own combat message explicitly uses Second Wind ("I use Second Wind and strike back"), declare \`{"action":"second_wind"}\` as an extra player slot beside their normal action (or alone, if catching their breath is the whole turn) — the engine validates availability, rolls 1d10 + level, spends the resource, and reports the recovery; it is a bonus action and never costs the action slot. Declare it ONLY on the player's explicit invocation — never on your own initiative or as a suggestion. If the sheet shows it spent or the bonus action already used, say so in narration instead of declaring the slot.
 - A \`channel\` slot is the Cleric's Turn Undead (level 2+): no target field; the engine rolls a save for every active undead foe. Declare it only when undead are actually present.
 - A Check/Save slot uses \`{"action":"check|save","skill":"<skill or ability>","dc":<5-30>}\` for a genuinely uncertain non-attack action committed during combat. The engine rolls it before companion/enemy intents; do not also use requested_rolls.
-- A Check intended to impose a condition may include \`"on_success":{"target":"<living enemy id>","add":["prone"]}\`. The engine applies the bounded condition only if the check succeeds. Supported enemy conditions are poisoned, blinded, frightened, restrained, prone, invisible, stunned, paralyzed, and unconscious.
+- A Check intended to impose a condition may include \`"on_success":{"target":"<living enemy id>","add":["prone"]}\`. The engine applies the bounded condition only if the check succeeds. ${SUPPORTED_ENEMY_CONDITIONS_SENTENCE}
 - **Situational rulings preserve table negotiation.** Any player slot, companion intent, or enemy attack intent may include \`"situational_ruling":{"mode":"advantage|disadvantage","reason":"<brief established fictional reason>"}\`. Use this only when you, as DM, accept that current established fiction or a plausible tactical setup warrants it (for example, a genuinely established flank). The player's claim alone does not make the reason true. If it is unsupported, omit the ruling and briefly adjudicate from the actual situation. Never supply numerical modifiers or dice. The engine combines an accepted ruling with conditions and normal advantage/disadvantage cancellation, and shows the reason beside the roll.
 - **An accepted flank persists.** When you grant a flanking-style advantage ruling, the engine records the target as FLANKED and keeps applying that advantage to the hero's and companions' attacks on it in later exchanges — never re-emit the same flank ruling round after round, and never quietly drop an established flank. When the fiction genuinely ends it (the foe repositions or breaks free, knockback, the allies scatter), declare \`"flank_broken": ["<enemy id>"]\` inside that combat_exchange. The engine also ends a flank on its own when the target falls or flees, when the hero Dashes or Disengages away, or when every companion is down.
 - \`enemy_condition_updates\` synchronizes a condition already established by prior authoritative fiction before this exchange (for example, a foe the previous narration left prone). It is not permission to grant advantage merely because the player asserts one. These updates apply before player rolls.
@@ -1122,7 +1123,7 @@ function rollNaturalLabel(r) {
 
 function buildRecentRollsBlock(rolls) {
     return `## RECENT DICE ROLLS (client-rolled, TRUE random)\n${rolls.map(r =>
-        `- ${r.description || r.notation}: **${r.total}** (${r.rolls.join(', ')}${r.modifier ? ` ${r.modifier >= 0 ? '+' : ''}${r.modifier}` : ''})${rollNaturalLabel(r)}`
+        `- ${r.description || r.notation}: **${r.total}** (${r.rolls.join(', ')}${r.modifier ? ` ${formatModifier(r.modifier)}` : ''})${rollNaturalLabel(r)}`
     ).join('\n')}`;
 }
 

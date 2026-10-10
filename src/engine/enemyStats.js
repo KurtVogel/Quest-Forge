@@ -14,6 +14,7 @@
  */
 
 import { toFlag } from '../data/items.js';
+import { CONDITION_EFFECTS } from './rules.js';
 
 const ATTACK_BONUS_MIN = -5;
 const ATTACK_BONUS_MAX = 15;
@@ -24,15 +25,25 @@ const DAMAGE_MOD_MAX = 15;
 const AC_MIN = 1;
 const AC_MAX = 25;
 const HP_MAX = 999;
-// NOTE: `exhausted`/`exhaustion` is deliberately absent even though
-// CONDITION_EFFECTS defines it — its only effect is check disadvantage and
-// enemies never make checks, so a DM's "exhausted ogre" drops the condition
-// (visible on the enemy card as simply not listed) rather than carrying a
-// mechanical no-op through every exchange.
-const SUPPORTED_ENEMY_CONDITIONS = new Set([
-    'poisoned', 'blinded', 'frightened', 'restrained', 'prone',
-    'invisible', 'stunned', 'paralyzed', 'unconscious',
-]);
+/**
+ * The conditions an ENEMY can carry — DERIVED from the hero's CONDITION_EFFECTS
+ * table (one vocabulary since 2026-10-10, enemy-stats P2: this was a hand-copied
+ * list, the prompt's sentence a third copy, the long-rest list a fourth): a row
+ * that touches a die an enemy rolls or suffers (its attacks, its saves, or the
+ * attacks against it). `exhausted` (check disadvantage only) is absent BY
+ * CONSTRUCTION — enemies never make checks, so a DM's "exhausted ogre" drops
+ * the condition (visible on the enemy card as simply not listed) rather than
+ * carrying a mechanical no-op through every exchange.
+ */
+export const SUPPORTED_ENEMY_CONDITIONS = new Set(Object.entries(CONDITION_EFFECTS)
+    .filter(([, effect]) => effect.attack || effect.save || effect.incomingAttack)
+    .map(([name]) => name));
+
+/** The DM prompt's own sentence, rendered from the Set at module load (prefix-stable). */
+export const SUPPORTED_ENEMY_CONDITIONS_SENTENCE = (() => {
+    const names = [...SUPPORTED_ENEMY_CONDITIONS];
+    return `Supported enemy conditions are ${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}.`;
+})();
 
 /**
  * Canonical `enemy-…` id for a DM-declared foe, unique within one fight via
@@ -42,7 +53,10 @@ const SUPPORTED_ENEMY_CONDITIONS = new Set([
  * (2026-08-29 audit).
  */
 export function canonicalEnemyId(enemy, index, usedIds) {
-    const fragment = String(enemy?.id || enemy?.name || index + 1)
+    // Type-strict reads (2026-10-10): an object id or name used to mint
+    // `enemy-object-object` — the ordinal is the fallback for junk, as for absence.
+    const text = value => ((typeof value === 'string' && value.trim()) || (typeof value === 'number' && Number.isFinite(value)) ? String(value) : '');
+    const fragment = (text(enemy?.id) || text(enemy?.name) || String(index + 1))
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
@@ -92,16 +106,12 @@ export function validateEnemyAttackBonus(value) {
 }
 
 /**
- * A saving-throw bonus within the same band as attack bonuses, or undefined
- * (→ engine default +2) when absurd. One flat number per enemy — spell saves
- * deliberately do not model six per-ability scores (spellcasting v1 spec).
+ * A saving-throw bonus: the SAME band and rule as the attack bonus by the
+ * spellcasting v1 spec (one flat number per enemy — six per-ability scores
+ * are deliberately not modeled), so it IS that validator under the name a
+ * call site reads (one body since 2026-10-10, enemy-stats nit).
  */
-export function validateEnemySaveBonus(value) {
-    const n = toNumber(value);
-    if (!Number.isFinite(n)) return undefined;
-    const r = Math.round(n);
-    return (r >= ATTACK_BONUS_MIN && r <= ATTACK_BONUS_MAX) ? r : undefined;
-}
+export const validateEnemySaveBonus = validateEnemyAttackBonus;
 
 /**
  * NdM(±K) with an optional trailing damage TYPE. "2d8+4 bludgeoning" /
@@ -168,17 +178,16 @@ export function clampEnemyCurrentHP(value, maxHp, fallback = maxHp) {
 export const HEALTH_CRITICAL_RATIO = 0.25;
 export const HEALTH_BLOODIED_RATIO = 0.5;
 
-/** `healthy` / `bloodied` (≤ half) / `critical` (≤ a quarter) / `downWord` at 0 HP. */
+/** The three standing health words, in order; `healthWord` adds the lane's own down word. */
+export const HEALTH_WORDS = ['healthy', 'bloodied', 'critical'];
+
+/** `healthy` / `bloodied` (≤ half) / `critical` (≤ a quarter) / `downWord` at 0 HP — an ENEMY's down word is the default `dead`. */
 export function healthWord(hp, maxHp, downWord = 'dead') {
     if (!(hp > 0)) return downWord;
     const ratio = maxHp > 0 ? hp / maxHp : 1;
     if (ratio <= HEALTH_CRITICAL_RATIO) return 'critical';
     if (ratio <= HEALTH_BLOODIED_RATIO) return 'bloodied';
     return 'healthy';
-}
-
-export function enemyHealthCondition(hp, maxHp) {
-    return healthWord(hp, maxHp, 'dead');
 }
 
 /**
@@ -212,6 +221,33 @@ export function normalizeEnemyAttackProfile(enemy) {
 }
 
 /**
+ * The TYPED identity, flags and offensive stats of an enemy — ONE composer for
+ * the parser (validateCombatStart), START_COMBAT and the load twin
+ * (2026-10-09 enemy-stats P2: START_COMBAT's copy wrote `String(name)` and
+ * `!!isUndead`, so an object name fielded "[object Object]" as a turnable
+ * undead on the reducer lane). Snake- and camel-case keys both read (the
+ * wire writes snake, the record camel). Each site adds what only it owns:
+ * the id, the HP / AC clamps, initiative, the health word, the status.
+ */
+export function typeEnemyFields(raw, { fallbackName = 'Enemy' } = {}) {
+    const out = {
+        name: (typeof raw?.name === 'string' ? raw.name.trim().slice(0, 100) : '') || fallbackName,
+        conditions: normalizeEnemyConditions(raw?.conditions),
+        isUndead: toFlag(raw?.is_undead ?? raw?.isUndead),
+        // Untrusted narrative flag, strict by policy — the XP estimator gates it
+        // on the statline before honoring the boss tier.
+        boss: raw?.boss === true || raw?.isBoss === true,
+    };
+    const ab = validateEnemyAttackBonus(raw?.attack_bonus ?? raw?.attackBonus);
+    const dmg = sanitizeEnemyDamage(raw?.damage);
+    const sb = validateEnemySaveBonus(raw?.save_bonus ?? raw?.saveBonus);
+    if (ab !== undefined) out.attackBonus = ab;
+    if (dmg !== undefined) out.damage = dmg;
+    if (sb !== undefined) out.saveBonus = sb;
+    return out;
+}
+
+/**
  * Sanitize an already-built enemy (e.g. from a loaded save) in place of trusting the stored
  * values: bound HP/AC and drop any out-of-range attack stats so the engine default applies.
  */
@@ -231,25 +267,16 @@ export function sanitizeLoadedEnemy(enemy) {
     const status = typeof enemy.combatStatus === 'string' ? enemy.combatStatus.trim().toLowerCase() : '';
     const cleaned = {
         id: typeof enemy.id === 'string' || typeof enemy.id === 'number' ? String(enemy.id).slice(0, 120) : undefined,
-        name: (typeof enemy.name === 'string' ? enemy.name.trim().slice(0, 100) : '') || 'Enemy',
+        ...typeEnemyFields(enemy),
         hp,
         maxHp,
         ac: clampEnemyAC(enemy.ac),
-        condition: enemyHealthCondition(hp, maxHp),
-        conditions: normalizeEnemyConditions(enemy.conditions),
+        condition: healthWord(hp, maxHp),
         combatStatus: ['active', 'fled', 'surrendered'].includes(status) ? status : 'active',
         defending: toFlag(enemy.defending),
-        isUndead: toFlag(enemy.isUndead),
-        boss: enemy.boss === true,
     };
     if (typeof enemy.initiative === 'number' && Number.isFinite(enemy.initiative)) {
         cleaned.initiative = enemy.initiative;
     }
-    const ab = validateEnemyAttackBonus(enemy.attackBonus);
-    const dmg = sanitizeEnemyDamage(enemy.damage);
-    const sb = validateEnemySaveBonus(enemy.saveBonus);
-    if (ab !== undefined) cleaned.attackBonus = ab;
-    if (dmg !== undefined) cleaned.damage = dmg;
-    if (sb !== undefined) cleaned.saveBonus = sb;
     return cleaned;
 }

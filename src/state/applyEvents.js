@@ -79,18 +79,20 @@ function applyStartingItems(events, dispatch, state, opts) {
 
 function applyQuestUpdates(events, dispatch, { openOnly = false } = {}) {
     for (const quest of events.questUpdates || []) {
-        // Every branch requires an identity — a malformed update with neither id nor
-        // name would otherwise create a permanent nameless "ghost" quest row.
-        if (!quest || (!quest.id && !String(quest.name || '').trim())) continue;
+        // The parser boundary (normalizeQuestUpdate) typed every field and
+        // required an identity — a name for `new` / `updated`, an id or a name
+        // for the terminal statuses — so this loop routes and never re-types.
+        if (!quest || (!quest.id && !quest.name)) continue;
         if (quest.status === 'new' || quest.status === 'updated') {
-            // ADD_QUEST upserts by id/name, so "updated" refreshes the existing entry
-            // (or self-heals into a new one if the DM never opened it).
+            // ADD_QUEST upserts by name (an id only when the name agrees), so
+            // "updated" refreshes the existing entry or self-heals into a new one
+            // if the DM never opened it; the reducer refuses a nameless row.
             dispatch({ type: 'ADD_QUEST', payload: { ...(quest.id && { id: quest.id }), name: quest.name, description: quest.description } });
         } else if (openOnly) {
             continue;
-        } else if (quest.status === 'completed' && (quest.id || quest.name)) {
+        } else if (quest.status === 'completed') {
             dispatch({ type: 'COMPLETE_QUEST', payload: { id: quest.id, name: quest.name, description: quest.description } });
-        } else if (quest.status === 'failed' && (quest.id || quest.name)) {
+        } else if (quest.status === 'failed') {
             dispatch({ type: 'FAIL_QUEST', payload: { id: quest.id, name: quest.name, description: quest.description } });
         }
     }

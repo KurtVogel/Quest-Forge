@@ -7,7 +7,7 @@ import { planCombatExchange, planOpeningExchange } from '../../engine/combatExch
 import { describeFightCost, describeFightResonance } from '../../engine/fightTally.js';
 import { combatNarrationPrompt } from '../../llm/combatNarration.js';
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
-import { buildKnownAppearances, buildKnownHeroTells, buildKnownLocations, buildKnownStances, buildKnownOpenPlans, buildKnownStoryCards, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
+import { buildScribeContext, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
 import { EPILOGUE_REQUEST_MESSAGE, isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
 import { saveRosterCharacter } from '../../state/rosterStore.js';
 import { addMemory, findSubjectsInText, retractMemoriesFromMessage, seedMemories } from '../../engine/vectorMemory.js';
@@ -616,12 +616,15 @@ export default function ChatPanel() {
                         dmNarrative: narrative,
                         settings: latest.settings,
                         dispatch,
-                        knownAppearances: buildKnownAppearances(latest, narrative),
-                        knownStances: buildKnownStances(latest, narrative),
-                        knownStoryCards: buildKnownStoryCards(latest, narrative),
-                        knownOpenPlans: buildKnownOpenPlans(latest),
-                        knownHeroTells: buildKnownHeroTells(latest),
-                        knownLocations: buildKnownLocations(latest),
+                        // The narration row this beat was read from (2026-10-10
+                        // scribe P2): the combat-beat Scribe used to run UNSTAMPED,
+                        // so ✕ on a victory narration retracted none of the facts /
+                        // cards / impressions it minted. sendToLLM committed the
+                        // narration before this `.then` ran, so the last committed
+                        // turn IS this narration.
+                        sourceMessageId: typeof runner.getLastCommittedTurn()?.id === 'string' ? runner.getLastCommittedTurn().id : null,
+                        // The beat's context: narrative only (no player line).
+                        ...buildScribeContext(latest, narrative),
                         authoritativeContext: {
                             terminal: result.terminal || 'ongoing',
                             postState: result.postState,

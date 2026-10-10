@@ -13,6 +13,7 @@
  */
 import { awardExperience, getQuestCompletionXp, QUEST_INSTANT_XP } from '../../engine/progression.js';
 import { containment, tokenSet } from '../../engine/textMatch.js';
+import { cleanText } from '../../engine/text.js';
 import { normalizeRefToken, systemMessage } from './shared.js';
 
 // Quest-name stopwords: articles/fillers that survive normalizeRefToken but
@@ -50,7 +51,6 @@ function questNameMatcher(refName) {
 // into the save and rode the system prompt every turn (2026-09-04 audit).
 export const QUEST_NAME_MAX_LENGTH = 160;
 export const QUEST_DESCRIPTION_MAX_LENGTH = 800;
-const clampQuestText = (value, max) => String(value ?? '').trim().slice(0, max);
 
 const QUEST_STATUSES = new Set(['active', 'completed', 'failed']);
 const mintQuestId = () => `quest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -64,10 +64,16 @@ const mintQuestId = () => `quest-${Date.now()}-${Math.random().toString(36).slic
  * (✓ sent `undefined`, ✕ removed every id-less row at once), a duplicate id
  * is re-minted, and openedAtMessage clamps to the live transcript so a
  * future stamp can never read as "same turn".
+ *
+ * Since 2026-10-10 (quests P2) this is also the ONE row COMPOSER: ADD_QUEST's
+ * insert and COMPLETE_QUEST's never-tracked terminal insert build their row
+ * through it with `{ status, openedAtMessage }` supplied, so a row written
+ * live equals the same row after a reload — the two inline inserts used to
+ * keep an untyped `source` and a second copy of the id mint each.
  */
 export function sanitizeQuestRecord(raw, { maxMessageCount = Infinity } = {}) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-    const name = typeof raw.name === 'string' ? clampQuestText(raw.name, QUEST_NAME_MAX_LENGTH) : '';
+    const name = cleanText(raw.name, QUEST_NAME_MAX_LENGTH);
     if (!name) return null;
     const id = (typeof raw.id === 'string' && raw.id.trim()) || (typeof raw.id === 'number' && Number.isFinite(raw.id))
         ? String(raw.id).trim().slice(0, 80)
@@ -80,7 +86,7 @@ export function sanitizeQuestRecord(raw, { maxMessageCount = Infinity } = {}) {
     return {
         id,
         name,
-        description: typeof raw.description === 'string' ? clampQuestText(raw.description, QUEST_DESCRIPTION_MAX_LENGTH) : '',
+        description: cleanText(raw.description, QUEST_DESCRIPTION_MAX_LENGTH),
         ...(source && { source }),
         status: QUEST_STATUSES.has(rawStatus) ? rawStatus : 'active',
         addedAt: Number.isFinite(addedAt) ? addedAt : Date.now(),
@@ -122,25 +128,36 @@ export const handlers = {
     ADD_QUEST(state, action) {
         const raw = action.payload || {};
         const payload = {
-            ...raw,
-            name: clampQuestText(raw.name, QUEST_NAME_MAX_LENGTH),
-            description: clampQuestText(raw.description, QUEST_DESCRIPTION_MAX_LENGTH),
+            id: (typeof raw.id === 'string' && raw.id.trim()) || (typeof raw.id === 'number' && Number.isFinite(raw.id))
+                ? String(raw.id).trim().slice(0, 80)
+                : '',
+            name: cleanText(raw.name, QUEST_NAME_MAX_LENGTH),
+            description: cleanText(raw.description, QUEST_DESCRIPTION_MAX_LENGTH),
+            source: raw.source,
         };
         const nameToken = normalizeRefToken(payload.name);
+        const sameName = quest => !!nameToken && normalizeRefToken(quest.name) === nameToken;
+        const fuzzyMatch = nameToken ? questNameMatcher(payload.name) : () => false;
         // Dedupe matches ACTIVE quests only — deliberate (documented 2026-07-23):
         // a completed/failed quest is table history and stays closed; a new quest
         // reusing its name is a new arc ("Guard the caravan" can recur), never a
         // silent reopen that would erase how the first one ended.
+        //
+        // The NAME is identity; a DM-chosen id is only a hint (2026-10-10 quests
+        // P2): the format example carries no id, so an id on a `new` is the
+        // DM's invention, and `{ id: 'q1', name: 'Escort the caravan' }` after
+        // `{ id: 'q1', name: 'Find the Relic' }` used to RENAME the relic arc in
+        // place — no terminal row, no XP. An id match counts only when the
+        // name agrees with the row (exact or the fuzzy near-equality).
         let existing = state.quests.find(quest =>
             quest.status === 'active' && (
-                (payload.id && quest.id === payload.id) ||
-                (nameToken && normalizeRefToken(quest.name) === nameToken)
+                (payload.id && quest.id === payload.id && (!nameToken || sameName(quest) || fuzzyMatch(quest.name)))
+                || sameName(quest)
             )
         );
         // Fuzzy fallback, unambiguous only: a re-phrased "updated" must refresh
         // the tracked arc, not mint a drifted twin beside it.
         if (!existing && nameToken) {
-            const fuzzyMatch = questNameMatcher(payload.name);
             const fuzzy = state.quests.filter(quest => quest.status === 'active' && fuzzyMatch(quest.name));
             if (fuzzy.length === 1) existing = fuzzy[0];
         }
@@ -156,20 +173,17 @@ export const handlers = {
                     : quest),
             };
         }
-        // Fields are picked explicitly — a payload spread would let untrusted
-        // input override status/addedAt or ride junk keys into the save.
-        return {
-            ...state,
-            quests: [...state.quests, {
-                id: payload.id || `quest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                name: payload.name,
-                description: payload.description || '',
-                ...(payload.source ? { source: payload.source } : {}),
-                status: 'active',
-                addedAt: Date.now(),
-                openedAtMessage: (state.messages || []).length,
-            }],
-        };
+        // The one row composer (see sanitizeQuestRecord): typed fields only,
+        // a nameless row is refused, and an id another row already holds is
+        // re-minted — the DM's invented id must not collide with a live arc.
+        const row = sanitizeQuestRecord({
+            ...payload,
+            status: 'active',
+            openedAtMessage: (state.messages || []).length,
+        });
+        if (!row) return state;
+        if (state.quests.some(quest => quest.id === row.id)) row.id = mintQuestId();
+        return { ...state, quests: [...state.quests, row] };
     },
 
     COMPLETE_QUEST(state, action) {
@@ -266,8 +280,7 @@ export const handlers = {
         // (playtest #14: the premise's letter delivery vanished without a trace).
         // Only named object refs qualify; a bare id string that matches nothing
         // (panel buttons, stale ids) stays a no-op.
-        const newName = typeof ref === 'object' ? clampQuestText(ref.name, QUEST_NAME_MAX_LENGTH) : '';
-        if (!newName) return state;
+        if (typeof ref !== 'object') return state;
         // Never-tracked terminal inserts pay NOTHING (DECISIONS.md 2026-09-04,
         // revisiting the 2026-08-26 flat instant tier here): this path exists to
         // record table history (playtest #14 was about the record), and the
@@ -275,18 +288,17 @@ export const handlers = {
         // the DM re-emitting that completion later resurrected it through this
         // insert and paid again (2026-09-04 audit P2). A DM that opens and closes
         // an arc in one response still earns the instant tier via ADD_QUEST +
-        // the same-turn gate above.
-        return {
-            ...state,
-            quests: [...state.quests, {
-                id: ref.id || `quest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                name: newName,
-                description: clampQuestText(ref.description, QUEST_DESCRIPTION_MAX_LENGTH),
-                status: terminalStatus,
-                addedAt: Date.now(),
-                openedAtMessage: (state.messages || []).length,
-            }],
-        };
+        // the same-turn gate above. The one row composer refuses a nameless ref.
+        const row = sanitizeQuestRecord({
+            id: ref.id,
+            name: ref.name,
+            description: ref.description,
+            status: terminalStatus,
+            openedAtMessage: (state.messages || []).length,
+        });
+        if (!row) return state;
+        if (state.quests.some(quest => quest.id === row.id)) row.id = mintQuestId();
+        return { ...state, quests: [...state.quests, row] };
     },
 
     REMOVE_QUEST(state, action) {

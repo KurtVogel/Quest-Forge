@@ -12,6 +12,18 @@ export function isWeaponItem(item) {
     return item?.type === 'weapon';
 }
 
+/**
+ * Armor that actually PROTECTS: an armor row carrying a positive finite
+ * baseAC — the ONE read behind the hero's AC and the auto-equip slot
+ * (2026-10-09 rules-math P2: AC counted armor by `i.baseAC &&` while the slot
+ * asked `Number.isFinite && > 0`, so a `baseAC: "15"` row was AC 16 on the
+ * sheet and refused the slot). A costume (no AC) is armor-shaped but worn by
+ * neither read.
+ */
+export function isWornArmor(item) {
+    return isArmorItem(item) && Number.isFinite(item.baseAC) && item.baseAC > 0;
+}
+
 export function isEquippableItem(item) {
     return isWeaponItem(item) || isArmorItem(item) || isShieldItem(item);
 }
@@ -34,7 +46,7 @@ export function isSlotHeld(inventory = [], item) {
  */
 export function shouldAutoEquip(inventory = [], item) {
     if (!item || item.equipped || isSlotHeld(inventory, item)) return false;
-    if (isArmorItem(item)) return Number.isFinite(item.baseAC) && item.baseAC > 0;
+    if (isArmorItem(item)) return isWornArmor(item);
     if (isShieldItem(item)) return !inventory.some(row => row?.equipped && isWeaponItem(row) && row.twoHanded);
     return false;
 }

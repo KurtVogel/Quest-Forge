@@ -13,7 +13,7 @@ import { appendKeepsakes } from '../../engine/companionGear.js';
 import { CHRONICLE_CHAPTER_TEXT_MAX, CHRONICLE_TITLE_MAX, NPC_DOSSIER_FIELD_MAX, ROLL_HISTORY_CAP } from '../../config/contentLimits.js';
 import { COMBAT_PHASES, isLowLevelSolo } from '../../engine/combatPredicates.js';
 import { dropCondition } from '../../engine/spellcasting.js';
-import { healthWord } from '../../engine/enemyStats.js';
+import { HEALTH_WORDS, healthWord } from '../../engine/enemyStats.js';
 import {
     appendBondMoments,
     appendCallbackHooks,
@@ -657,6 +657,14 @@ function companionText(value, max) {
 export function companionStatus(hp, maxHp) {
     return healthWord(hp, maxHp, 'downed');
 }
+
+/**
+ * The party statuses the engine recognizes — the health ladder's words plus
+ * the companion's own down word and the explicit `dead` the DM / END_COMBAT
+ * set. Derived from the ladder (2026-10-09 enemy-stats nit: a literal copy in
+ * the load heal); anything else on a loaded record re-derives from HP.
+ */
+export const COMPANION_STATUSES = new Set([...HEALTH_WORDS, 'downed', 'dead']);
 
 export function normalizeCompanion(payload = {}, existing = {}) {
     const merged = { ...existing, ...payload };

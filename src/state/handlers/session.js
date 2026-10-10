@@ -24,6 +24,7 @@ import { DEATH_SAVE_OUTCOMES, PLAYER_SNAPSHOT_STATUSES } from '../../engine/deat
 import { normalizeDeathSaves } from '../../engine/rules.js';
 import { archiveDescriptiveLabels, dedupeNpcRoster, healPromotedStoryMemoryTwins, migrateLegacyNpc } from '../../engine/npcRoster.js';
 import {
+    COMPANION_STATUSES,
     ensureCompanionRosterRecord,
     normalizeCompanion,
     normalizeRecentTransactions,
@@ -38,11 +39,6 @@ import {
 
 /** Campaign name as typed at adventure start (the save-slot list renders it). */
 const SESSION_NAME_MAX = 120;
-
-// The party statuses the engine actually recognizes (companionStatus + the
-// explicit 'dead' the DM/END_COMBAT set). Anything else on a loaded record
-// re-derives from HP.
-const COMPANION_STATUSES = new Set(['healthy', 'bloodied', 'critical', 'downed', 'dead']);
 
 /** Strict boolean for a persisted flag: "true"/"false" strings from a hand edit coerce. */
 function toFlag(value) {

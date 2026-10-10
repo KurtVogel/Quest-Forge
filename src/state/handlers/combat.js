@@ -2,18 +2,16 @@
  * Combat: start/end, the intent lock, atomic exchange commits, and narration
  * acknowledgement.
  */
-import { computeACFromInventory, getModifier } from '../../engine/rules.js';
+import { computeACFromInventory, formatModifier, getModifier } from '../../engine/rules.js';
 import { rollDie, rollWithModifier } from '../../engine/dice.ts';
 import { awardExperience, estimateCombatExperience } from '../../engine/progression.js';
 import {
     canonicalEnemyId,
     clampEnemyAC,
     clampEnemyHP,
-    enemyHealthCondition,
     enemyOutcome,
-    normalizeEnemyAttackProfile,
-    normalizeEnemyConditions,
-    validateEnemySaveBonus,
+    healthWord,
+    typeEnemyFields,
 } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES } from '../../engine/combatPredicates.js';
 import { reconcileStartingCombatExchange } from '../../engine/combatWire.js';
@@ -30,32 +28,22 @@ import { appendRollHistory, clearSustainedSpellState, reviveCharacter, systemMes
 function normalizeCombatEnemy(enemy, index, usedIds) {
     const hp = clampEnemyHP(enemy?.hp);
     const ac = clampEnemyAC(enemy?.ac);
-    const initiative = rollDie(20);
-    // Engine-owned enemy turns need canonical attack stats. Accept them from the DM's
-    // combat_start when given (validated through the shared sanitizer — defense-in-depth even
-    // though the parser already ran); otherwise the exchange engine fills the flat
-    // ENEMY_DEFAULT_* at roll time, so older saves whose enemies lack these fields still work.
-    const attackProfile = normalizeEnemyAttackProfile(enemy);
-    const saveBonus = validateEnemySaveBonus(enemy?.saveBonus);
-
-    // Whitelist projection, no raw spread: every key validateCombatStart emits is
-    // set explicitly below, and an unknown key on this trust boundary must not
-    // survive into combat state — the sanitizeLoadedEnemy policy (2026-08-29 audit).
+    // Whitelist projection, no raw spread (the sanitizeLoadedEnemy policy,
+    // 2026-08-29 audit) — and the SAME typed composer as the parser and the
+    // load twin (2026-10-09 enemy-stats P2: this copy wrote `String(name)` and
+    // `!!isUndead`). Offensive stats the DM gave ride validated; absent ones
+    // fall to the exchange engine's flat ENEMY_DEFAULT_* at roll time, so older
+    // saves whose enemies lack these fields still work.
     return {
         id: canonicalEnemyId(enemy, index, usedIds),
-        name: String(enemy?.name || `Enemy ${index + 1}`).trim().slice(0, 100) || `Enemy ${index + 1}`,
+        ...typeEnemyFields(enemy, { fallbackName: `Enemy ${index + 1}` }),
         maxHp: hp,
         hp,
         ac,
-        ...attackProfile,
-        ...(saveBonus !== undefined && { saveBonus }),
-        initiative,
-        condition: enemyHealthCondition(hp, hp),
-        conditions: normalizeEnemyConditions(enemy?.conditions),
+        initiative: rollDie(20),
+        condition: healthWord(hp, hp),
         combatStatus: 'active',
         defending: false,
-        isUndead: !!enemy?.isUndead,
-        boss: enemy?.boss === true,
     };
 }
 
@@ -255,7 +243,7 @@ export const handlers = {
             rollHistory: appendRollHistory(state, playerInitiativeRoll),
             messages: [
                 ...state.messages,
-                systemMessage(`**Initiative** — ${state.character?.name || 'You'} rolled **${playerInitiativeRoll.total}** (d20: ${playerInitiativeRoll.rolls.join(', ')}${dexMod ? `, DEX ${dexMod >= 0 ? '+' : ''}${dexMod}` : ''}).`),
+                systemMessage(`**Initiative** — ${state.character?.name || 'You'} rolled **${playerInitiativeRoll.total}** (d20: ${playerInitiativeRoll.rolls.join(', ')}${dexMod ? `, DEX ${formatModifier(dexMod)}` : ''}).`),
             ],
         };
     },

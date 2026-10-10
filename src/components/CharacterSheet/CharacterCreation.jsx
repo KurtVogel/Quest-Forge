@@ -6,7 +6,7 @@ import { downloadCharacterExport } from './exportFile.js';
 import { countRosterCharacters, listRosterCharacters, loadRosterCharacter, saveRosterCharacter, deleteRosterCharacter } from '../../state/rosterStore.js';
 import { RACES, RACE_LIST } from '../../data/races.js';
 import { CLASSES, CLASS_LIST } from '../../data/classes.js';
-import { SKILL_ABILITIES, computeACFromInventory, getModifier, getProficiencyBonus, getSkillModifier } from '../../engine/rules.js';
+import { SKILL_ABILITIES, computeACFromInventory, formatModifier, getModifier, getProficiencyBonus, getSkillModifier } from '../../engine/rules.js';
 import { getAbilityGuidance } from '../../engine/abilityGuidance.js';
 import { requestPortrait } from '../../llm/providers/imageGen.js';
 import { getMachineryGeminiKey } from '../../llm/machinery.js';
@@ -15,8 +15,6 @@ import { CAMPAIGN_PREMISE_MAX_LENGTH, normalizeCampaignPremise } from '../../con
 import { buildPremiseFromStarter, findPremiseStarter } from '../../data/premiseStarters.js';
 import PremiseStarters from './PremiseStarters.jsx';
 import './CharacterSheet.css';
-
-const formatModifier = (mod) => (mod >= 0 ? `+${mod}` : `${mod}`);
 
 const STEPS = ['name', 'race', 'class', 'stats', 'skills', 'confirm', 'adventure'];
 
