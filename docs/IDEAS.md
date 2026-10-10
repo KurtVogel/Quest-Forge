@@ -3299,3 +3299,27 @@ check. The build: `composeEnemy(raw, { index, usedIds, initiative })` with the l
 all three boundaries, the Set derived from the table and the prompt sentence from the Set, the alias
 fold + `LONG_REST_CLEARS`, one ceiling shelf for the hero's AC, a `damageEnemy(enemy, amount)` owning
 the stored health word, and the parity pins.
+
+### [strengthening] A lane's context belongs to the lane; a wire's keep rule is its load twin's — status: `idea` (2026-10-10 audit, quests + scribe Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
+Two rules from the quests + scribe Lap-4 pass (2026-10-10), every number measured against the real
+reducer, `normalizeEvents`, `buildSystemPrompt`, `namesMatch` and the real `buildKnownStances`.
+**(1)** The Scribe exports six `buildKnown*` context builders and BOTH of its call sites compose them
+by hand with the same arguments and pass them back as six of `runScribe`'s fifteen named options —
+one copy in `turnOrchestrator.js`, one in `ChatPanel.jsx` (the 0 %-coverage DOM file, so the combat
+beat's narrative-only context is pinned nowhere, and that copy also omits the `sourceMessageId` stamp:
+✕ on a victory narration retracts none of the canon it minted). The reflection, which builds its
+context INSIDE, is the shape the Scribe should have. Rule: a machinery call takes `state` + the turn's
+texts and owns its projection (`buildScribeContext`); the test pins the projection, not each caller.
+**(2)** `normalizeQuestUpdate` keeps an id-only `new`, `applyQuestUpdates` passes it, ADD_QUEST inserts
+`name: ''` — `- **** [id: q-7]: No details` on every DM turn, an empty panel row — and the load twin
+drops the row silently; and a DM-chosen id outranks the name, so re-using "q1" for a different
+agreement renames the tracked arc in place (the first arc erased, no terminal row, no XP). The 10-09
+"middle composer is the lax one" shape, one boundary earlier. Rule: for every wire → reducer → load
+triple, the wire's keep rule and the load's keep rule are the SAME predicate, pinned by feeding the
+wire's output through the load twin. Smaller twins from the same pass: `companionNameMatches` is a
+first-token copy of `namesMatch` that hands "Old Hesk"'s sword to "Old Marn"; `ITEM_GRANT_LEDGER_WINDOW`
+12 mirrors `RECENT_ITEM_GRANT_EXTENDED_WINDOW` 12 by comment; `reflectionText` is `cleanText` without
+its type guard; the upgrade director's quest slice is `baseDirectorContext`'s under another key. The
+build: the name-requiring wire + its load-twin pin, the id match gated on name compatibility, one quest
+row composer, `buildScribeContext` + the stamp on the combat beat, `namesMatch` at the handoff, the
+shared constants and the anchor-vs-schema pin.
