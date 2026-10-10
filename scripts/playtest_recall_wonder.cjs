@@ -49,6 +49,20 @@ function envKey(name) {
 const GEMINI_API_KEY = envKey('GEMINI_API_KEY');
 const OPENAI_API_KEY = envKey('OPENAI_API_KEY');
 
+// Class variants (2026-10-08): QF_CLASS / QF_RACE / QF_NAME / QF_GENDER / QF_SKILLS (comma) / QF_EXPERTISE (comma)
+// QF_ATTACK = the hero's fight line (full probe). Defaults keep the original Fighter run.
+const HERO_CLASS = process.env.QF_CLASS || 'Fighter';
+const HERO_RACE = process.env.QF_RACE || 'Human';
+const HERO_NAME = process.env.QF_NAME || 'Aino Halme';
+const HERO_GENDER = process.env.QF_GENDER || 'woman';
+const HERO_SKILLS = (process.env.QF_SKILLS || 'Athletics,Perception').split(',');
+const HERO_EXPERTISE = (process.env.QF_EXPERTISE || '').split(',').filter(Boolean);
+const HERO_ATTACK = process.env.QF_ATTACK || '';
+// QF_COMBAT = pipe-separated combat lines cycled per round, {t} = the target; QF_CLASSLINES = pipe-separated extra turns after the fight.
+const HERO_COMBAT = (process.env.QF_COMBAT || 'I attack the {t} with my longsword.').split('|');
+const HERO_CLASSLINES = (process.env.QF_CLASSLINES || '').split('|').filter(Boolean);
+let combatRound = 0;
+
 const PROBE = process.argv[2];
 const runLabel = process.argv[3];
 const provider = process.argv[4];
@@ -403,7 +417,7 @@ async function resolveCombat(page, maxIters = 14) {
                 await waitForIdle(page);
                 continue;
             }
-            const action = `I attack the ${target.n} with my longsword.`;
+            const action = HERO_COMBAT[combatRound++ % HERO_COMBAT.length].replace('{t}', target.n);
             note('combat', `${action} (enemy hp ${target.hp})`);
             await typeAndSend(page, action);
             await waitForIdle(page);
@@ -493,22 +507,22 @@ async function bootAndCreateHero(page, { premiseMode, premiseText }) {
     await page.click('.creation-card'); // Forge a New Hero
     await delay(800);
     await page.waitForSelector('.creation-input');
-    if (!await reactFill(page, `el => (el.placeholder || '').startsWith('Enter your character')`, 'Aino Halme')) {
+    if (!await reactFill(page, `el => (el.placeholder || '').startsWith('Enter your character')`, HERO_NAME)) {
         throw new Error('Name input not found.');
     }
-    await reactFill(page, `el => (el.placeholder || '').startsWith('Gender')`, 'woman');
+    await reactFill(page, `el => (el.placeholder || '').startsWith('Gender')`, HERO_GENDER);
     await reactFill(page, `el => (el.placeholder || '').startsWith('Appearance')`,
-        'Tall and broad-shouldered, pale skin weathered brown on the face and forearms, dark hair cropped to the scalp, a notched left ear.');
+        process.env.QF_APPEARANCE || 'Tall and broad-shouldered, pale skin weathered brown on the face and forearms, dark hair cropped to the scalp, a notched left ear.');
     await delay(400);
     await page.click('.char-creation-actions .btn-primary');
     await delay(900);
     await expectOnScreen(page, 'Choose your race', 'after identity');
-    await clickByText(page, '.creation-card', 'Human');
+    await clickByText(page, '.creation-card', HERO_RACE);
     await delay(300);
     await page.click('.char-creation-actions .btn-primary');
     await delay(900);
     await expectOnScreen(page, 'Choose your class', 'after race');
-    await clickByText(page, '.creation-card', 'Fighter');
+    await clickByText(page, '.creation-card', HERO_CLASS);
     await delay(300);
     await page.click('.char-creation-actions .btn-primary');
     await delay(900);
@@ -518,10 +532,10 @@ async function bootAndCreateHero(page, { premiseMode, premiseText }) {
     await page.click('.char-creation-actions .btn-primary');
     await delay(900);
     await expectOnScreen(page, 'Choose your skills', 'after stats');
-    await clickByText(page, '.skill-choice-card', 'Athletics');
-    await delay(250);
-    await clickByText(page, '.skill-choice-card', 'Perception');
-    await delay(250);
+    for (const sk of HERO_SKILLS) { await clickByText(page, '.skill-choice-card', sk); await delay(250); }
+    if (HERO_EXPERTISE.length) {
+        for (const sk of HERO_EXPERTISE) { await clickByText(page, '.expertise-selection .skill-choice-card', sk); await delay(250); }
+    }
     await page.click('.char-creation-actions .btn-primary');
     await delay(1000);
     await expectOnScreen(page, 'stands ready', 'hero reveal');
@@ -1211,8 +1225,8 @@ const FULL_PLAN = [
     ['travel', 'In the morning I set out along the road toward wherever the job takes me, taking in the way as I go.'],
     ['travel', 'I keep to the road and ask the first traveller I meet what lies ahead.'],
     ['travel', 'I press on toward the place the job named.'],
-    ['fight', 'I move off the road to hunt for whatever is threatening this stretch, sword drawn, looking for a fight.'],
-    ['fight', 'I attack whoever or whatever stands in my way with my longsword.'],
+    ['fight', HERO_ATTACK ? `I move off the road to hunt for whatever is threatening this stretch, looking for a fight. ${HERO_ATTACK}` : 'I move off the road to hunt for whatever is threatening this stretch, sword drawn, looking for a fight.'],
+    ['fight', HERO_ATTACK || 'I attack whoever or whatever stands in my way with my longsword.'],
     ['loot', 'When it is over I catch my breath and search what is left for anything worth taking.'],
     ['ordinary', 'I tend my wounds and take stock of what I have.'],
     ['ooc', 'OOC: quick table check — what am I carrying, roughly how much coin do I have left, and what job am I on?'],
@@ -1363,6 +1377,17 @@ async function runFullProbe(page) {
         const r = await fullTurn(page, kind, action);
         if (r.row.combatIters || r.row.delta.combatStarted) combatSeen = true;
     }
+    if (!combatSeen) {
+        await page.evaluate(() => window.__QF_DISPATCH__?.({ type: 'START_COMBAT', payload: { enemies: [
+            { name: 'road bandit', hp: 11, ac: 13, attackBonus: 3, damage: '1d6+1' },
+            { name: 'second bandit', hp: 11, ac: 13, attackBonus: 3, damage: '1d6+1' },
+        ] } }));
+        await delay(1500); await waitForIdle(page);
+        note('full', 'DEBUG FOE: the DM fielded no foe; START_COMBAT staged two road bandits (11 HP, AC 13, +3, 1d6+1).');
+        await fullTurn(page, 'fight', HERO_COMBAT[0].replace('{t}', 'nearest bandit'));
+        combatSeen = true;
+    }
+    for (const line of HERO_CLASSLINES) await fullTurn(page, 'class', line);
     const mid = await snap(page);
     results.push({ kind: 'mid-run', counts: mid?.counts, questRows: mid?.questRows, location: mid?.location, level: mid?.level, exp: mid?.exp, combatSeen });
     note('mid-run', `counts ${JSON.stringify(mid?.counts)}; combatSeen=${combatSeen}; quests ${JSON.stringify(mid?.questRows)}`);
