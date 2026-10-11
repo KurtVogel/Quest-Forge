@@ -108,7 +108,7 @@ async function run() {
             llmProvider: 'gemini',
             apiKey,
             imageApiKey,
-            model: 'gemini-3.1-pro-preview'
+            model: 'gemini-3.8-flash'
         }));
     }, { apiKey: GEMINI_API_KEY, imageApiKey: XAI_API_KEY });
 

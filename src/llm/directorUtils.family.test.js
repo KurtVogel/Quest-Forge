@@ -26,7 +26,7 @@ const state = () => ({
         pendingRegionalFronts: { key: 'the saltreach|200', region: 'The Saltreach', locationName: 'Aldermill' },
         pendingWonder: { key: 'wonder-200-lull', requestedAtMessage: 200, onDemand: false },
     },
-    settings: { apiKey: 'k', llmProvider: 'gemini', model: 'gemini-3.1-pro-preview' },
+    settings: { apiKey: 'k', llmProvider: 'gemini', model: 'gemini-3.8-flash' },
     combat: { active: false },
     currentLocation: 'Aldermill',
     character: { name: 'Rauha', race: 'human', class: 'cleric', level: 4, background: 'A ferryman\'s daughter.' },
@@ -103,7 +103,7 @@ describe('runDirector — the one call', () => {
         expect(parsed).toEqual({ hooks: [1, 2] });
         expect(sendMessageMock).toHaveBeenCalledTimes(1);
         expect(sendMessageMock.mock.calls[0][0]).toEqual({
-            provider: 'gemini', apiKey: 'k', model: 'gemini-3.1-pro-preview',
+            provider: 'gemini', apiKey: 'k', model: 'gemini-3.8-flash',
             systemPrompt: 'PROMPT', messageHistory: [], userMessage: '{"a":1}', temperature: 0.9,
         });
     });

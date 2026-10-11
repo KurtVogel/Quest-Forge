@@ -18,7 +18,7 @@ const baseState = () => ({
         premise: 'A quiet river town with debts.',
         pendingWonder: { key: 'wonder-60-lull', requestedAtMessage: 60, onDemand: false },
     },
-    settings: { apiKey: 'k', llmProvider: 'gemini', model: 'gemini-3.1-pro-preview', preset: 'grimdark', paceDial: 'slow-burn', customSystemPrompt: 'Low magic. Nobody casts spells in public.' },
+    settings: { apiKey: 'k', llmProvider: 'gemini', model: 'gemini-3.8-flash', preset: 'grimdark', paceDial: 'slow-burn', customSystemPrompt: 'Low magic. Nobody casts spells in public.' },
     combat: { active: false },
     character: { name: 'Rauha', race: 'human', class: 'cleric', level: 4, background: 'A ferryman\'s daughter.' },
     party: [{ name: 'Ketta', role: 'scout' }],
@@ -79,7 +79,7 @@ describe('generateWonder', () => {
             ['The Sky Barge', 'standalone'],
         ]);
         const call = sendMessageMock.mock.calls[0][0];
-        expect(call.model).toBe('gemini-3.1-pro-preview');
+        expect(call.model).toBe('gemini-3.8-flash');
         expect(call.systemPrompt).toContain('At least ONE hook must be "standalone"');
         expect(call.systemPrompt).toContain('WONDER, not danger');
         expect(call.temperature).toBe(0.9);

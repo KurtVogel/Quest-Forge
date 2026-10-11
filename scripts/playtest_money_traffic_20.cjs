@@ -36,7 +36,7 @@ function readEnvKey(name) {
 // PLAYTEST_PROVIDER=gemini|openai picks the DM; the Gemini key is ALWAYS required
 // because the memory machinery (RAG/Scribe/audits) is Gemini-only.
 const PROVIDER = (process.env.PLAYTEST_PROVIDER || 'gemini').toLowerCase();
-const DEFAULT_MODELS = { gemini: 'gemini-3.1-pro-preview', openai: 'gpt-5.6-terra' };
+const DEFAULT_MODELS = { gemini: 'gemini-3.8-flash', openai: 'gpt-5.6-terra' };
 const MODEL = process.env.PLAYTEST_MODEL || DEFAULT_MODELS[PROVIDER];
 const GEMINI_API_KEY = readEnvKey('GEMINI_API_KEY');
 const DM_API_KEY = PROVIDER === 'openai' ? readEnvKey('OPENAI_API_KEY') : GEMINI_API_KEY;

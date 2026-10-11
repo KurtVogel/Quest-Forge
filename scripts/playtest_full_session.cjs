@@ -336,7 +336,7 @@ async function phaseCreate() {
             llmProvider: 'gemini',
             apiKey,
             imageApiKey: '', // scene art out of scope
-            model: 'gemini-3.1-pro-preview',
+            model: 'gemini-3.8-flash',
         }));
     }, { apiKey: GEMINI_API_KEY });
     await page.reload({ waitUntil: 'networkidle2' });

@@ -12,7 +12,7 @@
  * story, the narrators labeled A/B/C in a fixed random order.
  *
  *   npm.cmd run eval:bakeoff
- *   $env:QF_BAKEOFF_MODELS="gemini:gemini-3.1-pro-preview,openai:gpt-6.1-sol,openai:gpt-6-astra"
+ *   $env:QF_BAKEOFF_MODELS="gemini:gemini-3.8-flash,openai:gpt-6.1-sol,openai:gpt-6-astra"
  *
  * Output: docs/DM_BAKEOFF_<date>.md (the blind doc: turns + a judge table by
  * letter) and scripts/.eval-out/bakeoff/<stamp>/ (raw replies, scores, and
@@ -46,7 +46,7 @@ try {
 const KEYS = { gemini: process.env.GEMINI_API_KEY, openai: process.env.OPENAI_API_KEY, xai: process.env.XAI_API_KEY };
 if (!KEYS.gemini) { console.error('GEMINI_API_KEY is required (the judge).'); process.exit(2); }
 
-const MODEL_SPEC = process.env.QF_BAKEOFF_MODELS || 'gemini:gemini-3.1-pro-preview,openai:gpt-6.1-sol,openai:gpt-6-astra';
+const MODEL_SPEC = process.env.QF_BAKEOFF_MODELS || 'gemini:gemini-3.8-flash,openai:gpt-6.1-sol,openai:gpt-6-astra';
 const DMS = MODEL_SPEC.split(',').map(s => s.trim()).filter(Boolean).map(spec => {
     const [provider, ...rest] = spec.split(':');
     const model = rest.join(':');

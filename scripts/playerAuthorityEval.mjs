@@ -20,7 +20,7 @@
  *                    never diagnoses (the pass condition)
  *
  * A thinking-free Gemini Flash judge scores each reply (JSON only). Providers
- * are Gemini Pro and GPT Terra — playtests never use the Grok DM (Vesa,
+ * are Gemini Flash and GPT Terra — playtests never use the Grok DM (Vesa,
  * 2026-09-14). Keys come from the environment or the git-ignored .env
  * (GEMINI_API_KEY required — DM lane + judge; OPENAI_API_KEY optional).
  *
@@ -63,7 +63,7 @@ if (!GEMINI_KEY) {
 }
 
 const PROVIDERS = {
-    gemini: { provider: 'gemini', apiKey: GEMINI_KEY, model: process.env.QF_EVAL_GEMINI_MODEL || 'gemini-3.1-pro-preview' },
+    gemini: { provider: 'gemini', apiKey: GEMINI_KEY, model: process.env.QF_EVAL_GEMINI_MODEL || 'gemini-3.8-flash' },
     openai: { provider: 'openai', apiKey: OPENAI_KEY, model: process.env.QF_EVAL_OPENAI_MODEL || 'gpt-5.6-terra' },
 };
 const wanted = (process.env.QF_EVAL_PROVIDERS || 'gemini,openai').split(',').map(s => s.trim()).filter(Boolean);

@@ -5,7 +5,7 @@
  * in every run — differences are the narrator's.
  *
  *   node scripts/playtest_provider_compare.cjs <label> <provider> <model>
- *   node scripts/playtest_provider_compare.cjs gemini gemini gemini-3.1-pro-preview
+ *   node scripts/playtest_provider_compare.cjs gemini gemini gemini-3.8-flash
  *   node scripts/playtest_provider_compare.cjs terra  openai gpt-5.6-terra
  *
  * Requires `npm run preview` serving the production build on :4173 (the dev

@@ -5,6 +5,7 @@
  */
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
+import { PROVIDERS } from '../llm/adapter.js';
 
 function makeLocalStorageStub() {
     const store = new Map();
@@ -55,8 +56,8 @@ function fullHero(overrides = {}) {
 
 describe('settings (localStorage)', () => {
     it('round-trips settings through save/load', () => {
-        saveSettings({ llmProvider: 'gemini', model: 'gemini-3.1-pro-preview' });
-        expect(loadSettings()).toEqual({ llmProvider: 'gemini', model: 'gemini-3.1-pro-preview' });
+        saveSettings({ llmProvider: 'gemini', model: 'gemini-3.8-flash' });
+        expect(loadSettings()).toEqual({ llmProvider: 'gemini', model: 'gemini-3.8-flash' });
     });
 
     it('returns null when nothing has been saved', () => {
@@ -915,9 +916,19 @@ describe('loadSettings types every field (2026-09-16 providers-adapter P2 — th
             __proto__junk: 'x', evil: 'x'.repeat(10),
         }));
         expect(loadSettings()).toEqual({
-            apiKey: '', geminiApiKey: '', imageApiKey: 'xai-abc', model: '', ruleset: 'simplified5e', customSystemPrompt: '',
+            apiKey: '', geminiApiKey: '', imageApiKey: 'xai-abc', model: 'gemini-3.8-flash', ruleset: 'simplified5e', customSystemPrompt: '',
             paceDial: 'standard', memoryInspector: false, firebaseConfig: { apiKey: 'fb', authDomain: 'x.app' },
         });
+    });
+
+    it('a retired Gemini Pro model id falls to the DM model, Flash (Pro retired 2026-10-11)', () => {
+        saveSettings({ llmProvider: 'gemini', model: 'gemini-3.1-pro-preview' });
+        expect(loadSettings().model).toBe('gemini-3.8-flash');
+        saveSettings({ llmProvider: 'gemini', model: 'gemini-2.5-pro' });
+        expect(loadSettings().model).toBe('gemini-3.8-flash');
+        // a blank model on an otherwise valid blob is not a model either
+        saveSettings({ llmProvider: 'openai', model: '' });
+        expect(loadSettings().model).toBe(PROVIDERS.openai.models[0].id);
     });
 
     it('a well-formed blob round-trips unchanged, including a valid provider, preset, and pace', () => {

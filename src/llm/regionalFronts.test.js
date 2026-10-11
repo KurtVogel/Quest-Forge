@@ -21,7 +21,7 @@ const baseState = () => ({
         premise: 'A drowned delta ruled by toll-weirs.',
         pendingRegionalFronts: { region: 'The Harchwold', locationName: 'Saltmarsh Landing' },
     },
-    settings: { apiKey: 'k', llmProvider: 'gemini', model: 'gemini-3.1-pro-preview' },
+    settings: { apiKey: 'k', llmProvider: 'gemini', model: 'gemini-3.8-flash' },
     combat: { active: false },
     character: { name: 'Rauha', race: 'human', class: 'cleric', level: 4 },
     locations: [

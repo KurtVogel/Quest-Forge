@@ -51,7 +51,7 @@ if (!GEMINI_KEY) {
 }
 
 const PROVIDERS = {
-    gemini: { provider: 'gemini', apiKey: GEMINI_KEY, model: process.env.QF_EVAL_GEMINI_MODEL || 'gemini-3.1-pro-preview' },
+    gemini: { provider: 'gemini', apiKey: GEMINI_KEY, model: process.env.QF_EVAL_GEMINI_MODEL || 'gemini-3.8-flash' },
     xai: { provider: 'xai', apiKey: XAI_KEY, model: process.env.QF_EVAL_XAI_MODEL || 'grok-4.3' },
 };
 const wanted = (process.env.QF_EVAL_PROVIDERS || 'gemini,xai').split(',').map(s => s.trim()).filter(Boolean);

@@ -64,7 +64,7 @@ const worstCaseState = () => ({
         pendingRegionalFronts: { key: 'the saltreach|200', region: 'The Saltreach', locationName: 'Aldermill', atMessage: 200 },
         pendingWonder: { key: 'wonder|200', requestedAtMessage: 200, onDemand: false },
     },
-    settings: { apiKey: 'k', llmProvider: 'gemini', model: 'gemini-3.1-pro-preview', paceDial: 'standard' },
+    settings: { apiKey: 'k', llmProvider: 'gemini', model: 'gemini-3.8-flash', paceDial: 'standard' },
     combat: { active: false },
     currentLocation: 'Aldermill',
     character: {

@@ -70,7 +70,7 @@ export const initialGameState = {
         apiKey: '',
         geminiApiKey: '', // Gemini machinery key (RAG/Scribe/journal) — required when the DM provider is not Gemini
         imageApiKey: '', // xAI (Grok) key for scene-art image generation — separate from the chat key
-        model: 'gemini-3.1-pro-preview',
+        model: 'gemini-3.8-flash',
         preset: 'classicFantasy',
         ruleset: 'simplified5e',
         paceDial: 'standard', // Campaign pace setpoint: slow-burn | standard | breakneck (world-tempo thermostat)

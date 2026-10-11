@@ -81,7 +81,7 @@ const GEMINI_API_KEY = envKey('GEMINI_API_KEY');
 const OPENAI_API_KEY = envKey('OPENAI_API_KEY');
 
 const DM_ARMS = {
-    gemini: { provider: 'gemini', model: 'gemini-3.1-pro-preview', label: 'Gemini Pro' },
+    gemini: { provider: 'gemini', model: 'gemini-3.8-flash', label: 'Gemini Flash' },
     terra: { provider: 'openai', model: 'gpt-5.6-terra', label: 'GPT Terra' },
 };
 const dmArmName = String(ARGS.dm || 'gemini');

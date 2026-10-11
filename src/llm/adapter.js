@@ -230,12 +230,10 @@ export const PROVIDERS = {
     gemini: {
         name: 'Google Gemini',
         models: [
-            { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Recommended)', description: 'Most capable Gemini model' },
-            { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', description: 'Newest Flash — stable, near-Pro quality at a fraction of the price (1M context, 64k output)' },
+            { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Recommended)', description: 'The DM model — newest Flash, stable, fast and cheap (1M context, 64k output)' },
             { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', description: 'Fast frontier-class, great value' },
             { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', description: 'Cheapest current-gen' },
             { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Previous gen, fast and affordable' },
-            { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Previous gen pro model' },
         ],
     },
     openai: {

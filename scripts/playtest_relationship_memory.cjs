@@ -183,7 +183,7 @@ async function createCharacter(page) {
             llmProvider: 'gemini',
             apiKey,
             imageApiKey: '',
-            model: 'gemini-3.1-pro-preview',
+            model: 'gemini-3.8-flash',
             customSystemPrompt: [
                 '*** PLAY TEST SCENARIO *** conversation and relationships.',
                 'This session tests interpersonal play. Lean strongly toward narrating social',

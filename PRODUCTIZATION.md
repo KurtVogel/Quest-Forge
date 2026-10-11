@@ -39,7 +39,7 @@ _Created: 2026-09-06 (scheduled productization task, first run). Last research p
 
 | Fact | Source |
 |---|---|
-| **Production posture is hosted-Gemini, not BYOK.** DM on Gemini Pro, machinery on Gemini Flash, the player does not bring a key. OpenAI stays experimental, Grok shelved for narration (kept for scene art). | DECISIONS.md 2026-08-22 |
+| **Production posture is hosted-Gemini, not BYOK.** DM on Gemini 3.8 Flash (Pro retired 2026-10-11), machinery on Gemini Flash, the player does not bring a key. OpenAI stays experimental, Grok shelved for narration (kept for scene art). | DECISIONS.md 2026-08-22 |
 | BYOK still works in the shipped client (Settings → AI Provider) and costs us nothing per turn. The multi-provider DM surface stays as "cheap optionality". | CLAUDE.md, adapter.js |
 | **No backend exists.** A server-side key proxy is *launch-critical* and *not started*. | IDEAS.md "Hosted-tier key proxy" |
 | Cost basis (measured call inventory): ordinary turn ≈ 1 DM call (~14k in / ~1.1k out) + 1 Scribe call + 3 embeddings; a combat exchange = 2 DM calls. Re-estimated 2026-09-07 at **~$0.05/turn uncached, ~$0.04 with the cache hitting** (§2). Cache-hit rate has **never been observed** — re-confirmed 2026-09-08 (third grep): no `usageMetadata` / `cachedContentTokenCount` / `thoughtsTokenCount` read exists anywhere in `src/`. | IDEAS.md Launch & Monetization; STATUS.md focus track A |
@@ -164,7 +164,7 @@ What it means for the hosted door:
 
 ### Option C — Tiered subscription with *standard unlimited* + *premium credits* (Friends & Fables shape)
 
-- Standard turns run on the efficient narrator (Flash-class) and are unlimited within a fair-use ceiling; premium turns on Gemini Pro burn credits. The subscription is a floor, credits the upsell.
+- Standard turns run on the efficient narrator (Flash-class) and are unlimited within a fair-use ceiling; premium turns on a pricier narrator (GPT-6.1 Sol today) burn credits. The subscription is a floor, credits the upsell.
 - Pros: "unlimited" on the price page without whale bankruptcy; a clean upsell to the better narrator. Cons: requires the Flash narrator to pass our own quality bar (eval:combat + eval:memory + golden fixtures) — **not yet tested**; two narrators = two prompt-cache prefixes and two tuning baselines.
 
 ### Option D — Pure pay-per-use wallet (OpenRouter shape)

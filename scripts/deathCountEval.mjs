@@ -13,7 +13,7 @@
  * over-the-body ending, the DIED terminal). A thinking-free Gemini Flash judge
  * scores each narration, JSON only.
  *
- * Providers: Gemini Pro + GPT Terra (never Grok). Keys from env / .env.
+ * Providers: Gemini Flash + GPT Sol (never Grok). Keys from env / .env.
  *   npm run eval:death                       (both providers, 5 runs)
  *   QF_EVAL_PROVIDERS=gemini QF_EVAL_RUNS=3 npm run eval:death
  * Report: scripts/.eval-out/death-count-<date>.md (+ .json).
@@ -42,7 +42,7 @@ const OPENAI_KEY = process.env.OPENAI_API_KEY;
 if (!GEMINI_KEY) { console.error('GEMINI_API_KEY is required (DM lane and the judge).'); process.exit(2); }
 
 const PROVIDERS = {
-    gemini: { provider: 'gemini', apiKey: GEMINI_KEY, model: process.env.QF_EVAL_GEMINI_MODEL || 'gemini-3.1-pro-preview' },
+    gemini: { provider: 'gemini', apiKey: GEMINI_KEY, model: process.env.QF_EVAL_GEMINI_MODEL || 'gemini-3.8-flash' },
     openai: { provider: 'openai', apiKey: OPENAI_KEY, model: process.env.QF_EVAL_OPENAI_MODEL || 'gpt-5.6-terra' },
 };
 const wanted = (process.env.QF_EVAL_PROVIDERS || 'gemini,openai').split(',').map(s => s.trim()).filter(Boolean);

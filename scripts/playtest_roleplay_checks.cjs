@@ -379,7 +379,7 @@ async function createCharacter(page) {
             llmProvider: 'gemini',
             apiKey,
             imageApiKey: '',
-            model: 'gemini-3.1-pro-preview',
+            model: 'gemini-3.8-flash',
             customSystemPrompt: [
                 '*** PLAY TEST SCENARIO *** narration roll proposal-heavy.',
                 'This session tests the out-of-combat check proposal system. Lean strongly toward',

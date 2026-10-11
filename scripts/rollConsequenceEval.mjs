@@ -19,7 +19,7 @@
  *   live_choice         the narration ends on a live choice / open question
  *
  * PASS = matches_stakes && single_consequence && no_second_check && competence_kept.
- * Providers: Gemini Pro + GPT Terra (never Grok). Keys from env / .env.
+ * Providers: Gemini Flash + GPT Sol (never Grok). Keys from env / .env.
  *
  *   npm.cmd run eval:consequence
  *   $env:QF_EVAL_PROVIDERS="gemini"; npm.cmd run eval:consequence
@@ -52,7 +52,7 @@ const OPENAI_KEY = process.env.OPENAI_API_KEY;
 if (!GEMINI_KEY) { console.error('GEMINI_API_KEY is required (DM lane and the judge).'); process.exit(2); }
 
 const PROVIDERS = {
-    gemini: { provider: 'gemini', apiKey: GEMINI_KEY, model: process.env.QF_EVAL_GEMINI_MODEL || 'gemini-3.1-pro-preview' },
+    gemini: { provider: 'gemini', apiKey: GEMINI_KEY, model: process.env.QF_EVAL_GEMINI_MODEL || 'gemini-3.8-flash' },
     openai: { provider: 'openai', apiKey: OPENAI_KEY, model: process.env.QF_EVAL_OPENAI_MODEL || 'gpt-5.6-terra' },
 };
 const wanted = (process.env.QF_EVAL_PROVIDERS || 'gemini,openai').split(',').map(s => s.trim()).filter(Boolean);

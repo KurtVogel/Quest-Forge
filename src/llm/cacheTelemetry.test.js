@@ -198,7 +198,7 @@ describe('inspector capture — captureUsage / captureProviderNote', () => {
     beforeEach(() => resetInspector());
 
     it('records the row with cachedShare and keeps a capped history, newest last', () => {
-        captureUsage({ lane: 'dm', mode: 'standard', provider: 'gemini', model: 'gemini-3.1-pro-preview', promptTokens: 40000, cachedTokens: 30000, outputTokens: 400, promptChars: 130000 });
+        captureUsage({ lane: 'dm', mode: 'standard', provider: 'gemini', model: 'gemini-3.8-flash', promptTokens: 40000, cachedTokens: 30000, outputTokens: 400, promptChars: 130000 });
         const { lastUsage, usageHistory } = getInspectorSnapshot();
         expect(lastUsage).toMatchObject({ lane: 'dm', mode: 'standard', provider: 'gemini', promptTokens: 40000, cachedTokens: 30000, outputTokens: 400, cachedShare: 0.75, promptChars: 130000 });
         expect(usageHistory).toHaveLength(1);

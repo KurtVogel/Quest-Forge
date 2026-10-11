@@ -39,6 +39,14 @@ export function sanitizeSettings(raw) {
     if ('llmProvider' in raw && typeof raw.llmProvider === 'string' && Object.prototype.hasOwnProperty.call(PROVIDERS, raw.llmProvider)) {
         out.llmProvider = raw.llmProvider;
     }
+    // A model id the picker no longer offers (the Gemini Pro rows were retired
+    // 2026-10-11 — heavy, expensive, more censored) falls to the provider's first
+    // row: the picker is a <select>, so a stored id outside the list rendered
+    // blank and the DM call went to a model the app had dropped on purpose.
+    if (typeof out.model === 'string') {
+        const provider = PROVIDERS[out.llmProvider || 'gemini'];
+        if (provider && !provider.models.some(m => m.id === out.model)) out.model = provider.models[0].id;
+    }
     if ('preset' in raw && typeof raw.preset === 'string' && Object.prototype.hasOwnProperty.call(PRESETS, raw.preset)) {
         out.preset = raw.preset;
     }

@@ -30,7 +30,7 @@ beforeEach(() => {
 
 const baseOptions = {
     apiKey: 'test-key',
-    model: 'gemini-3.1-pro-preview',
+    model: 'gemini-3.8-flash',
     systemPrompt: 'You are a DM.',
     messageHistory: [],
     userMessage: 'I open the door.',
@@ -41,7 +41,7 @@ describe('sendMessage', () => {
         sendGeminiMessage.mockResolvedValue('narration');
         const result = await sendMessage({ ...baseOptions, provider: 'gemini' });
         expect(result).toBe('narration');
-        expect(sendGeminiMessage).toHaveBeenCalledWith(expect.objectContaining({ apiKey: 'test-key', model: 'gemini-3.1-pro-preview' }));
+        expect(sendGeminiMessage).toHaveBeenCalledWith(expect.objectContaining({ apiKey: 'test-key', model: 'gemini-3.8-flash' }));
         expect(sendOpenAIMessage).not.toHaveBeenCalled();
     });
 

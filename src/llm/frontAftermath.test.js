@@ -22,7 +22,7 @@ const baseState = () => ({
         premise: 'A drowned delta ruled by toll-weirs.',
         pendingFrontAftermath: { frontId: 'front-tithe', title: 'The Tithe Collectors' },
     },
-    settings: { apiKey: 'k', llmProvider: 'gemini', model: 'gemini-3.1-pro-preview' },
+    settings: { apiKey: 'k', llmProvider: 'gemini', model: 'gemini-3.8-flash' },
     combat: { active: false },
     character: { name: 'Rauha', race: 'human', class: 'cleric', level: 4 },
     fronts: [

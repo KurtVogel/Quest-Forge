@@ -15,7 +15,7 @@ import { parseResponse } from '../src/llm/responseParser.js';
 
 const provider = process.env.QF_EVAL_PROVIDER || (process.env.OPENAI_API_KEY ? 'openai' : 'gemini');
 const apiKey = provider === 'openai' ? process.env.OPENAI_API_KEY : process.env.GEMINI_API_KEY;
-const model = process.env.QF_EVAL_MODEL || (provider === 'openai' ? 'gpt-4o-mini' : 'gemini-3.1-pro-preview');
+const model = process.env.QF_EVAL_MODEL || (provider === 'openai' ? 'gpt-4o-mini' : 'gemini-3.8-flash');
 
 const baseFighter = {
     name: 'Astra',

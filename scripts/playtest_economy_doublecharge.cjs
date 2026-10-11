@@ -214,7 +214,7 @@ async function run() {
             llmProvider: 'gemini',
             apiKey,
             imageApiKey: 'xai-dummy',
-            model: 'gemini-3.1-pro-preview',
+            model: 'gemini-3.8-flash',
         }));
     }, { apiKey: GEMINI_API_KEY });
     await page.reload();

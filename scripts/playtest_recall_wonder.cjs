@@ -5,15 +5,15 @@
  *             engine/recallDossier.js + the orchestrator's recall lane).
  *   PROBE 2 — the wonder die (engine/wonder.js + llm/wonderDirector.js).
  *
- *   node scripts/playtest_recall_wonder.cjs recall gemini gemini gemini-3.1-pro-preview
- *   node scripts/playtest_recall_wonder.cjs wonder gemini gemini gemini-3.1-pro-preview
+ *   node scripts/playtest_recall_wonder.cjs recall gemini gemini gemini-3.8-flash
+ *   node scripts/playtest_recall_wonder.cjs wonder gemini gemini gemini-3.8-flash
  *   node scripts/playtest_recall_wonder.cjs wonder terra  openai gpt-5.6-terra
  *   node scripts/playtest_recall_wonder.cjs full flash gemini gemini-3.8-flash   (PROBE 3: a general ordinary-play run)
- *   node scripts/playtest_recall_wonder.cjs tells pro   gemini gemini-3.1-pro-preview (PROBE 4: hero tells — habit → recognition → "That's not me")
+ *   node scripts/playtest_recall_wonder.cjs tells pro   gemini gemini-3.8-flash (PROBE 4: hero tells — habit → recognition → "That's not me")
  *   node scripts/playtest_recall_wonder.cjs tells terra openai gpt-5.6-terra
- *   node scripts/playtest_recall_wonder.cjs proof pro   gemini gemini-3.1-pro-preview (PROBE 5: place-card return visit + wound callback + recap taps)
+ *   node scripts/playtest_recall_wonder.cjs proof pro   gemini gemini-3.8-flash (PROBE 5: place-card return visit + wound callback + recap taps)
  *
- * Never the xAI/Grok DM (Vesa, 2026-09-14) — Gemini Pro and GPT Terra only.
+ * Never the xAI/Grok DM (Vesa, 2026-09-14) — Gemini Flash and GPT Sol only (Pro retired 2026-10-11).
  * The Gemini Flash machinery (Scribe, journal, embeddings) is identical in every
  * run; Flash is ALSO the script's own ground-truth extractor and judge.
  *

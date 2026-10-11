@@ -20,7 +20,7 @@
  *   paragraphs    blank-line paragraph count (the 3-paragraph ceiling)
  *
  * PASS = normal_life && anchor && echo && handle && !menu && !urgent.
- * Providers: Gemini Pro + GPT Terra (never Grok). Keys from env / .env.
+ * Providers: Gemini Flash + GPT Sol (never Grok). Keys from env / .env.
  *
  *   npm.cmd run eval:openings
  *   $env:QF_EVAL_SAMPLES="1"; npm.cmd run eval:openings
@@ -51,7 +51,7 @@ const GEMINI_KEY = process.env.GEMINI_API_KEY;
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 if (!GEMINI_KEY) { console.error('GEMINI_API_KEY is required (DM lane and the judge).'); process.exit(2); }
 const PROVIDERS = {
-    gemini: { provider: 'gemini', apiKey: GEMINI_KEY, model: process.env.QF_EVAL_GEMINI_MODEL || 'gemini-3.1-pro-preview' },
+    gemini: { provider: 'gemini', apiKey: GEMINI_KEY, model: process.env.QF_EVAL_GEMINI_MODEL || 'gemini-3.8-flash' },
     openai: { provider: 'openai', apiKey: OPENAI_KEY, model: process.env.QF_EVAL_OPENAI_MODEL || 'gpt-5.6-terra' },
 };
 const wanted = (process.env.QF_EVAL_PROVIDERS || 'gemini,openai').split(',').map(s => s.trim()).filter(Boolean);

@@ -3,11 +3,11 @@
  * journey per DM provider, aimed at the travel-link system.
  *
  *   node scripts/playtest_geography.cjs <label> <provider> <model>
- *   node scripts/playtest_geography.cjs gemini gemini gemini-3.1-pro-preview
+ *   node scripts/playtest_geography.cjs gemini gemini gemini-3.8-flash
  *   node scripts/playtest_geography.cjs terra  openai gpt-5.6-terra
  *
- * Never run with the xAI/Grok provider (Vesa, 2026-09-14) — Gemini Pro and
- * GPT Terra only. The Gemini machinery (Scribe) is identical in every run.
+ * Never run with the xAI/Grok provider (Vesa, 2026-09-14) — Gemini Flash and
+ * GPT Sol only. The Gemini machinery (Scribe) is identical in every run.
  *
  * What the run establishes and checks:
  *   1. The premise states geography outright (bearings, a named road, a

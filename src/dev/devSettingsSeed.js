@@ -42,7 +42,7 @@ export function seedDevSettings() {
     } else if (geminiKey) {
         settings.llmProvider = 'gemini';
         settings.apiKey = geminiKey;
-        settings.model = 'gemini-3.1-pro-preview';
+        settings.model = 'gemini-3.8-flash';
     }
 
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
