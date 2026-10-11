@@ -289,6 +289,33 @@ describe('DM rest replay guard', () => {
         expect(echoed.messages).toHaveLength(rested.messages.length);
     });
 
+    it('a past-tense mention of resting is not a request to rest again (2026-10-09 class playtest: two providers posted a second Short Rest)', () => {
+        const rested = gameReducer(makeFighter({ currentHP: 10 }), {
+            type: 'TAKE_REST',
+            payload: 'short',
+            meta: { source: 'dm', sourceId: 'msg-1', playerMessage: 'I take a short rest and pray.' },
+        });
+        const echoed = gameReducer(rested, {
+            type: 'TAKE_REST',
+            payload: 'short',
+            meta: { source: 'dm', sourceId: 'msg-2', playerMessage: 'I pick up where I left off and look around to see what has changed while I was resting.' },
+        });
+        expect(echoed.messages).toHaveLength(rested.messages.length);
+        const rememberedPast = gameReducer(rested, {
+            type: 'TAKE_REST',
+            payload: 'short',
+            meta: { source: 'dm', sourceId: 'msg-3', playerMessage: 'Having rested, I ask about the road.' },
+        });
+        expect(rememberedPast.messages).toHaveLength(rested.messages.length);
+        // the present-tense frame still asks for one
+        const asksAgain = gameReducer(rested, {
+            type: 'TAKE_REST',
+            payload: 'short',
+            meta: { source: 'dm', sourceId: 'msg-4', playerMessage: "I'm resting here until the storm passes." },
+        });
+        expect(asksAgain.messages.at(-1).content).toContain('Short Rest');
+    });
+
     it('always suppresses an exact same-source replay, even with rest intent', () => {
         const rested = gameReducer(makeFighter({ currentHP: 10 }), {
             type: 'TAKE_REST',

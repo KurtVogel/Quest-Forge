@@ -31,8 +31,14 @@ const RECENT_REST_MESSAGE_WINDOW = 8;
 function playerMessageRequestsRest(playerMessage) {
     const text = String(playerMessage || '');
     if (!text.trim()) return false;
-    // "rest of the loot"/"the rest of them" is partitive, not resting.
-    if (/\brest(?:s|ed|ing)?\b(?!\s+of\b)/i.test(text)) return true;
+    // "rest of the loot"/"the rest of them" is partitive, not resting. The base
+    // form asks for a rest ("I take a long rest", "we rest here"); "rested" is a
+    // past rest and "resting" one only in a present-tense frame ("I'm resting",
+    // "we start resting") — "…what changed while I was resting" opened this
+    // bypass and posted a SECOND Short Rest on two providers (2026-10-09 class
+    // playtest, cleric-sol 76/79 + cleric-flash 101/104).
+    if (/\brests?\b(?!\s+of\b)/i.test(text)) return true;
+    if (/\b(?:am|'m|are|'re|start|begin|keep|try)\s+(?:\w+\s+)?resting\b/i.test(text)) return true;
     return /\b(sleep|nap|slumber|make camp|set up camp|camp for|bed down|turn in for)\b/i.test(text);
 }
 

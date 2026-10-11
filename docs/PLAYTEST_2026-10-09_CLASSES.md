@@ -26,10 +26,10 @@ Eleven runs, ~310 turns, three DMs. No crashes, no JSON/prompt leaks, no state-l
 
 ## Findings
 
-### P2 — a DM-emitted rest re-applies when the player's line merely mentions "resting" (reproduced on Sol AND Flash)
+### P2 (FIXED 2026-10-11) — a DM-emitted rest re-applies when the player's line merely mentions "resting" (reproduced on Sol AND Flash)
 `cleric-sol` 76/79 and `cleric-flash` 101/104: a `Short Rest` banner posts; the next player line — "…see what has changed **while I was resting**" — produces a **second** identical `Short Rest` with no rest asked for. Cause: `playerMessageRequestsRest` in [src/state/handlers/resources.js:31](src/state/handlers/resources.js:31) matches any `rest|rests|rested|resting` outside "rest of", so the `recentRests` replay guard's "the player asked to rest again" bypass opens on a past-tense reference. Effect: short-rest resources and hit dice recharge a second time for free; a long rest would re-heal fully. Fix: match only intent forms (`I (take|go to|settle in for|make) … rest`, `let's rest`, `rest (here|until|for|a while)`), never `was/been/after resting`; add a fixture on the exact cleric line. Two providers, two clerics, same line — this is the player-phrasing class the ledger was built to resist.
 
-### P2 — the Scribe loot audit grants a second potion when the DM maps a flavour name to a catalog key (cleric-flash t26)
+### P2 (FIXED 2026-10-11) — the Scribe loot audit grants a second potion when the DM maps a flavour name to a catalog key (cleric-flash t26)
 The DM narrated ONE "squat stoneware flask … *Restorative Draft*" and evented it as `Potion of Healing` (catalog key — correct behaviour). The audit then saw a narrated item "Restorative Draft" with no event match and granted it too: inventory gained `Potion of Healing×1` AND `Restorative Draft×1` for one flask. The 09-20 `looseSameItem` pairing needs ≥ 2 shared tokens and these share none. Candidate fix: when a narration has exactly ONE unmatched narrated item and the response's events granted exactly ONE unmatched item of the same kind (consumable ↔ consumable), pair them one-to-one regardless of tokens — the count is the evidence. This is the inverse of the 10-07 P1 (a keyed purchase beside a named find) on the audit lane.
 
 ### Known trade-off, now measured — the recap-bundle strip under-charges the opening's second purchase in 6 of 6 Gemini runs

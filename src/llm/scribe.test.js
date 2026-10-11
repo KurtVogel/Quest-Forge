@@ -1150,7 +1150,14 @@ describe('Scribe loot persistence audit', () => {
 
         it('still grants a genuinely different item that only shares descriptive words', async () => {
             expect(await auditWith(['Rusty iron dagger'], ['rusty iron key'])).toEqual(['rusty iron key']);
-            expect(await auditWith(['Hempen Rope (50 ft)'], ['iron ft ring'])).toEqual(['iron ft ring']);
+            // the parenthetical "(50 ft)" is not a shared token; the rope itself is narrated so the ring is the lone stranger and is granted
+            expect(await auditWith(['Hempen Rope (50 ft)'], ['hempen rope', 'iron ft ring'])).toEqual(['iron ft ring']);
+        });
+
+        it('a LONE unmatched narrated item beside a LONE unmatched evented item is the same object even with no shared token (cleric-flash t26, 2026-10-10)', async () => {
+            expect(await auditWith(['Potion of Healing'], ['Restorative Draft'])).toEqual([]);
+            // two narrated strangers beside one evented item: the count no longer says which — both are granted
+            expect(await auditWith(['Potion of Healing'], ['Restorative Draft', 'bone whistle'])).toEqual(['Restorative Draft', 'bone whistle']);
         });
 
         it('pairs one event item with one narrated item — a second same-kind object is still granted', async () => {

@@ -452,6 +452,23 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
         else if (recentlyGranted) console.warn(`[Scribe] Narrated item "${item.name}" was already granted moments ago (ledger); skipping.`);
         return !alreadyApplied && !recentlyGranted;
     });
+    // ONE narrated item nobody matched beside ONE event-granted item nobody
+    // matched is the same object under a name with no shared token: the DM
+    // narrated a "Restorative Draft" flask and evented it as the catalog
+    // `Potion of Healing` (correct), and the audit minted a second potion
+    // (2026-10-10 class playtest, cleric-flash t26). The count is the evidence
+    // where the tokens cannot be; over-matching only ever skips a grant. When
+    // the two names DO share a token, looseSameItem has already judged them
+    // different (a drifted head noun — "rusty iron dagger" / "rusty iron key")
+    // and the count does not overrule it.
+    const shareNoToken = (a, b) => overlapCount(
+        tokenSet(String(a).replace(/\([^)]*\)/g, ' '), { minLength: 2 }),
+        tokenSet(String(b).replace(/\([^)]*\)/g, ' '), { minLength: 2 }),
+    ) === 0;
+    if (missingItems.length === 1 && unpairedAppliedNames.length === 1 && shareNoToken(unpairedAppliedNames[0], missingItems[0].name)) {
+        console.warn(`[Scribe] Narrated item "${missingItems[0].name}" is the event path's lone "${unpairedAppliedNames[0]}" under another name; skipping.`);
+        missingItems.length = 0;
+    }
 
     // Coins route through the replay-guarded grant so a reward the DM re-narrates on a
     // later turn (already suppressed on the event path) cannot re-enter via the audit.
