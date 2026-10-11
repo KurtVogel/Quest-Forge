@@ -3323,3 +3323,34 @@ its type guard; the upgrade director's quest slice is `baseDirectorContext`'s un
 build: the name-requiring wire + its load-twin pin, the id match gated on name compatibility, one quest
 row composer, `buildScribeContext` + the stamp on the combat beat, `namesMatch` at the handoff, the
 shared constants and the anchor-vs-schema pin.
+
+### [strengthening] A row keyed by its text has one composer, reading the record; a shelf's pieces exported beside it are the shelf copied; two regexes for one grammar are two grammars — status: `idea` (2026-10-11 audit, response-parsing + vector-memory-rag Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
+Three rules from the response-parsing + vector-memory-rag Lap-4 pass (2026-10-11), every number
+measured against the real parser, the real reducer and the real arbiter with the adapter mocked.
+**(1)** A RAG row's identity is its TEXT — the dedupe, the mutable-category prune, the `retiredTexts`
+prune and the ✕ retraction all key on it — and that text has eleven composers: the fact text at four
+sites, the `[Location: X]` narrative / player text at three, the journal row at two. The live fact
+lane composes from the DM's raw WIRE element before `ADD_WORLD_FACTS` has trimmed, clamped, folded
+`knownBy` or rejected it, so 4 of 4 measured wire shapes embed a text the seed never produces: a
+restatement the record refused becomes a permanent immutable-category row (rejected canon is still
+canon to retrieval), `knownBy: "public"` embeds as `[SECRET — known only to: public] …`, `{ "text": … }`
+embeds the string `undefined`, a 900-char fact embeds whole against the record's 400 — while the
+Scribe's facts, the dominant source, are never embedded live at all. Rule: a cache keyed by a derived
+string has ONE composer per category, and a live lane reads the RECORD after dispatch, never the wire.
+**(2)** `parseBalancedJsonAt` calls itself the one extract → parse → repair walk, and `extractBalancedJson`
++ `repairJson` are exported beside it — so five consumers (two directors, the nudge, the enrichment
+lane with ten chained anchor scans, the roll arbiter) import the pieces and re-assemble the walk, and
+the arbiter forgot the repair: a reply truncated by one `}` flips an agency REJECTION into an ACCEPT.
+The two "loose" parsers (`parseJsonObjectLoose`, `tryParseDirectorJson`) disagree on trailing prose,
+and the weaker one serves the journal cadence. Rule: grep the importers of a shelf's PARTS; a part
+imported with its sibling is the shelf re-implemented.
+**(3)** `findFencedJsonBlock` learned bare ``` fences on 09-05; the second-fence warning and the
+trailing strip still spell ```json only — so two fenced blocks, one bare, ship raw JSON as story in
+either order, and in one order the 50 gold and the quest vanish with no warning. The prose detector's
+`KNOWN_SKILLS` is the same shape one level down: a private substring list beside the engine's
+word-boundary `findSkillInText`, reading "Int" as Intimidation and "Thieves' Tools" as an unknown +0
+key, where the engine would refuse the roll out loud. Rule: a grammar is one function with one list of
+matches; a vocabulary has one lookup. The build: `parseLlmJson` with repair inside and every consumer
+on it, the finder's block list read by the strip and the warning, `findSkillInText` in the detector,
+one RAG composer per category + the record-reading live lane for both fact lanes, `withEmbedDb`,
+`addMemory` folded into the batch path with the combat narrative stamped, and the pins.
