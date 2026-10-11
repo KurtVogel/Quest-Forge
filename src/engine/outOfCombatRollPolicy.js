@@ -1,6 +1,6 @@
 import { sendMessage } from '../llm/adapter.js';
 import { getPreCommitConfig } from '../llm/machinery.js';
-import { extractBalancedJson } from '../llm/utils/jsonExtractor.js';
+import { parseLlmJson } from '../llm/utils/jsonExtractor.js';
 
 const SOCIAL_SKILLS = new Set(['persuasion', 'deception', 'intimidation', 'charisma']);
 
@@ -109,17 +109,13 @@ Output ONLY the JSON, no prose outside the JSON.`;
             signal, // the turn's Stop cancels the arbiter too (2026-09-07 P2)
         });
 
-        const jsonMatch = extractBalancedJson(response, 'rolls_evaluation');
-        if (!jsonMatch) {
+        // The shared extract → parse → repair walk (2026-10-11 audit P2): this
+        // lane's inline copy had NO repair, so a reply truncated by its final
+        // `}` fell to the sync rules alone and a verdict the arbiter had
+        // written as an agency REJECTION landed as an accept.
+        const result = parseLlmJson(response, { anchors: ['rolls_evaluation'], wholeObject: true })?.value;
+        if (!result) {
             console.warn('[RollPolicy] Scribe review returned invalid JSON, falling back to regex.');
-            return reviewOutsideCombatRollsSync(rolls, playerMessage);
-        }
-
-        let result;
-        try {
-            result = JSON.parse(jsonMatch.json);
-        } catch {
-            console.warn('[RollPolicy] Scribe JSON parsing failed, falling back to regex.');
             return reviewOutsideCombatRollsSync(rolls, playerMessage);
         }
 

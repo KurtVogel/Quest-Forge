@@ -107,6 +107,18 @@ function applyQuestUpdates(events, dispatch, { openOnly = false } = {}) {
  * exchange machine spends that slot (the engine may refuse to take on
  * suspicion). `location` rides the orchestrator's own SET_LOCATION.
  */
+/**
+ * The DM lane's source stamp (2026-10-11): a fact the DM's own `world_facts`
+ * minted remembers the message it rode in on (`opts.sourceMessageId`, the
+ * committed DM row), exactly like the Scribe's — so ✕ on that message
+ * retracts it from the record as the RAG lane retracts its row. Absent when
+ * the caller has no message (the roll resolver's post-roll replay).
+ */
+function factLaneMeta(opts) {
+    const id = opts?.sourceMessageId;
+    return typeof id === 'string' && id ? { meta: { sourceMessage: id } } : {};
+}
+
 function applyFightOpeningChannels(events, dispatch, getState, opts) {
     const meta = buildTransactionMeta(events, opts);
     applyStartingItems(events, dispatch, getState?.(), opts);
@@ -118,7 +130,7 @@ function applyFightOpeningChannels(events, dispatch, getState, opts) {
     }
     applyQuestUpdates(events, dispatch, { openOnly: true });
     if ((events.worldFacts || []).length > 0) {
-        dispatch({ type: 'ADD_WORLD_FACTS', payload: events.worldFacts });
+        dispatch({ type: 'ADD_WORLD_FACTS', payload: events.worldFacts, ...factLaneMeta(opts) });
     }
     for (const npc of events.npcUpdates || []) {
         dispatch({ type: 'UPDATE_NPC', payload: npc });
@@ -481,7 +493,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     }
 
     if (events.worldFacts.length > 0) {
-        dispatch({ type: 'ADD_WORLD_FACTS', payload: events.worldFacts });
+        dispatch({ type: 'ADD_WORLD_FACTS', payload: events.worldFacts, ...factLaneMeta(opts) });
     }
 
     for (const npc of events.npcUpdates) {

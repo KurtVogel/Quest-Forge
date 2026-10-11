@@ -13,51 +13,88 @@ export function stripMarkdownFences(text) {
 }
 
 /**
- * Extract → parse → repair one keyword-anchored balanced object, returning the
- * parsed value AND where it starts in `text` (callers slicing narrative off the
- * front need the index). ONE implementation of the anchors→parse→repair walk —
- * responseParser's unfenced fallback used to re-implement it inline just for
- * `startIndex` (2026-08-29 audit). Never throws — null on failure.
+ * Parse one JSON text, repairing ONCE before giving up (trailing commas,
+ * truncation, an unclosed string). Returns the parsed value — which may be
+ * a JSON `null` — or `undefined` when nothing parses; never throws.
+ * THE parse→repair step every LLM-JSON reader shares (2026-10-11 audit: the
+ * walk had seven inline copies, and the roll arbiter's copy had no repair —
+ * a reply truncated by its final `}` flipped a REJECT into an accept).
+ * `label` names the lane in the one-line warning a repair earns.
  */
-export function parseBalancedJsonAt(text, keyword) {
-    const jsonMatch = extractBalancedJson(text, keyword);
-    if (!jsonMatch?.json) return null;
+export function parseJsonText(json, { label = null } = {}) {
+    if (typeof json !== 'string' || !json.trim()) return undefined;
     try {
-        return { value: JSON.parse(jsonMatch.json), startIndex: jsonMatch.startIndex };
+        return JSON.parse(json);
     } catch {
         try {
-            return { value: JSON.parse(repairJson(jsonMatch.json)), startIndex: jsonMatch.startIndex };
-        } catch {
-            return null;
+            const parsed = JSON.parse(repairJson(json));
+            if (label) console.warn(`[${label}] JSON repaired before parsing.`);
+            return parsed;
+        } catch (e) {
+            if (label) console.warn(`[${label}] JSON parse failed after repair:`, e.message);
+            return undefined;
         }
     }
 }
 
 /**
- * Parse a JSON object from LLM output, trying repair and optional keyword anchors.
+ * Locate the JSON object an LLM reply carries: the first anchor key that
+ * extracts a balanced object wins (`{ json, startIndex }`); with
+ * `wholeObject`, a reply that IS the object (fences stripped, starting at
+ * `{`) is read whole as the fallback — the machinery's "Output ONLY the JSON"
+ * contract, whose schema keys are an ASSUMPTION the model may omit
+ * (2026-09-16 scribe P1). `startIndex` is relative to `text` for an anchored
+ * hit and null for the whole-object read (its text was fence-stripped).
+ */
+export function extractLlmJson(text, { anchors = [], wholeObject = false } = {}) {
+    const source = String(text || '');
+    for (const anchor of (Array.isArray(anchors) ? anchors : [anchors])) {
+        if (typeof anchor !== 'string' || !anchor) continue;
+        const match = extractBalancedJson(source, anchor);
+        if (match?.json) return match;
+    }
+    if (!wholeObject) return null;
+    const cleaned = stripMarkdownFences(source);
+    if (!cleaned.startsWith('{')) return null;
+    const end = scanBalancedObject(cleaned, 0);
+    return { json: end > 0 ? cleaned.slice(0, end) : cleaned, startIndex: null };
+}
+
+/**
+ * THE extract → parse → repair walk: `extractLlmJson` then `parseJsonText`,
+ * accepting only a plain object. Returns `{ value, startIndex }` or null —
+ * never throws. Every reader of LLM JSON runs on this (the DM parser's
+ * unfenced lane, the directors, the Scribe, the nudge, the enrichment lane,
+ * the roll arbiter, the journal, the fodder review).
+ */
+export function parseLlmJson(text, { anchors = [], wholeObject = false, label = null } = {}) {
+    const extracted = extractLlmJson(text, { anchors, wholeObject });
+    if (!extracted) return null;
+    const value = parseJsonText(extracted.json, { label });
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return { value, startIndex: extracted.startIndex };
+}
+
+/**
+ * One keyword-anchored object with where it starts in `text` (callers
+ * slicing narrative off the front need the index). Never throws — null on
+ * failure. A thin name over parseLlmJson, kept for the DM parser's lane.
+ */
+export function parseBalancedJsonAt(text, keyword) {
+    return parseLlmJson(text, { anchors: [keyword] });
+}
+
+/**
+ * Parse a JSON object from LLM output: keyword anchors first, then the reply
+ * read whole when it IS the object. The same walk the directors run
+ * (2026-10-11 audit: this twin used `JSON.parse(cleaned)` on the WHOLE
+ * fence-stripped string, so a fenced object followed by prose with no anchor
+ * hit parsed through the director's walk and returned null here — and the
+ * weaker twin was the one the journal cadence and the fodder review read).
  * Never throws — returns null on failure.
  */
 export function parseJsonObjectLoose(text, keywords = []) {
-    const cleaned = stripMarkdownFences(text);
-    if (!cleaned) return null;
-
-    for (const keyword of keywords) {
-        const parsed = parseBalancedJsonAt(cleaned, keyword);
-        if (parsed) return parsed.value;
-    }
-    // No anchor matched — a response that IS the object, fences already stripped.
-    if (cleaned.startsWith('{')) {
-        try {
-            return JSON.parse(cleaned);
-        } catch {
-            try {
-                return JSON.parse(repairJson(cleaned));
-            } catch {
-                // fall through
-            }
-        }
-    }
-    return null;
+    return parseLlmJson(text, { anchors: keywords, wholeObject: true })?.value ?? null;
 }
 
 /**

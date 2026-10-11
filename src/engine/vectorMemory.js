@@ -19,6 +19,12 @@ import {
     GEMINI_EMBED_DIMENSIONS,
     GEMINI_EMBED_SCHEMA,
 } from '../llm/providers/gemini.js';
+import { findSubjectsInText, nameTokensPresent, textWordSet } from './textMatch.js';
+import { formatSecrecyTag } from './storyMemory.js';
+
+// The presence tokenizer lives on the tokenizer shelf (textMatch.js, 2026-10-11);
+// re-exported so the RAG module's tagging helper keeps its historical name here.
+export { findSubjectsInText };
 
 // --- IndexedDB persistence for embeddings ---
 const EMBED_DB_NAME = 'rpg-vector-memory';
@@ -71,6 +77,34 @@ function campaignKeyRange(sessionId) {
 }
 
 /**
+ * THE embed-store transaction (2026-10-11 audit P2 — four hand-rolled
+ * open / close / settle patterns, one of which closed only on `tx.onerror`):
+ * opens the database, runs `run(store, done)` inside one transaction of
+ * `mode`, resolves with whatever `run` handed to `done` once the transaction
+ * COMMITS, rejects when it aborts or errors, and closes the connection on
+ * every path — a failed put (quota) used to leave the handle open forever,
+ * blocking every later version upgrade (2026-09-06 audit). Callers decide
+ * what a failure means (the cache is non-critical: every writer swallows,
+ * the reader degrades to []).
+ */
+function withEmbedDb(mode, run) {
+    return openEmbedDB().then(db => new Promise((resolve, reject) => {
+        let value;
+        let failure = null;
+        const tx = db.transaction(EMBED_STORE, mode);
+        tx.oncomplete = () => { db.close(); resolve(value); };
+        tx.onabort = () => { db.close(); reject(failure || tx.error || new Error('Embedding cache transaction aborted')); };
+        tx.onerror = () => { failure = tx.error; };
+        try {
+            run(tx.objectStore(EMBED_STORE), (result) => { value = result; });
+        } catch (e) {
+            failure = e;
+            try { tx.abort(); } catch { /* already aborting */ }
+        }
+    }));
+}
+
+/**
  * ONE readwrite transaction for a batch of puts and deletes (2026-09-29
  * vector-memory P2): the seed used to open a connection and a transaction
  * per persisted row — 1,501 `indexedDB.open` calls at the cap on a cold
@@ -83,25 +117,10 @@ function syncPersistedEmbeddings({ put = [], remove = [] } = {}) {
     const puts = put.filter(e => e && e.sessionId != null);
     const removes = remove.filter(e => e && e.sessionId != null);
     if (puts.length === 0 && removes.length === 0) return Promise.resolve();
-    return openEmbedDB().then(db => new Promise(resolve => {
-        const tx = db.transaction(EMBED_STORE, 'readwrite');
-        const store = tx.objectStore(EMBED_STORE);
+    return withEmbedDb('readwrite', (store) => {
         for (const e of removes) store.delete([e.sessionId, e.text]);
         for (const e of puts) store.put(e);
-        // A failed put (quota) aborts the transaction and used to leave the
-        // connection open forever — one leaked handle per failed write, which
-        // then blocks every later version upgrade (2026-09-06 audit; the
-        // 2026-07-12 persistence.js class, one store over).
-        const settle = () => { db.close(); resolve(); };
-        tx.oncomplete = settle;
-        tx.onabort = settle;
-        tx.onerror = () => db.close();
-    })).catch(() => {});
-}
-
-/** Fire-and-forget single-row write — the live lane (one memory at a time). */
-function persistEmbedding(entry) {
-    syncPersistedEmbeddings({ put: [entry] });
+    }).catch(() => {});
 }
 
 /** Fire-and-forget removal of specific persisted rows (eviction / stale-prune). */
@@ -130,28 +149,20 @@ function isVectorShape(value) {
 function clearPersistedEmbeddings() {
     // Resolves only after the IndexedDB clear COMMITS, so a caller can order a
     // subsequent load/seed behind it. Never rejects — the cache is non-critical.
-    return openEmbedDB().then(db => new Promise(resolve => {
-        const tx = db.transaction(EMBED_STORE, 'readwrite');
-        tx.objectStore(EMBED_STORE).clear();
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onabort = () => { db.close(); resolve(); };
-    })).catch(() => {});
+    return withEmbedDb('readwrite', (store) => { store.clear(); }).catch(() => {});
 }
 
 async function loadPersistedEmbeddings(sessionId) {
     try {
-        const db = await openEmbedDB();
-        // `return await`, not bare `return`: a bare returned promise's rejection
-        // (request.onerror) skips this try/catch and rejects the caller's seed
-        // instead of degrading to [] (found by the 2026-07-28 audit tests).
-        return await new Promise((resolve, reject) => {
-            const tx = db.transaction(EMBED_STORE, 'readonly');
-            // The campaign's OWN key range — the read scales with this
-            // campaign, not with every campaign on the device (2026-09-29 P1).
-            const request = tx.objectStore(EMBED_STORE).getAll(campaignKeyRange(sessionId));
+        // The campaign's OWN key range — the read scales with this campaign,
+        // not with every campaign on the device (2026-09-29 P1). `return
+        // await`, not bare `return`: a rejection must land in THIS try so
+        // the seed degrades to [] (found by the 2026-07-28 audit tests).
+        return await withEmbedDb('readonly', (store, done) => {
+            const request = store.getAll(campaignKeyRange(sessionId));
             request.onsuccess = () => {
                 const entries = Array.isArray(request.result) ? request.result : [];
-                const compatible = entries.filter(entry => (
+                done(entries.filter(entry => (
                     entry && typeof entry === 'object'
                     // Only the active campaign's rows — another campaign's memories
                     // must never leak into this session's retrieval (the range
@@ -166,12 +177,8 @@ async function loadPersistedEmbeddings(sessionId) {
                     // A corrupted/tampered row with NaN/non-number elements would
                     // yield NaN cosine scores and pollute the store.
                     && entry.vector.every(Number.isFinite)
-                )).map(typeCachedRow);
-                resolve(compatible);
+                )).map(typeCachedRow));
             };
-            request.onerror = () => { db.close(); reject(request.error); };
-            tx.onabort = () => db.close();
-            tx.oncomplete = () => db.close();
         });
     } catch {
         return [];
@@ -350,91 +357,20 @@ function normalizeSubjects(subjects) {
     return list.length > 0 ? list : null;
 }
 
-// Name tokens that identify nobody on their own — articles, particles, and
-// titles ("The Steward" must match on "steward", never on "the"; "Lady
-// Celeste" on "celeste", never on every scene containing a lady).
-const NAME_TOKEN_STOP_WORDS = new Set([
-    'the', 'and', 'of', 'von', 'van', 'der', 'den', 'del', 'della',
-    'lady', 'lord', 'sir', 'dame', 'master', 'mistress', 'miss', 'madam',
-    'captain', 'king', 'queen', 'prince', 'princess', 'mother', 'father',
-    'brother', 'sister', 'old', 'young', 'elder',
-]);
-
-function identifyingNameTokens(name) {
-    return String(name || '').toLowerCase().split(/[^\p{L}\p{N}]+/u)
-        .filter(token => token.length >= 3 && !NAME_TOKEN_STOP_WORDS.has(token));
-}
-
 /**
- * THE name-presence tokenizer (2026-08-30 audit): lowercase words on Unicode
- * boundaries, so "Ash" is present in "Ash swore it" but never in "ashes" or
- * "Ashford" — the old raw-substring check quietly re-admitted exactly the
- * person-tied rows the presence gate means to rest. Shared by
- * findSubjectsInText (tagging) and retrieveRelevant's presence gate (scoring).
- */
-function textWordSet(text) {
-    return new Set(String(text || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
-}
-
-/**
- * Whole-word presence of any identifying token of `name` in a word set.
- * Returns null when the name has no identifying tokens ("The Lady") — the
- * caller decides what unjudgeable means (tagging skips it; the presence gate
- * treats it as present so the row is never permanently penalized).
- */
-function nameTokensPresent(wordSet, name) {
-    const tokens = identifyingNameTokens(name);
-    if (tokens.length === 0) return null;
-    return tokens.some(token => wordSet.has(token));
-}
-
-/**
- * Roster names that appear in a text — the seed/live-add helper for tagging a
- * memory's `subjects`. Matches on any identifying name token of 3+ characters
- * so "Lady Celeste" in a journal entry matches the roster's
- * "Lady Celeste Jewelglade".
- */
-export function findSubjectsInText(text, names, cap = 4) {
-    const words = textWordSet(text);
-    if (words.size === 0) return null;
-    const found = [];
-    for (const name of (Array.isArray(names) ? names : [])) {
-        const clean = String(name || '').trim();
-        if (!clean) continue;
-        if (nameTokensPresent(words, clean) === true) {
-            found.push(clean);
-            if (found.length >= cap) break;
-        }
-    }
-    return found.length > 0 ? found : null;
-}
-
-/**
- * Add a memory entry and embed it. Also persists to IndexedDB.
- * Silently skips if embedding fails.
+ * Add ONE memory: a batch of one (2026-10-11 audit P2 — this was a second
+ * document-embed path with its own guard, dedupe, embed call and persist).
+ * The player line is its only live caller; it lands before the reply exists,
+ * so it cannot ride the turn's batch. Silently skips if embedding fails.
  * @param {string} apiKey - Gemini API key
  * @param {string} text - The memory text
  * @param {string} [category] - e.g. 'world_fact', 'journal', 'npc', 'event'
  * @param {string|null} [location]
  * @param {string[]|null} [subjects] - people this memory is ABOUT (presence-aware retrieval)
+ * @param {string|null} [sourceMessage] - the DM message this row was read from (retraction)
  */
-export async function addMemory(apiKey, text, category = 'general', location = null, subjects = null, sourceMessage = null) {
-    // `?.` guards null/undefined but not type — an object-valued world fact from
-    // the parser would throw on .trim() inside this async fn (2026-07-28 audit).
-    if (!apiKey || typeof text !== 'string' || !text.trim()) return;
-
-    // Deduplicate by exact text
-    if (memoryStore.some(m => m.text === text)) return;
-
-    const vector = await embedText(apiKey, text, { inputType: 'document' });
-    if (!vector) {
-        console.error('[VectorMemory] Embedding failed for:', text.slice(0, 80));
-        return;
-    }
-
-    const entry = storeMemoryEntry({ text, vector, category, location, subjects, sourceMessage });
-    if (entry) persistEmbedding(entry); // fire-and-forget to IndexedDB
-    enforceCampaignCap();
+export function addMemory(apiKey, text, category = 'general', location = null, subjects = null, sourceMessage = null) {
+    return addMemories(apiKey, [{ text, category, location, subjects, sourceMessage }]);
 }
 
 /**
@@ -442,8 +378,11 @@ export async function addMemory(apiKey, text, category = 'general', location = n
  * (2026-09-29 vector-memory P2: the ordinary turn's fan-out was one
  * `embedContent` request per world fact plus one for the narrative — six
  * embed calls on a turn with three facts, all against the per-minute quota
- * the NEXT turn's blocking query embed needs). Dedupes against the store and
- * within the batch; a failed vector skips its item exactly like addMemory.
+ * the NEXT turn's blocking query embed needs). The pre-embed filter skips
+ * texts the store already holds (never pay for a known row) and dedupes
+ * within the batch; storeMemoryEntry's own exact-text check is the one
+ * AUTHORITATIVE dedupe (a row may land between the filter and the store).
+ * A failed vector skips its item.
  * @param {string} apiKey
  * @param {Array<{text: string, category?: string, location?: string|null, subjects?: string[]|null}>} items
  */
@@ -497,7 +436,7 @@ let pendingBatch = null; // { apiKey, items, timer, promise, resolve }
  * @param {string|null} [location]
  * @param {string[]|null} [subjects]
  */
-export function queueMemory(apiKey, text, category = 'general', location = null, subjects = null, sourceMessage = null) {
+export function queueMemory(apiKey, text, category = 'general', location = null, subjects = null, sourceMessage = null, { carry = false } = {}) {
     if (!apiKey || typeof text !== 'string' || !text.trim()) return Promise.resolve();
     // A batch is one key: a different key (a Settings change mid-turn)
     // flushes what was queued under the old one first.
@@ -505,16 +444,24 @@ export function queueMemory(apiKey, text, category = 'general', location = null,
     if (!pendingBatch) {
         let resolve;
         const promise = new Promise(r => { resolve = r; });
-        pendingBatch = {
-            apiKey,
-            items: [],
-            timer: setTimeout(() => { flushMemoryQueue(); }, MEMORY_BATCH_WINDOW_MS),
-            promise,
-            resolve,
-        };
+        pendingBatch = { apiKey, items: [], timer: null, promise, resolve };
+    }
+    // A CARRIED row (2026-10-11 — the Scribe's facts land seconds after the
+    // turn's batch flushed) waits for the next flush instead of arming the
+    // window: it rides the next turn's request, never one of its own (the
+    // journal entry's pattern; the mount seed covers a reload before then).
+    // Any ordinary row arriving later arms the window for the whole batch.
+    if (!carry && pendingBatch.timer === null) {
+        pendingBatch.timer = setTimeout(() => { flushMemoryQueue(); }, MEMORY_BATCH_WINDOW_MS);
     }
     pendingBatch.items.push({ text, category, location, subjects, sourceMessage });
     return pendingBatch.promise;
+}
+
+/** Queue one composed row (the composers below) for the next batch. */
+export function queueMemoryItem(apiKey, item, options = {}) {
+    if (!item || typeof item !== 'object') return Promise.resolve();
+    return queueMemory(apiKey, item.text, item.category || 'general', item.location ?? null, item.subjects ?? null, item.sourceMessage ?? null, options);
 }
 
 /** Embed and store everything queued so far, now. Resolves when done. */
@@ -522,7 +469,7 @@ export function flushMemoryQueue() {
     const batch = pendingBatch;
     if (!batch) return Promise.resolve();
     pendingBatch = null;
-    clearTimeout(batch.timer);
+    if (batch.timer !== null) clearTimeout(batch.timer);
     const run = addMemories(batch.apiKey, batch.items).catch(() => {});
     run.then(batch.resolve, batch.resolve);
     return run;
@@ -533,7 +480,7 @@ function discardMemoryQueue() {
     const batch = pendingBatch;
     if (!batch) return;
     pendingBatch = null;
-    clearTimeout(batch.timer);
+    if (batch.timer !== null) clearTimeout(batch.timer);
     batch.resolve();
 }
 
@@ -791,6 +738,7 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55,
         .filter(({ gated }) => gated >= minScore)
         .map(({ entry, gated }) => ({
             ...entry,
+            entry, // the store row itself — the telemetry stamp below writes to it
             score: gated + (CATEGORY_BOOST[entry.category] || 0),
         }))
         .sort((a, b) => b.score - a.score);
@@ -809,13 +757,15 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55,
     // count and the last message it was retrieved for, stamped on the
     // in-memory store row — read by the inspector, never a survival rule,
     // never persisted (the cache store is written by the batch, not per turn).
+    // The chosen copy keeps its store row beside the spread (2026-10-11 P2
+    // nit: the stamp used to re-find each row by text + category — O(N) per
+    // chosen row — and count the hit twice).
     for (const m of chosen) {
-        const row = memoryStore.find(entry => entry.text === m.text && entry.category === m.category);
-        if (!row) continue;
+        const row = m.entry;
         row.hits = (Number.isFinite(row.hits) ? row.hits : 0) + 1;
         if (Number.isFinite(atMessage)) row.lastHitMessage = atMessage;
     }
-    return chosen.map(m => ({ text: m.text, category: m.category, score: m.score, hits: (Number.isFinite(m.hits) ? m.hits : 0) + 1, ...(m.location && { location: m.location }) }));
+    return chosen.map(m => ({ text: m.text, category: m.category, score: m.score, hits: m.entry.hits, ...(m.location && { location: m.location }) }));
 }
 
 /**
@@ -850,12 +800,7 @@ export function deleteCampaignMemories(sessionId) {
     if (activeSessionId === sessionId) {
         memoryStore = [];
     }
-    return openEmbedDB().then(db => new Promise(resolve => {
-        const tx = db.transaction(EMBED_STORE, 'readwrite');
-        tx.objectStore(EMBED_STORE).delete(IDBKeyRange.bound([sessionId, ''], [sessionId, []]));
-        tx.oncomplete = () => { db.close(); resolve(); };
-        tx.onabort = () => { db.close(); resolve(); };
-    })).catch(() => {});
+    return withEmbedDb('readwrite', (store) => { store.delete(campaignKeyRange(sessionId)); }).catch(() => {});
 }
 
 /**
@@ -874,7 +819,9 @@ export function shouldPurgeCampaignEmbeddings({ deletedSessionId, liveSessionId 
 }
 
 /**
- * Return current memory count (for debugging/UI).
+ * TEST HOOK: current memory count. No production caller by design (the
+ * Memory Inspector counts the record, not the cache) — kept, with
+ * getMemoryTexts, as the suite's store inspection beside clearMemories.
  */
 export function getMemoryCount() {
     return memoryStore.length;
@@ -887,53 +834,75 @@ export function getMemoryTexts() {
     return memoryStore.map(m => m.text);
 }
 
-/**
- * Build a "retrieved memories" block for injection into the system prompt.
- * @param {Array<{text: string, category: string}>} memories
- * @returns {string}
- */
-/**
- * The block's ceilings (2026-09-29 vector-memory P2 — every other prompt
- * block got a ceiling constant in the 09-25/09-27 sweeps; this one was
- * bounded only by its sources' clamps: 8 journal rows at JOURNAL_SUMMARY_MAX
- * were 17k chars of LIVE prompt bytes, the recall lane's 16 rows 33k). A row
- * is clipped at a sentence end; the lines together stop at the ceiling with
- * an honest "+K more" tail. The typical block (8 rows of a 2–3-sentence
- * summary) never meets either.
- */
-export const RETRIEVED_MEMORY_ROW_MAX = 600;
-export const RETRIEVED_MEMORIES_CHAR_CEILING = 8000;
+// ——— THE row composers (2026-10-11 audit P2) ———
+// A RAG row's TEXT is its identity: the exact-text dedupe, the mutable-category
+// prune, the retired-texts prune and the retraction all compare it. It had
+// eleven composers across the seed, the live lanes and the retraction — and
+// the live fact lane composed from the WIRE before the reducer judged it, so a
+// restatement the record refused was embedded anyway and a `knownBy: "public"`
+// fact embedded with a SECRET tag the record never had. One composer per
+// category: the seed, every live lane and the retraction call these.
 
-/** Clip at the last sentence end inside `max` (past its midpoint), else hard. */
-function clipMemoryText(text, max) {
-    const clean = typeof text === 'string' ? text : '';
-    if (clean.length <= max) return clean;
-    const head = clean.slice(0, max);
-    const cut = Math.max(head.lastIndexOf('. '), head.lastIndexOf('! '), head.lastIndexOf('? '), head.lastIndexOf('.\n'));
-    if (cut >= max / 2) return `${head.slice(0, cut + 1)} …`;
-    return `${head.trimEnd()}…`;
+/** Narrative / player text clamp — the live lanes embed a scene's head, not its whole. */
+export const MEMORY_TEXT_CLAMP = 500;
+
+/** A world fact's row text — the secrecy tag inside the text, so a hit re-surfaces its knower boundary. */
+export function factMemoryText(fact) {
+    return `${formatSecrecyTag(fact?.knownBy)}${typeof fact?.fact === 'string' ? fact.fact : ''}`;
 }
 
-export function buildRetrievedMemoriesBlock(memories) {
-    if (!memories || memories.length === 0) return '';
-    const lines = [];
-    let used = 0;
-    let omitted = 0;
-    for (const m of memories) {
-        const category = cleanLabel(m.category, 'general');
-        const label = category === 'player'
-            ? 'player statement/attempt — not automatically canon'
-            : category;
-        const location = cleanLabel(m.location);
-        const locationTag = location ? ` — recorded at: ${location}` : '';
-        const line = `- [${label}${locationTag}] ${clipMemoryText(m.text, RETRIEVED_MEMORY_ROW_MAX)}`;
-        if (used + line.length + 1 > RETRIEVED_MEMORIES_CHAR_CEILING) {
-            omitted += 1;
-            continue;
-        }
-        lines.push(line);
-        used += line.length + 1;
-    }
-    if (omitted > 0) lines.push(`- (+${omitted} more relevant ${omitted === 1 ? 'memory' : 'memories'} omitted for length)`);
-    return `## RETRIEVED MEMORIES (most relevant to current scene)\nUse canonical world facts and DM-established memories normally. An entry labeled "player statement/attempt" records something the player said, wanted, or tried; it is not proof that an external claim became true unless the established fiction corroborates it.\nThese are memories, not the current scene. An entry recorded at a DIFFERENT place than where the hero now stands is context from elsewhere — never transplant its creatures, factions, or local color into the present location unless the fiction has actually moved them here. Distant places stay distinct: give each region its own dangers.\n${lines.join('\n')}`;
+/** A world fact's row (seed or live lane). */
+export function factMemoryItem(fact, { location = null, sourceMessage = null } = {}) {
+    return {
+        text: factMemoryText(fact),
+        category: typeof fact?.category === 'string' && fact.category ? fact.category : 'world_fact',
+        location,
+        subjects: null,
+        sourceMessage,
+    };
+}
+
+/** A narrative or player row: the location in the text so a hit says where it was recorded. */
+export function sceneMemoryItem(text, { category = 'narrative', location = null, sourceMessage = null } = {}) {
+    const clean = typeof text === 'string' ? text.slice(0, MEMORY_TEXT_CLAMP) : '';
+    return {
+        text: location ? `[Location: ${location}] ${clean}` : clean,
+        category,
+        location,
+        subjects: null,
+        sourceMessage,
+    };
+}
+
+/** A journal entry's row, tagged with the roster people it names. */
+export function journalMemoryItem(entry, rosterNames = []) {
+    return {
+        text: typeof entry?.summary === 'string' ? entry.summary : '',
+        category: 'journal',
+        location: entry?.location ?? null,
+        subjects: findSubjectsInText(entry?.summary, rosterNames),
+        sourceMessage: null,
+    };
+}
+
+/** An NPC's row: name, disposition and current notes, about that person. */
+export function npcMemoryItem(npc) {
+    return {
+        text: `${npc?.name} (${npc?.disposition || 'unknown'}): ${npc?.lastNotes || npc?.notes}`,
+        category: 'npc',
+        location: npc?.basedIn || npc?.lastLocation || null,
+        subjects: [npc?.name],
+        sourceMessage: null,
+    };
+}
+
+/** A story card's row: secrecy tag, subject and text, about its linked people. */
+export function storyCardMemoryItem(card) {
+    return {
+        text: `${formatSecrecyTag(card?.knownBy)}${card?.subject ? `${card.subject}: ` : ''}${card?.text}`,
+        category: `story_${card?.type || 'callback'}`,
+        location: card?.location ?? null,
+        subjects: Array.isArray(card?.linkedNpcNames) && card.linkedNpcNames.length > 0 ? card.linkedNpcNames : null,
+        sourceMessage: null,
+    };
 }

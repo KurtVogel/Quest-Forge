@@ -22,7 +22,7 @@
  */
 
 import { tokenSet } from './textMatch.js';
-import { findSubjectsInText } from './vectorMemory.js';
+import { findSubjectsInText } from './textMatch.js';
 import { collectNarrativeEntries } from '../llm/narrativeMessages.js';
 import { conversationalDistance } from './replayLedger.js';
 import { formatSecrecyTag } from './storyMemory.js';

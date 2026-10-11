@@ -556,7 +556,7 @@ describe('follow-up check rejected by the roll arbiter (2026-09-02 P1)', () => {
 
     it('hands an agency rejection to onFollowUpRejected instead of staging or silently dropping it', async () => {
         rollQueue.push(15);
-        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [], _playerAuthorityRollRejected: true });
+        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [], turn: { playerAuthorityRollRejected: true } });
         const onFollowUpRolls = vi.fn();
         const onFollowUpRejected = vi.fn().mockResolvedValue(undefined);
 
@@ -568,7 +568,7 @@ describe('follow-up check rejected by the roll arbiter (2026-09-02 P1)', () => {
 
     it('flags an attack-as-check rejection so the caller takes the combat_start correction route', async () => {
         rollQueue.push(15);
-        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [], _attackAsCheckRejected: true });
+        const sendToLLM = vi.fn().mockResolvedValue({ requestedRolls: [], turn: { attackAsCheckRejected: true } });
         const onFollowUpRejected = vi.fn().mockResolvedValue(undefined);
 
         await handleRequestedRolls(climb, { getState: state, dispatch: vi.fn(), sendToLLM, playerAction: 'I climb.', onFollowUpRejected });

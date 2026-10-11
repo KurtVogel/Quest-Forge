@@ -8,7 +8,7 @@ import { describeArmorAc, describeShieldAc, formatModifier, getModifier, getProf
 import { SUPPORTED_ENEMY_CONDITIONS_SENTENCE } from '../engine/enemyStats.js';
 import { getDmBonusXpCap, getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalContext } from '../engine/worldJournal.js';
-import { buildRetrievedMemoriesBlock, findSubjectsInText } from '../engine/vectorMemory.js';
+import { findSubjectsInText } from '../engine/textMatch.js';
 import { buildWonderBlock } from '../engine/wonder.js';
 import { buildPresenceText } from './narrativeMessages.js';
 import { buildStoryMemoryPromptBlock, formatSecrecyTag } from '../engine/storyMemory.js';
@@ -28,6 +28,68 @@ import { listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments 
 import { buildRelationshipBeatBlock, describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
 import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
 import { describeStateTag, liveWorldFacts } from '../engine/worldFacts.js';
+
+// ——— RETRIEVED MEMORIES (the RAG block — moved here from engine/vectorMemory.js
+// 2026-10-11: a prompt block is the prompt builder's, and the engine module's
+// import chain for it reached the Gemini provider) ———
+
+/**
+ * The block's ceilings (2026-09-29 vector-memory P2 — every other prompt
+ * block got a ceiling constant in the 09-25/09-27 sweeps; this one was
+ * bounded only by its sources' clamps: 8 journal rows at JOURNAL_SUMMARY_MAX
+ * were 17k chars of LIVE prompt bytes, the recall lane's 16 rows 33k). A row
+ * is clipped at a sentence end; the lines together stop at the ceiling with
+ * an honest "+K more" tail. The typical block (8 rows of a 2–3-sentence
+ * summary) never meets either.
+ */
+export const RETRIEVED_MEMORY_ROW_MAX = 600;
+export const RETRIEVED_MEMORIES_CHAR_CEILING = 8000;
+const MEMORY_LABEL_MAX = 80;
+
+/** A memory's label (category / location) read string-or-fallback, clamped — the row came from a cache. */
+function cleanMemoryLabel(value, fallback = '') {
+    const text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, MEMORY_LABEL_MAX) : '';
+    return text || fallback;
+}
+
+/** Clip at the last sentence end inside `max` (past its midpoint), else hard. */
+function clipMemoryText(text, max) {
+    const clean = typeof text === 'string' ? text : '';
+    if (clean.length <= max) return clean;
+    const head = clean.slice(0, max);
+    const cut = Math.max(head.lastIndexOf('. '), head.lastIndexOf('! '), head.lastIndexOf('? '), head.lastIndexOf('.\n'));
+    if (cut >= max / 2) return `${head.slice(0, cut + 1)} …`;
+    return `${head.trimEnd()}…`;
+}
+
+/**
+ * Build the "retrieved memories" block for injection into the system prompt.
+ * @param {Array<{text: string, category: string, location?: string}>} memories
+ * @returns {string}
+ */
+export function buildRetrievedMemoriesBlock(memories) {
+    if (!memories || memories.length === 0) return '';
+    const lines = [];
+    let used = 0;
+    let omitted = 0;
+    for (const m of memories) {
+        const category = cleanMemoryLabel(m.category, 'general');
+        const label = category === 'player'
+            ? 'player statement/attempt — not automatically canon'
+            : category;
+        const location = cleanMemoryLabel(m.location);
+        const locationTag = location ? ` — recorded at: ${location}` : '';
+        const line = `- [${label}${locationTag}] ${clipMemoryText(m.text, RETRIEVED_MEMORY_ROW_MAX)}`;
+        if (used + line.length + 1 > RETRIEVED_MEMORIES_CHAR_CEILING) {
+            omitted += 1;
+            continue;
+        }
+        lines.push(line);
+        used += line.length + 1;
+    }
+    if (omitted > 0) lines.push(`- (+${omitted} more relevant ${omitted === 1 ? 'memory' : 'memories'} omitted for length)`);
+    return `## RETRIEVED MEMORIES (most relevant to current scene)\nUse canonical world facts and DM-established memories normally. An entry labeled "player statement/attempt" records something the player said, wanted, or tried; it is not proof that an external claim became true unless the established fiction corroborates it.\nThese are memories, not the current scene. An entry recorded at a DIFFERENT place than where the hero now stands is context from elsewhere — never transplant its creatures, factions, or local color into the present location unless the fiction has actually moved them here. Distant places stay distinct: give each region its own dangers.\n${lines.join('\n')}`;
+}
 
 /**
  * Tripwire against unbounded prompt growth, NOT a target. A deliberately
@@ -723,11 +785,11 @@ PLAYER DEATH & DYING:
 - **Combat deaths are owned by the system.** At 0 HP the player falls unconscious and starts dying; declare one \`death_save\` player slot each round and let the engine own every transition. Do not emit player_death for this.
 - If LOW-LEVEL SOLO SAFETY is active or the character status says DEFEATED, do NOT request death saves and do NOT emit player_death. Narrate capture, subdual, being left for dead, a costly escape, loss of gear, leverage, or rescue instead.
 - Use "player_death": { "description": "..." } ONLY for unavoidable narrative deaths with no dying state — an execution, disintegration, a fall from a mile up — and never while LOW-LEVEL SOLO SAFETY is active.
-- Death does NOT end the game — the player will describe what happens next (their spirit may linger, possess another body, etc.)
-- Continue the world as normal. Death is a narrative event, not a game-over.
+- Death ENDS the hero's story (CRITICAL RULE 5, 2026-09-30): the engine posts the epitaph and the ending card. Narrate the death itself with weight and STOP — no spirit lingering, no possession, no successor, and no world continuing past the hero's last breath in that response.
 
 ECONOMY & HEALING:
 - Provide "healing" only for HP recovery you author that the UI cannot apply (e.g. an NPC's healing spell on the player). Potions and class abilities are player-activated through the UI — never emit "healing" for those.
+- **Harm you narrate outside combat is real only through its event.** A fall, fire, frostbite, poison, a trap, a beating — when the prose says the hero is hurt, that SAME response carries "damage_taken" with a proportionate integer (or a "damage_roll" in requested_rolls when the dice should decide), plus "conditions_gained" when a condition follows (poisoned, exhausted). The engine shows every HP change as a system line; harm narrated without the event never happened, and a hero standing at full HP after an eighty-foot fall into an ice-choked river is a contradiction the player sees on their sheet (class playtest 2026-10-09).
 - Provide "X_found" and "X_lost" properties where X is "gold", "silver", or "copper" based on the economy action (e.g. looting coins gives X_found, buying a sword requires X_lost). Provide numbers (integers without labels).
 - **EVERY narrated acquisition MUST carry its matching event in the SAME response.** If the prose says the hero takes, pockets, loots, or receives coins or an item, that exact response must emit the corresponding items_found / X_found / purchase event — narration without the event means the player never receives it. Never attach loot to a response that proposes requested_rolls; grant it in the post-roll outcome response instead, and always state concrete amounts ("23 gold"), never vague quantities.
 - **The reverse is equally binding: items_found is ONLY for items NEWLY entering the hero's possession** (looted, received, stolen, gifted, crafted). NEVER emit items_found for gear the hero already owns and is merely using, drawing, lighting, striking, wearing, or retrieving from their own pack — using their own flint and steel, torch, or rope grants NOTHING. The INVENTORY section lists what they already own; check it before granting an item. Emit items_lost only when an owned item is consumed, destroyed, or leaves their possession — as { "name": "<item>", "quantity": <count> }: a bare name (or quantity 1) removes ONE unit of a stack, so one torch burned or one ration eaten never empties the pack; give the count for more, or "quantity": "all" when the whole stack goes (confiscated, burned with the wagon).
@@ -749,7 +811,7 @@ REST & RESOURCES:
   - **Short rest:** Spends hit dice to heal, resets short-rest abilities (Fighter's Second Wind, Action Surge, etc.)
   - **Long rest:** Full HP restore, recovers half hit dice, resets ALL abilities, clears minor conditions
 - The character sheet shows current resources (Second Wind, Action Surge, Channel Divinity, etc.) with uses remaining. Reference these in narration — e.g., "You steel yourself and catch your breath" for Second Wind.
-- **Limited abilities (Second Wind, Action Surge, Channel Divinity, Arcane Recovery) and consumables (potions) are activated by the PLAYER through the game UI**, which rolls any dice and applies the effect. Healing potions are bonus actions in this game, use the same Bonus Action This Turn limit as Second Wind, and do not consume the main action. Do NOT emit "resources_used" or "healing" for these. When a system line appears (e.g. "Second Wind — you recover 8 HP" or "You drink a Potion of Healing *(bonus action)*"), simply weave it into your narration as something the player just did. If the player only *describes* using one in prose and no system line follows, narrate the intent but gently note they can trigger it from their character sheet or inventory so the system applies it. ONE exception: Second Wind explicitly used in an active-combat message is declared as a \`second_wind\` player slot inside that turn's combat_exchange (see COMBAT NOTES) — never met with a "press the button" note; the sheet button remains equally valid.
+- **Limited abilities (Second Wind, Action Surge, Channel Divinity, Arcane Recovery) and consumables (potions) are activated by the PLAYER through the game UI**, which rolls any dice and applies the effect. Healing potions are bonus actions in this game, use the same Bonus Action This Turn limit as Second Wind, and do not consume the main action. Do NOT emit "resources_used" or "healing" for these. When a system line appears (e.g. "Second Wind — you recover 8 HP" or "You drink a Potion of Healing *(bonus action)*"), simply weave it into your narration as something the player just did. If the player only *describes* using one in prose and no system line follows, narrate the intent inside the fiction and add ONE short italic aside AFTER the narration — *(Use Second Wind from your character sheet so the system applies it.)* — never a sentence of the story: the fiction and its characters never mention sheets, buttons, slots, panels, or "the system", and you never volunteer such an aside unprompted (the class playtest 2026-10-09 caught all three DMs coaching the player mid-scene). ONE exception: Second Wind explicitly used in an active-combat message is declared as a \`second_wind\` player slot inside that turn's combat_exchange (see COMBAT NOTES) — never met with a "press the button" note; the sheet button remains equally valid.
 - **Bonus actions are lightweight but real.** If the prompt says Bonus Action This Turn is used, do not suggest another bonus-action resource this turn. Fighter's Second Wind is a bonus action; the UI tracks and spends it.
 - If a system message says Second Wind was used as a bonus action, weave that recovery into the scene and remember the fighter still has their main action unless the player already declared it.
 - If ACTION SURGE ACTIVE is present, the player has already spent Action Surge in the UI. Honor it on their next declared action.

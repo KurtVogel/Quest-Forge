@@ -76,3 +76,68 @@ export function itemIdentityMatches(a, b) {
     const setB = tokenSet(String(b || ''), { minLength: 2 });
     return setA.size > 0 && setB.size > 0 && containment(setA, setB) >= 0.99;
 }
+
+// ——— The name-presence tokenizer (moved here from vectorMemory.js 2026-10-11:
+// four of its six importers read it for PRESENCE, not retrieval, and the
+// prompt builder's import chain for a tokenizer was vectorMemory → the Gemini
+// provider → the SSE reader; this is the stated tokenizer shelf) ———
+
+// Name tokens that identify nobody on their own — articles, particles, and
+// titles ("The Steward" must match on "steward", never on "the"; "Lady
+// Celeste" on "celeste", never on every scene containing a lady).
+const NAME_TOKEN_STOP_WORDS = new Set([
+    'the', 'and', 'of', 'von', 'van', 'der', 'den', 'del', 'della',
+    'lady', 'lord', 'sir', 'dame', 'master', 'mistress', 'miss', 'madam',
+    'captain', 'king', 'queen', 'prince', 'princess', 'mother', 'father',
+    'brother', 'sister', 'old', 'young', 'elder',
+]);
+
+export function identifyingNameTokens(name) {
+    return String(name || '').toLowerCase().split(/[^\p{L}\p{N}]+/u)
+        .filter(token => token.length >= 3 && !NAME_TOKEN_STOP_WORDS.has(token));
+}
+
+/**
+ * THE name-presence tokenizer (2026-08-30 audit): lowercase words on Unicode
+ * boundaries, so "Ash" is present in "Ash swore it" but never in "ashes" or
+ * "Ashford" — the old raw-substring check quietly re-admitted exactly the
+ * person-tied rows the presence gate means to rest. Shared by
+ * findSubjectsInText (tagging) and retrieveRelevant's presence gate (scoring).
+ */
+export function textWordSet(text) {
+    return new Set(String(text || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+}
+
+/**
+ * Whole-word presence of any identifying token of `name` in a word set.
+ * Returns null when the name has no identifying tokens ("The Lady") — the
+ * caller decides what unjudgeable means (tagging skips it; the presence gate
+ * treats it as present so the row is never permanently penalized).
+ */
+export function nameTokensPresent(wordSet, name) {
+    const tokens = identifyingNameTokens(name);
+    if (tokens.length === 0) return null;
+    return tokens.some(token => wordSet.has(token));
+}
+
+/**
+ * Roster names that appear in a text — the seed/live-add helper for tagging a
+ * memory's `subjects`, and every presence read (the KNOWN NPCs slots, the
+ * Scribe's merge context, the recall dossier's scorer). Matches on any
+ * identifying name token of 3+ characters so "Lady Celeste" in a journal
+ * entry matches the roster's "Lady Celeste Jewelglade".
+ */
+export function findSubjectsInText(text, names, cap = 4) {
+    const words = textWordSet(text);
+    if (words.size === 0) return null;
+    const found = [];
+    for (const name of (Array.isArray(names) ? names : [])) {
+        const clean = String(name || '').trim();
+        if (!clean) continue;
+        if (nameTokensPresent(words, clean) === true) {
+            found.push(clean);
+            if (found.length >= cap) break;
+        }
+    }
+    return found.length > 0 ? found : null;
+}

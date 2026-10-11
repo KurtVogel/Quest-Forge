@@ -16,7 +16,7 @@ import { NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../config/contentLimits.js';
 import { NPC_OPEN_THREAD_MAX } from '../engine/relationshipArc.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
-import { extractBalancedJson, repairJson } from './utils/jsonExtractor.js';
+import { parseLlmJson } from './utils/jsonExtractor.js';
 import { cleanText } from './directorUtils.js';
 import { liveWorldFacts } from '../engine/worldFacts.js';
 
@@ -178,6 +178,12 @@ export function needsNpcEnrichment(npc = {}) {
     return !!hasSignal;
 }
 
+/** The enrichment schema's keys, in the order the read anchors on. */
+const ENRICHMENT_ANCHORS = [
+    'agenda', 'relationshipTension', 'stanceToPlayer', 'appearance', 'callbackHooks',
+    'bondMoments', 'gradedMoments', 'openThread', 'voicedMoments', 'basedIn',
+];
+
 export async function enrichNpcProfile({ state, npc, settings }) {
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !npc?.name) {
@@ -193,25 +199,12 @@ export async function enrichNpcProfile({ state, npc, settings }) {
         temperature: 0.4, // grounded agenda inference with a little invention
     });
 
-    const jsonMatch = extractBalancedJson(response, 'agenda')
-        || extractBalancedJson(response, 'relationshipTension')
-        || extractBalancedJson(response, 'stanceToPlayer')
-        || extractBalancedJson(response, 'appearance')
-        || extractBalancedJson(response, 'callbackHooks')
-        || extractBalancedJson(response, 'bondMoments')
-        || extractBalancedJson(response, 'gradedMoments')
-        || extractBalancedJson(response, 'openThread')
-        || extractBalancedJson(response, 'voicedMoments')
-        || extractBalancedJson(response, 'basedIn');
-    if (!jsonMatch) {
+    // ONE walk over the schema's keys (2026-10-11 audit: ten chained
+    // extractBalancedJson calls, each a full two-needle scan), the reply read
+    // whole when it IS the object, repair included.
+    const parsed = parseLlmJson(response, { anchors: ENRICHMENT_ANCHORS, wholeObject: true })?.value;
+    if (!parsed) {
         throw new Error('Could not parse NPC enrichment response.');
-    }
-
-    let parsed;
-    try {
-        parsed = JSON.parse(jsonMatch.json);
-    } catch {
-        parsed = JSON.parse(repairJson(jsonMatch.json));
     }
 
     const update = { id: npc.id, name: npc.name };

@@ -195,7 +195,7 @@ describe('the player\'s line reaches the provider ONCE (2026-10-01 chat-orchestr
         const events = await h.runner.sendToLLM(action, action);
         h.runner.stageRoleplayCheck(events.requestedRolls, action, {
             setupNarrative: h.runner.getLastCommittedTurn().content,
-            setupMessageId: events._setupMessageId,
+            setupMessageId: events.turn.setupMessageId,
         });
         await settle();
 
@@ -344,6 +344,7 @@ describe('network calls per turn (2026-10-01 test depth)', () => {
         // A campaign with memory: an EMPTY store skips the query embed altogether.
         await addMemory('test-key', 'The reeve takes bribes after dark.', 'world_fact');
         embedTextMock.mockClear();
+        embedTextsMock.mockClear(); // addMemory is a batch of one since 2026-10-11
         const h = createHarness();
         // A line no other test sends: the query-vector memo would skip the embed.
         await playTurn(h, 'I count the coins in my purse.');

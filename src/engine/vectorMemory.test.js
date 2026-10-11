@@ -11,7 +11,11 @@ const { embedTextMock, embedTextsMock, SCHEMA } = vi.hoisted(() => ({
     SCHEMA: 'gemini-embedding-2:search-retrieval-v1:768',
 }));
 
-vi.mock('../llm/providers/gemini.js', () => ({
+// The block builder now lives in promptBuilder (2026-10-11), whose import
+// chain reaches the adapter — the provider mock keeps the module's other
+// exports so that chain loads.
+vi.mock('../llm/providers/gemini.js', async (importOriginal) => ({
+    ...(await importOriginal()),
     embedText: embedTextMock,
     embedTexts: embedTextsMock,
     GEMINI_EMBED_DIMENSIONS: 768,
@@ -28,9 +32,9 @@ beforeEach(() => {
         Promise.all((texts || []).map(text => embedTextMock(apiKey, text, options))));
 });
 
+import { buildRetrievedMemoriesBlock } from '../llm/promptBuilder.js';
 import {
     addMemory,
-    buildRetrievedMemoriesBlock,
     clearMemories,
     deleteCampaignMemories,
     findSubjectsInText,
@@ -1296,9 +1300,8 @@ import {
     flushMemoryQueue,
     MEMORY_BATCH_WINDOW_MS,
     queueMemory,
-    RETRIEVED_MEMORIES_CHAR_CEILING,
-    RETRIEVED_MEMORY_ROW_MAX,
 } from './vectorMemory.js';
+import { RETRIEVED_MEMORIES_CHAR_CEILING, RETRIEVED_MEMORY_ROW_MAX } from '../llm/promptBuilder.js';
 
 describe('2026-09-29 audit: the ranged campaign read, one transaction per seed, float32 rows, the batched turn, the block ceiling, the seed notice', () => {
     beforeEach(() => {

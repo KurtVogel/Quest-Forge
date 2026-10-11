@@ -12,7 +12,9 @@
  * This file owns only text → parsed-JSON extraction and the prose detectors.
  */
 
-import { parseBalancedJsonAt, parseJsonObjectLoose, repairJson, scanBalancedObject } from './utils/jsonExtractor.js';
+import { parseBalancedJsonAt, parseJsonObjectLoose, parseJsonText, scanBalancedObject } from './utils/jsonExtractor.js';
+import { findSkillInText, SKILL_ABILITIES } from '../engine/rules.js';
+import { markTurn } from './turnFlags.js';
 import { sendMessage } from './adapter.js';
 import { getPreCommitConfig } from './machinery.js';
 import { normalizeEvents, EVENT_CHANNELS } from './eventChannels.js';
@@ -38,12 +40,17 @@ const UNFENCED_EVENT_ANCHORS = EVENT_CHANNELS
     .flatMap(c => [c.wire, ...(c.aliases || [])])
     .filter(key => key.includes('_'));
 
-// All recognized skill and ability names for text roll detection
-const KNOWN_SKILLS = [
-    'perception', 'stealth', 'athletics', 'acrobatics', 'investigation',
-    'insight', 'persuasion', 'deception', 'intimidation', 'sleight of hand',
-    'arcana', 'history', 'nature', 'religion', 'medicine', 'survival',
-    'animal handling', 'performance', 'thieves tools', "thieves' tools",
+// The skill / ability / attack phrases the prose detector listens for, DERIVED
+// from the engine's own skill table (2026-10-11 audit P2): the old private
+// 27-entry list was substring-matched both ways, so "Roll an Int check" read
+// as Intimidation (Charisma −1 on a rogue with INT 14), "Make an Int save"
+// as an Intimidation SAVE, and "Thieves' Tools check" minted a key the engine
+// has no skill for, at +0 — a wrong stat rolled silently where a roll the
+// engine cannot name is refused out loud ("Roll skipped", 2026-09-10). Every
+// detected phrase is canonicalized through `findSkillInText`, the one lookup
+// the wire's `resolveRollSkill` runs one step later.
+const ROLL_SKILL_PHRASES = [
+    ...Object.keys(SKILL_ABILITIES).map(key => key.replace(/([A-Z])/g, ' $1').toLowerCase().trim()),
     'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma',
     // 'initiative' retired 2026-08-27 (DECISIONS.md): initiative is engine-owned
     // (START_COMBAT rolls it); a detected prose request had no consumer.
@@ -52,11 +59,12 @@ const KNOWN_SKILLS = [
 
 // Pattern 2 of detectTextRollRequests, compiled ONCE (2026-09-28 audit P2: it
 // built one RegExp per known skill on every prose-only reply). Non-global, so
-// `.test` carries no lastIndex state between calls.
-const SKILL_REQUEST_PATTERNS = KNOWN_SKILLS.map(skill => ({
-    skill,
+// `.test` carries no lastIndex state between calls. Word-bounded on both
+// sides of the phrase, like findSkillInText.
+const SKILL_REQUEST_PATTERNS = ROLL_SKILL_PHRASES.map(phrase => ({
+    phrase,
     pattern: new RegExp(
-        `\\b(?:rolls?|makes?|attempts?|gives? me|need)\\b[\\s\\S]{0,40}?\\b${skill.replace(/['"]/g, '.')}\\s+(?:check|save|saving throw)`,
+        `\\b(?:rolls?|makes?|attempts?|gives? me|need)\\b[\\s\\S]{0,40}?\\b${phrase.replace(/ /g, '[\\s-]*')}\\s+(?:check|save|saving throw)\\b`,
         'i',
     ),
 }));
@@ -89,9 +97,9 @@ export function detectTextRollRequests(narrative) {
     const rollPattern = /(?:roll|make|attempt)\s+(?:a|an)\s+([\w\s']+?)\s+(?:check|save|saving throw)/gi;
     let match;
     while ((match = rollPattern.exec(narrative)) !== null) {
-        const skillRaw = match[1].trim().toLowerCase();
-        if (KNOWN_SKILLS.some(s => skillRaw.includes(s) || s.includes(skillRaw))) {
-            const skill = KNOWN_SKILLS.find(s => skillRaw.includes(s) || s.includes(skillRaw)) || skillRaw;
+        // The engine's own lookup names the skill, or there is no roll here.
+        const skill = findSkillInText(match[1]);
+        if (skill) {
             // Note: "saving" does NOT contain the substring "save" — match both forms.
             const type = /sav(e|ing)/i.test(match[0]) ? 'saving_throw' : 'skill_check';
             rolls.push({ type, skill, dc, description: match[0].trim() });
@@ -104,12 +112,14 @@ export function detectTextRollRequests(narrative) {
     // minted a phantom DC-10 proposal (2026-08-29 audit). Genuinely verb-less
     // prose requests stay covered by the semantic detector + arbiter.
     if (rolls.length === 0) {
-        for (const { skill, pattern: skillPattern } of SKILL_REQUEST_PATTERNS) {
-            if (skillPattern.test(narrative)) {
-                const type = /save|saving throw/i.test(narrative.match(skillPattern)?.[0] || '') ? 'saving_throw' : 'skill_check';
-                rolls.push({ type, skill, dc, description: `${skill} check (DC ${dc})` });
-                break; // One detected roll per response is enough to trigger the system
-            }
+        for (const { phrase, pattern: skillPattern } of SKILL_REQUEST_PATTERNS) {
+            const hit = narrative.match(skillPattern);
+            if (!hit) continue;
+            const skill = findSkillInText(phrase);
+            if (!skill) continue;
+            const type = /save|saving throw/i.test(hit[0]) ? 'saving_throw' : 'skill_check';
+            rolls.push({ type, skill, dc, description: `${phrase} check (DC ${dc})` });
+            break; // One detected roll per response is enough to trigger the system
         }
     }
 
@@ -128,35 +138,55 @@ export function detectPreNarratedOutcome(narrative) {
 }
 
 /**
- * Locate the fenced JSON block: `{ full, body, index }` or null. Tag
- * case-insensitive (```JSON), and a bare ``` fence counts when its body is an
- * object — both used to fall to the anchor path and leave a dangling opener on
- * the narrative (2026-09-05 audit). When the body is an object, its extent is
- * a string-aware balanced-brace walk closed by the NEXT fence, so a ``` inside
- * a JSON string value no longer ends the block early — `"Read the ``` sign"`
- * minted quest "Read the" AND appended the JSON tail to the story as prose
- * (2026-09-15 audit P2). The lazy regex remains the fallback for a non-object
- * body or a body the walk cannot close on a fence.
+ * THE fence grammar (2026-10-11 audit P2 — the finder, the second-fence
+ * warning and the trailing strip each had their own idea of a fence, so a
+ * bare ``` block after the ```json block shipped as raw JSON in the story
+ * while its events vanished without a warning): every fenced JSON block in
+ * the response, in order, each `{ full, body, index }`. The first is the
+ * events block; the rest are discarded WITH a warning and stripped from the
+ * prose. A block is a ```json fence (tag case-insensitive) or a bare ```
+ * fence whose body is an object — both used to fall to the anchor path and
+ * leave a dangling opener on the narrative (2026-09-05 audit). An object
+ * body's extent is a string-aware balanced-brace walk closed by the NEXT
+ * fence, so a ``` inside a JSON string value no longer ends the block early
+ * — `"Read the ``` sign"` minted quest "Read the" AND appended the JSON
+ * tail to the story as prose (2026-09-15 audit P2); the lazy regex remains
+ * the fallback for a ```json body that is not an object. A bare fence
+ * around prose (a sign, a letter) is never a block.
  */
-function findFencedJsonBlock(response) {
-    const opener = response.match(/```json\s*/i) || response.match(/```\s*(?=\{)/);
-    if (opener) {
-        const bodyStart = opener.index + opener[0].length;
+function findFencedJsonBlocks(response) {
+    const blocks = [];
+    let from = 0;
+    while (from < response.length) {
+        const rest = response.slice(from);
+        // The EARLIEST opener of either kind — a tagged fence later in the
+        // reply must not outrank a bare object block before it.
+        const tagged = rest.match(/```json\s*/i);
+        const bare = rest.match(/```\s*(?=\{)/);
+        const opener = (tagged && bare) ? (tagged.index <= bare.index ? tagged : bare) : (tagged || bare);
+        if (!opener) break;
+        const index = from + opener.index;
+        const bodyStart = index + opener[0].length;
+        let block = null;
         if (response[bodyStart] === '{') {
             const end = scanBalancedObject(response, bodyStart);
             const closer = end === -1 ? null : response.slice(end).match(/^\s*```/);
             if (closer) {
-                return {
-                    full: response.slice(opener.index, end + closer[0].length),
-                    body: response.slice(bodyStart, end),
-                    index: opener.index,
-                };
+                block = { full: response.slice(index, end + closer[0].length), body: response.slice(bodyStart, end), index };
             }
         }
+        if (!block && /^```json/i.test(opener[0])) {
+            const lazy = rest.slice(opener.index).match(/^```json\s*\n?([\s\S]*?)\n?\s*```/i);
+            if (lazy) block = { full: lazy[0], body: lazy[1], index };
+        }
+        if (block) {
+            blocks.push(block);
+            from = block.index + block.full.length;
+        } else {
+            from = bodyStart;
+        }
     }
-    const lazy = response.match(/```json\s*\n?([\s\S]*?)\n?\s*```/i)
-        || response.match(/```\s*\n?(\{[\s\S]*?\})\s*\n?\s*```/);
-    return lazy ? { full: lazy[0], body: lazy[1], index: lazy.index } : null;
+    return blocks;
 }
 
 /**
@@ -169,7 +199,8 @@ export function parseResponse(response) {
     // `response.match is not a function` throw (2026-09-15 audit P2 belt).
     if (typeof response !== 'string' || !response) return { narrative: '', events: null };
 
-    const jsonMatch = findFencedJsonBlock(response);
+    const blocks = findFencedJsonBlocks(response);
+    const jsonMatch = blocks[0] || null;
 
     debugLog('[ResponseParser] Raw response length:', response.length);
     debugLog('[ResponseParser] JSON block found:', !!jsonMatch);
@@ -196,7 +227,7 @@ export function parseResponse(response) {
         if (detectedRolls.length > 0) {
             console.warn(`[ResponseParser] Detected ${detectedRolls.length} text-based roll request(s) — converting to JSON events.`);
             const events = normalizeEvents({ requested_rolls: detectedRolls });
-            events._textRollDetected = true; // Flag for ChatPanel to show a notice
+            markTurn(events, { textRollDetected: true }); // read by turnVisibility's proposal-from-prose rule
             return { narrative: response.trim(), events };
         }
 
@@ -204,46 +235,42 @@ export function parseResponse(response) {
         return { narrative: response.trim(), events: null };
     }
 
-    // A second fenced block is a real (Grok-observed) behavior class: today only
-    // the FIRST block is parsed. Make the drop observable instead of silent.
-    const secondFence = response.slice(jsonMatch.index + jsonMatch.full.length).match(/```json/i);
-    if (secondFence) {
-        console.warn('[ResponseParser] Response contains a second ```json block — only the first is parsed; the rest is discarded.');
+    // A second fenced block is a real (Grok-observed) behavior class: only
+    // the FIRST block is parsed. The drop is observable, never silent — and
+    // the warning counts exactly the blocks the strip below removes.
+    const extraBlocks = blocks.slice(1);
+    if (extraBlocks.length > 0) {
+        console.warn(`[ResponseParser] Response contains ${extraBlocks.length} further fenced JSON block(s) — only the first is parsed; the rest are discarded.`);
     }
 
     // Extract narrative (everything before the JSON block). Prose AFTER the
     // fence used to vanish silently — and a JSON-first response committed an
-    // EMPTY assistant message — so non-empty trailing text (minus any further
-    // fenced block, which is discarded with the warning above) is appended.
+    // EMPTY assistant message — so non-empty trailing text (minus every
+    // further fenced block, discarded with the warning above) is appended.
     const jsonStart = jsonMatch.index;
     let narrative = response.slice(0, jsonStart).trim();
-    const trailing = response.slice(jsonStart + jsonMatch.full.length)
-        .replace(/```json[\s\S]*?```/gi, '')
-        .trim();
+    let trailing = response.slice(jsonStart + jsonMatch.full.length);
+    for (const block of extraBlocks) trailing = trailing.replace(block.full, '');
+    trailing = trailing.trim();
     if (trailing) {
         console.warn('[ResponseParser] Prose after the JSON block — appended to the narrative.');
         narrative = narrative ? `${narrative}\n\n${trailing}` : trailing;
     }
 
     // Parse the JSON, attempting repair on failure
-    let events = null;
-    try {
-        events = JSON.parse(jsonMatch.body);
-    } catch {
-        console.warn('[ResponseParser] JSON parse failed, attempting repair...');
-        try {
-            events = JSON.parse(repairJson(jsonMatch.body));
-            console.warn('[ResponseParser] JSON repaired successfully.');
-        } catch (e2) {
-            console.warn('[ResponseParser] JSON repair failed too:', e2.message);
-            debugLog('[ResponseParser] Raw JSON string:', jsonMatch.body);
-            // Unrepairable events are DROPPED — flag it so the caller can surface
-            // a visible notice instead of the events vanishing in silence. The
-            // narrative is the PROSE only: returning the full response leaked the
-            // raw broken JSON into the story, the save, the DM's own window
-            // (self-priming), the journal, and RAG (2026-09-05 audit P1).
-            return { narrative, events: null, eventsDropped: true };
-        }
+    // Parse → repair once (jsonExtractor's ONE walk, 2026-10-11).
+    // A body that parses to a non-object (`null`, a scalar, a list) is a
+    // VALID empty bag — normalizeEvents handles it; only a body nothing can
+    // parse is dropped.
+    let events = parseJsonText(jsonMatch.body, { label: 'ResponseParser' });
+    if (events === undefined) {
+        debugLog('[ResponseParser] Raw JSON string:', jsonMatch.body);
+        // Unrepairable events are DROPPED — flag it so the caller can surface
+        // a visible notice instead of the events vanishing in silence. The
+        // narrative is the PROSE only: returning the full response leaked the
+        // raw broken JSON into the story, the save, the DM's own window
+        // (self-priming), the journal, and RAG (2026-09-05 audit P1).
+        return { narrative, events: null, eventsDropped: true };
     }
 
     events = normalizeEvents(events);

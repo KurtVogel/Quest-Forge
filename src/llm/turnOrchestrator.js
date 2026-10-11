@@ -32,10 +32,13 @@ import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt, rev
 import { maybeAutoSummarize } from '../engine/worldJournal.js';
 import { buildScribeContext, runScribe } from './scribe.js';
 import { EPILOGUE_RESPONSE_MODE, isEpilogueRequest, TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
-import { findSubjectsInText, flushMemoryQueue, queueMemory, retrieveRelevant } from '../engine/vectorMemory.js';
+import { factMemoryItem, flushMemoryQueue, journalMemoryItem, queueMemoryItem, retrieveRelevant, sceneMemoryItem } from '../engine/vectorMemory.js';
+import { findSubjectsInText } from '../engine/textMatch.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
 import { describeMemoryUnavailable, dmCallConfig, getMachineryGeminiKey } from './machinery.js';
-import { curateStoryMemory, formatSecrecyTag } from '../engine/storyMemory.js';
+import { curateStoryMemory } from '../engine/storyMemory.js';
+import { planWorldFactAdditions } from '../engine/worldFacts.js';
+import { markTurn, turnFlags } from './turnFlags.js';
 import { captureInjection, captureProviderNote, captureUsage } from '../debug/memoryInspectorStore.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from '../components/Chat/turnVisibility.js';
 import { buildNudgePrompt, detectMissingEventsCue, extractNudgeEventFields } from '../components/Chat/missingEventsNudge.js';
@@ -202,11 +205,7 @@ export function createTurnRunner({
                 // instead — SESSION HISTORY renders the entry meanwhile, and a
                 // reload before then is covered by the mount seed.
                 const rosterNames = (getState().npcs || []).map(n => n?.name).filter(Boolean);
-                carriedJournalMemories.push({
-                    text: result.journalEntry.summary,
-                    location: result.journalEntry.location,
-                    subjects: findSubjectsInText(result.journalEntry.summary, rosterNames),
-                });
+                carriedJournalMemories.push(journalMemoryItem(result.journalEntry, rosterNames));
             }
         } catch (e) {
             console.error('[Journal RAG Seeding] Failed:', e);
@@ -546,7 +545,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 } else {
                     events = detected;
                 }
-                events._textRollDetected = true;
+                markTurn(events, { textRollDetected: true });
             }
         }
 
@@ -557,16 +556,16 @@ Translate the player's committed action into the single bounded combat_exchange 
                 // An attack staged as a check takes the combat-correction path —
                 // but only when no legitimate check survived to stage instead.
                 if (review.attackAsCheck && review.acceptedRolls.length === 0) {
-                    events._attackAsCheckRejected = true;
+                    markTurn(events, { attackAsCheckRejected: true });
                     console.warn('[ChatPanel] Rejected a check that staged the player\'s declared attack; requesting a combat_start response.');
                 } else {
-                    events._playerAuthorityRollRejected = true;
+                    markTurn(events, { playerAuthorityRollRejected: true });
                     console.warn('[ChatPanel] Rejected a check that overrides player-authored portrayal; requesting a no-roll roleplay response.');
                 }
             }
             const preNarrated = review.preNarrated !== undefined ? review.preNarrated : detectPreNarratedOutcome(narrative);
             if (preNarrated) {
-                events._preNarratedOutcome = true;
+                markTurn(events, { preNarratedOutcome: true });
                 console.warn('[ChatPanel] DM pre-narrated outcome before roll — correction will be injected with roll results.');
             }
         }
@@ -582,8 +581,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         if (events) {
             // Let callers staging a roleplay-check proposal recover this response's
             // narration (the withheld setup) and reveal/reuse it later.
-            events._setupMessageId = msgId;
-            events._setupHidden = hideSetup;
+            markTurn(events, { setupMessageId: msgId, setupHidden: hideSetup });
             // In a batched combat round the client already rolled AND applied HP from the
             // inline damage, so ignore any HP deltas the DM narrated to avoid double-counting.
             // Finalized BEFORE dispatch: this object enters the reducer store, and an
@@ -626,6 +624,8 @@ Translate the player's committed action into the single bounded combat_exchange 
                 // starting_items is the one-time opening's channel alone.
                 openingScene: !!opts.openingScene,
                 lootSourceId: msgId,
+                // The DM's own facts remember this message (2026-10-11).
+                sourceMessageId: msgId,
                 playerMessage: originalPlayerMessage || opts.playerActionContext,
             });
             // A fight-starting response's queued exchange never blocks its
@@ -643,15 +643,19 @@ Translate the player's committed action into the single bounded combat_exchange 
         // Skip on a setup turn (pending rolls) — those facts ride on the outcome narration.
         // A fight-starting setup applied its facts already (applyEvents) — embed them too.
         if ((!setupPhase || events?.combatStart) && !s.combat?.active && events?.worldFacts?.length > 0 && machineryKey) {
-            for (const f of events.worldFacts) {
-                // Same secrecy-tagged text the mount seed builds — an untagged
-                // live embed of a secret fact was a mismatched duplicate row
-                // (and leaked the canon without its knower boundary) on reload.
-                // QUEUED, not embedded (2026-09-29 P2): the turn's facts and
-                // its narrative ride ONE batch request, flushed by the
-                // post-turn extraction (or by the queue's own window when no
-                // extraction follows — a fight-starting response).
-                queueMemory(machineryKey, `${formatSecrecyTag(f.knownBy)}${f.fact}`, f.category || 'world_fact', events?.location || s.currentLocation).catch(() => {});
+            // The RECORD's rows, not the wire's (2026-10-11 P2): the same plan
+            // the reducer just committed judges these candidates against the
+            // captured state — a restatement the record refuses is never
+            // embedded, the text is the sanitized text with the record's own
+            // secrecy tag (the seed's format, so no mismatched twin on reload),
+            // and the row carries this message's id for retraction.
+            // QUEUED, not embedded (2026-09-29 P2): the turn's facts and its
+            // narrative ride ONE batch request, flushed by the post-turn
+            // extraction (or by the queue's own window when no extraction
+            // follows — a fight-starting response).
+            const planned = planWorldFactAdditions(s.worldFacts, events.worldFacts, { messageCount: (s.messages || []).length, sourceMessage: msgId });
+            for (const f of planned.added) {
+                queueMemoryItem(machineryKey, factMemoryItem(f, { location: events?.location || s.currentLocation, sourceMessage: msgId })).catch(() => {});
             }
         }
 
@@ -798,19 +802,18 @@ Translate the player's committed action into the single bounded combat_exchange 
         }).catch(() => {});
         const machineryKey = getMachineryGeminiKey(latest.settings);
         if (machineryKey && !recallTurn) {
-            const loc = turnLocation;
-            const narrativeText = loc
-                ? `[Location: ${loc}] ${finalNarration.content.slice(0, 500)}`
-                : finalNarration.content.slice(0, 500);
             // The narrative joins the facts sendToLLM queued and the whole
             // turn embeds as ONE request (2026-09-29 P2).
-            queueMemory(machineryKey, narrativeText, 'narrative', loc, null, typeof finalNarration.id === 'string' ? finalNarration.id : null).catch(() => {});
+            queueMemoryItem(machineryKey, sceneMemoryItem(finalNarration.content, {
+                location: turnLocation,
+                sourceMessage: typeof finalNarration.id === 'string' ? finalNarration.id : null,
+            })).catch(() => {});
         }
         // The last cadence's journal entry rides this turn's batch (see
         // runAutoSummarize): one embed request, not a request of its own.
         if (machineryKey && carriedJournalMemories.length > 0) {
             for (const row of carriedJournalMemories) {
-                queueMemory(machineryKey, row.text, 'journal', row.location, row.subjects).catch(() => {});
+                queueMemoryItem(machineryKey, row).catch(() => {});
             }
             carriedJournalMemories = [];
         }
@@ -934,7 +937,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                 // setup is still the scene the player never saw, so carry it forward.
                 stageRoleplayCheck(events.requestedRolls, proposal.playerAction, {
                     challengeUsed: true,
-                    preNarrated: events._preNarratedOutcome,
+                    preNarrated: turnFlags(events).preNarratedOutcome,
                     loot: proposal.loot,
                     setupNarrative: proposal.setupNarrative,
                     setupMessageId: proposal.setupMessageId,
@@ -951,7 +954,7 @@ Translate the player's committed action into the single bounded combat_exchange 
                     challenge,
                 });
                 if (ruling) dispatch({ type: 'RECORD_ROLL_RULING', payload: ruling });
-                if (events?._playerAuthorityRollRejected) await sendRollCorrection();
+                if (turnFlags(events).playerAuthorityRollRejected) await sendRollCorrection();
                 finalizeRoleplayTurn(proposal.playerAction);
             }
         } catch (error) {

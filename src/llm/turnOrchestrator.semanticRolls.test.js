@@ -65,7 +65,7 @@ describe('turn runner — semantic text-roll merge', () => {
 
         const events = await runner.sendToLLM('I take the amulet and look around.', 'I take the amulet and look around.');
 
-        expect(events._textRollDetected).toBe(true);
+        expect(events.turn.textRollDetected).toBe(true);
         expect(events.requestedRolls).toHaveLength(1);
         expect(events.requestedRolls[0].skill).toBe('perception');
         // The merge, not a replace: the response's own loot event survived.

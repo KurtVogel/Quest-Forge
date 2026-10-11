@@ -8,7 +8,6 @@ import { itemIdentityMatches } from '../../engine/textMatch.js';
 import { isArmorItem, isShieldItem, isWeaponItem } from '../../engine/equipment.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName, MAX_ITEM_QUANTITY } from '../../data/items.js';
 import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
-import { normalizeKnownBy } from '../../engine/storyMemory.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
 import { CHRONICLE_CHAPTER_TEXT_MAX, CHRONICLE_TITLE_MAX, NPC_DOSSIER_FIELD_MAX, ROLL_HISTORY_CAP } from '../../config/contentLimits.js';
 import { COMBAT_PHASES, isLowLevelSolo } from '../../engine/combatPredicates.js';
@@ -288,24 +287,9 @@ export function normalizeRefToken(value) {
 // World facts are hostile LLM input persisted forever: a non-string fact/category
 // spread raw into the store used to crash buildSystemPrompt on every later turn
 // (2026-07-23 audit). Explicit whitelist, typed, clamped — never spread the payload.
-const WORLD_FACT_MAX_LENGTH = 400;
-const WORLD_FACT_CATEGORY_MAX_LENGTH = 40;
-
-export function sanitizeWorldFactPayload(payload) {
-    if (!payload || typeof payload !== 'object') return null;
-    const fact = typeof payload.fact === 'string' ? payload.fact.trim().slice(0, WORLD_FACT_MAX_LENGTH) : '';
-    if (!fact) return null;
-    const category = (typeof payload.category === 'string' && payload.category.trim())
-        ? payload.category.trim().slice(0, WORLD_FACT_CATEGORY_MAX_LENGTH)
-        : 'general';
-    // Epistemics boundary (DECISIONS.md 2026-08-05 ×2): a non-empty knownBy
-    // marks the fact as private to exactly those people. Always present in the
-    // output so a hostile save's junk value gets overwritten on load.
-    // `pinned` (2026-09-30): an engine-minted commitment the post-journal
-    // verifier must find live after every cadence (a front's resolution fact).
-    const pinned = payload.pinned === true || payload.pinned === 'true';
-    return { fact, category, knownBy: normalizeKnownBy(payload.knownBy ?? payload.known_by), ...(pinned && { pinned: true }) };
-}
+// The fact payload boundary lives in engine/worldFacts.js beside the plan
+// that judges it (2026-10-11); re-exported for the load heal's import.
+export { sanitizeWorldFactPayload } from '../../engine/worldFacts.js';
 
 const RECENT_TRANSACTION_LIMIT = 20;
 

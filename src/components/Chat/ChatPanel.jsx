@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
+import { turnFlags } from '../../llm/turnFlags.js';
 import { useGame } from '../../state/GameContext.jsx';
 import { sendMessage, streamMessage } from '../../llm/adapter.js';
 import { createTurnRunner } from '../../llm/turnOrchestrator.js';
@@ -10,7 +11,7 @@ import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildScribeContext, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
 import { EPILOGUE_REQUEST_MESSAGE, isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
 import { saveRosterCharacter } from '../../state/rosterStore.js';
-import { addMemory, findSubjectsInText, retractMemoriesFromMessage, seedMemories } from '../../engine/vectorMemory.js';
+import { addMemory, factMemoryItem, factMemoryText, journalMemoryItem, npcMemoryItem, queueMemoryItem, retractMemoriesFromMessage, sceneMemoryItem, seedMemories, storyCardMemoryItem } from '../../engine/vectorMemory.js';
 import { describeMemorySeedIncomplete, getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { generateFrontAftermath, shouldGenerateFrontAftermath } from '../../llm/frontAftermath.js';
@@ -19,7 +20,6 @@ import { generateRegionalFronts, shouldGenerateRegionalFronts } from '../../llm/
 import { generateWonder, shouldGenerateWonder } from '../../llm/wonderDirector.js';
 import { isDirectorBackingOff, RETRYABLE_DIRECTORS } from '../../engine/directorRetry.js';
 import { isWonderRequest } from '../../engine/wonder.js';
-import { formatSecrecyTag } from '../../engine/storyMemory.js';
 import { liveWorldFacts } from '../../engine/worldFacts.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRouting.js';
@@ -140,7 +140,7 @@ export default function ChatPanel() {
         // IndexedDB). The fact texts are named in the seed's own format.
         const factTexts = (state.worldFacts || [])
             .filter(fact => fact && fact.sourceMessage === id)
-            .map(fact => `${formatSecrecyTag(fact.knownBy)}${fact.fact}`);
+            .map(factMemoryText);
         dispatch({ type: 'DELETE_MESSAGE', payload: id });
         retractMemoriesFromMessage(id, factTexts).catch(() => {});
     }, [dispatch, state.worldFacts]);
@@ -405,40 +405,27 @@ export default function ChatPanel() {
         memorySeededRef.current = true; // Prevent concurrent attempts
 
         const rosterNames = (s.npcs || []).map(n => n?.name).filter(Boolean);
+        // Every row through vectorMemory's composers (2026-10-11): the seed,
+        // the live lanes and the retraction compose one text per category.
         const items = [
             // Secret facts/cards keep their knower boundary inside the embedded
             // text, so a RAG hit re-surfaces the SECRET tag along with the canon.
             // Live facts only: a fact superseded by a flip (2026-09-29) is
             // history for the record lane, never a retrieval candidate.
-            ...liveWorldFacts(s.worldFacts).map(f => ({ text: `${formatSecrecyTag(f.knownBy)}${f.fact}`, category: f.category || 'world_fact' })),
+            ...liveWorldFacts(s.worldFacts).map(f => factMemoryItem(f)),
             // `subjects` = who a memory is ABOUT (presence-aware retrieval,
             // 2026-08-28): person-tied rows go dormant in scenes their person
             // is nowhere near, instead of semantically shadowing the hero.
             // A `fallback` entry ("Auto-summary was unavailable…") is honest
             // bookkeeping, not memory — a content-free row would compete for
             // retrieval slots on every reload (2026-09-06 P2).
-            ...(s.journal || []).filter(j => !j.fallback).map(j => ({
-                text: j.summary,
-                category: 'journal',
-                location: j.location,
-                subjects: findSubjectsInText(j.summary, rosterNames),
-            })),
-            ...(s.npcs || []).filter(n => n.lastNotes || n.notes).map(n => ({
-                text: `${n.name} (${n.disposition || 'unknown'}): ${n.lastNotes || n.notes}`,
-                category: 'npc',
-                location: n.basedIn || n.lastLocation,
-                subjects: [n.name],
-            })),
+            ...(s.journal || []).filter(j => !j.fallback).map(j => journalMemoryItem(j, rosterNames)),
+            ...(s.npcs || []).filter(n => n.lastNotes || n.notes).map(npcMemoryItem),
             // Non-active cards stay out of retrieval: a resolved promise or a
             // dormant scene beat retrieving beside live ones invites the DM to
             // revive a paid-off arc (2026-08-06 audit). Their cached rows are
             // mutable-category, so the seed prune also drops them from disk.
-            ...(s.storyMemory || []).filter(m => (m.status || 'active') === 'active').map(m => ({
-                text: `${formatSecrecyTag(m.knownBy)}${m.subject ? `${m.subject}: ` : ''}${m.text}`,
-                category: `story_${m.type || 'callback'}`,
-                location: m.location,
-                subjects: Array.isArray(m.linkedNpcNames) && m.linkedNpcNames.length > 0 ? m.linkedNpcNames : null,
-            })),
+            ...(s.storyMemory || []).filter(m => (m.status || 'active') === 'active').map(storyCardMemoryItem),
         ];
 
         // Campaign-keyed seeding (v4): loads THIS campaign's cached embeddings and
@@ -448,7 +435,7 @@ export default function ChatPanel() {
         seedMemories(machineryKey, items, s.session?.id || null, {
             // The superseded facts' cached rows retire with them (immutable
             // categories are otherwise kept when absent from the seed).
-            retiredTexts: new Set((s.worldFacts || []).filter(f => f && (f.supersededBy || Number.isFinite(f.retractedAtMessage))).map(f => `${formatSecrecyTag(f.knownBy)}${f.fact}`)),
+            retiredTexts: new Set((s.worldFacts || []).filter(f => f && (f.supersededBy || Number.isFinite(f.retractedAtMessage))).map(factMemoryText)),
             // Rows the seed could not embed (a rate limit, an outage, a
             // rejected key) leave the whole session on a partial store — said
             // once, as an infrastructure line (2026-09-29 vector-memory P2).
@@ -643,12 +630,15 @@ export default function ChatPanel() {
                     // owns their truth. Persist only terminal combat narration to RAG so a
                     // model wording mistake cannot become a long-lived semantic memory.
                     const machineryKey = getMachineryGeminiKey(latest.settings);
+                    // Stamped with the narration's id like the ordinary lane
+                    // (2026-10-11 P2): ✕ on a victory narration used to retract
+                    // its Scribe canon but keep this row.
                     if (['victory', 'defeat', 'escaped'].includes(result.terminal) && machineryKey) {
-                        const loc = latest.currentLocation;
-                        const narrativeText = loc
-                            ? `[Location: ${loc}] ${narrative.slice(0, 500)}`
-                            : narrative.slice(0, 500);
-                        addMemory(machineryKey, narrativeText, 'narrative', loc).catch(() => {});
+                        const committed = runner.getLastCommittedTurn();
+                        queueMemoryItem(machineryKey, sceneMemoryItem(narrative, {
+                            location: latest.currentLocation,
+                            sourceMessage: typeof committed?.id === 'string' ? committed.id : null,
+                        })).catch(() => {});
                     }
                 }
                 runner.runAutoSummarize();
@@ -737,11 +727,11 @@ export default function ChatPanel() {
         });
         const playerMachineryKey = getMachineryGeminiKey(stateRef.current.settings);
         if (playerMachineryKey && !tableTalkTurn) {
+            // The player line lands before the reply exists, so it embeds
+            // alone (a batch of one) rather than riding the turn's batch.
             const loc = stateRef.current.currentLocation;
-            const playerText = loc
-                ? `[Location: ${loc}] ${trimmed.slice(0, 500)}`
-                : trimmed.slice(0, 500);
-            addMemory(playerMachineryKey, playerText, 'player', loc).catch(() => {});
+            const row = sceneMemoryItem(trimmed, { category: 'player', location: loc });
+            addMemory(playerMachineryKey, row.text, row.category, loc).catch(() => {});
         }
 
         setIsLoading(true);
@@ -779,10 +769,10 @@ export default function ChatPanel() {
                 // the post-roll outcome, or revealed if the player changes approach.
                 // Prose-detected checks stay visible, so they carry no setup payload.
                 runner.stageRoleplayCheck(events.requestedRolls, trimmed, {
-                    preNarrated: events._preNarratedOutcome,
+                    preNarrated: turnFlags(events).preNarratedOutcome,
                     loot: routed.proposalLoot,
-                    setupNarrative: events._setupHidden ? dmNarrative : '',
-                    setupMessageId: events._setupHidden ? events._setupMessageId : null,
+                    setupNarrative: turnFlags(events).setupHidden ? dmNarrative : '',
+                    setupMessageId: turnFlags(events).setupHidden ? turnFlags(events).setupMessageId : null,
                 });
             } else if (routed.route === TURN_ROUTES.ATTACK_AS_CHECK) {
                 await runner.sendRollCorrection({ attackAsCheck: true, playerAction: trimmed });

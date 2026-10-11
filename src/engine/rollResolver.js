@@ -16,6 +16,7 @@
  */
 
 import { rollWithModifier } from './dice.ts';
+import { turnFlags } from '../llm/turnFlags.js';
 import { computeACFromInventory, formatModifier, getConditionRollEffects, combineRollModifiers, resolvePlayerRollModifier } from './rules.js';
 import { ENEMY_DEFAULT_DAMAGE, validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
 import { applyUncannyDodge, conditionAwareAttackModifiers, getAttackCount, rollD20Kept, rollDamage, stampCriticalRoll } from './combatMath.js';
@@ -400,26 +401,27 @@ export async function handleRequestedRolls(requestedRolls, {
         if (followUpEvents?.requestedRolls?.length > 0) {
             // The follow-up response is itself a withheld setup when hidden — carry
             // its narration forward so chained checks can't erase fiction either.
-            const followUpSetup = followUpEvents._setupHidden ? followUpNarrative : '';
+            const followUp = turnFlags(followUpEvents);
+            const followUpSetup = followUp.setupHidden ? followUpNarrative : '';
             if (onFollowUpRolls) {
                 onFollowUpRolls(followUpEvents.requestedRolls, {
                     playerAction,
-                    preNarrated: followUpEvents._preNarratedOutcome || false,
+                    preNarrated: followUp.preNarratedOutcome || false,
                     pendingLoot,
                     setupNarrative: followUpSetup,
-                    setupMessageId: followUpEvents._setupHidden ? followUpEvents._setupMessageId : null,
+                    setupMessageId: followUp.setupHidden ? followUp.setupMessageId : null,
                 });
             } else {
                 // Follow-up rolls always re-stage as a fresh proposal via the
                 // caller's handler; there is no recursive resolution path anymore.
                 console.warn('[RollResolver] Follow-up rolls dropped — no onFollowUpRolls handler was provided.');
             }
-        } else if (followUpEvents?._attackAsCheckRejected || followUpEvents?._playerAuthorityRollRejected) {
+        } else if (turnFlags(followUpEvents).attackAsCheckRejected || turnFlags(followUpEvents).playerAuthorityRollRejected) {
             // The arbiter rejected every check the outcome chained. That rejected
             // narration was withheld (setup policy), so without a correction the
             // player sees dice and then silence — same routing as the first hop.
             if (onFollowUpRejected) {
-                await onFollowUpRejected({ attackAsCheck: !!followUpEvents._attackAsCheckRejected });
+                await onFollowUpRejected({ attackAsCheck: !!turnFlags(followUpEvents).attackAsCheckRejected });
             } else {
                 console.warn('[RollResolver] Follow-up check rejected by the roll arbiter — no onFollowUpRejected handler was provided.');
             }

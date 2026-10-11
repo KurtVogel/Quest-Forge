@@ -17,14 +17,16 @@
  *    costs nobody a turn and cannot produce a free enemy attack.
  * 4. requestedRolls outside combat — staged as a roleplay-check proposal (dice
  *    do not exist until the player accepts the public adjudication).
- * 5. _attackAsCheckRejected — the DM staged the player's declared attack as a
+ * 5. turn.attackAsCheckRejected — the DM staged the player's declared attack as a
  *    check (Codex 2026-08-09); request a combat_start re-response. Outranks the
  *    no-dice correction: when both flags could apply, starting the fight is the
  *    correction that honors the player's actual action.
- * 6. _playerAuthorityRollRejected — every proposed roll was rejected as a
+ * 6. turn.playerAuthorityRollRejected — every proposed roll was rejected as a
  *    player-authority override; request a no-roll roleplay response.
  * 7. Plain narrative — nothing to orchestrate.
  */
+
+import { turnFlags } from '../../llm/turnFlags.js';
 
 export const TURN_ROUTES = {
     COMBAT_REJECTED: 'combat_rejected',
@@ -93,10 +95,10 @@ export function routeTurnEvents(events, { combatWasActive = false } = {}) {
             proposalLoot: extractProposalLoot(events),
         };
     }
-    if (events?._attackAsCheckRejected) {
+    if (turnFlags(events).attackAsCheckRejected) {
         return { route: TURN_ROUTES.ATTACK_AS_CHECK, combatIntentHandled: false };
     }
-    if (events?._playerAuthorityRollRejected) {
+    if (turnFlags(events).playerAuthorityRollRejected) {
         return { route: TURN_ROUTES.AUTHORITY_CORRECTION, combatIntentHandled: false };
     }
     return { route: TURN_ROUTES.NARRATIVE, combatIntentHandled: false };

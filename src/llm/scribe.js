@@ -19,11 +19,12 @@ import { captureReflection, captureScribePass, captureUsage } from '../debug/mem
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
 import { getKnownSpells, isSpellcaster } from '../engine/spellcasting.js';
 import { containment, tokenSet } from '../engine/textMatch.js';
-import { findSubjectsInText } from '../engine/vectorMemory.js';
+import { findSubjectsInText } from '../engine/textMatch.js';
+import { factMemoryItem, queueMemoryItem } from '../engine/vectorMemory.js';
 import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 import { HERO_TELL_REPORT_CAP, isHeroTellEstablished } from '../engine/heroTells.js';
-import { liveWorldFacts } from '../engine/worldFacts.js';
+import { liveWorldFacts, planWorldFactAdditions } from '../engine/worldFacts.js';
 import { cleanText } from '../engine/text.js';
 import {
     CAST_AUDIT_RULES,
@@ -377,6 +378,13 @@ export function buildScribeContext(state, ...texts) {
         knownOpenPlans: buildKnownOpenPlans(state),
         knownHeroTells: buildKnownHeroTells(state),
         knownLocations: buildKnownLocations(state),
+        // The record the Scribe's facts are judged against before they embed
+        // live (2026-10-11): the facts, the transcript length, the place.
+        memoryContext: {
+            worldFacts: state?.worldFacts || [],
+            messageCount: (state?.messages || []).length,
+            location: state?.currentLocation || null,
+        },
     };
 }
 
@@ -448,7 +456,7 @@ export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'story_memor
  */
 export const RECALL_TURN_RULE = 'RECALL TURN: the player asked about the PAST and the DM answered from the engine\'s own record of this campaign. Extract NOTHING new from the answer — no world_facts, no story cards, no location change, no loot, no payment, no appearance — everything it recounts is already on record. The ONE exception: if the remembering itself visibly moved someone (warmth, grief, a grudge surfacing), report that as an npc_updates bondMoment or stanceToPlayer for that person. Emit "world_facts": [] and leave every other field empty.';
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownHeroTells = null, knownLocations = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownHeroTells = null, knownLocations = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null }) {
     // Source-stamped retraction (memory-research M0, 2026-09-30): every
     // record this pass writes remembers the DM message it was read from.
     const laneMeta = typeof sourceMessageId === 'string' && sourceMessageId ? { sourceMessage: sourceMessageId } : null;
@@ -534,6 +542,24 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         if (worldFacts.length > 0) {
             dispatch({ type: 'ADD_WORLD_FACTS', payload: worldFacts, ...(laneMeta && { meta: laneMeta }) });
             console.log(`[Scribe] Added ${worldFacts.length} world fact(s)`);
+            // The Scribe is the dominant fact source and its facts never
+            // embedded live before (2026-10-11 P2 — the mount seed was their
+            // only path, so a fact written this turn was invisible to
+            // retrieval until the next reload). The same plan the reducer
+            // commits judges them against the record the caller captured;
+            // the rows born are CARRIED onto the next turn's batch (the turn's
+            // own batch flushed seconds ago — an embed here was a request of
+            // its own on every fact turn), stamped for retraction.
+            if (memoryContext && typeof memoryContext === 'object') {
+                const planned = planWorldFactAdditions(memoryContext.worldFacts, worldFacts, {
+                    messageCount: Number.isFinite(memoryContext.messageCount) ? memoryContext.messageCount : 0,
+                    sourceMessage: sourceMessageId,
+                });
+                const location = (typeof dmLocationEvent === 'string' && dmLocationEvent) || memoryContext.location || null;
+                for (const fact of planned.added) {
+                    queueMemoryItem(background.apiKey, factMemoryItem(fact, { location, sourceMessage: typeof sourceMessageId === 'string' ? sourceMessageId : null }), { carry: true }).catch(() => {});
+                }
+            }
         }
 
         const rosteredNames = [];

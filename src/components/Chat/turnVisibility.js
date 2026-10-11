@@ -9,6 +9,7 @@
  */
 
 import { MESSAGE_CONTENT_MAX } from '../../config/contentLimits.js';
+import { turnFlags } from '../../llm/turnFlags.js';
 
 /**
  * Derive the withheld-setup flags for a parsed DM response.
@@ -27,20 +28,21 @@ import { MESSAGE_CONTENT_MAX } from '../../config/contentLimits.js';
  * override.
  *
  * @param {object|null} events - normalized events from parseResponse (with the
- *   underscore-prefixed orchestration flags ChatPanel stamps on them).
+ *   `turn` orchestration flags the orchestrator stamps on them — llm/turnFlags.js).
  * @returns {{ proposalFromProse: boolean, setupPhase: boolean, hideSetup: boolean }}
  */
 export function deriveSetupVisibility(events) {
-    const proposalFromProse = !!events?._textRollDetected
-        && !events?._preNarratedOutcome
-        && !events?._playerAuthorityRollRejected
+    const turn = turnFlags(events);
+    const proposalFromProse = !!turn.textRollDetected
+        && !turn.preNarratedOutcome
+        && !turn.playerAuthorityRollRejected
         && events?.requestedRolls?.length > 0;
     const setupPhase = events?.requestedRolls?.length > 0
         || !!events?.combatExchange
-        || !!events?._playerAuthorityRollRejected
+        || !!turn.playerAuthorityRollRejected
         // An attack staged as a check: the invalid setup narration is superseded
         // by the combat_start correction response, exactly like the no-dice case.
-        || !!events?._attackAsCheckRejected;
+        || !!turn.attackAsCheckRejected;
     return { proposalFromProse, setupPhase, hideSetup: setupPhase && !proposalFromProse };
 }
 

@@ -7,7 +7,7 @@
  * audit: six copies of the dance, eight of cleanText) — one implementation,
  * one test surface.
  */
-import { extractBalancedJson, repairJson, scanBalancedObject, stripMarkdownFences } from './utils/jsonExtractor.js';
+import { extractLlmJson, parseJsonText, parseLlmJson } from './utils/jsonExtractor.js';
 import { sendMessage } from './adapter.js';
 import { dmCallConfig } from './machinery.js';
 import { CAMPAIGN_PREMISE_MAX_LENGTH } from '../config/contentLimits.js';
@@ -117,66 +117,32 @@ export function baseDirectorContext(state, overrides = {}) {
  * them so every existing surface stays byte-identical.
  */
 export function parseDirectorJson(response, anchorKey, label, { missingMessage, malformedMessage } = {}) {
-    const text = String(response || '');
     const anchors = Array.isArray(anchorKey) ? anchorKey : [anchorKey];
-    let extracted = null;
-    for (const anchor of anchors) {
-        extracted = extractBalancedJson(text, anchor);
-        if (extracted) break;
-    }
+    // The anchor contract is deliberate here (required lists, not omit rules):
+    // no whole-object fallback, so a reply without the schema's list is
+    // "missing", not an empty install.
+    const extracted = extractLlmJson(response, { anchors });
     if (!extracted) throw new Error(missingMessage || `The ${label} response did not contain ${anchors[0]}.`);
-    try {
-        return JSON.parse(extracted.json);
-    } catch {
-        try {
-            return JSON.parse(repairJson(extracted.json));
-        } catch {
-            throw new Error(malformedMessage || `The ${label} response was malformed.`);
-        }
-    }
+    const value = parseJsonText(extracted.json);
+    if (value === undefined || value === null || typeof value !== 'object') throw new Error(malformedMessage || `The ${label} response was malformed.`);
+    return value;
 }
 
 /**
  * Non-throwing sibling of parseDirectorJson for the fire-and-forget Scribe
  * passes (per-turn extraction, cadence reflection), whose failure contract is
  * "log and quietly do nothing" rather than an error surface. Returns the
- * parsed object, or null when no anchored JSON exists or repair fails.
+ * parsed object, or null when no JSON exists or repair fails.
+ *
+ * Whole-object fallback (2026-09-16 scribe P1): an anchor list is a schema
+ * ASSUMPTION, and the Scribe's own prompt says "omit empty/unknown fields"
+ * — a turn with an NPC update, a relocation, and a six-silver payment but
+ * no durable fact came back without `world_facts` and parsed to null, so
+ * NOTHING dispatched (the payment audit included). When the reply IS the
+ * object (the machinery's "Output ONLY the JSON" contract), read it whole.
+ * The walk itself is jsonExtractor's ONE (2026-10-11).
  */
 export function tryParseDirectorJson(response, anchorKey, label) {
-    const text = String(response || '');
-    const anchors = Array.isArray(anchorKey) ? anchorKey : [anchorKey];
-    let extracted = null;
-    for (const anchor of anchors) {
-        extracted = extractBalancedJson(text, anchor);
-        if (extracted) break;
-    }
-    // Whole-object fallback (2026-09-16 scribe P1): an anchor list is a schema
-    // ASSUMPTION, and the Scribe's own prompt says "omit empty/unknown fields"
-    // — a turn with an NPC update, a relocation, and a six-silver payment but
-    // no durable fact came back without `world_facts` and parsed to null, so
-    // NOTHING dispatched (the payment audit included). When the reply IS the
-    // object (the machinery's "Output ONLY the JSON" contract), read it whole.
-    if (!extracted) {
-        const cleaned = stripMarkdownFences(text).trim();
-        if (!cleaned.startsWith('{')) return null;
-        const end = scanBalancedObject(cleaned, 0);
-        extracted = { json: end > 0 ? cleaned.slice(0, end) : cleaned, startIndex: 0 };
-    }
-    const parsed = parseObjectJson(extracted.json, label);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    return parseLlmJson(response, { anchors: anchorKey, wholeObject: true, label })?.value ?? null;
 }
 
-function parseObjectJson(json, label) {
-    try {
-        return JSON.parse(json);
-    } catch {
-        try {
-            const parsed = JSON.parse(repairJson(json));
-            console.warn(`[${label}] JSON repaired before parsing.`);
-            return parsed;
-        } catch (e) {
-            console.warn(`[${label}] JSON parse failed after repair:`, e.message);
-            return null;
-        }
-    }
-}

@@ -36,11 +36,11 @@ const state = {
 };
 
 describe('buildScribeContext (scribe P2, 2026-10-10)', () => {
-    it('is the six builders with the same arguments, under the names runScribe reads', () => {
+    it('is the six builders with the same arguments, under the names runScribe reads, plus the memory context', () => {
         const texts = ['I ask Mira about the ribbon.', 'Mira wipes her hands. "Not yet," she says.'];
         const context = buildScribeContext(state, ...texts);
         expect(Object.keys(context).sort()).toEqual([
-            'knownAppearances', 'knownHeroTells', 'knownLocations', 'knownOpenPlans', 'knownStances', 'knownStoryCards',
+            'knownAppearances', 'knownHeroTells', 'knownLocations', 'knownOpenPlans', 'knownStances', 'knownStoryCards', 'memoryContext',
         ]);
         expect(context).toEqual({
             knownAppearances: buildKnownAppearances(state, ...texts),
@@ -49,6 +49,7 @@ describe('buildScribeContext (scribe P2, 2026-10-10)', () => {
             knownOpenPlans: buildKnownOpenPlans(state),
             knownHeroTells: buildKnownHeroTells(state),
             knownLocations: buildKnownLocations(state),
+            memoryContext: { worldFacts: state.worldFacts, messageCount: 0, location: null },
         });
         expect(context.knownAppearances).toContain('Mira');
         expect(context.knownAppearances).not.toContain('Tammo');

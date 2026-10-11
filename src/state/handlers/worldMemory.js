@@ -2,7 +2,7 @@
  * Long-term memory: world facts (near-duplicate rejection), story-memory
  * cards, journal entries/summarization marks, and the campaign chronicle.
  */
-import { classifyFactAspect, classifyFactCandidate, factTokenSet, findOpenPlan, liveWorldFacts } from '../../engine/worldFacts.js';
+import { planWorldFactAdditions } from '../../engine/worldFacts.js';
 import {
     applyStoryMemoryDormancy,
     findStoryMemoryMatch,
@@ -12,7 +12,7 @@ import {
     stripStoryMemoryEngineStamps,
 } from '../../engine/storyMemory.js';
 import { gameReducer } from '../gameReducer.js';
-import { isStaleCampaignAction, normalizeChronicleChapter, sanitizeWorldFactPayload, stampNpcRelationshipArcs, systemMessage } from './shared.js';
+import { isStaleCampaignAction, normalizeChronicleChapter, stampNpcRelationshipArcs, systemMessage } from './shared.js';
 import { rollHeroTellBeat } from './heroTells.js';
 import { rollDie } from '../../engine/dice.ts';
 import {
@@ -106,77 +106,21 @@ export const handlers = {
     ADD_WORLD_FACTS(state, action) {
         // Bulk add, rejecting exact and near-duplicate restatements of known facts
         // (the Scribe tends to re-canonize the same truth with slight rewording).
-        // Only LIVE facts take part: a flip (the same claim, negation reversed)
-        // is stored and supersedes its twin (engine/worldFacts.js, 2026-09-29),
-        // and a later re-flip judges against the current truth, never the buried one.
-        let worldFacts = Array.isArray(state.worldFacts) ? state.worldFacts : [];
-        let live = liveWorldFacts(worldFacts);
-        let liveSets = live.map(f => factTokenSet(f.fact));
-        const messageCount = (state.messages || []).length;
+        // The judgement is engine/worldFacts.js's planWorldFactAdditions — ONE
+        // plan the reducer commits and the live embed lanes read (2026-10-11),
+        // so a RAG row is always the record's own text. Only LIVE facts take
+        // part: a flip is stored and supersedes its twin (2026-09-29), and a
+        // later re-flip judges against the current truth, never the buried one.
         // Source-stamped retraction (memory-research M0, 2026-09-30): the lane
         // names the DM message it read (`meta.sourceMessage`); DELETE_MESSAGE
         // retracts what that message minted.
         const sourceMessage = typeof action.meta?.sourceMessage === 'string' && action.meta.sourceMessage ? action.meta.sourceMessage : null;
-        let changed = false;
-        for (const f of action.payload || []) {
-            const sanitized = sanitizeWorldFactPayload(f);
-            if (!sanitized) continue;
-            const verdict = classifyFactCandidate(sanitized.fact, live, liveSets);
-            if (verdict.kind === 'duplicate') {
-                // A state is not a fact (M0, 2026-09-30): a restatement of a
-                // STATE fact ("the road is still flooded") re-stamps its age
-                // instead of being dropped — the DM reads the freshness. An
-                // INTENT restated ("he still means to…") re-stamps the same way
-                // (2026-10-07).
-                if ((verdict.of?.aspect === 'state' || verdict.of?.aspect === 'intent') && verdict.of.id) {
-                    const ofId = verdict.of.id;
-                    worldFacts = worldFacts.map(existing => (existing.id === ofId
-                        ? { ...existing, atMessage: messageCount, timestamp: Date.now() }
-                        : existing));
-                    live = liveWorldFacts(worldFacts);
-                    changed = true;
-                }
-                continue;
-            }
-            const id = `fact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-            const aspect = classifyFactAspect(sanitized.fact);
-            const next = {
-                id,
-                timestamp: Date.now(),
-                // Birth stamp in messages: the age every state tag and the
-                // retraction ledger read (legacy rows simply have none).
-                atMessage: messageCount,
-                ...sanitized,
-                ...(aspect && { aspect }),
-                ...(sourceMessage && { sourceMessage }),
-            };
-            if (verdict.kind === 'flip' && verdict.of?.id) {
-                next.supersedes = verdict.of.id;
-                worldFacts = worldFacts.map(existing => (existing.id === verdict.of.id
-                    ? { ...existing, supersededBy: id, supersededAtMessage: messageCount }
-                    : existing));
-            } else {
-                // An intent is not a deed (memory-research M0, 2026-10-07): a
-                // lane that read KNOWN OPEN PLANS names the plan this fact
-                // settles (`supersedes: <id>`) and the plan closes exactly as a
-                // flipped twin does. Only a live INTENT fact answers to the ref
-                // (engine/worldFacts.js `findOpenPlan`) — a standing truth
-                // closes by a FLIP alone, so the ref can never bury canon.
-                const plan = findOpenPlan(live, f?.supersedes);
-                if (plan && plan.id !== id) {
-                    next.supersedes = plan.id;
-                    worldFacts = worldFacts.map(existing => (existing.id === plan.id
-                        ? { ...existing, supersededBy: id, supersededAtMessage: messageCount }
-                        : existing));
-                }
-            }
-            worldFacts = [...worldFacts, next];
-            live = liveWorldFacts(worldFacts);
-            liveSets = live.map(x => factTokenSet(x.fact));
-            changed = true;
-        }
-        if (!changed) return state;
-        return { ...state, worldFacts };
+        const plan = planWorldFactAdditions(state.worldFacts, action.payload, {
+            messageCount: (state.messages || []).length,
+            sourceMessage,
+        });
+        if (!plan.changed) return state;
+        return { ...state, worldFacts: plan.worldFacts };
     },
 
     ADD_STORY_MEMORY_CARD(state, action) {

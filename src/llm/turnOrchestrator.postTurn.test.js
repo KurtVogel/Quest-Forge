@@ -26,6 +26,8 @@ vi.mock('../engine/vectorMemory.js', async (importOriginal) => ({
     ...(await importOriginal()),
     addMemory: mocks.addMemory,
     queueMemory: mocks.queueMemory,
+    // The composer lane (2026-10-11) is the positional queue seen through the item.
+    queueMemoryItem: (key, item) => mocks.queueMemory(key, item.text, item.category, item.location, item.subjects, item.sourceMessage),
     flushMemoryQueue: mocks.flushMemoryQueue,
     retrieveRelevant: async () => [],
 }));

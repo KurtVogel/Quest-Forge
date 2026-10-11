@@ -14,20 +14,20 @@ describe('deriveSetupVisibility', () => {
     });
 
     it('keeps a prose-extracted proposal visible while still deferring mutations', () => {
-        const flags = deriveSetupVisibility({ requestedRolls: [roll], _textRollDetected: true });
+        const flags = deriveSetupVisibility({ requestedRolls: [roll], turn: { textRollDetected: true } });
         expect(flags).toEqual({ proposalFromProse: true, setupPhase: true, hideSetup: false });
     });
 
     it('hides a prose-extracted setup that pre-narrated the outcome', () => {
         const flags = deriveSetupVisibility({
-            requestedRolls: [roll], _textRollDetected: true, _preNarratedOutcome: true,
+            requestedRolls: [roll], turn: { textRollDetected: true, preNarratedOutcome: true },
         });
         expect(flags).toEqual({ proposalFromProse: false, setupPhase: true, hideSetup: true });
     });
 
     it('hides the setup when the check was rejected as a player-authority override, even with no surviving rolls', () => {
         const flags = deriveSetupVisibility({
-            requestedRolls: [], _textRollDetected: true, _playerAuthorityRollRejected: true,
+            requestedRolls: [], turn: { textRollDetected: true, playerAuthorityRollRejected: true },
         });
         expect(flags).toEqual({ proposalFromProse: false, setupPhase: true, hideSetup: true });
     });

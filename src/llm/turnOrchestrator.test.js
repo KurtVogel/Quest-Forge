@@ -429,12 +429,12 @@ describe('turn runner — change approach (reveal + set-aside ruling)', () => {
         expect(runner.getLastCommittedTurn().hidden).toBe(true);
         runner.stageRoleplayCheck(events.requestedRolls, 'I sneak past the sergeant.', {
             setupNarrative: runner.getLastCommittedTurn().content,
-            setupMessageId: events._setupMessageId,
+            setupMessageId: events.turn.setupMessageId,
         });
 
         runner.changeRoleplayApproach();
 
-        const setupMessage = getState().messages.find(m => m.id === events._setupMessageId);
+        const setupMessage = getState().messages.find(m => m.id === events.turn.setupMessageId);
         expect(setupMessage.hidden).toBe(false); // the fiction the player never saw is restored
         expect(setupMessage.revealedSetup).toBe(true);
         expect(getState().pendingRoleplayCheck).toBeNull();
@@ -453,12 +453,12 @@ describe('turn runner — change approach (reveal + set-aside ruling)', () => {
         runner.stageRoleplayCheck(events.requestedRolls, 'I sneak past the sergeant.', {
             preNarrated: true,
             setupNarrative: runner.getLastCommittedTurn().content,
-            setupMessageId: events._setupMessageId,
+            setupMessageId: events.turn.setupMessageId,
         });
 
         runner.changeRoleplayApproach();
 
-        expect(getState().messages.find(m => m.id === events._setupMessageId).hidden).toBe(true);
+        expect(getState().messages.find(m => m.id === events.turn.setupMessageId).hidden).toBe(true);
         expect(getState().pendingRoleplayCheck).toBeNull();
         expect(getState().recentRulings).toHaveLength(1);
         expect(getState().messages.some(m => m.role === 'system'

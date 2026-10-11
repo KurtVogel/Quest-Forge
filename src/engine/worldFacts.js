@@ -46,6 +46,7 @@
  */
 import { containment, tokenSet } from './textMatch.js';
 import { conversationalDistance } from './replayLedger.js';
+import { normalizeKnownBy } from './storyMemory.js';
 
 const FACT_STOP_WORDS = new Set([
     'the', 'a', 'an', 'of', 'to', 'in', 'is', 'are', 'was', 'were', 'and', 'or',
@@ -207,4 +208,120 @@ export function describeSupersededTag(fact, { messages = null, messageCount } = 
 /** The record lane's tag for a retracted fact: it was minted by a message the player removed. */
 export function describeRetractedTag(fact) {
     return fact && Number.isFinite(fact.retractedAtMessage) ? '[RETRACTED — its message was removed] ' : '';
+}
+
+// ——— The fact payload boundary and THE addition plan (2026-10-11) ———
+
+export const WORLD_FACT_MAX_LENGTH = 400;
+const WORLD_FACT_CATEGORY_MAX_LENGTH = 40;
+
+/**
+ * A lane's fact payload typed and clamped: fact string-or-drop at
+ * WORLD_FACT_MAX_LENGTH, category clamped (default 'general'), knownBy
+ * through the epistemics normalizer (DECISIONS.md 2026-08-05 ×2 — always
+ * present so a hostile save's junk value is overwritten on load), `pinned`
+ * (2026-09-30: an engine-minted commitment the post-journal verifier must
+ * find live after every cadence). Null for junk. Moved here from
+ * handlers/shared.js so the live embed lanes can read the RECORD's shape.
+ */
+export function sanitizeWorldFactPayload(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    const fact = typeof payload.fact === 'string' ? payload.fact.trim().slice(0, WORLD_FACT_MAX_LENGTH) : '';
+    if (!fact) return null;
+    const category = (typeof payload.category === 'string' && payload.category.trim())
+        ? payload.category.trim().slice(0, WORLD_FACT_CATEGORY_MAX_LENGTH)
+        : 'general';
+    const pinned = payload.pinned === true || payload.pinned === 'true';
+    return { fact, category, knownBy: normalizeKnownBy(payload.knownBy ?? payload.known_by), ...(pinned && { pinned: true }) };
+}
+
+function mintFactId() {
+    return `fact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/**
+ * THE judgement of a batch of fact candidates against the record (2026-10-11
+ * audit P2): the reducer's ADD_WORLD_FACTS is this plan committed, and the
+ * live embed lanes (the DM's `world_facts`, the Scribe's) read `added` so a
+ * RAG row is composed from the record's own shape — never from the wire.
+ * Measured before: a restatement the record REFUSED was embedded anyway (a
+ * permanent immutable-category row), `knownBy: "public"` embedded with a
+ * SECRET tag the record never carried, an object fact embedded the literal
+ * string "undefined", a 900-char fact embedded whole against the record's
+ * 400 — four of four live texts absent from the seed's.
+ *
+ * Per candidate: sanitized; a ≥ 0.9 same-polarity restatement is a
+ * `duplicate` (dropped — or, for a STATE / INTENT fact, its age re-stamped);
+ * a restatement whose negation differs is a FLIP (stored, superseding its
+ * twin); a lane's `supersedes` ref closes a live INTENT fact only
+ * (`findOpenPlan`); a new fact is born with its id, `atMessage`, aspect and
+ * (when the lane stamped one) `sourceMessage`. Returns the next list, the
+ * rows born, and whether anything changed. Pure.
+ */
+export function planWorldFactAdditions(worldFacts, payload, { messageCount = 0, sourceMessage = null, now = Date.now() } = {}) {
+    let facts = Array.isArray(worldFacts) ? worldFacts : [];
+    let live = liveWorldFacts(facts);
+    let liveSets = live.map(f => factTokenSet(f.fact));
+    const stamp = typeof sourceMessage === 'string' && sourceMessage ? sourceMessage : null;
+    const added = [];
+    let changed = false;
+    for (const f of (Array.isArray(payload) ? payload : [])) {
+        const sanitized = sanitizeWorldFactPayload(f);
+        if (!sanitized) continue;
+        const verdict = classifyFactCandidate(sanitized.fact, live, liveSets);
+        if (verdict.kind === 'duplicate') {
+            // A state is not a fact (M0, 2026-09-30): a restatement of a
+            // STATE fact ("the road is still flooded") re-stamps its age
+            // instead of being dropped — the DM reads the freshness. An
+            // INTENT restated ("he still means to…") re-stamps the same way
+            // (2026-10-07).
+            if ((verdict.of?.aspect === 'state' || verdict.of?.aspect === 'intent') && verdict.of.id) {
+                const ofId = verdict.of.id;
+                facts = facts.map(existing => (existing.id === ofId
+                    ? { ...existing, atMessage: messageCount, timestamp: now }
+                    : existing));
+                live = liveWorldFacts(facts);
+                changed = true;
+            }
+            continue;
+        }
+        const id = mintFactId();
+        const aspect = classifyFactAspect(sanitized.fact);
+        const next = {
+            id,
+            timestamp: now,
+            // Birth stamp in messages: the age every state tag and the
+            // retraction ledger read (legacy rows simply have none).
+            atMessage: messageCount,
+            ...sanitized,
+            ...(aspect && { aspect }),
+            ...(stamp && { sourceMessage: stamp }),
+        };
+        if (verdict.kind === 'flip' && verdict.of?.id) {
+            next.supersedes = verdict.of.id;
+            facts = facts.map(existing => (existing.id === verdict.of.id
+                ? { ...existing, supersededBy: id, supersededAtMessage: messageCount }
+                : existing));
+        } else {
+            // An intent is not a deed (memory-research M0, 2026-10-07): a
+            // lane that read KNOWN OPEN PLANS names the plan this fact
+            // settles (`supersedes: <id>`) and the plan closes exactly as a
+            // flipped twin does. Only a live INTENT fact answers to the ref
+            // (`findOpenPlan`) — a standing truth closes by a FLIP alone, so
+            // the ref can never bury canon.
+            const plan = findOpenPlan(live, f?.supersedes);
+            if (plan && plan.id !== id) {
+                next.supersedes = plan.id;
+                facts = facts.map(existing => (existing.id === plan.id
+                    ? { ...existing, supersededBy: id, supersededAtMessage: messageCount }
+                    : existing));
+            }
+        }
+        facts = [...facts, next];
+        added.push(next);
+        live = liveWorldFacts(facts);
+        liveSets = live.map(x => factTokenSet(x.fact));
+        changed = true;
+    }
+    return { worldFacts: facts, added, changed };
 }

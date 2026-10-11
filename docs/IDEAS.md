@@ -3123,7 +3123,7 @@ roster's `NPC_RECORD_KEYS` pattern) is the test that keeps a record from growing
 - **Generic LLM-generated three-act campaign structure** — rejected 2026-06-11 in favor of
   fronts (above): act structures produce railroady, beige plots.
 
-### [strengthening] A family of N directors is one runner and N prompts; a boundary that lands in one lane is copied by the next unless the copy is DELETED; a reason string two modules share is a contract with no test — status: `idea` (2026-10-03 audit, living-world + scene-art Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
+### [strengthening] A family of N directors is one runner and N prompts; a boundary that lands in one lane is copied by the next unless the copy is DELETED; a reason string two modules share is a contract with no test — status: `shipped` (the 10-04 living-world slice and the 10-11 parser + RAG slice — `parseLlmJson`, `findFencedJsonBlocks`, the detector on `findSkillInText`, one RAG composer per category over `planWorldFactAdditions`, `withEmbedDb`, `addMemory` as a batch of one; DECISIONS.md 2026-10-11) (2026-10-03 audit, living-world + scene-art Lap 4; queue lines in SCHEDULED_STRENGTHENING.md)
 Four patterns from the design lap. **(1)** The living-world directors (aftermath, absence drift,
 regional fronts, wonder — and the front director and upgrade beside them) are one gate, one
 `sendMessage`, and one base context written five or six times; every shared projection's slice × clamp

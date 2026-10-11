@@ -12,7 +12,7 @@
  * recovery path. Gemini behavior is untouched in practice: it virtually always
  * emits a block, so the cue never fires.
  */
-import { extractBalancedJson, repairJson } from '../../llm/utils/jsonExtractor.js';
+import { parseLlmJson } from '../../llm/utils/jsonExtractor.js';
 
 const MAX_NUDGE_QUEST_UPDATES = 4;
 const MAX_NUDGE_STARTING_ITEMS = 8;
@@ -71,20 +71,10 @@ export function buildNudgePrompt(cue) {
 }
 
 function parseLooseObject(text) {
-    for (const keyword of ['quest_updates', 'starting_items']) {
-        const match = extractBalancedJson(text, keyword);
-        if (!match) continue;
-        try {
-            return JSON.parse(match.json);
-        } catch {
-            try {
-                return JSON.parse(repairJson(match.json));
-            } catch {
-                return null;
-            }
-        }
-    }
-    return null;
+    // The shared extract → parse → repair walk (2026-10-11): the two allowed
+    // channels anchor the read; a reply that IS the object (the honest empty
+    // block `{}` included) is read whole and whitelisted below.
+    return parseLlmJson(text, { anchors: ['quest_updates', 'starting_items'], wholeObject: true })?.value ?? null;
 }
 
 /**
