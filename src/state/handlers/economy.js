@@ -525,33 +525,22 @@ export const handlers = {
             return suppress(state, 'recentCoinLosses', transaction, sourceId, messageIndex,
                 `Duplicate coin charge ignored — ${transaction.item.name} was already paid when you bought ${purchaseCover.name || 'that'}.`);
         }
-        // No exact duplicate — but the charge may be a recap BUNDLE that swallows a
-        // recent payment whole (novel total, so the signature check can't see it).
-        // Known accepted false positive (live 2026-08-22): a genuine fresh charge
-        // that HAPPENS to swallow an unrelated recent payment gets that payment
-        // carved out (a 3 sp ferry debt stripped from a 3 gp 6 sp shopping bill).
-        // Deliberately kept: the same playtest's next turn had the DM bundle a
-        // full 360 cp recap INTO a genuine 71 cp meal charge on a message that
-        // also initiated commerce — no player-intent guard can tell the two
-        // apart, and a visible under-charge beats a silent double-charge.
-        // Strips against BOTH spend channels: a recap can bundle an atomic
-        // purchase's price together with a genuinely new charge ("75 gold for the
-        // mail and 5 silver for the strap").
-        const bundled = stripBundledReplay(
-            spendLedgerView(state), amounts, meta.playerMessage,
-            messageIndex, RECENT_SPEND_MESSAGE_WINDOW, state.messages
-        );
-        const charge = bundled ? bundled.remainder : amounts;
-        // Spend-side twin of the grant path: a recap bundle assembled entirely
-        // from already-taken payments must charge nothing at all.
-        if (bundled && isEmptyCoin(charge)) {
-            return suppress(state, 'recentCoinLosses', transaction, sourceId, messageIndex,
-                `Duplicate coin charge ignored — ${transaction.item.name} repeats payments already taken moments ago.`);
-        }
-        const chargeTransaction = bundled ? coinTransaction('loss', charge) : transaction;
-        const bundleNote = bundled
-            ? [coinLine(`Adjusted a bundled coin charge — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken moments ago; charged ${formatCurrency(chargeTransaction.priceCp)}.`)]
-            : [];
+        // NO recap-bundle strip on the DM's spend lane (Vesa, 2026-10-12 —
+        // DECISIONS.md): the 2026-07-31 guard carved any recent payment that
+        // fit inside a novel charge out of it, and the class playtest measured
+        // the ACCEPTED false positive (2026-08-22) at 6 of 6 Gemini openings —
+        // pay 1 gp for room + stew, then buy rope + lantern for 6 gp, charged
+        // 5. The reducer never sees the goods a loose coin loss paid for, so
+        // no discriminator lives here; the receipts rule (2026-08-31: every
+        // movement is a `−N paid — purse:` line the DM reads) attacks the
+        // re-emission at its source, and the exact-value signature guard plus
+        // the purchase cover above still catch a straight replay. The grant
+        // lane and the audit lane keep their strips (the grant lane refuses to
+        // GIVE on suspicion, the safe direction; the audit fires only on a
+        // coin-silent narration and carries no player message).
+        const charge = amounts;
+        const chargeTransaction = transaction;
+        const bundleNote = [];
         const result = spendCurrency(state.character, charge);
         if (!result.paid) {
             // An unpayable charge is NOT ledgered (2026-08-28 P1): no coin moved,

@@ -1151,9 +1151,13 @@ describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beg
         return next;
     }
 
-    it('strips a recent payment bundled into a new coin loss and charges only the remainder', () => {
-        // Live repro: gave 1 gp to the beggar (evented), then the fountain response
-        // bundled "gold_lost": 1 + "copper_lost": 3 — 103 cp, a novel signature.
+    it('the DM spend lane charges a novel total IN FULL — the recap-bundle strip is gone from this lane (Vesa, 2026-10-12)', () => {
+        // The 2026-07-31 repro (1 gp to the beggar, then "gold_lost": 1 +
+        // "copper_lost": 3 on the fountain turn) used to carve the gold out.
+        // The class playtest measured the strip's false positive at 6 of 6
+        // Gemini openings (room + stew, then rope + lantern charged 5 gp for
+        // 6), so a novel total is now the DM's own accounting; the exact-value
+        // signature guard and the purchase cover still catch a straight replay.
         const state = makeState({ character: { gold: 5, silver: 0, copper: 10 } });
         const paid = gameReducer(state, {
             type: 'APPLY_COIN_LOSS',
@@ -1164,9 +1168,10 @@ describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beg
             type: 'APPLY_COIN_LOSS',
             payload: { gold: 1, copper: 3, _meta: { sourceId: 'msg-fountain', playerMessage: 'I toss 3 copper coins into the wishing fountain and make a wish.' } },
         });
-        expect(bundled.character.gold).toBe(4); // one gold total, not two
+        expect(bundled.character.gold).toBe(3); // both charges stand
         expect(bundled.character.copper).toBe(7);
-        expect(bundled.messages.some(m => /Adjusted a bundled coin charge/.test(m.content))).toBe(true);
+        expect(bundled.messages.some(m => /Adjusted a bundled coin charge/.test(m.content))).toBe(false);
+        expect(bundled.messages.at(-1).content).toMatch(/−1 gp, 3 cp\*\* paid/);
     });
 
     it('keeps the full charge when the player names the repeated denomination', () => {
@@ -1245,7 +1250,7 @@ describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beg
         expect(recap.recentCoinGrants.at(-1).status).toBe('ignored');
     });
 
-    it('strips MULTIPLE prior payments from one recap charge and charges only the true remainder', () => {
+    it('a recap that bundles two prior payments plus new coin is charged in full on the DM lane (the accepted cost of dropping the strip, 2026-10-12)', () => {
         const state = makeState({ character: { gold: 10, silver: 10, copper: 10 } });
         const first = gameReducer(state, {
             type: 'APPLY_COIN_LOSS',
@@ -1260,10 +1265,10 @@ describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beg
             type: 'APPLY_COIN_LOSS',
             payload: { gold: 1, silver: 2, copper: 5, _meta: { sourceId: 'msg-recap', playerMessage: 'I head upstairs for the night.' } },
         });
-        expect(recap.character.gold).toBe(9);   // charged once, not twice
-        expect(recap.character.silver).toBe(8); // charged once, not twice
-        expect(recap.character.copper).toBe(5); // only the genuinely new part
-        expect(recap.messages.some(m => /Adjusted a bundled coin charge/.test(m.content))).toBe(true);
+        expect(recap.character.gold).toBe(8);   // the DM's novel total is its own accounting
+        expect(recap.character.silver).toBe(6);
+        expect(recap.character.copper).toBe(5);
+        expect(recap.messages.some(m => /Adjusted a bundled coin charge/.test(m.content))).toBe(false);
     });
 });
 
@@ -1712,14 +1717,15 @@ describe('2026-09-03 audit: sale quantity coercion, covered-purchase ledger stat
         });
         expect(replayed.inventory.filter(i => i.name === 'Brass Lantern')).toHaveLength(1);
         expect(replayed.character.gold).toBe(15);
-        // A genuine 10 gp charge two messages later: only the ONE real 5 gp spend is
-        // strippable now, so 5 gp is charged — before the fix the twin `applied`
-        // entries stripped the whole charge as "payments already taken".
+        // A genuine 10 gp charge two messages later is charged in full: the DM
+        // spend lane strips nothing any more (2026-10-12). Before the 09-03 fix
+        // the twin `applied` entries stripped the WHOLE charge as "payments
+        // already taken"; after it only the one real 5 gp was.
         const room = gameReducer(addMessages(covered, 2), {
             type: 'APPLY_COIN_LOSS',
             payload: { gold: 10, _meta: { sourceId: 'msg-room', playerMessage: 'I pay for the room.' } },
         });
-        expect(room.character.gold).toBe(10);
+        expect(room.character.gold).toBe(5);
     });
 
     it('PURCHASE_ITEM stacks into an existing same-identity row (P2)', () => {
