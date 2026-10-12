@@ -23,7 +23,7 @@
  * Lives in engine/ (not llm/) so reducer handlers never import from llm/.
  */
 import { containment, tokenSet } from './textMatch.js';
-import { conversationalDistance } from './replayLedger.js';
+import { clampMessageStamp, conversationalAgeSince } from './replayLedger.js';
 import { BOND_SCENE_WINDOW_MESSAGES, namesMatch } from './npcRoster.js';
 import { BEAT_COOLDOWN_MESSAGES, BEAT_SCENE_MESSAGES, BEAT_WINDOW_MESSAGES } from './relationshipArc.js';
 
@@ -66,13 +66,6 @@ function text(value, max) {
     if (typeof value !== 'string') return '';
     const clean = value.replace(/\s+/g, ' ').trim();
     return max ? clean.slice(0, max) : clean;
-}
-
-function finiteStamp(value, maxMessageCount) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return null;
-    const floored = Math.max(0, Math.floor(n));
-    return Number.isFinite(maxMessageCount) ? Math.min(floored, Math.max(0, Math.floor(maxMessageCount))) : floored;
 }
 
 function tellTokens(value) {
@@ -144,12 +137,12 @@ export function normalizeHeroTell(raw, { maxMessageCount } = {}) {
     const body = text(raw.text, HERO_TELL_TEXT_MAX);
     if (!body) return null;
     const sightings = normalizeSightings(raw.sightings, { maxMessageCount });
-    const first = finiteStamp(raw.firstSeenMessage, maxMessageCount);
-    const last = finiteStamp(raw.lastSeenMessage, maxMessageCount);
-    const voiced = finiteStamp(raw.lastVoicedMessage, maxMessageCount);
-    const beat = finiteStamp(raw.lastBeatMessage, maxMessageCount);
+    const first = clampMessageStamp(raw.firstSeenMessage, maxMessageCount);
+    const last = clampMessageStamp(raw.lastSeenMessage, maxMessageCount);
+    const voiced = clampMessageStamp(raw.lastVoicedMessage, maxMessageCount);
+    const beat = clampMessageStamp(raw.lastBeatMessage, maxMessageCount);
     const voicedCount = Number(raw.voicedCount);
-    const absence = finiteStamp(raw.lastAbsenceRemarkMessage, maxMessageCount);
+    const absence = clampMessageStamp(raw.lastAbsenceRemarkMessage, maxMessageCount);
     const kind = normalizeHeroTellKind(raw.kind);
     return {
         id: text(raw.id, 80) || mintHeroTellId(),
@@ -393,25 +386,17 @@ export function isHeroTellEstablished(tell) {
     return (Array.isArray(tell.sightings) ? tell.sightings.length : 0) >= establishScenesFor(tell);
 }
 
-function distanceFrom(anchor, { messages, messageCount }) {
-    if (!Number.isFinite(anchor)) return null;
-    const end = Number.isFinite(messageCount) ? messageCount : (Array.isArray(messages) ? messages.length : NaN);
-    if (!Number.isFinite(end)) return null;
-    if (Array.isArray(messages)) return conversationalDistance(messages, anchor - 1, end - 1);
-    return Math.max(0, end - anchor);
-}
-
 /** Established, not struck by the player, and seen recently enough that it still reads as the hero's way. */
 export function isHeroTellLive(tell, { messages = null, messageCount } = {}) {
     if (!isHeroTellEstablished(tell) || tell.dormant) return false;
-    const since = distanceFrom(tell.lastSeenMessage, { messages, messageCount });
+    const since = conversationalAgeSince(tell.lastSeenMessage, { messages, messageCount });
     return since === null || since < HERO_TELL_FADE_MESSAGES;
 }
 
 /** Established once, not struck, but unseen long enough that its ABSENCE is noticeable. */
 export function isHeroTellFaded(tell, { messages = null, messageCount } = {}) {
     if (!isHeroTellEstablished(tell) || tell.dormant) return false;
-    const since = distanceFrom(tell.lastSeenMessage, { messages, messageCount });
+    const since = conversationalAgeSince(tell.lastSeenMessage, { messages, messageCount });
     return since !== null && since >= HERO_TELL_FADE_MESSAGES;
 }
 
@@ -456,7 +441,7 @@ export function listPublicTells(tells = [], { messages = null, messageCount } = 
     const out = [];
     for (const tell of (Array.isArray(tells) ? tells : [])) {
         if (!tell || !tell.public || isIntimateTell(tell) || !isHeroTellLive(tell, { messages, messageCount })) continue;
-        const age = distanceFrom(tell.lastSeenMessage, { messages, messageCount });
+        const age = conversationalAgeSince(tell.lastSeenMessage, { messages, messageCount });
         out.push({ tell, age: age === null ? 0 : age });
     }
     return out;
@@ -526,7 +511,7 @@ export function selectHeroTellCandidate(tells = [], npcs = [], { messages = null
         if (!isHeroTellLive(tell, { messages, messageCount })) continue;
         const witnesses = (tell.witnesses || []).filter(w => roster.some(n => namesMatch(n.name, w)));
         if (witnesses.length === 0) continue;
-        const sinceVoiced = distanceFrom(lastRemarkMessage(tell), { messages, messageCount });
+        const sinceVoiced = conversationalAgeSince(lastRemarkMessage(tell), { messages, messageCount });
         if (sinceVoiced !== null && sinceVoiced < HERO_TELL_BEAT_COOLDOWN_MESSAGES) continue;
         const pull = (sinceVoiced === null ? 10 : Math.min(6, sinceVoiced / 40))
             + Math.min(3, tell.sightings?.length || 0)
@@ -551,7 +536,7 @@ export function selectAbsenceTellCandidate(tells = [], npcs = [], { messages = n
         if ((tell.voicedCount || 0) === 0) continue; // an absence is only noticeable of a habit someone once named
         const witnesses = (tell.witnesses || []).filter(w => roster.some(n => namesMatch(n.name, w)));
         if (witnesses.length === 0) continue;
-        const sinceRemark = distanceFrom(tell.lastAbsenceRemarkMessage, { messages, messageCount });
+        const sinceRemark = conversationalAgeSince(tell.lastAbsenceRemarkMessage, { messages, messageCount });
         if (sinceRemark !== null && sinceRemark < HERO_TELL_ABSENCE_COOLDOWN_MESSAGES) continue;
         const pull = (sinceRemark === null ? 10 : Math.min(6, sinceRemark / 60)) + Math.min(3, tell.sightings?.length || 0);
         if (!best || pull > best.pull) best = { tell, witnesses, pull, mode: 'absence' };

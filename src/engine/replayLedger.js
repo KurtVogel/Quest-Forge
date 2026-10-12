@@ -35,6 +35,38 @@ export function conversationalDistance(messages, fromIndex, toIndex) {
 }
 
 /**
+ * Conversational messages since a stamp written as "the message count at the
+ * time", or null when the stamp is missing (a legacy record) or no transcript
+ * position is known. With the live transcript the count skips system lines and
+ * hidden / deleted rows like every replay ledger; without it the raw gap is the
+ * best available. THE one wrapper since 2026-10-12 (story-memory Lap-4 P2):
+ * story cards, NPC recency, bonds and hero tells each kept a private copy.
+ * (`distanceSince` in worldTempo.js is a different contract — an explicit,
+ * inclusive end index — and stays its own function.)
+ */
+export function conversationalAgeSince(stamp, { messages = null, messageCount } = {}) {
+    if (!Number.isFinite(stamp)) return null;
+    const end = Number.isFinite(messageCount)
+        ? messageCount
+        : (Array.isArray(messages) ? messages.length : NaN);
+    if (!Number.isFinite(end)) return null;
+    if (Array.isArray(messages)) return conversationalDistance(messages, stamp - 1, end - 1);
+    return Math.max(0, end - stamp);
+}
+
+/**
+ * A finite, floored, non-negative message stamp, clamped to the transcript when
+ * the caller knows its length; null for junk. THE stamp typer for the load
+ * boundaries of the living-world markers and the hero tells (2026-10-12).
+ */
+export function clampMessageStamp(value, maxMessageCount) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    const floored = Math.max(0, Math.floor(n));
+    return Number.isFinite(maxMessageCount) ? Math.min(floored, Math.max(0, Math.floor(maxMessageCount))) : floored;
+}
+
+/**
  * Prefix counts of conversational rows, memoized on the transcript array
  * (2026-09-30 story-memory + prompt-building Lap-3 P2). A turn asks for the
  * distance since a stamp K + 2N times — every story card's two stamps, every

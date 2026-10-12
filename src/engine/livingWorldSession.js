@@ -21,27 +21,24 @@ import { sanitizePendingWonder, sanitizeWonder } from './wonder.js';
 import { sanitizeDirectorFailures } from './directorRetry.js';
 import { sanitizeHeroDeath } from './heroDeath.js';
 import { cleanText as text, isRecord } from './text.js';
+import { clampMessageStamp } from './replayLedger.js';
 
 const HEARSAY_GRADES = ['firsthand', 'secondhand', 'legend'];
 
 /** Why the Chronicle tab suggests a close: a front's fall, or the hero's death (2026-09-30). */
 export const CHAPTER_CLOSE_REASONS = Object.freeze(['front', 'death']);
 
-/**
- * A finite, floored, non-negative stamp, clamped to the transcript when the
- * caller knows its length. THE one stamp helper since 2026-10-03: a second,
+/*
+ * Every message stamp here goes through `clampMessageStamp` (replayLedger.js —
+ * shared with the hero tells since 2026-10-12): finite, floored, non-negative,
+ * clamped to the transcript when the caller knows its length. THE one stamp
+ * helper since 2026-10-03: a second,
  * unclamped one typed the hearsay / away blocks' `arrivedAtMessage` and the
  * drift marker's `returnMessage`, so a past-the-end stamp from a hostile save
  * kept its block rendering for as long as the hero stood there (the window
  * test is `distance > N`, and a stamp beyond the end measures 0). A DISTANCE
  * (`awayDistance`) is not a stamp and passes no ceiling.
  */
-function finiteStamp(value, maxMessageCount) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return null;
-    const floored = Math.max(0, Math.floor(n));
-    return Number.isFinite(maxMessageCount) ? Math.min(floored, Math.max(0, Math.floor(maxMessageCount))) : floored;
-}
 
 /**
  * The persisted key sets of the three one-shot markers — pinned by test so a
@@ -58,7 +55,7 @@ export const PENDING_MARKER_KEYS = Object.freeze({
 export function sanitizeAbsenceDriftState(raw, { maxMessageCount } = {}) {
     if (!isRecord(raw)) return null;
     const locationName = text(raw.locationName, 120);
-    const arrivedAtMessage = finiteStamp(raw.arrivedAtMessage, maxMessageCount);
+    const arrivedAtMessage = clampMessageStamp(raw.arrivedAtMessage, maxMessageCount);
     if (!locationName || arrivedAtMessage === null) return null;
     const developments = (Array.isArray(raw.developments) ? raw.developments : [])
         .map(dev => (isRecord(dev)
@@ -82,7 +79,7 @@ export function sanitizeAbsenceDriftState(raw, { maxMessageCount } = {}) {
     return {
         locationName,
         arrivedAtMessage,
-        awayDistance: finiteStamp(raw.awayDistance) ?? 0,
+        awayDistance: clampMessageStamp(raw.awayDistance) ?? 0,
         developments,
         fact: text(raw.fact, 300),
         frontSymptom,
@@ -92,7 +89,7 @@ export function sanitizeAbsenceDriftState(raw, { maxMessageCount } = {}) {
 export function sanitizeRegionalHearsayState(raw, { maxMessageCount } = {}) {
     if (!isRecord(raw)) return null;
     const locationName = text(raw.locationName, 120);
-    const arrivedAtMessage = finiteStamp(raw.arrivedAtMessage, maxMessageCount);
+    const arrivedAtMessage = clampMessageStamp(raw.arrivedAtMessage, maxMessageCount);
     if (!locationName || arrivedAtMessage === null) return null;
     const items = (Array.isArray(raw.items) ? raw.items : [])
         .map(item => (isRecord(item)
@@ -108,9 +105,9 @@ export function sanitizePendingAbsenceDrift(raw, { maxMessageCount } = {}) {
     if (!isRecord(raw)) return null;
     const key = text(raw.key, 200);
     const locationName = text(raw.locationName, 120);
-    const returnMessage = finiteStamp(raw.returnMessage, maxMessageCount);
+    const returnMessage = clampMessageStamp(raw.returnMessage, maxMessageCount);
     if (!key || !locationName || returnMessage === null) return null;
-    return { key, locationName, awayDistance: finiteStamp(raw.awayDistance) ?? 0, returnMessage };
+    return { key, locationName, awayDistance: clampMessageStamp(raw.awayDistance) ?? 0, returnMessage };
 }
 
 export function sanitizePendingRegionalFronts(raw) {
@@ -163,9 +160,9 @@ export function sanitizePendingFrontAftermath(raw) {
 export function sanitizeFrontDirector(raw) {
     if (!isRecord(raw)) return null;
     const next = {};
-    const generationVersion = finiteStamp(raw.generationVersion);
+    const generationVersion = clampMessageStamp(raw.generationVersion);
     if (generationVersion) next.generationVersion = generationVersion;
-    if (raw.lastJournalEnd !== undefined) next.lastJournalEnd = finiteStamp(raw.lastJournalEnd) ?? 0;
+    if (raw.lastJournalEnd !== undefined) next.lastJournalEnd = clampMessageStamp(raw.lastJournalEnd) ?? 0;
     for (const key of ['lastCadenceId', 'lastEmergentCadenceId']) {
         if (typeof raw[key] === 'string' && raw[key]) next[key] = raw[key].slice(0, 160);
     }
@@ -203,7 +200,7 @@ export function sanitizeLivingWorldSession(session, { maxMessageCount } = {}) {
     // any negative difference.
     for (const field of ['lastWonderMessage', 'lastHeroTellBeatMessage', 'lastRelationshipBeatMessage']) {
         if (session[field] === undefined) continue;
-        next[field] = finiteStamp(session[field], maxMessageCount);
+        next[field] = clampMessageStamp(session[field], maxMessageCount);
     }
     // The hero's death stamp (the last chapter, 2026-09-30): complete-or-null,
     // `atMessage` clamped to the transcript like the beat cooldowns.

@@ -26,6 +26,7 @@ import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 import { HERO_TELL_REPORT_CAP, isHeroTellEstablished } from '../engine/heroTells.js';
 import { liveWorldFacts, planWorldFactAdditions } from '../engine/worldFacts.js';
 import { cleanText } from '../engine/text.js';
+import { compareCardRecency } from '../engine/storyMemory.js';
 import {
     CAST_AUDIT_RULES,
     describeAppliedLoot,
@@ -335,7 +336,7 @@ export function buildKnownStoryCards({ storyMemory = [] } = {}, ...texts) {
             const subjectTokens = tokenSet(card.subject || '', { minLength: 4 });
             return subjectTokens.size > 0 && containment(subjectTokens, haystackTokens) >= 0.5;
         })
-        .sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0))
+        .sort(compareCardRecency)
         .slice(0, KNOWN_STORY_CARD_CAP)
         .map(card => {
             const subject = String(card.subject || '').trim();
@@ -983,6 +984,9 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
             ? reflected.story_memory.filter(memory => memory && typeof memory === 'object' && !Array.isArray(memory)).slice(0, 2)
             : [];
         if (reflectedCards.length > 0) {
+            // No `meta.sourceMessage` by design: the reflection reads a journal
+            // BATCH, not one DM message, so a cadence card has no single
+            // message whose removal should retract it (2026-10-12, stated).
             dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: reflectedCards });
         }
 

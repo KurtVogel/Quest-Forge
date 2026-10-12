@@ -3,7 +3,15 @@
  * OpenAI-compatible factory). One reader means a stream-truncation fix lands
  * once instead of being hand-copied across providers — streamGeminiMessage was
  * the third hand-maintained copy of this skeleton (2026-08-30 audit).
+ *
+ * Since 2026-10-12 (providers-adapter Lap 4) it is also THE transport
+ * vocabulary: what a transient failure is (`isTransient`), how long to wait
+ * before the retry (`retryDelay`), `sleep`, the body typer (`asRecord`), the
+ * usage reporter and the history-text coercion — each was spelled twice or
+ * more across the adapter's two lanes, the embed's two lanes and the two
+ * provider families.
  */
+import { isRecord } from '../../engine/text.js';
 
 /**
  * Read an SSE response body to completion, invoking onEvent(parsedJson) for
@@ -76,6 +84,59 @@ export async function readSseStream(response, onEvent) {
 const NETWORK_FAILURE_RE = /failed to fetch|networkerror|load failed|network request failed/i;
 export function isNetworkFailure(error) {
     return error instanceof TypeError && NETWORK_FAILURE_RE.test(error?.message || '');
+}
+
+/** Transient HTTP statuses worth a retry: a rate limit or a server hiccup. */
+export const TRANSIENT_STATUS = Object.freeze(new Set([429, 500, 502, 503, 504]));
+
+/**
+ * THE transient judgement (2026-10-12 — it was spelled as `RETRYABLE_STATUS` +
+ * `isRetryableError` in the adapter and `RETRYABLE_EMBED_STATUS` + `.has` +
+ * `isNetworkFailure` in the embed). A number is read as an HTTP status; any
+ * other value as an error — transient when its `.status` is, or when it is a
+ * browser network failure (a stall's AbortError / TimeoutError is not: each
+ * lane decides what a stall costs on its own).
+ */
+export function isTransient(errorOrStatus) {
+    if (typeof errorOrStatus === 'number') return TRANSIENT_STATUS.has(errorOrStatus);
+    return TRANSIENT_STATUS.has(errorOrStatus?.status) || isNetworkFailure(errorOrStatus);
+}
+
+/**
+ * The wait before retry `attempt` (0-based): exponential backoff from `base`
+ * plus up to `jitterMs` of jitter, and a provider's `Retry-After` (the
+ * `.retryAfterMs` that makeHttpError stamps, already capped) wins whenever it
+ * is longer — a per-minute quota 429 burned all three attempts in ~3 s and
+ * lost the Scribe/journal extraction (2026-09-06).
+ */
+export function retryDelay(attempt, error, { base = 1000, jitterMs = 250 } = {}) {
+    const backoff = base * 2 ** attempt + Math.random() * jitterMs;
+    return Math.max(backoff, Number.isFinite(error?.retryAfterMs) ? error.retryAfterMs : 0);
+}
+
+export const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/** A parsed provider body as a plain object, else {} (`null`, an array, a scalar). */
+export function asRecord(value) {
+    return isRecord(value) ? value : {};
+}
+
+/**
+ * One history row's text: a string as-is, anything else `String(x ?? '')` —
+ * a null part is a 400 at Gemini and a null content a 400 at the compat APIs.
+ */
+export function historyText(content) {
+    return typeof content === 'string' ? content : String(content ?? '');
+}
+
+/**
+ * Hand a provider's raw usage to the caller's `onUsage` through that
+ * provider's normalizer, when there is a callback and a usable shape.
+ */
+export function reportUsage(onUsage, raw, normalize) {
+    if (typeof onUsage !== 'function') return;
+    const usage = normalize(raw);
+    if (usage) onUsage(usage);
 }
 
 /**
@@ -189,8 +250,8 @@ export function makeHttpError(label) {
         // A body that parses to `null` threw out of this helper before
         // `.status`/`.retryAfterMs` stamped, so a 429/503 shaped that way was
         // never retried (2026-09-16 audit P2).
-        const body = await response.json().catch(() => ({}));
-        const error = body && typeof body === 'object' ? body : {};
+        // An ARRAY body is not a record either (2026-10-12): asRecord.
+        const error = asRecord(await response.json().catch(() => ({})));
         const detail = error.error?.message
             || (typeof error.error === 'string' ? error.error : '')
             || response.statusText;

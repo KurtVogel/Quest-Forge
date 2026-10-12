@@ -21,7 +21,8 @@ import { canonicalEnemyId, validateEnemyAttackBonus, clampEnemyAC, clampEnemyHP,
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatWire.js';
 import { dedupeCastTargets } from '../engine/spellcasting.js';
 import { LOCATION_NAME_MAX, MAX_COIN_EVENT, MAX_ROLL_DC } from '../config/contentLimits.js';
-import { toFiniteNumber, toFlag } from '../data/items.js';
+import { toFiniteNumber } from '../data/items.js';
+import { toFlag } from '../engine/text.js';
 import { normalizeConditionName, findSkillInText, CONDITION_LIST_CAP } from '../engine/rules.js';
 
 /**

@@ -12,7 +12,8 @@
  */
 
 import { CLASSES } from '../data/classes.js';
-import { normalizeItem, normalizeItemKey, toFlag } from '../data/items.js';
+import { normalizeItem, normalizeItemKey } from '../data/items.js';
+import { toFlag } from '../engine/text.js';
 import { isLowLevelSolo } from '../engine/combatPredicates.js';
 import { itemIdentityMatches } from '../engine/textMatch.js';
 import { normalizeRefToken } from './handlers/shared.js';

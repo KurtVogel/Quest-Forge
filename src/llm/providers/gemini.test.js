@@ -30,10 +30,12 @@ const SEND_ARGS = {
     userMessage: 'I open the door.',
 };
 
+/** A batchEmbedContents reply of one vector — embedText rides embedTexts since 2026-10-12. */
 function embeddingResponse(length = GEMINI_EMBED_DIMENSIONS) {
     return {
         ok: true,
-        json: async () => ({ embedding: { values: Array.from({ length }, (_, i) => i / length) } }),
+        status: 200,
+        json: async () => ({ embeddings: [{ values: Array.from({ length }, (_, i) => i / length) }] }),
     };
 }
 
@@ -52,13 +54,14 @@ describe('Gemini embedding provider', () => {
         expect(vector).toHaveLength(768);
         expect(fetchMock).toHaveBeenCalledOnce();
         const [url, options] = fetchMock.mock.calls[0];
-        expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent');
+        // One embed path (2026-10-12): the single is a batch of one.
+        expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:batchEmbedContents');
         expect(options.headers['x-goog-api-key']).toBe('test-key');
-        expect(JSON.parse(options.body)).toEqual({
+        expect(JSON.parse(options.body)).toEqual({ requests: [{
             model: 'models/gemini-embedding-2',
             content: { parts: [{ text: 'title: none | text: Kraul fell in the cavern.' }] },
             output_dimensionality: 768,
-        });
+        }] });
     });
 
     it('uses the documented asymmetric search-query format for retrieval queries', async () => {
@@ -68,7 +71,7 @@ describe('Gemini embedding provider', () => {
         await embedText('test-key', 'Who ruled the cavern?', { inputType: 'query' });
 
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-        expect(body.content.parts[0].text).toBe('task: search result | query: Who ruled the cavern?');
+        expect(body.requests[0].content.parts[0].text).toBe('task: search result | query: Who ruled the cavern?');
     });
 
     it('rejects a response with an unexpected vector size instead of caching it', async () => {
@@ -433,11 +436,11 @@ describe('hostile bodies (2026-09-16 providers-adapter P2)', () => {
 
     it('embedText rejects a vector of the right LENGTH whose elements are not finite numbers', async () => {
         vi.spyOn(console, 'error').mockImplementation(() => {});
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ embedding: { values: Array.from({ length: GEMINI_EMBED_DIMENSIONS }, () => 'x') } }) }));
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ embeddings: [{ values: Array.from({ length: GEMINI_EMBED_DIMENSIONS }, () => 'x') }] }) }));
         expect(await embedText('test-key', 'Strings are not a vector.')).toBeNull();
         const withNaN = Array.from({ length: GEMINI_EMBED_DIMENSIONS }, (_, i) => i / 1000);
         withNaN[3] = NaN;
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ embedding: { values: withNaN } }) }));
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ embeddings: [{ values: withNaN }] }) }));
         expect(await embedText('test-key', 'One NaN poisons cosine.')).toBeNull();
     });
 
@@ -470,14 +473,14 @@ describe('embed input cap + rejected-chunk bisect (2026-09-17 vector-memory P1)'
     });
 
     it('truncates the WIRE text to MAX_EMBED_INPUT_CHARS on both the single and the batch path', async () => {
-        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ embedding: { values: vector() }, embeddings: [{ values: vector() }] }) });
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ embeddings: [{ values: vector() }] }) });
         vi.stubGlobal('fetch', fetchMock);
         const huge = 'x'.repeat(MAX_EMBED_INPUT_CHARS * 3);
 
         await embedText('test-key', huge);
         await embedTexts('test-key', [huge]);
 
-        const single = JSON.parse(fetchMock.mock.calls[0][1].body).content.parts[0].text;
+        const single = JSON.parse(fetchMock.mock.calls[0][1].body).requests[0].content.parts[0].text;
         const batched = JSON.parse(fetchMock.mock.calls[1][1].body).requests[0].content.parts[0].text;
         expect(single).toHaveLength('title: none | text: '.length + MAX_EMBED_INPUT_CHARS);
         expect(batched).toHaveLength('title: none | text: '.length + MAX_EMBED_INPUT_CHARS);
@@ -543,7 +546,7 @@ describe('embed retries (2026-09-29 providers-adapter + vector-memory P2 — a r
         headers: { get: (name) => (name === 'retry-after' && retryAfter != null ? String(retryAfter) : null) },
         text: async () => JSON.stringify({ error: { message: 'Quota exceeded for embed requests per minute.' } }),
     });
-    const single = () => ({ ok: true, status: 200, json: async () => ({ embedding: { values: vector() } }) });
+    const single = () => ({ ok: true, status: 200, json: async () => ({ embeddings: [{ values: vector() }] }) });
     const batch = (n) => ({ ok: true, status: 200, json: async () => ({ embeddings: Array.from({ length: n }, () => ({ values: vector() })) }) });
 
     beforeEach(() => {
@@ -704,7 +707,7 @@ describe('embedText onError (2026-09-19 — the memory-less turn names its cause
 
     it('reports a malformed vector, ignores a throwing callback, and never calls it on success or an empty input', async () => {
         vi.spyOn(console, 'error').mockImplementation(() => {});
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ embedding: { values: [1, 2, 3] } }) }));
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ embeddings: [{ values: [1, 2, 3] }] }) }));
         const onError = vi.fn(() => { throw new Error('ui'); });
         await expect(embedText('test-key', 'anything', { onError })).resolves.toBeNull();
         expect(onError).toHaveBeenCalledTimes(1);
@@ -716,5 +719,69 @@ describe('embedText onError (2026-09-19 — the memory-less turn names its cause
         expect(await embedText('', 'anything', { onError: quiet })).toBeNull();
         expect(await embedText('test-key', '   ', { onError: quiet })).toBeNull();
         expect(quiet).not.toHaveBeenCalled();
+    });
+});
+
+describe('embedText IS embedTexts([text]) (2026-10-12 providers-adapter P2 — one embed path)', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    it('the single and a batch of one send the identical request', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(embeddingResponse());
+        vi.stubGlobal('fetch', fetchMock);
+
+        const single = await embedText('test-key', 'Who holds the bridge?', { inputType: 'query' });
+        const [batched] = await embedTexts('test-key', ['Who holds the bridge?'], { inputType: 'query' });
+
+        expect(single).toEqual(batched);
+        const [[urlA, optsA], [urlB, optsB]] = fetchMock.mock.calls;
+        expect(urlA).toBe(urlB);
+        expect(optsA.headers).toEqual(optsB.headers);
+        expect(JSON.parse(optsA.body)).toEqual(JSON.parse(optsB.body));
+    });
+
+    it('both retry a 429 once after the same Retry-After and report the same reason when it persists', async () => {
+        vi.useFakeTimers();
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const rateLimited = {
+            ok: false, status: 429, statusText: 'Too Many Requests',
+            headers: { get: (name) => (name === 'retry-after' ? '2' : null) },
+            text: async () => JSON.stringify({ error: { message: 'Quota exceeded.' } }),
+        };
+        const runOne = async (call) => {
+            const fetchMock = vi.fn().mockResolvedValue(rateLimited);
+            vi.stubGlobal('fetch', fetchMock);
+            const onError = vi.fn();
+            const run = call(onError);
+            await vi.advanceTimersByTimeAsync(1999);
+            const beforeWait = fetchMock.mock.calls.length;
+            await vi.advanceTimersByTimeAsync(1);
+            await run;
+            return { beforeWait, calls: fetchMock.mock.calls.length, reasons: onError.mock.calls };
+        };
+
+        const single = await runOne((onError) => embedText('test-key', 'anything', { onError }));
+        const batch = await runOne((onError) => embedTexts('test-key', ['anything'], { onError }));
+
+        expect(single).toEqual(batch);
+        expect(single).toEqual({ beforeWait: 1, calls: 2, reasons: [[{ status: 429, message: 'Quota exceeded.', timedOut: false }]] });
+    });
+
+    it('a malformed vector in a batch is reported once with its status, like the single', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const clean = Array.from({ length: GEMINI_EMBED_DIMENSIONS }, (_, i) => i / 1000);
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ embeddings: [{ values: clean }, { values: [1, 2] }] }) }));
+        const onError = vi.fn();
+
+        const vectors = await embedTexts('test-key', ['Clean.', 'Short.'], { onError });
+
+        expect(vectors[0]).toHaveLength(GEMINI_EMBED_DIMENSIONS);
+        expect(vectors[1]).toBeNull();
+        expect(onError).toHaveBeenCalledTimes(1);
+        expect(onError.mock.calls[0][0]).toMatchObject({ status: 200, timedOut: false });
     });
 });

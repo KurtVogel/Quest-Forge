@@ -7,7 +7,6 @@ import { getInspectorSnapshot } from '../debug/memoryInspectorStore.js';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { createAutosaveRuntime } from './autosaveRuntime.js';
 import { loadSettings, saveSettings, autoSave } from './persistence.js';
-import { PROVIDERS } from '../llm/adapter.js';
 import { initializeFirebase } from '../config/firebase.js';
 import { subscribeToAuth } from './auth.js';
 
@@ -31,19 +30,12 @@ export function GameProvider({ children }) {
     }, []);
 
     const [state, dispatch] = useReducer(gameReducer, initialGameState, (initial) => {
-        // Load persisted settings on init
+        // Load persisted settings on init. The model heal is sanitizeSettings'
+        // (via loadSettings) — the one copy since 2026-10-12; a second check
+        // here on the merged settings could never fire.
         const savedSettings = loadSettings();
         if (savedSettings) {
-            const merged = { ...initial, settings: { ...initial.settings, ...savedSettings } };
-            // Validate that saved model still exists in current provider's model list
-            const provider = PROVIDERS[merged.settings.llmProvider];
-            if (provider) {
-                const modelExists = provider.models.some(m => m.id === merged.settings.model);
-                if (!modelExists) {
-                    merged.settings.model = provider.models[0].id;
-                }
-            }
-            return merged;
+            return { ...initial, settings: { ...initial.settings, ...savedSettings } };
         }
         return initial;
     });

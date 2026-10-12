@@ -404,3 +404,24 @@ describe('CORS-hidden OpenAI error replies (2026-09-17 "Failed to fetch" playtes
         expect(abortMock).toHaveBeenCalledTimes(1);
     });
 });
+
+describe('the compat stream honors a passed output cap like the send (2026-10-12 providers-adapter P2 nit)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    it('a passed maxOutputTokens rides both lanes; without one the per-model cap holds (the DM lane is unchanged)', async () => {
+        const stop = () => streamResponse(['data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n']);
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce(jsonResponse({ choices: [{ finish_reason: 'stop', message: { content: 'ok' } }] }))
+            .mockResolvedValueOnce(stop())
+            .mockResolvedValueOnce(stop());
+        vi.stubGlobal('fetch', fetchMock);
+        await sendOpenAIMessage({ ...SEND_ARGS, model: 'gpt-6.1-sol', maxOutputTokens: 4096 });
+        await streamOpenAIMessage({ ...SEND_ARGS, model: 'gpt-6.1-sol', maxOutputTokens: 4096, onChunk: () => {} });
+        await streamOpenAIMessage({ ...SEND_ARGS, model: 'gpt-6.1-sol', onChunk: () => {} });
+        const caps = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body).max_completion_tokens);
+        expect(caps).toEqual([4096, 4096, 32768]);
+    });
+});

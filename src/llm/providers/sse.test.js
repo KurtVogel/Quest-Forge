@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { makeHttpError, makeStreamError, parseRetryAfterMs, readSseStream, RETRY_AFTER_CAP_MS } from './sse.js';
+import { asRecord, historyText, isTransient, makeHttpError, makeStreamError, parseRetryAfterMs, readSseStream, reportUsage, RETRY_AFTER_CAP_MS, retryDelay, TRANSIENT_STATUS } from './sse.js';
 
 /** Response whose body yields the given strings as successive reader chunks. */
 function streamResponse(chunks) {
@@ -137,5 +137,60 @@ describe('hostile bodies and events (2026-09-16 providers-adapter P2)', () => {
     it('a response without a body is a dropped connection, not a TypeError out of getReader', async () => {
         await expect(readSseStream({ ok: true, body: null }, () => {})).rejects.toThrow(/no response body/);
         await expect(readSseStream(undefined, () => {})).rejects.toThrow(/no response body/);
+    });
+});
+
+describe('the transport vocabulary, spelled once (2026-10-12 providers-adapter Lap 4)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('isTransient reads a status number or an error: the five statuses and a browser network failure, nothing else', () => {
+        for (const status of [429, 500, 502, 503, 504]) {
+            expect(isTransient(status)).toBe(true);
+            expect(isTransient(Object.assign(new Error('x'), { status }))).toBe(true);
+        }
+        expect([...TRANSIENT_STATUS].sort()).toEqual([429, 500, 502, 503, 504]);
+        for (const status of [200, 400, 401, 403, 404, 413]) expect(isTransient(status)).toBe(false);
+        expect(isTransient(new TypeError('Failed to fetch'))).toBe(true);
+        expect(isTransient(new TypeError("Cannot read properties of undefined (reading 'x')"))).toBe(false);
+        const stall = new Error('The operation was aborted due to timeout');
+        stall.name = 'TimeoutError';
+        expect(isTransient(stall)).toBe(false);
+        expect(isTransient(null)).toBe(false);
+        expect(isTransient(undefined)).toBe(false);
+    });
+
+    it('retryDelay doubles from its base, adds at most the jitter, and a longer Retry-After wins', () => {
+        vi.spyOn(Math, 'random').mockReturnValue(0.5);
+        expect(retryDelay(0, null, { base: 1000 })).toBe(1125);
+        expect(retryDelay(1, {}, { base: 1500 })).toBe(3125);
+        expect(retryDelay(0, { retryAfterMs: 4000 }, { base: 1000 })).toBe(4000);
+        expect(retryDelay(2, { retryAfterMs: 1000 }, { base: 1000 })).toBe(4125);
+        // The embed lane: no jitter, so its wait is exactly the Retry-After or the base.
+        expect(retryDelay(0, { retryAfterMs: null }, { base: 1000, jitterMs: 0 })).toBe(1000);
+        expect(retryDelay(0, { retryAfterMs: 2000 }, { base: 1000, jitterMs: 0 })).toBe(2000);
+    });
+
+    it('asRecord accepts only a plain object; makeHttpError no longer reads an ARRAY body as the error', async () => {
+        expect(asRecord({ a: 1 })).toEqual({ a: 1 });
+        for (const junk of [null, undefined, [1, 2], 'text', 42]) expect(asRecord(junk)).toEqual({});
+        const arrayBody = [{ error: { message: 'not this' } }];
+        arrayBody.error = { message: 'nor this' };
+        const err = await makeHttpError('Test')({ status: 503, statusText: 'Service Unavailable', json: async () => arrayBody });
+        expect(err.message).toBe('Test API error (503): Service Unavailable');
+        expect(err.status).toBe(503);
+    });
+
+    it('historyText and reportUsage are the two lanes\' shared shelves', () => {
+        expect(historyText('hi')).toBe('hi');
+        expect(historyText(null)).toBe('');
+        expect(historyText(undefined)).toBe('');
+        expect(historyText(42)).toBe('42');
+        const onUsage = vi.fn();
+        reportUsage(onUsage, { n: 3 }, (raw) => (raw?.n ? { promptTokens: raw.n } : null));
+        reportUsage(onUsage, null, () => null);
+        reportUsage(undefined, { n: 1 }, () => { throw new Error('never normalized without a callback'); });
+        expect(onUsage.mock.calls).toEqual([[{ promptTokens: 3 }]]);
     });
 });

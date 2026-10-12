@@ -1,6 +1,6 @@
 import { containment, overlapCount, tokenSet as sharedTokenSet } from './textMatch.js';
-import { conversationalDistance } from './replayLedger.js';
-import { textOr as cleanText } from './text.js';
+import { conversationalAgeSince } from './replayLedger.js';
+import { clampNumber, textOr as cleanText, toFlag } from './text.js';
 
 const ALLOWED_TYPES = new Set([
     'callback',
@@ -56,12 +56,6 @@ const TYPE_BY_FOLDED_KEY = new Map([...ALLOWED_TYPES].map(type => [foldTypeKey(t
  * engine/text.js; `cleanText` here is its `(value, fallback)` form.
  */
 
-function clampNumber(value, min, max, fallback) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return fallback;
-    return Math.max(min, Math.min(max, Math.round(n)));
-}
-
 /**
  * A list field read from a lane. A SCALAR string is a one-item list (2026-09-17
  * audit P1, the 09-15 `conditions: "prone"` parity rule): the Scribe's
@@ -77,19 +71,13 @@ function normalizeTextArray(value, max = MAX_TAGS) {
         .slice(0, max);
 }
 
-const FALSE_FLAG_WORDS = new Set(['false', 'no', 'off', '0', 'none', 'null', 'undefined']);
-
-/** A stored or lane boolean: "false" / "no" / 0 are false, anything else truthy is `!!` (the 09-15 `is_undead` rule). */
-function toFlag(value) {
-    if (typeof value === 'string') {
-        const word = value.trim().toLowerCase();
-        return word !== '' && !FALSE_FLAG_WORDS.has(word);
-    }
-    return !!value;
-}
-
-/** A finite wall-clock stamp, or the fallback (junk used to persist and NaN-compare in dormancy). */
-function finiteStamp(value, fallback) {
+/**
+ * A finite WALL-CLOCK stamp, or the fallback (junk used to persist and
+ * NaN-compare in dormancy). The wall-clock trio is the legacy fallback for
+ * cards born before the message stamps (2026-10-12: every reader prefers the
+ * conversational clock) — named apart from the message-stamp typers.
+ */
+function wallClockStamp(value, fallback) {
     return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
@@ -276,9 +264,9 @@ export function normalizeStoryMemoryCard(card = {}, existing = null, { maxMessag
         // Wall-clock trio typed finite (2026-09-17 P2): `firstSeenAt: "junk"`
         // persisted and NaN-compared in applyStoryMemoryDormancy, so a
         // salience-2 card went dormant on the very next cadence.
-        firstSeenAt: finiteStamp(card.firstSeenAt, finiteStamp(card.first_seen_at, finiteStamp(base?.firstSeenAt, now))),
-        lastSeenAt: finiteStamp(card.lastSeenAt, finiteStamp(card.last_seen_at, now)),
-        lastUsedAt: finiteStamp(card.lastUsedAt, finiteStamp(card.last_used_at, finiteStamp(base?.lastUsedAt, null))),
+        firstSeenAt: wallClockStamp(card.firstSeenAt, wallClockStamp(card.first_seen_at, wallClockStamp(base?.firstSeenAt, now))),
+        lastSeenAt: wallClockStamp(card.lastSeenAt, wallClockStamp(card.last_seen_at, now)),
+        lastUsedAt: wallClockStamp(card.lastUsedAt, wallClockStamp(card.last_used_at, wallClockStamp(base?.lastUsedAt, null))),
         source: cleanText(card.source, base?.source || 'scribe').slice(0, 40),
         linkedNpcNames: normalizeTextArray(card.linkedNpcNames || card.linked_npc_names, MAX_LINKED_NPCS),
         location: cleanText(card.location, base?.location || '').slice(0, MAX_SUBJECT_LENGTH),
@@ -297,11 +285,13 @@ export function normalizeStoryMemoryUpdate(update = {}) {
     if (subject) out.subject = subject.slice(0, MAX_SUBJECT_LENGTH);
     if (text) out.text = text.slice(0, MAX_TEXT_LENGTH);
     if (update.status && ALLOWED_STATUS.has(update.status)) out.status = update.status;
-    // The engine owns the clock: `used: true` stamps Date.now(). A raw
+    // The engine owns the clock: `used` is a FLAG the reducer turns into the
+    // conversational `lastUsedMessage` (and its wall-clock twin). A raw
     // lastUsedAt pass-through was never part of the DM contract ({id, used})
     // and would let a hallucinated timestamp pin a card outside — or forever
-    // inside — scoreStoryMemory's callback-cooldown gate (2026-07-14 audit).
-    if (update.used || update.markUsed || update.mark_used) out.lastUsedAt = Date.now();
+    // inside — scoreStoryMemory's callback-cooldown gate (2026-07-14 audit);
+    // read through toFlag since 2026-10-12 (`used: "false"` was a use).
+    if (toFlag(update.used) || toFlag(update.markUsed) || toFlag(update.mark_used)) out.used = true;
     if (update.salience !== undefined) out.salience = clampNumber(update.salience, 1, 5, 3);
     if (update.emotionalCharge !== undefined || update.emotional_charge !== undefined) {
         out.emotionalCharge = clampNumber(update.emotionalCharge ?? update.emotional_charge, 0, 5, 2);
@@ -328,19 +318,33 @@ export function findStoryMemoryMatch(memories = [], card = {}) {
 }
 
 /**
- * Conversational messages since a card stamp, or null when the card carries
- * no stamp (legacy) or the caller supplied no transcript position. With the
- * live transcript the count skips system lines and hidden/deleted rows like
- * every replay ledger; without it the raw index gap is the best available.
+ * A card's BIRTH stamps — the one composer for every lane that adds a card
+ * (ADD_STORY_MEMORY_CARD for the Scribe / DM / engine cards, the roster
+ * promotion — 2026-10-12 story-memory Lap-4 P2: the promotion stamped
+ * `firstSeenMessage` only, so a fresh promotion's recency scored through the
+ * legacy wall-clock fallback). `firstSeenMessage` ages a witnessed deed for
+ * hearsay, `lastSeenMessage` feeds the curation recency window, and
+ * `sourceMessage` (M0, 2026-09-30) is the DM message the card was read from,
+ * so removing that message retracts the card. A lane without a single source
+ * message (the cadence reflection, which reads a journal batch; the roster
+ * promotion, a snapshot of the dossier) passes none and is never retracted.
  */
-function conversationalAge(stamp, messages, messageCount) {
-    if (!Number.isFinite(stamp)) return null;
-    const end = Number.isFinite(messageCount)
-        ? messageCount
-        : (Array.isArray(messages) ? messages.length : NaN);
-    if (!Number.isFinite(end)) return null;
-    if (Array.isArray(messages)) return conversationalDistance(messages, stamp - 1, end - 1);
-    return Math.max(0, end - stamp);
+export function bornStoryMemoryCard(card, messageCount, { sourceMessage } = {}) {
+    if (!card) return null;
+    const source = typeof sourceMessage === 'string' && sourceMessage ? sourceMessage : null;
+    return { ...card, firstSeenMessage: messageCount, lastSeenMessage: messageCount, ...(source && { sourceMessage: source }) };
+}
+
+/**
+ * Newest-first order for cards: the conversational stamp when both carry one,
+ * the wall-clock stamp as the legacy fallback (2026-10-12: the Scribe's KNOWN
+ * STORY CARDS and the promotion-twin heal sorted by wall-clock only).
+ */
+export function compareCardRecency(a, b) {
+    const am = a?.lastSeenMessage;
+    const bm = b?.lastSeenMessage;
+    if (Number.isFinite(am) && Number.isFinite(bm) && am !== bm) return bm - am;
+    return (Number(b?.lastSeenAt) || 0) - (Number(a?.lastSeenAt) || 0);
 }
 
 /**
@@ -360,7 +364,7 @@ function conversationalAge(stamp, messages, messageCount) {
  */
 export function scoreStoryMemory(card, { query = '', location = '', npcs = [], messages = null, messageCount, now = Date.now() } = {}) {
     if (!card || (card.status || 'active') !== 'active') return 0;
-    const usedAge = conversationalAge(card.lastUsedMessage, messages, messageCount);
+    const usedAge = conversationalAgeSince(card.lastUsedMessage, { messages, messageCount });
     if (usedAge !== null) {
         if (usedAge < CALLBACK_COOLDOWN_MESSAGES) return 0;
     } else if (card.lastUsedAt && now - card.lastUsedAt < LEGACY_CALLBACK_COOLDOWN_MS) {
@@ -396,7 +400,7 @@ export function scoreStoryMemory(card, { query = '', location = '', npcs = [], m
         if (npcNames.has(String(name).toLowerCase())) score += 5;
     }
 
-    const seenAge = conversationalAge(card.lastSeenMessage, messages, messageCount);
+    const seenAge = conversationalAgeSince(card.lastSeenMessage, { messages, messageCount });
     if (seenAge !== null) {
         score += Math.max(0, 3 - seenAge / RECENCY_DECAY_MESSAGES);
     } else if (card.lastSeenAt) {
@@ -432,29 +436,53 @@ function isEngineWound(card) {
  * skipped by curation and the RAG seed, and revived automatically if the
  * Scribe re-reports the beat (the ADD_STORY_MEMORY_CARD merge restores
  * `active` — for DORMANT cards only; `resolved` is terminal there, 2026-09-06).
- * "Untouched" compares the card's last merge/use stamp against the
- * timestamp of the journal entry N cycles back, so the measure is
- * conversational (a cadence ≈ 10 messages) while using existing stamps.
+ * "Untouched" compares the card's last birth / merge / use stamp against the
+ * journal entry N cycles back, on the CONVERSATIONAL clock since 2026-10-12
+ * (story-memory Lap-4 P2: the cutoff used to be the entry's wall-clock
+ * `timestamp` while cooldown and recency read message stamps — two clocks on
+ * one card): the entry's `messageRange` end against the card's message
+ * stamps. A legacy card (no message stamp) or a legacy entry (no range) falls
+ * back to the wall-clock pair.
  */
+function journalCutoff(entry) {
+    const range = entry?.messageRange;
+    const message = Array.isArray(range) && Number.isFinite(range[1]) ? range[1] : null;
+    const at = Number.isFinite(entry?.timestamp) ? entry.timestamp : null;
+    return message === null && at === null ? null : { message, at };
+}
+
+function lastTouchMessage(card) {
+    const stamps = [card.lastSeenMessage, card.lastUsedMessage, card.firstSeenMessage].filter(Number.isFinite);
+    return stamps.length > 0 ? Math.max(...stamps) : null;
+}
+
+/** True when the card was touched at or after the cutoff — null when no clock compares. */
+function touchedSince(card, cutoff) {
+    const touch = lastTouchMessage(card);
+    if (touch !== null && cutoff.message !== null) return touch >= cutoff.message;
+    if (cutoff.at === null) return null;
+    // Belt under the load typing: a non-finite stamp reads as "never", not NaN.
+    const lastTouch = Math.max(wallClockStamp(card.lastSeenAt, 0), wallClockStamp(card.lastUsedAt, 0), wallClockStamp(card.firstSeenAt, 0));
+    return lastTouch >= cutoff.at;
+}
+
 export function applyStoryMemoryDormancy(cards = [], journal = []) {
     const list = Array.isArray(cards) ? cards : [];
     const entries = Array.isArray(journal) ? journal : [];
     if (entries.length < DORMANCY_JOURNAL_CYCLES) return list;
-    const cutoff = entries[entries.length - DORMANCY_JOURNAL_CYCLES]?.timestamp;
-    if (!Number.isFinite(cutoff)) return list;
+    const cutoff = journalCutoff(entries[entries.length - DORMANCY_JOURNAL_CYCLES]);
+    if (!cutoff) return list;
     const woundCutoff = entries.length >= WOUND_DORMANCY_JOURNAL_CYCLES
-        ? entries[entries.length - WOUND_DORMANCY_JOURNAL_CYCLES]?.timestamp
+        ? journalCutoff(entries[entries.length - WOUND_DORMANCY_JOURNAL_CYCLES])
         : null;
 
     let changed = false;
     const next = list.map(card => {
         if (!card || (card.status || 'active') !== 'active') return card;
         const engineWound = isEngineWound(card);
-        if (engineWound && !Number.isFinite(woundCutoff)) return card;
+        if (engineWound && !woundCutoff) return card;
         if (!engineWound && ((card.salience || 0) > 2 || DORMANCY_EXEMPT_TYPES.has(card.type))) return card;
-        // Belt under the load typing: a non-finite stamp reads as "never", not NaN.
-        const lastTouch = Math.max(finiteStamp(card.lastSeenAt, 0), finiteStamp(card.lastUsedAt, 0), finiteStamp(card.firstSeenAt, 0));
-        if (lastTouch >= (engineWound ? woundCutoff : cutoff)) return card;
+        if (touchedSince(card, engineWound ? woundCutoff : cutoff) !== false) return card;
         changed = true;
         return { ...card, status: 'dormant' };
     });
@@ -477,10 +505,14 @@ export function buildStoryMemoryPromptBlock(memories = []) {
         // Array.isArray, not just ?.length — a string value has .length but no .join.
         const npcs = Array.isArray(m.linkedNpcNames) && m.linkedNpcNames.length ? ` | NPCs: ${m.linkedNpcNames.join(', ')}` : '';
         const loc = m.location ? ` | location: ${m.location}` : '';
-        return `- ${formatSecrecyTag(m.knownBy)}(${m.type}; salience ${m.salience}/5${subject}${npcs}${loc}) ${m.text}`;
+        // The id is ON the line (2026-10-12 P1): memory_updates addresses a
+        // card by `{ "id": … }` and the block used to print none, so the
+        // documented update was a silent no-op.
+        const id = m.id ? ` | id: ${m.id}` : '';
+        return `- ${formatSecrecyTag(m.knownBy)}(${m.type}; salience ${m.salience}/5${id}${subject}${npcs}${loc}) ${m.text}`;
     }).join('\n');
 
     return `## DRAMATIC CALLBACK OPPORTUNITIES
-These are compact story memories that may matter now. Use at most ONE naturally if it improves the scene. Do not force a callback, do not explain this memory system, and do not slow the turn down just to prove you remember something. If you visibly pay off or resolve one, mark it with memory_updates in the JSON. A memory tagged SECRET is known ONLY to the people listed — no other character may reference or act on it.
+These are compact story memories that may matter now. Use at most ONE naturally if it improves the scene. Do not force a callback, do not explain this memory system, and do not slow the turn down just to prove you remember something. If you visibly pay off or resolve one, mark it with memory_updates in the JSON, using the id shown on its line. A memory tagged SECRET is known ONLY to the people listed — no other character may reference or act on it.
 ${lines}`;
 }

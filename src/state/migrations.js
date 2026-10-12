@@ -58,6 +58,7 @@ import { coverage, tokenSet } from '../engine/textMatch.js';
 import { sanitizePortraitUrl } from '../engine/portraitUrl.js';
 import { cleanTextField, HERO_TEXT_LIMITS, MAX_COIN_HELD } from '../config/contentLimits.js';
 import { applyEarlyDefeat, isLowLevelSolo, stackIdentity, systemMessage } from './handlers/shared.js';
+import { strictFlag } from '../engine/text.js';
 
 /**
  * Save-format version stamped into every persisted payload (persistence.js
@@ -287,17 +288,11 @@ function backfillCharacterShape(save) {
  * audit). Casters from any-era saves additionally get an authoritative spell
  * slot table and a sane sustained spell.
  */
-/** Strict booleans for the death flags; "true"/"false" strings from a hand edit coerce. */
-function toFlag(value) {
-    if (typeof value === 'string') return value.trim().toLowerCase() === 'true';
-    return value === true;
-}
-
 /** The hero's death state, typed — only the keys the save actually carries. */
 function typedDeathState(character) {
     const typed = {};
     for (const flag of ['dying', 'isDead', 'lowLevelDefeat']) {
-        if (character[flag] !== undefined) typed[flag] = toFlag(character[flag]);
+        if (character[flag] !== undefined) typed[flag] = strictFlag(character[flag]);
     }
     if (character.deathSaves !== undefined) typed.deathSaves = normalizeDeathSaves(character.deathSaves);
     return typed;

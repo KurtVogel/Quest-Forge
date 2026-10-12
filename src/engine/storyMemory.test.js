@@ -194,20 +194,23 @@ describe('normalizeStoryMemoryUpdate', () => {
         expect(out.location).toBe('Millhaven');
     });
 
-    it('stamps lastUsedAt from used:true and clamps salience/emotionalCharge', () => {
-        const before = Date.now();
+    it('carries used:true as a FLAG (the reducer stamps the clocks) and clamps salience/emotionalCharge', () => {
         const out = normalizeStoryMemoryUpdate({ id: 'mem-1', used: true, salience: 99, emotional_charge: -4 });
-        expect(out.lastUsedAt).toBeGreaterThanOrEqual(before);
+        expect(out.used).toBe(true);
+        expect(out.lastUsedAt).toBeUndefined();
         expect(out.salience).toBe(5);
         expect(out.emotionalCharge).toBe(0);
+        // A worded false is not a use (2026-10-12, read through toFlag).
+        expect(normalizeStoryMemoryUpdate({ id: 'mem-1', used: 'false' }).used).toBeUndefined();
     });
 
     it('ignores a raw lastUsedAt override — the engine owns the cooldown clock', () => {
         const farFuture = Date.now() + 1000 * 60 * 60 * 24 * 365;
         const withUsed = normalizeStoryMemoryUpdate({ id: 'mem-1', used: true, lastUsedAt: farFuture });
-        expect(withUsed.lastUsedAt).toBeLessThan(farFuture);
+        expect(withUsed.lastUsedAt).toBeUndefined();
         const withoutUsed = normalizeStoryMemoryUpdate({ id: 'mem-1', last_used_at: farFuture, status: 'active' });
         expect(withoutUsed.lastUsedAt).toBeUndefined();
+        expect(withoutUsed.used).toBeUndefined();
     });
 
     it('drops unknown statuses and returns null without any identity', () => {

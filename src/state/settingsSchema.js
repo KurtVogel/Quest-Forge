@@ -8,9 +8,12 @@
  * set — the shell went down at boot and stayed down until the row was cleared
  * by hand. Known keys only, strings through cleanTextField, provider / preset /
  * pace whitelisted, unknown keys dropped. Only keys PRESENT in the stored
- * blob are returned, so the GameContext merge keeps supplying the defaults.
+ * blob are returned, so the GameContext merge keeps supplying the defaults —
+ * with one exception: a stored provider without a model gets its provider's
+ * first row (the default model belongs to the default provider). This is the
+ * ONE model heal (2026-10-12: GameContext re-ran it on the merged settings).
  */
-import { PROVIDERS } from '../llm/adapter.js';
+import { PROVIDERS } from '../llm/modelCatalog.js';
 import { PRESETS } from '../data/presets.js';
 import { normalizePaceDial } from '../engine/worldTempo.js';
 import { cleanTextField } from '../config/contentLimits.js';
@@ -42,8 +45,10 @@ export function sanitizeSettings(raw) {
     // A model id the picker no longer offers (the Gemini Pro rows were retired
     // 2026-10-11 — heavy, expensive, more censored) falls to the provider's first
     // row: the picker is a <select>, so a stored id outside the list rendered
-    // blank and the DM call went to a model the app had dropped on purpose.
-    if (typeof out.model === 'string') {
+    // blank and the DM call went to a model the app had dropped on purpose. A
+    // stored provider WITHOUT a model takes its first row too — the merge would
+    // otherwise pair it with the default (Gemini) model.
+    if (typeof out.model === 'string' || out.llmProvider) {
         const provider = PROVIDERS[out.llmProvider || 'gemini'];
         if (provider && !provider.models.some(m => m.id === out.model)) out.model = provider.models[0].id;
     }

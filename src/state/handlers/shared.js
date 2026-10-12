@@ -29,6 +29,7 @@ import {
     sanitizeNpcLanePayload,
 } from '../../engine/npcRoster.js';
 import { NPC_OPEN_THREAD_MAX } from '../../engine/relationshipArc.js';
+import { clampNumber } from '../../engine/text.js';
 
 // Re-exported for the ledger's importers; the constant itself lives in
 // config/contentLimits.js so persistence.js reads the same one.
@@ -557,12 +558,6 @@ export function stampNpcRelationshipArcs(npcs) {
         };
     });
     return changed ? next : npcs;
-}
-
-function clampNumber(value, min, max, fallback) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return fallback;
-    return Math.max(min, Math.min(max, Math.trunc(n)));
 }
 
 function defaultCompanionDamage(weapon = '') {

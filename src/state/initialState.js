@@ -1,8 +1,11 @@
 /**
- * The initial game state shape. Pure data, no imports — safe for any module
+ * The initial game state shape. Pure data — its one import is the import-free
+ * model catalog (DEFAULT_DM_MODEL, 2026-10-12) — safe for any module
  * (reducer, migrations, handlers, UI) to depend on without cycles.
  * Re-exported from gameReducer.js for existing consumers.
  */
+import { DEFAULT_DM_MODEL } from '../llm/modelCatalog.js';
+
 export const initialGameState = {
     character: null, // Should include gold: 0, silver: 0, copper: 0
     inventory: [],
@@ -70,7 +73,7 @@ export const initialGameState = {
         apiKey: '',
         geminiApiKey: '', // Gemini machinery key (RAG/Scribe/journal) — required when the DM provider is not Gemini
         imageApiKey: '', // xAI (Grok) key for scene-art image generation — separate from the chat key
-        model: 'gemini-3.8-flash',
+        model: DEFAULT_DM_MODEL,
         preset: 'classicFantasy',
         ruleset: 'simplified5e',
         paceDial: 'standard', // Campaign pace setpoint: slow-burn | standard | breakneck (world-tempo thermostat)

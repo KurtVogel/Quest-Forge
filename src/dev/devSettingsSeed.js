@@ -10,6 +10,8 @@
  *
  * No-op outside `npm run dev` (import.meta.env.DEV) or when no VITE_ keys exist.
  */
+import { DEFAULT_DM_MODEL } from '../llm/modelCatalog.js';
+
 const SETTINGS_KEY = 'rpg-client-settings';
 const DM_FLAG_KEY = 'qf-dev-dm-provider';
 
@@ -42,7 +44,7 @@ export function seedDevSettings() {
     } else if (geminiKey) {
         settings.llmProvider = 'gemini';
         settings.apiKey = geminiKey;
-        settings.model = 'gemini-3.8-flash';
+        settings.model = DEFAULT_DM_MODEL;
     }
 
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));

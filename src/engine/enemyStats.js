@@ -13,7 +13,7 @@
  * outcome word (`enemyOutcome`) and the engine defaults (`ENEMY_DEFAULT_*`).
  */
 
-import { toFlag } from '../data/items.js';
+import { toFlag } from './text.js';
 import { CONDITION_EFFECTS } from './rules.js';
 
 const ATTACK_BONUS_MIN = -5;

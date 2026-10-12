@@ -443,3 +443,36 @@ describe('a machinery lane falls back to another model on a capacity refusal (gr
         expect(sendGeminiMessage).toHaveBeenCalledTimes(1);
     });
 });
+
+describe('the fallback attempt is counted (2026-10-12 providers-adapter P2 nit)', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+    const overloaded = () => Object.assign(new Error('Gemini API error (503): high demand'), { status: 503 });
+    const hangUntilAborted = ({ signal }) => new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')), { once: true });
+    });
+
+    it('a stalled fallback names every request sent — four for a budget of three plus the fallback', async () => {
+        vi.useFakeTimers();
+        sendGeminiMessage
+            .mockRejectedValueOnce(overloaded())
+            .mockRejectedValueOnce(overloaded())
+            .mockRejectedValueOnce(overloaded())
+            .mockImplementationOnce(hangUntilAborted);
+        const promise = sendMessage({ ...baseOptions, provider: 'gemini', model: 'primary', timeoutMs: 5000, fallbackModel: 'backup' });
+        const outcome = expect(promise).rejects.toThrow('stalled — no response after 5s (4 attempts)');
+        await vi.advanceTimersByTimeAsync(60000);
+        await outcome;
+        expect(sendGeminiMessage.mock.calls.map(([o]) => o.model)).toEqual(['primary', 'primary', 'primary', 'backup']);
+    });
+
+    it('a primary stall without a fallback still counts its own budget', async () => {
+        vi.useFakeTimers();
+        sendGeminiMessage.mockImplementation(hangUntilAborted);
+        const promise = sendMessage({ ...baseOptions, provider: 'gemini', timeoutMs: 5000, maxRetries: 0 });
+        const outcome = expect(promise).rejects.toThrow('(1 attempt).');
+        await vi.advanceTimersByTimeAsync(5000);
+        await outcome;
+    });
+});

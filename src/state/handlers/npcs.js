@@ -47,7 +47,7 @@ export function stampLastDmMessage(messages, marks) {
     if (merged.length === existing.length) return messages;
     return messages.map((m, i) => (i === idx ? { ...m, bondMarks: merged.slice(-6) } : m));
 }
-import { findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
+import { bornStoryMemoryCard, findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isDirectionEvidencedInText, isLocationEvidencedInText, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, linkLocations, normalizeTravelDirection, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
@@ -194,17 +194,17 @@ export const handlers = {
         }
         let storyMemory = state.storyMemory || [];
         if (touched) {
+            const messageCount = (state.messages || []).length;
             const promotion = buildStoryMemoryPromotion(touched);
             if (promotion) {
                 const idx = findStoryMemoryMatch(storyMemory, promotion);
                 if (idx === -1) {
-                    const card = normalizeStoryMemoryCard(promotion);
-                    // Birth stamps firstSeenMessage like ADD_STORY_MEMORY_CARD
-                    // (2026-08-30 audit — the stamp is an invariant of card
-                    // birth, even though promotions are never `witnessed`).
-                    if (card) {
-                        storyMemory = [...storyMemory, { ...card, firstSeenMessage: (state.messages || []).length }];
-                    }
+                    // Born through the one composer (2026-10-12 P2): the
+                    // promotion stamped firstSeenMessage only, so its recency
+                    // scored through the legacy wall-clock fallback. A snapshot
+                    // of the dossier carries no source message.
+                    const card = bornStoryMemoryCard(normalizeStoryMemoryCard(promotion), messageCount);
+                    if (card) storyMemory = [...storyMemory, card];
                 } else {
                     // Deliberate divergence from ADD_STORY_MEMORY_CARD's merge:
                     // a promotion is a REGENERATED dossier snapshot, so its
@@ -213,8 +213,10 @@ export const handlers = {
                     // of one beat, not for a snapshot that must also SHRINK
                     // when a stance softens. The promotion's stable id wins so
                     // a pre-fix `mem-` card migrates to the id rung here.
+                    // A refreshed snapshot is SEEN now on the conversational
+                    // clock too (its wall-clock twin was always restamped).
                     storyMemory = storyMemory.map((card, i) => (
-                        i === idx ? normalizeStoryMemoryCard(promotion, card) : card
+                        i === idx ? normalizeStoryMemoryCard({ ...promotion, lastSeenMessage: messageCount }, card) : card
                     ));
                 }
             }

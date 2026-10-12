@@ -5,7 +5,7 @@
  * label, and (for xAI) a key normalizer differ. Keeping one implementation
  * means stream-truncation fixes land once instead of being hand-copied.
  */
-import { assertStreamComplete, isNetworkFailure, makeCompletionGuard, makeHttpError, readSseStream } from './sse.js';
+import { asRecord, assertStreamComplete, historyText, isNetworkFailure, makeCompletionGuard, makeHttpError, readSseStream, reportUsage } from './sse.js';
 
 /**
  * Output cap is a glitch-loop guard, not a budget — 4096 silently truncated
@@ -37,7 +37,7 @@ function formatMessages(systemPrompt, messageHistory, userMessage) {
             // (user, and a `system` line a caller forgot to fold) is user-side
             // context, matching buildMessageWindow's own mapping.
             role: msg.role === 'assistant' ? 'assistant' : 'user',
-            content: typeof msg.content === 'string' ? msg.content : String(msg.content ?? ''),
+            content: historyText(msg.content),
         });
     }
 
@@ -123,14 +123,13 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
             throw await httpError(response);
         }
 
-        const body = await response.json();
-        const data = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+        const data = asRecord(await response.json());
         const message = data.choices?.[0]?.message;
         if (message?.refusal) {
             throw refusalError(message.refusal);
         }
         assertCompleteResponse(data.choices?.[0]?.finish_reason);
-        reportUsage(onUsage, data.usage);
+        reportUsage(onUsage, data.usage, normalizeOpenAIUsage);
         const content = contentText(message?.content);
         if (!content) {
             throw new Error('No response generated. The model may have been blocked or returned empty.');
@@ -140,7 +139,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
 
     /** Stream a message, calling onChunk with each text fragment. */
     async function stream(args) {
-        const { apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, onUsage } = args;
+        const { apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, maxOutputTokens, onUsage } = args;
         const response = await fetchWithExtraHeaders(args, {
             method: 'POST',
             headers: {
@@ -151,7 +150,10 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
                 model,
                 messages: formatMessages(systemPrompt, messageHistory, userMessage),
                 ...(temperatureUnsupported(model) ? {} : { temperature: temperature ?? 0.9 }),
-                [maxTokensParam]: maxOutputTokensFor(model),
+                // A passed cap is honored like the send's (2026-10-12 — the
+                // stream ignored it); the DM lane passes none and keeps the
+                // per-model cap (REASONING_MAX_TOKENS on a reasoning model).
+                [maxTokensParam]: Number.isFinite(maxOutputTokens) ? maxOutputTokens : maxOutputTokensFor(model),
                 stream: true,
                 // OpenAI reports usage on a stream only when asked; the final
                 // chunk then carries it (cached_tokens included). xAI sends it
@@ -187,7 +189,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
             throw refusalError(refusalText);
         }
         assertStreamComplete(finishReason, assertCompleteResponse);
-        reportUsage(onUsage, usage);
+        reportUsage(onUsage, usage, normalizeOpenAIUsage);
         return fullText;
     }
 
@@ -212,12 +214,6 @@ export function normalizeOpenAIUsage(usage) {
         cachedTokens: num(usage.prompt_tokens_details?.cached_tokens) ?? 0,
         outputTokens: num(usage.completion_tokens),
     };
-}
-
-function reportUsage(onUsage, raw) {
-    if (typeof onUsage !== 'function') return;
-    const usage = normalizeOpenAIUsage(raw);
-    if (usage) onUsage(usage);
 }
 
 /**

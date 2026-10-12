@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { boundHealingNotation, boundWeaponDamage, normalizeItem, normalizeItemKey, parseCountedItemName, toFiniteNumber, toFlag } from './items.js';
+import { boundHealingNotation, boundWeaponDamage, normalizeItem, normalizeItemKey, parseCountedItemName, toFiniteNumber } from './items.js';
+import { toFlag } from '../engine/text.js';
 
 describe('item catalog normalization', () => {
     it('recognizes a catalog item with a descriptive prefix', () => {

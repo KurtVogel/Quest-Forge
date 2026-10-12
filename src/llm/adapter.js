@@ -5,7 +5,10 @@
 import { sendGeminiMessage, streamGeminiMessage } from './providers/gemini.js';
 import { sendOpenAIMessage, streamOpenAIMessage } from './providers/openai.js';
 import { sendXaiMessage, streamXaiMessage } from './providers/xai.js';
-import { isNetworkFailure } from './providers/sse.js';
+import { isNetworkFailure, isTransient, retryDelay, sleep } from './providers/sse.js';
+// The Settings picker's catalog lives in its own module (2026-10-12) so state/
+// can read it without importing the transport; re-exported for every caller.
+export { DEFAULT_DM_MODEL, PROVIDERS, PROVIDER_LIST } from './modelCatalog.js';
 
 const providers = {
     gemini: { send: sendGeminiMessage, stream: streamGeminiMessage },
@@ -13,19 +16,16 @@ const providers = {
     xai: { send: sendXaiMessage, stream: streamXaiMessage },
 };
 
-/** Transient failures worth retrying: rate limits, server hiccups, dropped connections. */
-const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+// Transient failures worth retrying — rate limits, server hiccups, dropped
+// connections — are judged by sse.js `isTransient`, the one vocabulary the
+// embed lanes read too (2026-10-12). fetch() rejects with a TypeError on a
+// network failure, but so does any programming bug inside a provider; only the
+// browsers' network-failure messages count, so a bug is never retried.
 
-// fetch() rejects with a TypeError on network failure (no HTTP status at all), but
-// so does any programming bug inside a provider — retrying those only masks the bug
-// behind ~3s of pointless backoff. isNetworkFailure matches only the browsers'
-// network-failure messages.
-function isRetryableError(error) {
-    if (RETRYABLE_STATUS.has(error?.status)) return true;
-    return isNetworkFailure(error);
-}
-
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+/** Backoff base of a non-streaming retry (doubles per attempt, plus jitter). */
+const SEND_RETRY_BASE_MS = 1000;
+/** Backoff base of a DM stream refused before its first byte. */
+const STREAM_RETRY_BASE_MS = 1500;
 
 /**
  * Browser fetch never times out on its own: a stalled connection (no response,
@@ -113,6 +113,10 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, messa
     let activeModel = model;
     for (let attempt = 0; ; attempt++) {
         if (signal?.aborted) throw new DOMException('The request was aborted.', 'AbortError');
+        // Requests sent so far, this one included — the fallback attempt runs
+        // past the retry budget and is counted too (2026-10-12: a stalled
+        // fallback said "3 attempts" for four requests).
+        const requests = attempt + 1;
         // Per-attempt controller: the stall timer must not leak an abort into a
         // later retry, and an external caller signal cancels every attempt.
         const controller = new AbortController();
@@ -124,23 +128,19 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, messa
         } catch (error) {
             const stalled = error?.name === 'AbortError' && !signal?.aborted;
             if (signal?.aborted) throw error; // caller cancelled — never retry
-            if (!stalled && attempt >= MAX_RETRIES && isRetryableError(error) && !isNetworkFailure(error)
+            if (!stalled && attempt >= MAX_RETRIES && isTransient(error) && !isNetworkFailure(error)
                 && typeof fallbackModel === 'string' && fallbackModel && activeModel !== fallbackModel) {
-                console.warn(`[LLM Adapter] ${provider} ${activeModel} refused after ${attempt + 1} attempt(s) (${error.message}); one attempt on ${fallbackModel}.`);
+                console.warn(`[LLM Adapter] ${provider} ${activeModel} refused after ${requests} attempt(s) (${error.message}); one attempt on ${fallbackModel}.`);
                 activeModel = fallbackModel;
                 continue;
             }
-            if (!stalled && (attempt >= MAX_RETRIES || !isRetryableError(error))) throw error;
+            if (!stalled && (attempt >= MAX_RETRIES || !isTransient(error))) throw error;
             if (stalled && attempt >= MAX_RETRIES) {
-                const attempts = MAX_RETRIES + 1;
-                throw new Error(`${provider} request stalled — no response after ${Math.round(timeoutMs / 1000)}s (${attempts} attempt${attempts === 1 ? '' : 's'}).`);
+                throw new Error(`${provider} request stalled — no response after ${Math.round(timeoutMs / 1000)}s (${requests} attempt${requests === 1 ? '' : 's'}).`);
             }
             const reason = stalled ? `stalled after ${Math.round(timeoutMs / 1000)}s` : error.message;
-            // A `Retry-After` the provider sent wins over the default backoff —
-            // a per-minute quota 429 burned all three attempts in ~3 s and lost
-            // the Scribe/journal extraction (2026-09-06). Capped in sse.js.
-            const backoff = 1000 * 2 ** attempt + Math.random() * 250;
-            const delay = Math.max(backoff, Number.isFinite(error?.retryAfterMs) ? error.retryAfterMs : 0);
+            // A `Retry-After` the provider sent wins over the backoff (sse.js retryDelay).
+            const delay = retryDelay(attempt, error, { base: SEND_RETRY_BASE_MS });
             console.warn(`[LLM Adapter] Transient ${provider} failure (${reason}); retry ${attempt + 1}/${MAX_RETRIES} in ~${Math.round(delay)}ms.`);
             await sleep(delay);
         } finally {
@@ -152,10 +152,27 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, messa
 
 /**
  * Stream a message from the configured LLM provider.
- * Calls onChunk with each text fragment as it arrives.
- * @param {object} options - Same as sendMessage
+ * Calls onChunk with each text fragment as it arrives. The visible DM turn's
+ * lane: it takes NONE of sendMessage's timeoutMs / maxRetries / thinkingBudget
+ * / maxOutputTokens / fallbackModel — its stall guard is the idle timer, its
+ * retry budget is STREAM_START_MAX_RETRIES (before the first byte only), and
+ * the provider's own model defaults govern thinking and the output cap.
+ * @param {object} options
+ * @param {string} options.provider - Provider name ('gemini' | 'openai' | 'xai')
+ * @param {string} options.apiKey - API key
+ * @param {string} options.model - Model identifier
+ * @param {string} options.systemPrompt - System prompt
+ * @param {Array} options.messageHistory - Previous messages [{role, content}]
+ * @param {string} options.userMessage - New user message
  * @param {function} options.onChunk - Callback receiving each text chunk
- * @param {AbortSignal} [options.signal] - Optional abort signal
+ * @param {AbortSignal} [options.signal] - Optional abort signal (the Stop
+ *   button); surfaces as an AbortError, never retried
+ * @param {number} [options.temperature] - Sampling temperature (default 0.9)
+ * @param {number} [options.idleTimeoutMs] - Abort when no chunk has arrived
+ *   for this long (default DEFAULT_STREAM_IDLE_TIMEOUT_MS, reset per chunk)
+ * @param {function} [options.onUsage] - As sendMessage
+ * @param {string} [options.conversationId] - As sendMessage
+ * @param {function} [options.onHeaderRejected] - As sendMessage
  * @returns {Promise<string>} Complete response text
  */
 export async function streamMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS, onUsage, conversationId, onHeaderRejected }) {
@@ -195,9 +212,8 @@ export async function streamMessage({ provider, apiKey, model, systemPrompt, mes
                 // one cost the player a whole turn and a retyped line). A stall,
                 // a cancel, or anything after a chunk is never retried.
                 if (streamed || stalled || controller.signal.aborted || signal?.aborted
-                    || attempt >= STREAM_START_MAX_RETRIES || !isRetryableError(error)) throw error;
-                const backoff = 1500 * 2 ** attempt + Math.random() * 250;
-                const wait = Math.max(backoff, Number.isFinite(error?.retryAfterMs) ? error.retryAfterMs : 0);
+                    || attempt >= STREAM_START_MAX_RETRIES || !isTransient(error)) throw error;
+                const wait = retryDelay(attempt, error, { base: STREAM_RETRY_BASE_MS });
                 console.warn(`[LLM Adapter] ${provider} stream refused before the first byte (${error.message}); retry ${attempt + 1}/${STREAM_START_MAX_RETRIES} in ~${Math.round(wait)}ms.`);
                 clearTimeout(idleTimer);
                 await sleep(wait);
@@ -222,44 +238,3 @@ export async function streamMessage({ provider, apiKey, model, systemPrompt, mes
         signal?.removeEventListener('abort', onExternalAbort);
     }
 }
-
-/**
- * Available providers and their models.
- */
-export const PROVIDERS = {
-    gemini: {
-        name: 'Google Gemini',
-        models: [
-            { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Recommended)', description: 'The DM model — newest Flash, stable, fast and cheap (1M context, 64k output)' },
-            { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', description: 'Fast frontier-class, great value' },
-            { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', description: 'Cheapest current-gen' },
-            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Previous gen, fast and affordable' },
-        ],
-    },
-    openai: {
-        name: 'OpenAI',
-        models: [
-            // GPT-6 family (Astra 2026-09-03, Sol/Luna 09-22, 6.1 Sol 09-29). For a
-            // DM the tier is the prose: Terra reviewed as narratively flat, Astra
-            // leads EQ-Bench creative writing at 5× Sol's price (2026-10-03).
-            { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol (Recommended)', description: 'Newest — near-Astra quality at a fifth of the price' },
-            { id: 'gpt-6-astra', name: 'GPT-6 Astra', description: 'Best prose, priciest ($10/$50 per M tokens)' },
-            { id: 'gpt-6-luna', name: 'GPT-6 Luna', description: 'Fast, cheapest current-gen' },
-            { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', description: 'Previous flagship tier, strong fiction' },
-            { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', description: 'Previous mid tier — flat for fiction' },
-            { id: 'gpt-5', name: 'GPT-5', description: 'Older gen' },
-            { id: 'gpt-4o', name: 'GPT-4o', description: 'Legacy' },
-        ],
-    },
-    // DM narration only — the memory machinery (RAG, Scribe & co.) always runs
-    // on Gemini via the dedicated machinery key (see llm/machinery.js).
-    xai: {
-        name: 'xAI (Grok)',
-        models: [
-            { id: 'grok-4.3', name: 'Grok 4.3 (Recommended)', description: 'xAI flagship — fast, strong prose, but weaker game-event compliance: quests, loot, and coin may need the built-in audits to keep up' },
-            { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', description: 'Budget tier; xAI aliases retired IDs forward to the current model. Same event-compliance caveat as Grok 4.3' },
-        ],
-    },
-};
-
-export const PROVIDER_LIST = Object.keys(PROVIDERS);

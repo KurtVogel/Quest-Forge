@@ -36,15 +36,10 @@ import {
     normalizeChronicleChapter,
     systemMessage,
 } from './shared.js';
+import { strictFlag } from '../../engine/text.js';
 
 /** Campaign name as typed at adventure start (the save-slot list renders it). */
 const SESSION_NAME_MAX = 120;
-
-/** Strict boolean for a persisted flag: "true"/"false" strings from a hand edit coerce. */
-function toFlag(value) {
-    if (typeof value === 'string') return value.trim().toLowerCase() === 'true';
-    return value === true;
-}
 
 const MESSAGE_ROLES = new Set(['user', 'assistant', 'system']);
 const MESSAGE_FLAGS = ['hidden', 'deleted', 'summarized'];
@@ -65,7 +60,7 @@ function typeLoadedMessage(message, index) {
     if (content !== typed.content) typed = { ...typed, content };
     for (const flag of MESSAGE_FLAGS) {
         if (typed[flag] !== undefined && typeof typed[flag] !== 'boolean') {
-            typed = { ...typed, [flag]: toFlag(typed[flag]) };
+            typed = { ...typed, [flag]: strictFlag(typed[flag]) };
         }
     }
     if (typeof typed.id !== 'string' || !typed.id) {
@@ -171,7 +166,7 @@ function sanitizeStoredExchangeEvent(event) {
         if (event[field] != null && Number.isFinite(n)) typed[field] = n;
     }
     for (const field of EXCHANGE_EVENT_FLAG_FIELDS) {
-        if (event[field] !== undefined) typed[field] = toFlag(event[field]);
+        if (event[field] !== undefined) typed[field] = strictFlag(event[field]);
     }
     const sa = event.sneakAttackDetail;
     if (sa && typeof sa === 'object' && !Array.isArray(sa) && Number.isFinite(Number(sa.total))) {
@@ -416,7 +411,7 @@ function validateSaveState(payload) {
                     id: cleanTextField(e.id, 120) || `journal-loaded-${index}`,
                     timestamp: Number.isFinite(e.timestamp) ? e.timestamp : Date.now(),
                     location: cleanTextField(e.location, LOCATION_NAME_MAX) || null,
-                    ...(e.fallback !== undefined && { fallback: toFlag(e.fallback) }),
+                    ...(e.fallback !== undefined && { fallback: strictFlag(e.fallback) }),
                     ...(e.messageRange !== undefined && { messageRange: typeMessageRange(e.messageRange, messageCount) }),
                     // The live write clamps at JOURNAL_SUMMARY_MAX (normalizeJournalSummary);
                     // the load twin types it too (2026-09-17 vector-memory P1: a
@@ -541,7 +536,7 @@ function validateSaveState(payload) {
             // exchange, `active: "false"` loaded as a live foe-less fight,
             // `xpAwarded: "no"` paid 0 XP for slain foes, `bonusActionUsed: "no"`
             // refused Second Wind all round.
-            const active = toFlag(merged.active);
+            const active = strictFlag(merged.active);
             // Loaded saves are untrusted input: re-validate enemy stats so a tampered or
             // legacy save can't reintroduce an absurd attackBonus/damage/AC/HP after load.
             const enemies = assignUniqueEnemyIds(Array.isArray(merged.enemies)
@@ -576,8 +571,8 @@ function validateSaveState(payload) {
                 turnOrder,
                 currentTurn,
                 round: Math.max(1, Math.trunc(finiteOr(merged.round, 1))),
-                xpAwarded: toFlag(merged.xpAwarded),
-                bonusActionUsed: toFlag(merged.bonusActionUsed),
+                xpAwarded: strictFlag(merged.xpAwarded),
+                bonusActionUsed: strictFlag(merged.bonusActionUsed),
                 phase,
                 openingActorIds: stringList(merged.openingActorIds, 40),
                 queuedExchange: normalizeCombatExchange(merged.queuedExchange),

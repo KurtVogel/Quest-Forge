@@ -1,3 +1,4 @@
+import { toFlag } from '../engine/text.js';
 /**
  * Core item catalog for common D&D-style equipment.
  *
@@ -318,7 +319,6 @@ const DEFAULT_ITEM_TYPE = 'gear';
 // shield. Catalog rows carry only their catalog flags (a DM cannot make a
 // Longsword two-handed); non-catalog rows get theirs typed.
 const ITEM_FLAG_KEYS = ['ranged', 'finesse', 'thrown', 'twoHanded', 'versatile', 'isShield'];
-const FALSE_FLAG_WORDS = new Set(['false', 'no', '0', 'off', 'none', 'null', 'undefined']);
 // Free-text descriptors ride the payload untyped otherwise; string-or-drop with
 // a clamp so an object never reaches the prompt or a React child.
 const ITEM_TEXT_FIELDS = { damageType: 40, rarity: 40, description: 600, consumableType: 40, actionType: 40, category: 40, armorType: 40 };
@@ -331,11 +331,6 @@ const MAX_HEALING_DIE_SIDES = 12;
 const MAX_HEALING_FLAT_BONUS = 20;
 const FALLBACK_HEALING = '2d4+2';
 
-/** Coerce a payload boolean: false-words and 0 are false, anything else truthy is `!!`. */
-export function toFlag(value) {
-    if (typeof value === 'string') return !FALSE_FLAG_WORDS.has(value.trim().toLowerCase()) && value.trim() !== '';
-    return !!value;
-}
 
 /**
  * Numeric-string parity with the coin clamp (2026-09-12 P2): the DM emits

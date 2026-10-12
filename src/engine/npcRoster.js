@@ -6,7 +6,8 @@
 
 import { LOCATION_NAME_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../config/contentLimits.js';
 import { sanitizePortraitUrl } from './portraitUrl.js';
-import { conversationalDistance } from './replayLedger.js';
+import { conversationalAgeSince } from './replayLedger.js';
+import { compareCardRecency } from './storyMemory.js';
 import { coverage, tokenSet } from './textMatch.js';
 import { cleanText } from './text.js';
 
@@ -1137,13 +1138,7 @@ export function isPromptRosterNpc(npc = {}) {
 const NPC_RECENCY_DECAY_MESSAGES = 5;
 
 function npcConversationalAge(npc, messages, messageCount) {
-    if (!Number.isFinite(npc?.lastSeenMessage)) return null;
-    const end = Number.isFinite(messageCount)
-        ? messageCount
-        : (Array.isArray(messages) ? messages.length : NaN);
-    if (!Number.isFinite(end)) return null;
-    if (Array.isArray(messages)) return conversationalDistance(messages, npc.lastSeenMessage - 1, end - 1);
-    return Math.max(0, end - npc.lastSeenMessage);
+    return conversationalAgeSince(npc?.lastSeenMessage, { messages, messageCount });
 }
 
 export function scoreNpcForPrompt(npc = {}, { location = '', now = Date.now(), messages = null, messageCount } = {}) {
@@ -1362,7 +1357,7 @@ export function healPromotedStoryMemoryTwins(storyMemory = [], npcs = []) {
     for (const indexes of groups.values()) {
         let keep = indexes[0];
         for (const index of indexes) {
-            if ((cards[index].lastSeenAt || 0) > (cards[keep].lastSeenAt || 0)) keep = index;
+            if (compareCardRecency(cards[index], cards[keep]) < 0) keep = index;
         }
         for (const index of indexes) {
             if (index !== keep) drop.add(index);

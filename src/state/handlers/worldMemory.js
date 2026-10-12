@@ -5,6 +5,7 @@
 import { planWorldFactAdditions } from '../../engine/worldFacts.js';
 import {
     applyStoryMemoryDormancy,
+    bornStoryMemoryCard,
     findStoryMemoryMatch,
     normalizeStoryMemoryCard,
     normalizeStoryMemoryUpdate,
@@ -131,13 +132,7 @@ export const handlers = {
         const idx = findStoryMemoryMatch(state.storyMemory || [], card);
         const messageCount = (state.messages || []).length;
         if (idx === -1) {
-            // Message-index birth stamp: regional hearsay measures a witnessed
-            // deed's age in conversational messages, which wall-clock can't do.
-            // lastSeenMessage feeds the curation recency window the same way.
-            // `sourceMessage` (M0, 2026-09-30): the DM message this card was
-            // read from, so removing that message retracts the card.
-            const sourceMessage = typeof action.meta?.sourceMessage === 'string' && action.meta.sourceMessage ? action.meta.sourceMessage : null;
-            const born = { ...card, firstSeenMessage: messageCount, lastSeenMessage: messageCount, ...(sourceMessage && { sourceMessage }) };
+            const born = bornStoryMemoryCard(card, messageCount, { sourceMessage: action.meta?.sourceMessage });
             return { ...state, storyMemory: [...(state.storyMemory || []), born] };
         }
         const existing = state.storyMemory[idx];
@@ -156,6 +151,14 @@ export const handlers = {
                 ? normalizeStoryMemoryCard({
                     ...existing,
                     ...card,
+                    // Provenance and identity are the STORED card's (2026-10-12
+                    // P2): the normalized incoming card defaults `source` to
+                    // 'scribe' and mints a fresh id, so the spread re-sourced
+                    // END_COMBAT's engine wound on its first Scribe mention
+                    // (its six-cadence dormancy rule defeated) and churned the
+                    // id the DM's memory_updates addresses.
+                    id: existing.id,
+                    source: existing.source,
                     status,
                     // A paid-off beat's text is frozen with its status
                     // (2026-09-16 P2 belt): an id-keyed re-report used to
@@ -211,15 +214,17 @@ export const handlers = {
         // Conversational twins of the wall-clock stamps: the curation cooldown
         // and recency windows read these (2026-09-06).
         const messageCount = (state.messages || []).length;
+        const { used, ...fields } = update;
+        const now = Date.now();
         const stamps = {
-            lastSeenAt: Date.now(),
+            lastSeenAt: now,
             lastSeenMessage: messageCount,
-            ...(update.lastUsedAt && { lastUsedMessage: messageCount }),
+            ...(used && { lastUsedAt: now, lastUsedMessage: messageCount }),
         };
         return {
             ...state,
             storyMemory: state.storyMemory.map((memory, i) => i === idx
-                ? normalizeStoryMemoryCard({ ...memory, ...update, ...stamps }, memory)
+                ? normalizeStoryMemoryCard({ ...memory, ...fields, ...stamps, id: memory.id }, memory)
                 : memory),
         };
     },

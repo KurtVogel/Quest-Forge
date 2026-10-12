@@ -15,7 +15,7 @@
  * thread every scene, and both lead the Journal / Companions cards.
  */
 import { NPC_BOND_MOMENT_MAX, namesMatch, normalizeBondMoments, selectKeyBondMoments } from './npcRoster.js';
-import { conversationalDistance } from './replayLedger.js';
+import { conversationalAgeSince } from './replayLedger.js';
 import { liveWorldFacts } from './worldFacts.js';
 
 export const RELATIONSHIP_STAGES = ['stranger', 'acquaintance', 'familiar', 'trusted', 'intimate', 'rival', 'estranged'];
@@ -181,14 +181,6 @@ export const BOND_ABSENCE_MIN_MESSAGES = 30;
 /** Conversational messages an open thread may wait before it "stings". */
 export const OPEN_THREAD_STALE_MESSAGES = 24;
 
-function distanceFrom(anchor, { messages, messageCount }) {
-    if (!Number.isFinite(anchor)) return null;
-    const end = Number.isFinite(messageCount) ? messageCount : (Array.isArray(messages) ? messages.length : NaN);
-    if (!Number.isFinite(end)) return null;
-    if (Array.isArray(messages)) return conversationalDistance(messages, anchor - 1, end - 1);
-    return Math.max(0, end - anchor);
-}
-
 const ABSENCE_LINES = {
     intimate: 'the closeness has cooled to something quieter and wants rekindling',
     trusted: 'the trust has gone untested for a long while; they will want to see it still holds',
@@ -204,8 +196,8 @@ const ABSENCE_LINES = {
  * anyone. `away` and `threadAge` are conversational distances.
  */
 export function describeAbsence(npc = {}, { messages = null, messageCount } = {}) {
-    const away = distanceFrom(npc?.lastSeenMessage, { messages, messageCount });
-    const threadAge = text(npc?.openThread) ? distanceFrom(npc?.openThreadMessage, { messages, messageCount }) : null;
+    const away = conversationalAgeSince(npc?.lastSeenMessage, { messages, messageCount });
+    const threadAge = text(npc?.openThread) ? conversationalAgeSince(npc?.openThreadMessage, { messages, messageCount }) : null;
     const { stage } = deriveRelationshipStage(npc);
     const staleThread = threadAge !== null && threadAge >= OPEN_THREAD_STALE_MESSAGES;
     const longAway = away !== null && away >= BOND_ABSENCE_MIN_MESSAGES;
@@ -282,7 +274,7 @@ export function selectRelationshipBeatCandidate(npcs = [], storyMemory = [], { m
         if (npc.rosterTier && npc.rosterTier !== 'character') continue;
         const { stage } = deriveRelationshipStage(npc);
         if (!BEAT_ELIGIBLE_STAGES.has(stage)) continue;
-        const away = distanceFrom(npc.lastSeenMessage, { messages, messageCount });
+        const away = conversationalAgeSince(npc.lastSeenMessage, { messages, messageCount });
         if (away === null || away < BOND_ABSENCE_MIN_MESSAGES) continue;
         const thread = resolveOpenThread(npc, storyMemory);
         if (!thread && stage !== 'rival') continue;
