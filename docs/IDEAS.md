@@ -3354,3 +3354,30 @@ matches; a vocabulary has one lookup. The build: `parseLlmJson` with repair insi
 on it, the finder's block list read by the strip and the warning, `findSkillInText` in the detector,
 one RAG composer per category + the record-reading live lane for both fact lanes, `withEmbedDb`,
 `addMemory` folded into the batch path with the combat narrative stamped, and the pins.
+
+### [strengthening] A contract is read from the reader's side; a merge that spreads a default is a replace; a shelf copied inside its own module is still a copy — status: `idea` (2026-10-12)
+Three rules from the providers-adapter + story-memory Lap-4 pass (2026-10-12), the story-memory
+numbers measured against the real reducer and the real callbacks block. **(1)** The DM's one write
+channel for story cards — `memory_updates`, the callback cooldown AND `resolved`, the only way a card
+ends from play — is taught as `{ "id": "<memory id>", "used": true }`, and the DRAMATIC CALLBACK block
+the DM reads prints type / salience / subject / NPCs / location / text and no id: the documented update
+is a silent no-op, and only a volunteered subject (refused when ambiguous) or the exact 260-char text
+matches. The 09-30 analysis reasoned about the cooldown the channel sets as if it worked, and the
+test pins the instruction's wording. Rule: for every "send X back" sentence in a prompt, grep the block
+that would have to SHOW X, and pin the round trip (build the block, send its X through the reducer),
+never the sentence. **(2)** The card merge spreads the NORMALIZED incoming card over the stored one,
+and the normalizer fills `source: 'scribe'` and a fresh `mem-` id for an id-less lane card — so the
+first Scribe mention of END_COMBAT's engine wound re-sources it, `isEngineWound` is false, and the
+six-cadence wound dormancy (WOW 2026-09-27) is defeated; the id churns on every id-less merge, which
+is why the wonder residue must be re-found by subject + tag. `firstSeenAt` / `status` / `text` were
+protected because someone had asked about them. Rule: for every merge spread, list the keys the
+normalizer DEFAULTS and name the owner of each — provenance and identity are the record's, never the
+report's. **(3)** `embedText` beside `embedTexts` in one file is the same client twice with two deadline
+semantics; the transient vocabulary is four spellings, `sleep` two, `reportUsage` two, "plain object
+or {}" three (one accepts arrays), `toFlag` four under TWO semantics, "messages since a stamp" five over
+the one memoized distance; the stored-model heal has a dead second copy in GameContext and the default
+DM model three spellings. The 10-11 rule (grep a shelf's PARTS at its importers) extends: grep the
+shelf's NAME across the repo — a second declaration is a second shelf, even in the same file. The
+build: `id:` on the callbacks line + the round-trip pin, `source` / `id` kept on the merge, one card
+birth, dormancy on the conversational clock, `embedText` as `embedTexts([x])`, one transient / backoff
+/ sleep shelf in `sse.js`, `DEFAULT_DM_MODEL`, the helper twins onto `engine/text.js`.
