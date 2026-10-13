@@ -129,7 +129,7 @@ const PREFIX_END = 'heroSheet'; // the last per-campaign constant block (2026-09
  */
 const DYNAMIC_CEILINGS = {
     character: 1500,       // 1,108
-    party: 12500,          // 11,156 — four companions, every bond field at its cap (one bond composer since 2026-10-13)
+    party: 14000,          // 12,728 — four companions, every bond field at its cap (one bond composer + Wants / Their business now since 2026-10-13)
     inventory: 3000,       // 2,551 — 60 rows, names + values only
     quests: 7500,          // 6,554 — the block's own row cap + the 8-name overflow tail
     recentRolls: 1000,     // 744

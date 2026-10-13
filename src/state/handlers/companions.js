@@ -3,11 +3,33 @@
  * announcements, and the engine-owned gear handoff.
  */
 import { deriveGiftAC } from '../../engine/companionGear.js';
-import { namesMatch } from '../../engine/npcRoster.js';
+import { appendBondMoments, findCompanionRecord, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { ensureCompanionRosterRecord, normalizeCompanion, systemMessage, withInventoryAndAC } from './shared.js';
 import { isShieldItem, isWeaponItem } from '../../engine/equipment.js';
 
 const MAX_PARTY_SIZE = 4;
+
+/**
+ * Joining and leaving are moments (WOW 2026-10-13): ONE graded key moment
+ * (`meeting` / `farewell`, salience 4 — a beat both would recall) appended to
+ * the companion's roster record through the engine's own append (same-kind
+ * collapse and the record cap apply), plus the engine-owned stamp the Scribe's
+ * KNOWN STANCES reads (`joinedPartyMessage` — the join-turn thread) and the
+ * prompt may read later (`leftPartyMessage`). The record is resolved exactly
+ * (`findCompanionRecord`): a shared first name never lands the moment on the
+ * wrong person. A companion without a roster record gets no moment.
+ */
+function stampPartyMoment(npcs, companion, { kind, text, stamp, messageCount }) {
+    const record = findCompanionRecord(npcs, companion?.name);
+    if (!record) return npcs;
+    const moment = { text, kind, salience: 4, at: Date.now(), ...(Number.isFinite(messageCount) && { atMessage: messageCount }) };
+    const next = normalizeNpcRecord({
+        ...record,
+        bondMoments: appendBondMoments(record.bondMoments, [moment], { messageCount }),
+        ...(Number.isFinite(messageCount) && { [stamp]: messageCount }),
+    });
+    return npcs.map(npc => (npc === record ? next : npc));
+}
 
 export const handlers = {
     ADD_COMPANION(state, action) {
@@ -25,7 +47,15 @@ export const handlers = {
         return {
             ...state,
             party: [...party, added],
-            npcs: ensureCompanionRosterRecord(state.npcs, added),
+            // Joining is a moment (WOW 2026-10-13): the roster record gets a
+            // `meeting` key moment and the engine's `joinedPartyMessage` stamp
+            // (the Scribe asks for the join-turn thread while it is fresh).
+            npcs: stampPartyMoment(ensureCompanionRosterRecord(state.npcs, added), added, {
+                kind: 'meeting',
+                text: `${added.name} joined the hero's party${added.role ? ` as ${added.role}` : ''}.`,
+                stamp: 'joinedPartyMessage',
+                messageCount: (state.messages || []).length,
+            }),
         };
     },
 
@@ -95,7 +125,15 @@ export const handlers = {
             // Silent party changes are a bug (D6): the roster shrinking is a
             // mechanical fact the player must see, even when the narration was
             // vague about who actually left. The companion's roster NPC record
-            // (bond, stance, shared history) deliberately stays behind.
+            // (bond, stance, shared history) deliberately stays behind — and
+            // leaving is a moment on it (WOW 2026-10-13): a `farewell` key
+            // moment and the engine's `leftPartyMessage` stamp.
+            npcs: stampPartyMoment(state.npcs, target, {
+                kind: 'farewell',
+                text: `${target.name} left the hero's party.`,
+                stamp: 'leftPartyMessage',
+                messageCount: (state.messages || []).length,
+            }),
             messages: [...state.messages, systemMessage(`👤 ${target.name} is no longer travelling with the party.`)],
         };
     },

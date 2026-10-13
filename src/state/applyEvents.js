@@ -120,6 +120,16 @@ function factLaneMeta(opts) {
     return typeof id === 'string' && id ? { meta: { sourceMessage: id } } : {};
 }
 
+/**
+ * The DM lane's NPC updates carry the turn's presence text (M0, 2026-10-13):
+ * a short name the roster holds twice resolves to the person the scene
+ * names in full, or to nobody — never to roster order.
+ */
+function npcLaneMeta(opts) {
+    const text = opts?.presenceText;
+    return typeof text === 'string' && text.trim() ? { meta: { presenceText: text } } : {};
+}
+
 function applyFightOpeningChannels(events, dispatch, getState, opts) {
     const meta = buildTransactionMeta(events, opts);
     applyStartingItems(events, dispatch, getState?.(), opts);
@@ -134,7 +144,7 @@ function applyFightOpeningChannels(events, dispatch, getState, opts) {
         dispatch({ type: 'ADD_WORLD_FACTS', payload: events.worldFacts, ...factLaneMeta(opts) });
     }
     for (const npc of events.npcUpdates || []) {
-        dispatch({ type: 'UPDATE_NPC', payload: npc });
+        dispatch({ type: 'UPDATE_NPC', payload: npc, ...npcLaneMeta(opts) });
     }
 }
 
@@ -498,7 +508,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     }
 
     for (const npc of events.npcUpdates) {
-        dispatch({ type: 'UPDATE_NPC', payload: npc });
+        dispatch({ type: 'UPDATE_NPC', payload: npc, ...npcLaneMeta(opts) });
     }
 
     for (const front of events.frontUpdates) {

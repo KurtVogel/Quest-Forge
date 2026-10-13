@@ -12,11 +12,15 @@
  * to start a turn until `isMachineryReady` passes, so background tasks can
  * assume a key exists (their own key guards remain as cheap safety nets).
  */
-// Current-gen full Flash (Vesa 2026-08-22, up from 3.1-flash-lite): id verified
-// against the live models API (no 3.7-flash-lite variant exists). Costs more per
-// token than Lite; extraction-sensitive consumers (Scribe appearance/stance
-// merges, roll audits) remain the quality gate on any future swap.
-export const MACHINERY_MODEL = 'gemini-3.7-flash';
+// Current-gen full Flash. 3.7 Flash (Vesa 2026-08-22, up from 3.1-flash-lite)
+// was deprecated by Google on 2026-10-08 and auto-routed to 3.8 Flash — the
+// Scribe, journal, audits and the eval judge ran on 3.8 under 3.7's name for
+// five days until the id was renamed (memory-research M2, 2026-10-13). The
+// DM default is the same model (modelCatalog DEFAULT_DM_MODEL). Extraction-
+// sensitive consumers (Scribe appearance/stance merges, roll audits) remain
+// the quality gate on any future swap; the parser / Scribe golden fixtures
+// and scribe.size.test.js are the floor.
+export const MACHINERY_MODEL = 'gemini-3.8-flash';
 
 /**
  * One extra attempt on another Flash when MACHINERY_MODEL refuses for

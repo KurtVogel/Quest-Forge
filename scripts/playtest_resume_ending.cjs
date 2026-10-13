@@ -30,7 +30,7 @@ const PROFILE_DIR = path.join(OUT_DIR, 'profile');
 if (!fs.existsSync(PROFILE_DIR)) { console.error(`No profile at ${PROFILE_DIR}`); process.exit(1); }
 const APP_URL = process.env.QUEST_FORGE_TEST_URL || 'http://localhost:4173/?debugState=1';
 const CHROME_PATH = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-const JUDGE_MODEL = 'gemini-3.7-flash';
+const JUDGE_MODEL = 'gemini-3.8-flash';
 const JUDGE_FALLBACK_MODEL = 'gemini-3-flash-preview';
 const EPILOGUE_WAIT_MS = 300000;
 function envKey(name) {

@@ -3,7 +3,7 @@
  * (docs/MEMORY_RESEARCH.md, entry 2026-09-17, amended 09-17 / 09-23 / 09-30).
  *
  *   npm run eval:commitments -- [--turns 30] [--checkpoints 10,20,30]
- *                               [--dm gemini|terra] [--machinery gemini-3.7-flash|gemini-3.8-flash]
+ *                               [--dm gemini|terra] [--machinery gemini-3.8-flash|gemini-3-flash-preview]
  *                               [--embed-dims 768|1536] [--label <name>] [--url <app url>]
  *
  * What it measures (NCP-Bench-shaped, MemDelta / MemTrace / MemStrata / LAPSE protocol):
@@ -104,7 +104,7 @@ function readAppConstant(file, name, fallback) {
         return m ? m[1].trim() : fallback;
     } catch { return fallback; }
 }
-const APP_MACHINERY_MODEL = readAppConstant('src/llm/machinery.js', 'MACHINERY_MODEL', 'gemini-3.7-flash');
+const APP_MACHINERY_MODEL = readAppConstant('src/llm/machinery.js', 'MACHINERY_MODEL', 'gemini-3.8-flash');
 const APP_EMBED_DIMS = Number(readAppConstant('src/llm/providers/gemini.js', 'GEMINI_EMBED_DIMENSIONS', '768')) || 768;
 const MACHINERY_MODEL = String(ARGS.machinery || APP_MACHINERY_MODEL);
 const EMBED_DIMS = Number(ARGS['embed-dims'] || APP_EMBED_DIMS);
@@ -694,6 +694,15 @@ const SEEDS = [
         truthQ: 'Did Orsa make a SPECIFIC promise to the hero (what she will do or grant, on what condition) — either the one asked for or a concrete counter-offer she committed to? State it exactly. A refusal with no commitment is established=false.',
     },
     {
+        // A shared name is not a person (memory-research M0, 2026-10-13): a
+        // SECOND Tammo, named in full, gets his own promise — the
+        // misattribution column asks whether the two stay two people.
+        id: 'N1', kind: 'same-name-pair', label: 'Tammo Reed, the young net-mender, is promised the spare oilskin coat (not Old Tammo)',
+        line: 'Down at the slip I find Tammo Reed, the young net-mender — no kin to Old Tammo at the brazier, just the same first name — splicing cord with raw hands. "Tammo Reed, when the gales come you will have my spare oilskin coat. That is a promise to you, not to the old man." I want him to understand it is his.',
+        followUps: ['"Tammo Reed — you, the net-mender, not Old Tammo — say it back: my spare oilskin coat is yours when the gales come."'],
+        truthQ: 'Did the DM establish a SECOND person named Tammo (Tammo Reed, the young net-mender, distinct from Old Tammo), and did the hero promise HIM the spare oilskin coat on screen? State who was promised what.',
+    },
+    {
         id: 'F1b', kind: 'fact-flip', label: 'The spare sail moves aboard the Kittiwake, under the foredeck (marker-free flip of F1a)',
         line: 'I fetch the spare sail down from the net-loft rafters and lash it aboard the Kittiwake, under the foredeck, where I can reach it in a blow.',
         followUps: ['I check the lashing on the spare sail under the Kittiwake\'s foredeck one more time and tell Tammo it is aboard now.'],
@@ -787,6 +796,8 @@ const QUESTIONS = [
       rule: 'Correct if Orsa\'s promise and its condition match the ground truth (or, if she refused on record, the answer says she promised nothing).' },
     { id: 'F1-recall', seed: 'F1b', type: 'recall', text: 'I walk down to the pier and find Tammo by his brazier. "Tammo, where is the Kittiwake\'s spare sail right now? I want to be sure."',
       rule: 'Correct ONLY if the answer places the sail aboard the Kittiwake (under the foredeck). "In the net-loft / on the rafters" is the SUPERSEDED location and is incorrect (contradicted).' },
+    { id: 'N1-misattribution', seed: 'N1', type: 'misattribution', text: 'I sit down by Old Tammo\'s brazier. "Old man — my spare oilskin coat, when the gales come. Did I promise it to you, or to the Reed boy at the slip? And the row-out to Gannet Rock — whose was that?"',
+      rule: 'Correct if the two Tammos stay two people: the oilskin coat was promised to Tammo Reed (the young net-mender), NOT to Old Tammo, and the Gannet Rock row-out is Old Tammo\'s. Incorrect if Old Tammo claims the coat, if the DM treats the two as one person, or if the coat promise is attributed to the wrong Tammo.' },
     { id: 'F1-flip', seed: 'F1b', type: 'flip-awareness', text: '"Was the spare sail always aboard the Kittiwake, Tammo? Where did I keep it before?"',
       rule: 'Correct if the answer knows BOTH states in order: it was in the net-loft rafters before and is aboard under the foredeck now. Partial if only one state is known.' },
     { id: 'T1-state', seed: 'T1', type: 'state-persistence', text: 'I look up toward the harbor road. Is it still under water, or has the tide let it drain by now?',
@@ -1134,6 +1145,18 @@ function writeReport({ startedAt, finishedAt, buildInfo }) {
     lines.push(`- Machinery (in-app, ${MACHINERY_MODEL}): ${machineryTokens.prompt} prompt + ${machineryTokens.output} output/thought tokens ≈ $${machineryCost.toFixed(3)} at the Flash promo price ($${flashPromo.input}/M in, $${flashPromo.output}/M out).`);
     lines.push(`- Judge (${MACHINERY_MODEL}): ${judgeUsage.calls} calls, ${judgeUsage.promptTokens} prompt + ${judgeUsage.outputTokens} output tokens ≈ $${judgeCost.toFixed(3)}; ${judgeUsage.failures} failures.`);
     lines.push(`- DM (${DM.model}): ${laneTotals.dm?.calls || 0} calls, ${laneTotals.dm?.promptTokens || 0} prompt tokens (${laneTotals.dm?.cachedTokens || 0} cached) + ${laneTotals.dm?.outputTokens || 0} output — priced per the provider's Pro rate (not in the research doc; tokens only).`);
+    // The cache-hit ratio per turn on the DM we SHIP (memory-research M2,
+    // 2026-10-13 — C4's one number was taken on a retired Pro): each turn's
+    // DM usage as cached / prompt, then the mean over the turns that reported.
+    const cacheRows = turns
+        .filter(t => t.dmUsage && Number.isFinite(t.dmUsage.prompt) && t.dmUsage.prompt > 0 && Number.isFinite(t.dmUsage.cached))
+        .map(t => ({ turn: t.turn, share: t.dmUsage.cached / t.dmUsage.prompt }));
+    if (cacheRows.length > 0) {
+        const mean = cacheRows.reduce((a, r) => a + r.share, 0) / cacheRows.length;
+        lines.push(`- DM cache share per turn (${DM.model}): mean ${(mean * 100).toFixed(1)} % over ${cacheRows.length} turns with usage — ${cacheRows.map(r => `t${r.turn} ${(r.share * 100).toFixed(0)} %`).join(', ')}.`);
+    } else {
+        lines.push(`- DM cache share per turn (${DM.model}): no per-turn usage reported by the provider.`);
+    }
     lines.push(`- Console errors: ${consoleLines.filter(c => c.type === 'error').length}; warnings: ${consoleLines.filter(c => c.type === 'warning').length}.`);
     lines.push('');
     lines.push('## Caveats');

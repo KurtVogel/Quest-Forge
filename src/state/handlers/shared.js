@@ -26,6 +26,7 @@ import {
     normalizeNpcRecord,
     NPC_CORE_TEXT_FIELDS,
     NPC_DURABLE_TEXT_FIELDS,
+    resolveNpcRef,
     sanitizeNpcLanePayload,
 } from '../../engine/npcRoster.js';
 import { NPC_OPEN_THREAD_MAX } from '../../engine/relationshipArc.js';
@@ -787,7 +788,7 @@ export function mergeNpcUpdate(npcs, payload) {
  * @param {{ messageCount?: number }} [options] - transcript length for the
  *   conversational `lastSeenMessage` stamp the prompt curation's recency reads.
  */
-export function upsertNpc(npcs, rawPayload, { messageCount } = {}) {
+export function upsertNpc(npcs, rawPayload, { messageCount, presenceText = '', onAmbiguous = null } = {}) {
     // The lane trust boundary (2026-09-16 P1): known keys only, text fields
     // string-or-drop at their clamps, disposition whitelisted — see
     // sanitizeNpcLanePayload. Engine-owned keys (relationshipHistory,
@@ -867,10 +868,18 @@ export function upsertNpc(npcs, rawPayload, { messageCount } = {}) {
         delete update.bondMoments;
     }
 
-    const idx = npcs.findIndex(n =>
-        (payload.id && n.id === payload.id) ||
-        (payload.name && namesMatch(n.name, payload.name))
-    );
+    // A shared name is not a person (M0, 2026-10-13): the record is resolved
+    // by context — exact id, exact name, else the one `namesMatch` candidate,
+    // else the candidate the turn's presence text names in full, else the
+    // one seen inside the scene window — and an AMBIGUOUS reference lands on
+    // nobody: nothing minted, nothing merged, the caller told who it could
+    // have been. It used to be `findIndex` — roster order chose the person.
+    const resolved = resolveNpcRef(npcs, payload, { presenceText, messageCount });
+    if (resolved.ambiguous.length > 1) {
+        onAmbiguous?.(resolved.ambiguous, payload);
+        return npcs;
+    }
+    const idx = resolved.index;
 
     const existing = idx !== -1 ? npcs[idx] : null;
     // Classified from the sanitized update: a DM-lane `pinned: true` must not

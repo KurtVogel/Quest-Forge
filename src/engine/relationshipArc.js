@@ -383,12 +383,16 @@ const BEAT_MOVES = {
  * The private cue. Re-judged at RENDER (the world-tempo rule): the window
  * must be open, the NPC must still be on the roster, and never in combat.
  */
-export function buildRelationshipBeatBlock(beat, npcs = [], { messageCount, combatActive = false } = {}) {
+export function buildRelationshipBeatBlock(beat, npcs = [], { messageCount, combatActive = false, party = [] } = {}) {
     const b = sanitizeRelationshipBeat(beat);
     if (!b || combatActive || !isRelationshipBeatOpen(b, messageCount)) return '';
     const npc = (Array.isArray(npcs) ? npcs : []).find(n => n && beatTargets(b, n));
     if (!npc || (npc.rosterTier && npc.rosterTier !== 'character')) return '';
-    if (b.mode === 'turn') return buildTurnBeatBlock(b, npc);
+    // A travelling companion's breaking point (WOW 2026-10-13): the turn
+    // beat's estranged / rival variant for a PARTY member is the moment they
+    // say why and leave, or name the one condition on which they stay.
+    const inParty = (Array.isArray(party) ? party : []).some(c => typeof c?.name === 'string' && c.name && namesMatch(c.name, npc.name));
+    if (b.mode === 'turn') return buildTurnBeatBlock(b, npc, { inParty });
     const { stage } = deriveRelationshipStage(npc);
     const moves = BEAT_MOVES[stage] || BEAT_MOVES.trusted;
     const thread = b.thread ? ` Between them now: ${b.thread}.` : '';
@@ -411,9 +415,12 @@ const TURN_MOVES = {
  * live reading — a same-night second turn re-mints). Never names the stage
  * word in prose; never narrates the hero's side.
  */
-function buildTurnBeatBlock(beat, npc) {
+function buildTurnBeatBlock(beat, npc, { inParty = false } = {}) {
     const moves = TURN_MOVES[beat.stage];
     if (!moves) return '';
+    const breakingPoint = inParty && (beat.stage === 'estranged' || beat.stage === 'rival')
+        ? ` ${npc.name} is TRAVELLING WITH the hero, so this is the breaking point: they say why, in their own words, and either leave the party in that same response — emit \`remove_companions\` for them — or name the ONE condition on which they stay. Never both, never a silent sulk that keeps them on the party line.`
+        : '';
     return `## THE BOND HAS TURNED — PRIVATE
-Between ${npc.name} and the hero something has just changed: where they stand is now ${beat.stage} — earned by: ${beat.since.replace(/[.!?]+$/, '')}. ${npc.name} gets ONE beat of their own about it, in this scene or the next, only if the scene allows it: ${moves} Play it from ${npc.name}'s side and want, in their own register, as a thing they DO or SAY — never as narration of what the hero feels, and never the stage word itself. ONCE: never interrupt combat with it, never force the hero's reply, and never repeat it once done.`;
+Between ${npc.name} and the hero something has just changed: where they stand is now ${beat.stage} — earned by: ${beat.since.replace(/[.!?]+$/, '')}. ${npc.name} gets ONE beat of their own about it, in this scene or the next, only if the scene allows it: ${moves} Play it from ${npc.name}'s side and want, in their own register, as a thing they DO or SAY — never as narration of what the hero feels, and never the stage word itself.${breakingPoint} ONCE: never interrupt combat with it, never force the hero's reply, and never repeat it once done.`;
 }

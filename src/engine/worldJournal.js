@@ -462,6 +462,10 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex, {
         const encountered = (Array.isArray(summary.npcs_encountered) ? summary.npcs_encountered : [])
             .filter(npc => npc && typeof npc === 'object' && !Array.isArray(npc));
         secondary('NPC', () => {
+            // The batch's summary is the scene for the NPC lane (M0, 2026-10-13):
+            // a shared first name resolves to the person the summary names in
+            // full, or to nobody.
+            const cadenceMeta = { presenceText: `${summary.summary || ''} ${(summary.key_decisions || []).join(' ')}` };
             for (const npc of encountered) {
                 if (!npc.name) continue;
                 // Journal schema → roster schema mapped ONCE (notes → lastNotes);
@@ -481,7 +485,7 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex, {
                     ...(npc.secrets && { secrets: npc.secrets }),
                     ...(npc.lastLocation && { lastLocation: npc.lastLocation }),
                     ...(npc.basedIn && { basedIn: npc.basedIn }),
-                });
+                }, cadenceMeta);
             }
         });
 

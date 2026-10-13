@@ -12,7 +12,7 @@
 
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
-import { bondKindLabel, curateNpcsForPrompt, dispatchClassifiedNpcUpdate, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
+import { BOND_SCENE_WINDOW_MESSAGES, bondKindLabel, curateNpcsForPrompt, dispatchClassifiedNpcUpdate, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
 import { isLocationEvidencedInText, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
 import { tryParseDirectorJson } from './directorUtils.js';
 import { captureReflection, captureScribePass, captureUsage } from '../debug/memoryInspectorStore.js';
@@ -249,8 +249,15 @@ const STANCE_RULES = {
     moments: 'moments = moments already on record (do NOT re-report or paraphrase these; a same-kind moment from the same scene is already covered)',
 };
 
-export function buildKnownStances({ npcs = [] } = {}, ...texts) {
+export function buildKnownStances({ npcs = [], messages = null } = {}, ...texts) {
     const isPresent = namePresenceIn(npcs.map(n => n?.name), ...texts);
+    const messageCount = Array.isArray(messages) ? messages.length : null;
+    // Joining is a moment (WOW 2026-10-13): a companion who joined the party
+    // in THIS scene is asked for the join-turn thread — what they want from
+    // travelling with the hero — whether or not they have a stance yet.
+    const justJoined = (npc) => Number.isFinite(messageCount) && Number.isFinite(npc?.joinedPartyMessage)
+        && messageCount - npc.joinedPartyMessage <= BOND_SCENE_WINDOW_MESSAGES
+        && !(typeof npc?.openThread === 'string' && npc.openThread.trim());
     const entries = [];
     const rulesUsed = new Set();
     for (const npc of npcs) {
@@ -264,11 +271,15 @@ export function buildKnownStances({ npcs = [] } = {}, ...texts) {
         const onRecord = [...key.slice(-3), ...recent.slice(0, 2)];
         const impressions = listNpcImpressions(npc, 'stanceToPlayer');
         const thread = typeof npc?.openThread === 'string' ? npc.openThread.trim() : '';
-        if (!name || (!stance && onRecord.length === 0 && !thread)) continue;
+        const joined = justJoined(npc);
+        if (!name || (!stance && onRecord.length === 0 && !thread && !joined)) continue;
         if (!isPresent(name)) continue;
         const lines = [];
         if (stance) lines.push(`${name}: ${stance.slice(0, 240)}`);
         const fields = [];
+        if (joined) {
+            fields.push('JOINED THE PARTY THIS SCENE — emit openThread: what they want from travelling with the hero, in their own words, from the fiction');
+        }
         if (thread) {
             rulesUsed.add('thread');
             fields.push(`thread: "${thread.slice(0, 200)}"`);
@@ -460,7 +471,11 @@ export const RECALL_TURN_RULE = 'RECALL TURN: the player asked about the PAST an
 export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownHeroTells = null, knownLocations = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null }) {
     // Source-stamped retraction (memory-research M0, 2026-09-30): every
     // record this pass writes remembers the DM message it was read from.
+    // The turn's own texts are the scene for the NPC lane (M0, 2026-10-13):
+    // a short name the roster holds twice resolves to the person these name
+    // in full, or to nobody.
     const laneMeta = typeof sourceMessageId === 'string' && sourceMessageId ? { sourceMessage: sourceMessageId } : null;
+    const npcLaneMeta = { ...(laneMeta || {}), presenceText: `${playerMessage || ''} ${dmNarrative || ''}` };
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !dmNarrative) return;
 
@@ -500,7 +515,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     ? `KNOWN APPEARANCES (established canonical looks — merge new details into these, never contradict or shorten them):\n${knownAppearances}`
                     : null,
                 knownStances
-                    ? `KNOWN PLAYER-RELATIONSHIP STANCES (each NPC's established personal stance toward the hero — stanceToPlayer updates must merge with these, never shrink them to this turn's fragment):\n${knownStances}`
+                    ? `KNOWN PLAYER-RELATIONSHIP STANCES (each NPC's established personal stance toward the hero — stanceToPlayer updates must merge with these, never shrink them to this turn's fragment; when two records share a first name, write the FULL name on every update — a bare shared name is recorded for nobody):\n${knownStances}`
                     : null,
                 knownStoryCards
                     ? `KNOWN STORY CARDS (beats already on record for the people and threads in this exchange — update one by its exact "id" instead of minting a duplicate; a resolved card is paid off and must NOT be re-reported):\n${knownStoryCards}`
@@ -576,7 +591,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                 }
                 // Shared classify→dispatch with the journal's npcs_encountered
                 // loop (2026-08-31 P2 — one helper owns the roster boundary).
-                if (dispatchClassifiedNpcUpdate(dispatch, npc, laneMeta)) {
+                if (dispatchClassifiedNpcUpdate(dispatch, npc, npcLaneMeta)) {
                     rosteredNames.push(npc?.name || '(unnamed)');
                 }
             }
@@ -964,8 +979,12 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
 
         const reflectedNames = [];
         if (Array.isArray(reflected.npc_updates)) {
+            // The reflection's scene is the cadence context it read (M0,
+            // 2026-10-13): a shared first name resolves to the person the
+            // context names in full, or to nobody.
+            const reflectionMeta = { presenceText: JSON.stringify(context) };
             for (const npc of reflected.npc_updates) {
-                if (dispatchClassifiedNpcUpdate(dispatch, npc)) {
+                if (dispatchClassifiedNpcUpdate(dispatch, npc, reflectionMeta)) {
                     reflectedNames.push(npc?.name || '(unnamed)');
                 }
             }

@@ -89,6 +89,8 @@ describe('Scribe story memory extraction', () => {
                 trust: 42,
                 callbackHooks: expect.arrayContaining(['blue ribbon warning']),
             }),
+            // The turn's own texts ride as the NPC lane's scene (M0, 2026-10-13).
+            meta: expect.objectContaining({ presenceText: expect.stringContaining('blue ribbon') }),
         });
         const cardsCall = dispatch.mock.calls.find(([action]) => action.type === 'ADD_STORY_MEMORY_CARDS');
         // Four cards extracted, but the engine budget backstop keeps only the first three.
@@ -160,6 +162,7 @@ describe('Scribe story memory extraction', () => {
                 stanceToPlayer: expect.stringContaining('privately flattered'),
                 bondMoment: expect.stringContaining('hand linger'),
             }),
+            meta: expect.objectContaining({ presenceText: expect.stringContaining('Maren laughs') }),
         });
         const request = sendMessage.mock.calls[0][0];
         expect(request.systemPrompt).toContain('stanceToPlayer');

@@ -88,7 +88,7 @@ const PROXY_ARGS = process.env.HTTPS_PROXY
     : [];
 const OUT_DIR = path.resolve(`test-results/recall-wonder/${runLabel}`);
 const PROFILE_DIR = path.join(OUT_DIR, 'profile');
-const JUDGE_MODEL = 'gemini-3.7-flash';
+const JUDGE_MODEL = 'gemini-3.8-flash';
 
 fs.mkdirSync(OUT_DIR, { recursive: true });
 const delay = ms => new Promise(r => setTimeout(r, ms));

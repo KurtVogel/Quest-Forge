@@ -8,7 +8,7 @@ import { LOCATION_NAME_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_M
 import { sanitizePortraitUrl } from './portraitUrl.js';
 import { conversationalAgeSince } from './replayLedger.js';
 import { compareCardRecency } from './storyMemory.js';
-import { coverage, tokenSet } from './textMatch.js';
+import { coverage, identifyingNameTokens, textWordSet, tokenSet } from './textMatch.js';
 import { cleanText } from './text.js';
 
 export const NPC_ROSTER_TIERS = new Set(['character', 'archived_creature']);
@@ -56,6 +56,9 @@ export const NPC_RECORD_KEYS = new Set([
     'id', 'kind', 'rosterTier', 'pinned', 'importance', 'disposition', 'trust',
     'bondMoments', 'recentImpressions', 'openThread', 'openThreadMessage', 'openThreadResolvedMessage', 'callbackHooks',
     'knownFacts', 'relationshipHistory', 'arcDisposition', 'firstMet', 'lastSeen', 'lastSeenMessage',
+    // Joining and leaving are moments (WOW 2026-10-13): the reducer stamps
+    // when a companion joined / left the party; never lane-writable.
+    'joinedPartyMessage', 'leftPartyMessage',
     // `portraitPrompt` is deliberately NOT a record key (2026-09-21 audit P2):
     // ≤ 2,000 chars per portrait, read only as an <img> tooltip — write-only
     // ballast on every save. The load projection strips it from old saves.
@@ -1475,10 +1478,72 @@ export function namesMatch(name1, name2) {
  * normal fragment/restatement policy, bond moments and hooks union with their
  * own dedupe, and current-state fields come from whichever record was seen last.
  */
+/**
+ * A shared name is not a person (memory-research M0, 2026-10-13 — "Stale,
+ * Misattributed, or Late": misattribution survives every validity filter;
+ * resolve by CONTEXT, abstain when context cannot). THE record a lane payload
+ * refers to: the exact id, else the exact (case-folded) name, else the
+ * `namesMatch` candidates — ONE is the person; two or more resolve to the one
+ * whose FULL name is in the turn's presence text, else to the one seen inside
+ * the scene window (`lastSeenMessage` within BOND_SCENE_WINDOW_MESSAGES) if
+ * exactly one, else to NOBODY (`{ npc: null, ambiguous: [...] }`). `upsertNpc`
+ * and the UPDATE_NPC handler read it: an ambiguous payload mints and merges
+ * nothing. It used to be `findIndex` over `namesMatch` — on a roster
+ * [Maren Tull, Maren Ashford] a `{ name: 'Maren', bondMoment }` credited the
+ * moment to the smith by ROSTER ORDER.
+ * @returns {{ npc: object|null, index: number, ambiguous: object[] }}
+ */
+export function resolveNpcRef(npcs, payload = {}, { presenceText = '', messageCount } = {}) {
+    const roster = Array.isArray(npcs) ? npcs : [];
+    const none = { npc: null, index: -1, ambiguous: [] };
+    const id = typeof payload?.id === 'string' ? payload.id : '';
+    const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
+    if (id) {
+        const index = roster.findIndex(n => n?.id === id);
+        if (index !== -1) return { npc: roster[index], index, ambiguous: [] };
+    }
+    if (!name) return none;
+    const folded = name.toLowerCase();
+    const exact = roster.findIndex(n => typeof n?.name === 'string' && n.name.trim().toLowerCase() === folded);
+    if (exact !== -1) return { npc: roster[exact], index: exact, ambiguous: [] };
+    const candidates = roster.map((n, index) => ({ n, index })).filter(({ n }) => namesMatch(n?.name, name));
+    if (candidates.length === 0) return none;
+    if (candidates.length === 1) return { npc: candidates[0].n, index: candidates[0].index, ambiguous: [] };
+    // The FULL name, every identifying token whole-word present — the
+    // any-token rule the presence tagger uses would find "Maren" for both.
+    // When two are fully named ("Old Tam" has the one identifying token
+    // "tam", so "Tam Reed" in the scene names both), the MORE specific full
+    // name — more identifying tokens all present — is the person.
+    const words = cleanText(presenceText) ? textWordSet(presenceText) : null;
+    const namedTokens = (name) => {
+        const tokens = identifyingNameTokens(name);
+        return tokens.length > 0 && tokens.every(token => words.has(token)) ? tokens.length : 0;
+    };
+    const present = words
+        ? candidates.map(c => ({ ...c, named: namedTokens(c.n.name) })).filter(c => c.named > 0)
+        : [];
+    if (present.length > 0) {
+        const best = Math.max(...present.map(c => c.named));
+        const top = present.filter(c => c.named === best);
+        if (top.length === 1) return { npc: top[0].n, index: top[0].index, ambiguous: [] };
+    }
+    if (Number.isFinite(messageCount)) {
+        const recent = candidates.filter(({ n }) => Number.isFinite(n?.lastSeenMessage)
+            && messageCount - n.lastSeenMessage <= BOND_SCENE_WINDOW_MESSAGES);
+        if (recent.length === 1) return { npc: recent[0].n, index: recent[0].index, ambiguous: [] };
+    }
+    return { npc: null, index: -1, ambiguous: candidates.map(({ n }) => n) };
+}
+
 export function dedupeNpcRoster(npcs = []) {
     const kept = [];
     for (const raw of npcs) {
         const npc = raw || {};
+        // Forks of ONE person fold (2026-07-23): `namesMatch` folds a short
+        // form into its long form (the shorter token set must be contained in
+        // the longer). Two records that both carry a DISTINCT full name —
+        // "Maren Tull", "Maren Ashford" — never match under that rule, so two
+        // Marens stay two people at load (M0, 2026-10-13; pinned).
         const matchIdx = kept.findIndex(existing => namesMatch(existing.name, npc.name));
         if (matchIdx === -1) {
             kept.push(npc);

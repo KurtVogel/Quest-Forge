@@ -2,7 +2,7 @@
  * NPC roster and locations: upsert/pin/archive/portrait/migration plus the
  * canonical location registry writes.
  */
-import { buildStoryMemoryPromotion, gradeBondMoments, namesMatch, normalizeNpcRecord, selectKeyBondMoments } from '../../engine/npcRoster.js';
+import { buildStoryMemoryPromotion, gradeBondMoments, namesMatch, normalizeNpcRecord, resolveNpcRef, selectKeyBondMoments } from '../../engine/npcRoster.js';
 import { TURN_BEAT_TIMING_DIE_SIDES, beatTargets, deriveRelationshipStage, detectBondTurn, isRelationshipBeatExpired, mintTurnBeat, sanitizeRelationshipBeat } from '../../engine/relationshipArc.js';
 import { rollDie } from '../../engine/dice.ts';
 
@@ -53,7 +53,7 @@ import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryR
 import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, findDriftTheaterFront, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
-import { isStaleCampaignAction, upsertNpc } from './shared.js';
+import { isStaleCampaignAction, systemMessage, upsertNpc } from './shared.js';
 import { cleanTextField, LOCATION_NAME_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
 
 /**
@@ -91,14 +91,13 @@ export function archiveNpcBulk(npcs = [], ids = []) {
     ));
 }
 
-function findTouchedNpc(after = [], payload = {}) {
-    const id = payload.id;
-    const name = payload.name;
-    return after.find(npc =>
-        (id && npc.id === id)
-        || (name && namesMatch(npc.name, name))
-    ) || null;
+/** The record an UPDATE_NPC payload landed on — the same resolution `upsertNpc` made (M0, 2026-10-13). */
+function findTouchedNpc(after = [], payload = {}, context = {}) {
+    return resolveNpcRef(after, payload, context).npc;
 }
+
+/** The presence text a lane threaded on the action's meta (the turn's own texts), or ''. */
+const presenceTextOf = (action) => (typeof action?.meta?.presenceText === 'string' ? action.meta.presenceText : '');
 
 export const handlers = {
     // UPDATE_NPC upserts by id or name (see upsertNpc): one create/merge path
@@ -112,9 +111,27 @@ export const handlers = {
             console.warn('[NPC] Dropped an NPC update that started on a different campaign or load.');
             return state;
         }
-        let nextNpcs = upsertNpc(state.npcs, action.payload, { messageCount: (state.messages || []).length });
+        const messageCount = (state.messages || []).length;
+        const presenceText = presenceTextOf(action);
+        // An ambiguous reference lands on nobody, said once (M0, 2026-10-13):
+        // an infrastructure line (never narrative-eligible) names who it could
+        // have been — "'Maren' could be Maren Tull or Maren Ashford".
+        let ambiguous = null;
+        let nextNpcs = upsertNpc(state.npcs, action.payload, {
+            messageCount,
+            presenceText,
+            onAmbiguous: (candidates) => { ambiguous = candidates; },
+        });
+        if (ambiguous) {
+            const who = ambiguous.map(n => n.name).filter(Boolean);
+            console.warn(`[NPC] Dropped an update for "${action.payload?.name}" — it could be ${who.join(' or ')}; the lane must use the full name.`);
+            return {
+                ...state,
+                messages: [...state.messages, systemMessage(`"${String(action.payload?.name || '').trim()}" could be ${who.join(' or ')} — not recorded. The full name settles it.`, { kind: 'error' })],
+            };
+        }
         if (nextNpcs === state.npcs) return state;
-        let touched = findTouchedNpc(nextNpcs, action.payload);
+        let touched = findTouchedNpc(nextNpcs, action.payload, { presenceText, messageCount });
         // Deepen memory's regrade of the record's EXISTING bond moments
         // (2026-09-12 follow-up) rides the same action so the autosave flush's
         // single-action replay persists it: kind + salience land on ungraded

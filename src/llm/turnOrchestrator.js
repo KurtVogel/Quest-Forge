@@ -691,6 +691,10 @@ export function createTurnRunner({
                 // The DM's own facts remember this message (2026-10-11).
                 sourceMessageId: msgId,
                 playerMessage: originalPlayerMessage || playerActionContext,
+                // The scene's text for the NPC lane (M0, 2026-10-13): a short
+                // name the roster holds twice resolves to the person named
+                // in full here, or to nobody.
+                presenceText: `${originalPlayerMessage || playerActionContext || ''} ${narrative} ${buildPresenceText(promptState.messages || [])}`,
             });
             // A fight-starting response's queued exchange never blocks its
             // location: with no live combat, an exchange here always rides a

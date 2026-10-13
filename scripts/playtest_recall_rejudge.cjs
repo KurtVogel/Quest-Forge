@@ -32,7 +32,7 @@ const turns = fs.existsSync(turnsFile) ? JSON.parse(fs.readFileSync(turnsFile, '
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
 async function flash(prompt) {
-    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent';
+    const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
     for (let attempt = 0; attempt < 6; attempt++) {
         try {
             const res = await fetch(url, {
