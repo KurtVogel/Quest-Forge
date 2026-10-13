@@ -3381,3 +3381,29 @@ shelf's NAME across the repo — a second declaration is a second shelf, even in
 build: `id:` on the callbacks line + the round-trip pin, `source` / `id` kept on the merge, one card
 birth, dormancy on the conversational clock, `embedText` as `embedTexts([x])`, one transient / backoff
 / sleep shelf in `sse.js`, `DEFAULT_DM_MODEL`, the helper twins onto `engine/text.js`.
+
+### [strengthening] A record rendered by two blocks has two caps; a lane is a row, not a flag set; a fixture's names must survive the tokenizer — status: `idea` (2026-10-13)
+Three rules from the prompt-building + chat-orchestration Lap-4 pass (2026-10-13), measured on the
+`promptBlocks.size` fixture with real-shaped names. **(1)** A companion's bond with the hero is rendered
+by the COMPANIONS line (`buildPartyBlock`, caps 300) AND — whenever the companion spoke in the last three
+messages — by a reserved KNOWN NPCs line (`describeBondForPrompt`, caps 240 / 200): ~5.5k chars per
+present companion, two composers with two casings, two of eight KNOWN NPCs slots lost to people the party
+line already carries. Each block's ceiling was pinned alone, so the duplicate never tripped a pin. Rule:
+for every record two blocks render, name the block the DM is TOLD to read it from and let the other one
+point (party members out of the KNOWN NPCs candidates; one bond composer). **(2)** `sendToLLM` reads ten
+`opts` flags at thirty sites, nine callers combine them nine ways, one lane is named by three readers
+from two different flags (the prompt projection from `combatNarration`, the event discard from
+`narrationOnly`, two `mode` strings from one each), and `skipMemories` is passed by nobody. The director
+family's 10-04 shape — one runner, one table keyed by lane name — is the fix; the test iterates the
+table. Rule: count the distinct flag combinations the callers pass; that is the table's row count, and
+an option no caller passes is a row nobody sits in. **(3)** The size fixture's `Notable Person N` roster
+makes every NPC "present" to the presence tokenizer (the any-3-letter-token rule matches "Notable" /
+"Person" everywhere), the presence cap fills with indices 0–7, and the companions at index 100+ never
+reach KNOWN NPCs in the fixture — the block measured bounded because its names were generic. Rule: a
+fixture's names must survive `isGenericNameToken`; re-measure every presence-gated claim with
+real-shaped names. Companions: the same lens says the intent call (JSON-only, companion ids + four verbs)
+carries the party block whole — 8.5k of its 19.1k dynamic chars are bond prose — and the missing-events
+nudge (two whitelisted channels) carries the ORDINARY prompt's 82.5k-char dynamic half; both get the
+09-30 `intentOnly` treatment. Payoff: ~2k tokens off every combat round, ~15k off every nudge, one fewer
+composer per record, one name per lane.
+
