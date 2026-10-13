@@ -1199,7 +1199,9 @@ player (currently it just silently falls back).
 and every fallback case is now labeled — including the new Gemini quality-fallback tier
 (DECISIONS.md 2026-07-25). Still open: resolution toggle, gallery/journal persistence.
 
-### Companion combat depth — status: combat v1 `shipped` (2026-06-15), relationship depth `idea`
+### ~~Companion combat depth~~ — status: combat v1 `shipped` (2026-06-15); the relationship-depth bullets `merged` (2026-10-13 wow audit [wow]) into "[wow] Companions: a want and a voice; joining and leaving as moments" below
+**Merged 2026-10-13:** "loyalty / affinity consequences … leaving the party" is slice B of the new entry (the breaking point by the DERIVED stage, never by affinity — which that entry proposes to retire); "downed / dead story arcs" shipped piecemeal (down-but-stable 2026-07, the fight memory 2026-09-28, `remove_companions` as the death channel 2026-08-25, the hero's epitaph 2026-09-30); "roles / traits that affect narration" is listed there as a later slice. Original note kept:
+
 Shipped v1: companions are lightweight allies with normalized combat stats, a 4-companion
 cap, rest recovery, proper initiative labels, and `companion_attack` rolls that the engine
 resolves against enemy AC with client-owned damage/HP application.
@@ -1209,6 +1211,31 @@ Still open:
   morale, leaving the party.
 - Downed/dead story arcs: rescue, injury, permanent death, memorial notes.
 - Companion roles/traits that affect narration and simple mechanics without full class sheets.
+
+### [wow] Companions: a want and a voice; joining and leaving as moments — status: `idea` (wow audit 2026-10-13, `docs/SCHEDULED_WOW.md` entry 2026-10-13, two W1 slices)
+Lap-1 finding (companions): the bond side is genre-strong by construction (one system for every NPC, the fight
+memory, the turn beat), and the companion as a PERSON WITH BUSINESS is absent by construction. Why: Dragon Age's
+road banter and BG3's interjections are what make a party feel like people, and both start from a companion
+having a want of their own that the narrator is asked to voice.
+- **Slice A — a want and a voice.** `buildPartyBlock` renders no `goals` / `agenda`; they reach the DM only through a
+  curated KNOWN NPCs slot that the 2026-10-13 strengthening P2 proposes to remove for party members (a present
+  companion renders twice) — land the two together: `Wants:` + `Their business now:` on the party line (200 each), one
+  prefix footer rule (a companion present speaks or acts from their own want once per SCENE as the turn's MOTION, and
+  interjects in ONE line when the hero's choice touches their stance or wants — never a lecture), and — Vesa's call,
+  a revisit of DECISIONS 2026-07-23's "mechanics / affinity / keepsake" lane — retire `affinity`: DM-written, clamped,
+  rendered on the line and the card's bar, read by nothing, beside a derived stage that already answers the question.
+- **Slice B — joining and leaving as moments; the breaking point.** ADD_COMPANION mints a salience-3 `meeting` moment
+  ("<Name> joined the hero's company at <place>") and the Scribe's KNOWN STANCES asks, on a join turn, for the open
+  thread as what they want from travelling with the hero; REMOVE_COMPANION mints a salience-3 `farewell` moment and
+  stamps `leftPartyMessage` (typed at load) so the absence beat can bring them back and the card can say "travelled
+  with you N turns"; the turn block's estranged / rival moves get a PARTY variant: the breaking point — say why in
+  their own words, then leave (`remove_companions` in that response) or name the one condition for staying.
+- Proof: 20 ordinary turns with one companion on Gemini Flash + GPT Sol, baseline first — unprompted companion speech
+  or action in ≥ 50 % of turns (Sol baseline ~2 %), the interjection in 4/5 staged cases, the word band held; a staged
+  betrayal ends in a said-and-acted departure in 4/5; fixtures pin the mints, the stamp and the party variant.
+- Later slices, not proposed: companion↔companion ties (the npc-relationships ties slice covers it), roles / traits
+  that touch narration or simple mechanics, a camp scene (downtime-and-rest's moment), recruitment that the
+  fiction offers (the worldTempo "alone" cue is the only shelf today).
 
 ### ~~Combat intent profile expansion~~ — status: `merged` (2026-09-23 wow audit [wow]): the spell half shipped 2026-07-17 (Spellcasting v1 — slots, save spells, healing, darts, sustained spells, Turn Undead; DECISIONS.md 2026-07-17), the "morale personalities" line lives on in "[wow] Combat drama: the foe's next move, and the fight leaves a mark" below, and the rest (shove/grapple/help profiles, range/cover/movement/opportunity attacks, enemy special profiles) are listed there as later slices — the visible-reject rule for unsupported specials already ships
 Combat v2 deliberately resolves only mechanics with canonical engine profiles. Current bounded
