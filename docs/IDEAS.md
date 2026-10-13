@@ -325,6 +325,23 @@ only if the commitment probe shows the DM still treats an aged state as current.
 **2026-10-07 (memory research, Lane A run, light B — the THIRD aspect, queued M0):** an INTENT is a standing truth today — `classifyFactAspect` returns `null` for "The baron plans to seize the Ashford mill at the new moon" / "Tammo promised to return the hero's knife" / "Saima will marry the miller in spring" (only `is going to` / `is planning to` fall into `state` by the progressive regex), and the later deed "The baron seized the Ashford mill" is `new` beside the plan, so plan and deed coexist forever and an abandoned plan is canon (G1, scratch-reproduced). AgentMemGate (https://arxiv.org/abs/2610.07707) measured the class at 35.2 % (Mem0) / 27.3 % (Graphiti) of unresolved plans stored as current facts; a write-time speculation gate took it to 0. The slice: one Scribe rule (a commitment goes to a `promise` / `npcAgenda` card or the NPC `agenda` / `openThread`; a campaign-level plan is written in its irrealis form, never as a deed), `aspect: 'intent'` from a small modal lexicon, `planned (as of N turns ago): …` in WORLD FACTS and the record lane, and the still-open Scribe `supersedes` ref honored at `ADD_WORLD_FACTS` for intent facts so the deed closes the plan (`supersededBy`, as a FLIP does). Nothing expires. Full shape in `docs/MEMORY_RESEARCH.md` Verdict Log 2026-10-07.
 **2026-10-07 — the intent slice shipped the same evening** (DECISIONS.md 2026-10-07): `aspect: 'intent'` + `INTENT_RE` + `FACT_ASPECTS`, `planned (as of N turns ago): …` in WORLD FACTS and the record lane, KNOWN OPEN PLANS in the Scribe's per-turn context + a `supersedes` ref honored for live intents only (`findOpenPlan`), the intent restatement re-stamping its age. Still open from the shape: a `supersedes` ref for semantic flips of STANDING facts (deliberately not built — a standing truth closes by a FLIP alone, so no lane can retire canon by id), the `(formerly: …)` tail, expiry. Proof pending: the commitment probe's intent knowledge point on its next run.
 
+### [memory-research] A shared name is not a person: an ambiguous NPC reference lands on the scene's person or on nobody — status: `idea` (M0, memory research 2026-10-13, Lane B)
+`upsertNpc` (`handlers/shared.js`) resolves a lane payload by `findIndex` over `namesMatch`, so two roster records
+sharing a first name ("Maren Tull" the smith, "Maren Ashford" the innkeeper) and a payload naming "Maren" land the
+update — bond moment included — on whichever record is FIRST in the roster (G1, scratch-reproduced 2026-10-13: the rescue
+went to the smith; "Tam" went to Old Tam over Tam Reed). The Scribe's KNOWN blocks carry full names, so its lane
+is mostly protected; the DM's inline `npc_updates`, absence drift and Deepen memory have no guard. "Stale,
+Misattributed, or Late" (https://arxiv.org/abs/2610.10265) finds misattribution survives every validity filter and
+identically named people cannot be separated by an entity posterior alone — resolve by CONTEXT, abstain otherwise.
+The slice: `resolveNpcRef` (exact id → exact name → `namesMatch` candidates; two or more: the one whose full name is
+in the turn's presence text, else the one seen inside the scene window if exactly one, else nobody), read by
+`upsertNpc` and `findTouchedNpc`; an ambiguous payload mints and merges nothing and posts one infrastructure line
+naming the candidates; the Scribe's KNOWN STANCES header asks for the full name when two records share one;
+`dedupeNpcRoster` never folds two records that both carry a distinct full name. Zero calls. The REMOVE_COMPANION
+rule (ambiguous → nobody, DECISIONS 2026-08-25) extended to every write; DECISIONS 2026-09-06 (presence-first)
+extended to the write side. Proof: reducer twins of the scratch + a same-name pair in the commitment probe. Full
+shape in `docs/MEMORY_RESEARCH.md` Verdict Log 2026-10-13.
+
 ### [memory-research] Source-stamped retraction: scrubbing a message scrubs its canon — status: `shipped` (2026-09-30 — `meta.sourceMessage` on every Scribe dispatch, `retractedAtMessage` on facts, dormant cards, dropped impressions, `retractMemoriesFromMessage` for the RAG rows; DECISIONS.md 2026-09-30; `bondMoments` deliberately not stamped) (M0, memory research 2026-09-17, Lane A)
 `DELETE_MESSAGE` (2026-08-28, built to scrub refusals) soft-deletes the row and every reader
 honors it — but the Scribe facts, cards, NPC impressions, and the `narrative`/`player` RAG rows
