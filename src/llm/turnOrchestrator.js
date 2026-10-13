@@ -27,11 +27,12 @@
 import { buildSystemPrompt } from './promptBuilder.js';
 import { parseResponse, detectPreNarratedOutcome, normalizeEvents, detectSemanticTextRolls } from './responseParser.js';
 import { applyEvents } from '../state/applyEvents.js';
+import { gameReducer } from '../state/gameReducer.js';
 import { handleRequestedRolls } from '../engine/rollResolver.js';
 import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../engine/outOfCombatRollPolicy.js';
 import { maybeAutoSummarize } from '../engine/worldJournal.js';
 import { buildScribeContext, runScribe } from './scribe.js';
-import { EPILOGUE_RESPONSE_MODE, isEpilogueRequest, TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
+import { isEpilogueRequest } from './tableTalk.js';
 import { factMemoryItem, flushMemoryQueue, journalMemoryItem, queueMemoryItem, retrieveRelevant, sceneMemoryItem } from '../engine/vectorMemory.js';
 import { findSubjectsInText } from '../engine/textMatch.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
@@ -56,6 +57,51 @@ export { buildPresenceText, PRESENCE_MESSAGE_COUNT };
 
 /** Roster NPCs judged present in the scene, at most this many by name hit. */
 export const PRESENT_NPC_CAP = 8;
+
+/**
+ * The DM call as a family of LANES (2026-10-13 chat-orchestration P2). A
+ * lane is a ROW, not a flag set: `sendToLLM` used to read ten `opts` booleans
+ * at K sites, nine call sites combined them nine ways, and one lane was named
+ * by three readers from two different flags (the prompt projection read
+ * `combatNarration`, the event discard `narrationOnly`, the usage mode one
+ * and the timing log the other — a rest-cue narration logged 'narration-only'
+ * while its usage row said 'standard'). Every call site names its lane once;
+ * every reader inside `sendToLLM` reads the row.
+ *
+ * Columns:
+ * - projection — the system-prompt projection (`promptBuilder` option) or null
+ *   for the ordinary dynamic half. The plain `narration` lane (a rest cue, a
+ *   JSON-only cast's missing prose, the authority correction) keeps the FULL
+ *   prompt on purpose: it is a narrative turn minus the dice.
+ * - mode — the response-mode PART the builder pushes (`RESPONSE_MODES`); the
+ *   table-talk lane's mode becomes `epilogue` on the ending card's request.
+ * - discardsEvents — the reply's JSON is force-nulled (the world is paused or
+ *   the engine already committed the mechanics); a prose-less reply throws.
+ * - wantsMemories — retrieval + callback curation + the recall dossier, when
+ *   a player line rides the call.
+ * - detectors — the prose roll detector and the roll arbiter run.
+ * - nudge — the missing-events nudge may follow a JSON-less reply.
+ * - jsonOnly — the reply is a data block by contract: no display stream, an
+ *   empty narrative commits no bubble and is not a failure.
+ * - openingScene — the one-time opening: `starting_items` honored, a stray
+ *   roll request stripped, the nudge's opening cue.
+ * - usage — the ONE mode name the usage capture and the timing log share.
+ */
+export const DM_LANES = Object.freeze({
+    standard: Object.freeze({ projection: null, mode: null, discardsEvents: false, wantsMemories: true, detectors: true, nudge: true, jsonOnly: false, openingScene: false, usage: 'standard' }),
+    opening: Object.freeze({ projection: null, mode: null, discardsEvents: false, wantsMemories: true, detectors: true, nudge: true, jsonOnly: false, openingScene: true, usage: 'standard' }),
+    tableTalk: Object.freeze({ projection: null, mode: 'tableTalk', discardsEvents: true, wantsMemories: true, detectors: false, nudge: false, jsonOnly: false, openingScene: false, usage: 'table-talk' }),
+    combatIntent: Object.freeze({ projection: 'intentOnly', mode: 'combatIntent', discardsEvents: false, wantsMemories: false, detectors: false, nudge: false, jsonOnly: true, openingScene: false, usage: 'combat-intent' }),
+    combatNarration: Object.freeze({ projection: 'narrationOnly', mode: null, discardsEvents: true, wantsMemories: false, detectors: false, nudge: false, jsonOnly: false, openingScene: false, usage: 'combat-narration' }),
+    narration: Object.freeze({ projection: null, mode: null, discardsEvents: true, wantsMemories: false, detectors: false, nudge: false, jsonOnly: false, openingScene: false, usage: 'narration' }),
+});
+
+/** The lane row for a name — an unknown name is a programming error, said at once. */
+export function dmLane(name = 'standard') {
+    const lane = DM_LANES[name];
+    if (!lane) throw new Error(`Unknown DM lane "${name}" — one of ${Object.keys(DM_LANES).join(', ')}`);
+    return lane;
+}
 
 /**
  * Retrieval on a "remember when…" turn (WOW 2026-09-18): wider and looser
@@ -217,10 +263,11 @@ export function createTurnRunner({
     /**
      * Build the system prompt from current state, with optional RAG memories injected.
      */
-    const buildCurrentSystemPrompt = (s, retrievedMemories = [], storyMemory = [], recallRecord = '', { narrationOnly = false, intentOnly = false } = {}) => {
+    const buildCurrentSystemPrompt = (s, retrievedMemories = [], storyMemory = [], recallRecord = '', projection = {}) => {
         return buildSystemPrompt({
-            narrationOnly,
-            intentOnly,
+            // The lane's projection and response mode (`narrationOnly` /
+            // `intentOnly` / `nudgeOnly` / `mode`) — the builder's own options.
+            ...projection,
             // The whole pool for the open-thread LOOKUP (2026-09-30 P1); the
             // curated `storyMemory` below is only what the callbacks block SHOWS.
             storyMemoryPool: s.storyMemory || [],
@@ -296,14 +343,21 @@ export function createTurnRunner({
      *   detection, the roll arbiter, and pre-narration detection. Post-roll outcome
      *   calls pass the proposal's playerAction here too (2026-09-02 P1) — the
      *   outcome is the consequence beat and gets the full pipeline.
-     * @param {object} [opts]
-     * @param {boolean} [opts.skipMemories] - skip ONLY the retrieval stage (the
-     *   blocking query-embed round-trip) while keeping the arbiter and detectors.
-     * @param {boolean} [opts.combatNarration] - the combat narration lane (with
-     *   `narrationOnly`): builds the system prompt without the quest / facts /
-     *   history / inventory blocks (2026-09-23 combat-exchange P2).
+     * @param {object} [extras]
+     * @param {string} [extras.lane] - the DM_LANES row this call runs on
+     *   (default `standard`); the lane decides projection, mode, discards,
+     *   memories, detectors, the nudge and the usage name.
+     * @param {string} [extras.pendingUserRow] - the transcript row this call
+     *   sends as its own prompt (never in the window too) when it is not
+     *   `userMessage` itself (the challenge lane).
+     * @param {string} [extras.playerActionContext] - the player intent carried
+     *   into a follow-up call that has no player line (post-roll outcomes).
+     * @param {function} [extras.onNarrative] - receives the narrative text.
+     * @param {boolean} [extras.suppressHpEvents] - the engine already applied
+     *   this turn's HP deltas (a post-roll outcome).
      */
-    const sendToLLM = async (userMessage, originalPlayerMessage, opts = {}) => {
+    const sendToLLM = async (userMessage, originalPlayerMessage, { lane: laneName = 'standard', pendingUserRow = null, playerActionContext = '', onNarrative = null, suppressHpEvents = false } = {}) => {
+        const lane = dmLane(laneName);
         // Per-call semantics: a call that commits nothing (combat intent,
         // failure) must never leave an older turn's message readable here.
         lastCommittedTurn = null;
@@ -311,6 +365,7 @@ export function createTurnRunner({
         // path, so it does not carry the player's own row yet. Retrieval, the
         // recall dossier, settings, and the entry-time combat flag read it.
         const s = getState();
+        const combatWasActive = !!s.combat?.active;
 
         // RAG: retrieve memories relevant to the current scene (machinery key —
         // embeddings are Gemini-only regardless of the DM provider).
@@ -322,16 +377,14 @@ export function createTurnRunner({
         // round-trip delays every combat turn, and the captureInjection would
         // clobber the Memory Inspector's last real (narrative-turn) capture.
         const machineryKey = getMachineryGeminiKey(s.settings);
-        const wantsMemories = !!originalPlayerMessage && !opts.combatIntentOnly && !opts.skipMemories;
+        const wantsMemories = lane.wantsMemories && !!originalPlayerMessage;
         let retrievedMemories = [];
         let dramaticMemories = [];
         let curationQuery = originalPlayerMessage;
         // "Remember when…" (WOW 2026-09-18): a question about the past gets
         // the engine's dossier of what actually happened, wider retrieval with
         // the asked-about people counted as present, and a no-invention block.
-        const recallIntent = (wantsMemories || opts.tableTalk) && !opts.combatIntentOnly
-            ? findRecallIntent(s, originalPlayerMessage)
-            : null;
+        const recallIntent = wantsMemories ? findRecallIntent(s, originalPlayerMessage) : null;
         const recallDossier = recallIntent ? buildRecallDossier(s, recallIntent) : null;
         if (recallDossier) onStatus('Consulting the record');
         if (wantsMemories && machineryKey) {
@@ -395,28 +448,24 @@ export function createTurnRunner({
         }
 
         const recallRecord = recallDossier ? buildRecallRecordBlock(recallDossier, recallIntent.question) : '';
-        // Combat narration retells committed RESOLVED EVENTS: the quest / facts
-        // / history / inventory blocks are dead weight there (2026-09-23 P2).
-        const baseSystemPrompt = buildCurrentSystemPrompt(promptState, retrievedMemories, dramaticMemories, recallRecord, {
-            narrationOnly: !!opts.combatNarration,
-            // The intent call is the round's other half (2026-09-30 P2): it
-            // gets the projection its JSON-only job needs, not the ordinary turn's.
-            intentOnly: !!opts.combatIntentOnly,
+        // The lane's projection (combat narration retells committed RESOLVED
+        // EVENTS — the quest / facts / history / inventory blocks are dead
+        // weight there, 2026-09-23 P2; the intent call gets the projection its
+        // JSON-only job needs, 2026-09-30 P2) and its response MODE, pushed by
+        // the builder as a part (2026-10-13 P2 — it used to be string-appended
+        // here, unseen by the size log and the block pins). The deterministic
+        // OOC contract exists because some DM providers (Grok in live play)
+        // never break character on their own; the ending card's epilogue (the
+        // last chapter, 2026-09-30) rides the table-talk lane with its own mode.
+        const mode = lane.mode === 'tableTalk' && isEpilogueRequest(originalPlayerMessage) ? 'epilogue' : lane.mode;
+        const systemPrompt = buildCurrentSystemPrompt(promptState, retrievedMemories, dramaticMemories, recallRecord, {
+            narrationOnly: lane.projection === 'narrationOnly',
+            intentOnly: lane.projection === 'intentOnly',
+            mode,
         });
-        let systemPrompt = baseSystemPrompt;
-        if (opts.combatIntentOnly) {
-            systemPrompt = `${baseSystemPrompt}\n\n## CURRENT RESPONSE MODE — COMBAT INTENT ONLY
-Translate the player's committed action into the single bounded combat_exchange required by the live combat rules. Return ONLY the trailing fenced JSON event block: no narrative, setup, outcome, commentary, or prose outside the JSON. Keep descriptions brief. If the player names a spell from their available spell list, the cast slot MUST use exactly that spell — never substitute another. If they name magic outside their list, adapt it to the closest available option. The engine will resolve mechanics and make a separate narration-only request from the authoritative result.`;
-        } else if (opts.tableTalk) {
-            // Deterministic OOC contract: some DM providers (Grok in live play) never
-            // break character on their own and steamroll "DM, ..." into scene prose.
-            // The ending card's epilogue (the last chapter, 2026-09-30) rides the
-            // same lane with its own mode: an epilogue must move the world on.
-            systemPrompt = `${baseSystemPrompt}\n\n${isEpilogueRequest(originalPlayerMessage) ? EPILOGUE_RESPONSE_MODE : TABLE_TALK_RESPONSE_MODE}`;
-        }
         // The player's own row never rides the window beside `userMessage`
         // (the challenge lane names the row its prompt restates).
-        const messageHistory = buildMessageHistory(promptState, opts.pendingUserRow || userMessage);
+        const messageHistory = buildMessageHistory(promptState, pendingUserRow || userMessage);
 
         const abortController = new AbortController();
         setAbortController(abortController);
@@ -435,7 +484,8 @@ Translate the player's committed action into the single bounded combat_exchange 
             onUsage: (usage) => captureUsage({
                 ...usage,
                 lane: 'dm',
-                mode: opts.combatIntentOnly ? 'combat-intent' : (opts.combatNarration ? 'combat-narration' : (opts.tableTalk ? 'table-talk' : 'standard')),
+                // ONE mode name (2026-10-13): the timing log below reads the same row.
+                mode: lane.usage,
                 provider: s.settings.llmProvider,
                 model: s.settings.model,
                 promptChars: systemPrompt.length,
@@ -444,7 +494,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             onChunk: (chunk) => {
                 if (firstChunkAt === null) firstChunkAt = performance.now();
                 streamBuffer += chunk;
-                if (opts.combatIntentOnly) return;
+                if (lane.jsonOnly) return;
                 // Once we hit a ```json fence, freeze the display text — all remaining
                 // chunks are JSON data that parseResponse handles on the full text.
                 // (Paint coalescing stays in the component; this only supplies the
@@ -456,10 +506,20 @@ Translate the player's committed action into the single bounded combat_exchange 
         });
         const requestFinishedAt = performance.now();
         if (!isMounted()) return null; // Response landed after unmount/campaign switch — drop it
-        const mode = opts.combatIntentOnly ? 'combat-intent' : (opts.narrationOnly ? 'narration-only' : 'standard');
         console.info(
-            `[LLM timing] ${mode}: TTFT ${firstChunkAt === null ? 'n/a' : `${Math.round(firstChunkAt - requestStartedAt)}ms`}, total ${Math.round(requestFinishedAt - requestStartedAt)}ms`
+            `[LLM timing] ${lane.usage}: TTFT ${firstChunkAt === null ? 'n/a' : `${Math.round(firstChunkAt - requestStartedAt)}ms`}, total ${Math.round(requestFinishedAt - requestStartedAt)}ms`
         );
+
+        // Every dispatch of THIS turn is recorded as well as sent (2026-10-13
+        // chat-orchestration P2): the post-turn extraction needs the state the
+        // turn LEFT, and the ref will not show it until the render flushes.
+        // Replaying the recorded actions through the pure reducer over the
+        // captured prompt state is that state — see `stateAfter` below.
+        const turnActions = [];
+        const record = (action) => {
+            turnActions.push(action);
+            dispatch(action);
+        };
 
         const parsed = parseResponse(fullResponse);
         const narrative = parsed.narrative;
@@ -467,8 +527,8 @@ Translate the player's committed action into the single bounded combat_exchange 
         // must be VISIBLE — a silently vanished event block reads as "the DM gave
         // me nothing", and channels without a Scribe backstop (combat_start,
         // spell_cast, conditions) had no signal at all before this.
-        if (parsed.eventsDropped && !opts.narrationOnly && !opts.tableTalk) {
-            dispatch({
+        if (parsed.eventsDropped && !lane.discardsEvents) {
+            record({
                 type: 'ADD_MESSAGE',
                 // kind: 'error' keeps infrastructure lines out of every
                 // story reader (chronicler, scene art, priming) — 2026-09-04.
@@ -481,12 +541,13 @@ Translate the player's committed action into the single bounded combat_exchange 
         // and the DM's own 20-message window with no system line. Throwing
         // routes it to the caller's error line like any other failure; the
         // combat-intent mode is JSON-only by contract and keeps its own guard.
-        if (!opts.combatIntentOnly && !narrative.trim() && !parsed.events && !parsed.eventsDropped) {
+        if (!lane.jsonOnly && !narrative.trim() && !parsed.events && !parsed.eventsDropped) {
             throw new Error('The DM returned an empty response — nothing was narrated and no game state changed. Retry, or if the model is declining, edit or remove (✕) the message it objected to.');
         }
         // Table talk pauses the world: whatever a disobedient DM appends, no events
         // exist on an OOC turn — no rolls, loot, quests, or NPC/state mutations.
-        const discardsEvents = !!(opts.narrationOnly || opts.tableTalk);
+        // The narration lanes discard too: the engine committed their mechanics.
+        const discardsEvents = lane.discardsEvents;
         // The JSON-only hole in that guard (2026-09-07 audit P1): on the lanes
         // that DISCARD events, a reply that is only a fenced block passed the
         // `!parsed.events` test and committed a blank assistant bubble — and on
@@ -501,14 +562,14 @@ Translate the player's committed action into the single bounded combat_exchange 
         // Remembering is never a mechanic: no dice, no coin, no loot, no XP
         // from an answer about the past (RECALL_STRIPPED_EVENT_KEYS).
         if (recallDossier && events) events = stripRecallEvents(events);
-        opts.onNarrative?.(narrative);
+        onNarrative?.(narrative);
 
         // A combat_exchange with no live combat has no machine to resolve it; left in
         // place it hides the narration AND dead-ends in a silent plan rejection —
         // the whole response vanishes (playtest #10 finding: DM emitted a death_save
         // exchange after END_COMBAT closed the fight with the hero dying).
-        if (dropOrphanCombatExchange(events, !!s.combat?.active)) {
-            console.warn('[ChatPanel] Dropped a combat_exchange emitted outside active combat; narrating normally.');
+        if (dropOrphanCombatExchange(events, combatWasActive)) {
+            console.warn('[Turn] Dropped a combat_exchange emitted outside active combat; narrating normally.');
         }
         // The opening scene has no player action to adjudicate, so a roll the
         // DM asks for there ("a chase in progress — Athletics?") has nothing to
@@ -517,8 +578,8 @@ Translate the player's committed action into the single bounded combat_exchange 
         // the priming ladder re-fired it into three hidden rows (2026-09-07
         // audit P1). Strip it; the narration stands and the player's first
         // action is where the first check can be proposed.
-        if (opts.openingScene && events?.requestedRolls?.length > 0) {
-            console.warn('[ChatPanel] Dropped requested_rolls from the opening scene — there is no player action to adjudicate yet.');
+        if (lane.openingScene && events?.requestedRolls?.length > 0) {
+            console.warn('[Turn] Dropped requested_rolls from the opening scene — there is no player action to adjudicate yet.');
             events = { ...events, requestedRolls: [] };
         }
         // The same strip, keyed on combat_start (2026-09-19 audit P1): an ambush
@@ -528,15 +589,15 @@ Translate the player's committed action into the single bounded combat_exchange 
         // the opening volley against prose nobody saw. A fight has the exchange
         // machine, not dice: drop the rolls and let the narration stand.
         if (events?.combatStart && events.requestedRolls?.length > 0) {
-            console.warn('[ChatPanel] Dropped requested_rolls riding a combat_start — the fight resolves through the exchange machine.');
+            console.warn('[Turn] Dropped requested_rolls riding a combat_start — the fight resolves through the exchange machine.');
             events = { ...events, requestedRolls: [] };
         }
 
         // If no JSON events/rolls were detected, check if we should run the Scribe to semantically detect any requested rolls in text
-        if (!opts.narrationOnly && !opts.tableTalk && (!events || !events.requestedRolls?.length) && !events?.combatStart && originalPlayerMessage && !s.combat?.active && s.settings.apiKey) {
+        if (lane.detectors && (!events || !events.requestedRolls?.length) && !events?.combatStart && originalPlayerMessage && !combatWasActive && s.settings.apiKey) {
             const semanticRolls = await detectSemanticTextRolls(narrative, s.settings, { signal: abortController.signal });
             if (semanticRolls && semanticRolls.length > 0) {
-                console.warn('[ChatPanel] Scribe detected text-based rolls semantically:', semanticRolls);
+                console.warn('[Turn] Scribe detected text-based rolls semantically:', semanticRolls);
                 // Merge the detected rolls into any existing events — replacing the whole
                 // object would silently drop loot/quest/NPC events the response carried.
                 const detected = normalizeEvents({ requested_rolls: semanticRolls });
@@ -549,7 +610,7 @@ Translate the player's committed action into the single bounded combat_exchange 
             }
         }
 
-        if (events?.requestedRolls?.length > 0 && originalPlayerMessage && !s.combat?.active) {
+        if (lane.detectors && events?.requestedRolls?.length > 0 && originalPlayerMessage && !combatWasActive) {
             const review = await reviewOutsideCombatRolls(events.requestedRolls, originalPlayerMessage, narrative, s.settings, { signal: abortController.signal });
             events.requestedRolls = review.acceptedRolls;
             if (review.rejectedRolls.length > 0) {
@@ -557,16 +618,16 @@ Translate the player's committed action into the single bounded combat_exchange 
                 // but only when no legitimate check survived to stage instead.
                 if (review.attackAsCheck && review.acceptedRolls.length === 0) {
                     markTurn(events, { attackAsCheckRejected: true });
-                    console.warn('[ChatPanel] Rejected a check that staged the player\'s declared attack; requesting a combat_start response.');
+                    console.warn('[Turn] Rejected a check that staged the player\'s declared attack; requesting a combat_start response.');
                 } else {
                     markTurn(events, { playerAuthorityRollRejected: true });
-                    console.warn('[ChatPanel] Rejected a check that overrides player-authored portrayal; requesting a no-roll roleplay response.');
+                    console.warn('[Turn] Rejected a check that overrides player-authored portrayal; requesting a no-roll roleplay response.');
                 }
             }
             const preNarrated = review.preNarrated !== undefined ? review.preNarrated : detectPreNarratedOutcome(narrative);
             if (preNarrated) {
                 markTurn(events, { preNarratedOutcome: true });
-                console.warn('[ChatPanel] DM pre-narrated outcome before roll — correction will be injected with roll results.');
+                console.warn('[Turn] DM pre-narrated outcome before roll — correction will be injected with roll results.');
             }
         }
 
@@ -580,14 +641,17 @@ Translate the player's committed action into the single bounded combat_exchange 
         const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         if (events) {
             // Let callers staging a roleplay-check proposal recover this response's
-            // narration (the withheld setup) and reveal/reuse it later.
-            markTurn(events, { setupMessageId: msgId, setupHidden: hideSetup });
+            // narration (the withheld setup) and reveal/reuse it later. The ENTRY
+            // combat flag rides the turn too (2026-10-13 P2): the caller routes
+            // the events against the state the call READ, never against a ref
+            // it re-reads after the dispatches.
+            markTurn(events, { setupMessageId: msgId, setupHidden: hideSetup, combatWasActive });
             // In a batched combat round the client already rolled AND applied HP from the
             // inline damage, so ignore any HP deltas the DM narrated to avoid double-counting.
             // Finalized BEFORE dispatch: this object enters the reducer store, and an
             // object already in the store must never be mutated afterwards — what got
             // autosaved would depend on a race with the 2s debounce.
-            if (opts.suppressHpEvents) {
+            if (suppressHpEvents) {
                 events.damageTaken = 0;
             }
         }
@@ -598,17 +662,17 @@ Translate the player's committed action into the single bounded combat_exchange 
         // (queue 2026-08-09, live playtest #8). Events still flow to the caller
         // and through applyEvents below (condition syncs ride intent turns);
         // the committed-turn record stays null, matching "nothing narrated".
-        if (!(opts.combatIntentOnly && !narrative.trim())) {
+        const commits = !(lane.jsonOnly && !narrative.trim());
+        if (commits) {
             // The row carries NO `events` (2026-09-28 audit P2): the normalized
             // object materializes every channel key (~620 bytes for an EMPTY
             // reply), rode every assistant row into the save and the cloud
             // payload forever, and nothing read it back — both post-commit
             // readers take the in-memory lastCommittedTurn below.
-            dispatch({
+            record({
                 type: 'ADD_MESSAGE',
                 payload: { id: msgId, role: 'assistant', content: narrative, hidden: hideSetup },
             });
-            lastCommittedTurn = { id: msgId, content: narrative, events, hidden: hideSetup, recall: !!recallDossier };
         }
 
         // Apply game events (damage, items, etc.)
@@ -619,22 +683,39 @@ Translate the player's committed action into the single bounded combat_exchange 
             // calls (post-roll outcomes) where originalPlayerMessage is deliberately
             // absent — so the transaction replay guard can still honor an explicit
             // "I buy another one" when the purchase lands after dice.
-            applyEvents(events, dispatch, getState, {
+            applyEvents(events, record, getState, {
                 setupPhase,
                 // starting_items is the one-time opening's channel alone.
-                openingScene: !!opts.openingScene,
+                openingScene: lane.openingScene,
                 lootSourceId: msgId,
                 // The DM's own facts remember this message (2026-10-11).
                 sourceMessageId: msgId,
-                playerMessage: originalPlayerMessage || opts.playerActionContext,
+                playerMessage: originalPlayerMessage || playerActionContext,
             });
             // A fight-starting response's queued exchange never blocks its
             // location: with no live combat, an exchange here always rides a
             // combat_start (orphans were dropped above), and the narration-only
             // lane that follows cannot replay it.
-            if (events.location && !s.combat?.active) {
-                dispatch({ type: 'SET_LOCATION', payload: events.location });
+            if (events.location && !combatWasActive) {
+                record({ type: 'SET_LOCATION', payload: events.location });
             }
+        }
+
+        if (commits) {
+            // The state this turn LEFT, for the post-turn extraction: the
+            // captured prompt state plus every action the turn dispatched,
+            // replayed through the pure reducer. The Scribe's KNOWN contexts
+            // used to be built from a ref read after the dispatches — PRE-TURN
+            // by the render lag, so a stance or look the DM wrote this turn
+            // was absent from the merge base the Scribe is told to restate,
+            // and its facts were judged for embedding against a record that
+            // lacked the DM's own. The replay's one divergence: a record the
+            // reducer mints an id for (a new fact) carries a different id here
+            // than in the store — the Scribe reads people by name and cards
+            // by id, and the one id-keyed fact lane (`supersedes` on a live
+            // intent fact) cannot close a plan born in the same turn either way.
+            const stateAfter = turnActions.reduce(gameReducer, promptState);
+            lastCommittedTurn = { id: msgId, content: narrative, events, hidden: hideSetup, recall: !!recallDossier, combatWasActive, stateAfter };
         }
 
         // RAG: embed any new world facts the DM emitted this turn (per response).
@@ -642,7 +723,7 @@ Translate the player's committed action into the single bounded combat_exchange 
         // narrated outcome, so they capture results rather than withheld setup text.
         // Skip on a setup turn (pending rolls) — those facts ride on the outcome narration.
         // A fight-starting setup applied its facts already (applyEvents) — embed them too.
-        if ((!setupPhase || events?.combatStart) && !s.combat?.active && events?.worldFacts?.length > 0 && machineryKey) {
+        if ((!setupPhase || events?.combatStart) && !combatWasActive && events?.worldFacts?.length > 0 && machineryKey) {
             // The RECORD's rows, not the wire's (2026-10-11 P2): the same plan
             // the reducer just committed judges these candidates against the
             // captured state — a restatement the record refuses is never
@@ -662,15 +743,17 @@ Translate the player's committed action into the single bounded combat_exchange 
         // Missing-events nudge (IDEAS 2026-07-11): a no-JSON response at a contract
         // moment loses quest_updates/starting_items forever — the only channels with
         // no Scribe audit backstop. Recovery is one JSON-only follow-up, whitelisted.
-        if (!opts.narrationOnly && !opts.tableTalk && !opts.combatIntentOnly
-            && !getState().combat?.active
-            && !(events?.requestedRolls?.length > 0)) { // a text-detected check owns this turn
+        // Gated on the ENTRY combat flag (2026-10-13 P2): the two ref reads
+        // that stood here landed pre-turn by the render lag — the same flag,
+        // by accident. A fight this very turn started has a JSON block, so the
+        // cue never fires on it anyway.
+        if (lane.nudge && !combatWasActive && !(events?.requestedRolls?.length > 0)) { // a text-detected check owns this turn
             const nudgeCue = detectMissingEventsCue({
                 hadEventBlock: !!parsed.events,
-                openingScene: !!opts.openingScene,
-                playerMessage: originalPlayerMessage || opts.playerActionContext || '',
+                openingScene: lane.openingScene,
+                playerMessage: originalPlayerMessage || playerActionContext || '',
                 narrative,
-                combatActive: !!getState().combat?.active,
+                combatActive: combatWasActive,
             });
             if (nudgeCue) await recoverMissingEvents(nudgeCue, { id: msgId, content: narrative }, abortController.signal);
         }
@@ -700,7 +783,11 @@ Translate the player's committed action into the single bounded combat_exchange 
             // (times retries) while isLoading kept the Stop button showing.
             const response = await sendMessage({
                 ...dmCallConfig(s.settings),
-                systemPrompt: buildCurrentSystemPrompt(s, [], []),
+                // The nudge's own projection (2026-10-13 P2): the character
+                // line, INVENTORY and ACTIVE QUESTS over the cached prefix —
+                // it used to carry the whole 82k-char dynamic half for a reply
+                // whitelisted to two channels.
+                systemPrompt: buildCurrentSystemPrompt(s, [], [], '', { nudgeOnly: true }),
                 messageHistory: history,
                 userMessage: buildNudgePrompt(cue),
                 temperature: 0.2,
@@ -714,15 +801,37 @@ Translate the player's committed action into the single bounded combat_exchange 
                 openingScene: cue.reason === 'opening',
                 lootSourceId: `${committed.id}:nudge`,
             });
-            console.warn(`[ChatPanel] Missing-events nudge recovered ${Object.keys(rawFields).join(' + ')} (${cue.reason} cue).`);
+            console.warn(`[Turn] Missing-events nudge recovered ${Object.keys(rawFields).join(' + ')} (${cue.reason} cue).`);
         } catch (error) {
             // Recovery is best-effort — a failed nudge must never block the turn.
-            console.warn('[ChatPanel] Missing-events nudge failed:', error.message || error);
+            console.warn('[Turn] Missing-events nudge failed:', error.message || error);
         }
     };
 
-    const stageRoleplayCheck = (rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null, supersedesId = null } = {}) => {
-        const proposal = buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed, preNarrated, loot, setupNarrative, setupMessageId, supersedesId });
+    /**
+     * Stage a roleplay-check proposal from a DM response. THE carry rule,
+     * stated once (2026-10-13 chat-orchestration P2 — three sites assembled
+     * the five carry-over options by hand):
+     * - `preNarrated` is the response's own flag;
+     * - the withheld SETUP is the one the caller names in `setupFrom` (a
+     *   re-adjudication — the challenge — keeps the ORIGINAL scene the player
+     *   never saw), else this response's narration when it was withheld;
+     * - `loot` and `supersedesId` are the caller's (declared-but-unapplied
+     *   loot rides until a roll-free outcome lands; the lineage id keeps the
+     *   heat ledger from counting one moment twice).
+     */
+    const stageRoleplayCheck = (rolls, playerAction, { events = null, narrative = '', loot = null, setupFrom = null, supersedesId = null, challengeUsed = false } = {}) => {
+        const flags = turnFlags(events);
+        const setup = setupFrom
+            ? { setupNarrative: setupFrom.setupNarrative || '', setupMessageId: setupFrom.setupMessageId || null }
+            : { setupNarrative: flags.setupHidden ? narrative : '', setupMessageId: flags.setupHidden ? (flags.setupMessageId || null) : null };
+        const proposal = buildRoleplayCheckProposal(rolls, playerAction, {
+            challengeUsed,
+            preNarrated: !!flags.preNarratedOutcome,
+            loot,
+            ...setup,
+            supersedesId,
+        });
         if (!proposal) return false;
         dispatch({ type: 'PROPOSE_ROLEPLAY_CHECK', payload: proposal });
         resetRoleplayChallengeUi();
@@ -747,25 +856,27 @@ Translate the player's committed action into the single bounded combat_exchange 
      * @returns {boolean} true when a final narration existed and was extracted.
      */
     const runPostTurnExtraction = (playerMessage, { auditCasts = true } = {}) => {
-        const latest = getState();
         const committed = getLastCommittedTurn();
         const finalNarration = committed && !committed.hidden && committed.content?.trim()
             ? committed
             : null;
         if (!finalNarration) return false;
-        // Same-task reads of `latest` are PRE-TURN by construction (the header
-        // trap, 2026-09-07 audit P2): the fields this very turn changed are
-        // stale here. A fight-start narration is never extracted — handleSend
+        // The state the turn LEFT (2026-10-13 P2): the turn record's replayed
+        // projection, never a same-task ref read — that read is PRE-TURN by
+        // construction (the header trap, 2026-09-07 audit P2), so the stance,
+        // look, fact or place this very turn wrote was absent from the
+        // Scribe's merge base and the embed judgement. `getState` stays the
+        // loot audit's: it runs after the Scribe's network call, against the
+        // live store. A fight-start narration is never extracted — handleSend
         // skips the Scribe, loot audit, embed, and summarize when combat starts
         // (the fight's own narration lanes own it); the post-roll outcome path
         // reached here through finalizeRoleplayTurn and ran all four.
         if (finalNarration.events?.combatStart) return false;
-        // The DM's location event, already applied by sendToLLM, is where the
-        // hero IS — `latest.currentLocation` is where they were. A travel turn
-        // used to embed the ARRIVAL prose under the departure place.
-        const turnLocation = (finalNarration.events?.location && !latest.combat?.active && !finalNarration.events?.combatExchange)
-            ? finalNarration.events.location
-            : latest.currentLocation;
+        const latest = finalNarration.stateAfter || getState();
+        // Where the hero IS after the turn — the DM's location event is already
+        // in the projection (a travel turn used to embed the ARRIVAL prose
+        // under the departure place).
+        const turnLocation = latest.currentLocation;
         // A recall answer is the record read back, not new fiction (2026-09-18):
         // the Scribe gets a RECALL TURN hint (extract nothing new but a moved
         // heart), the loot/payment audit is OFF (a recounted reward is not a
@@ -840,7 +951,7 @@ Translate the player's committed action into the single bounded combat_exchange 
      */
     const sendRollCorrection = ({ attackAsCheck = false, playerAction = '' } = {}) => (attackAsCheck
         ? sendToLLM(attackAsCheckCorrectionPrompt(playerAction), null, { playerActionContext: playerAction })
-        : sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { narrationOnly: true }));
+        : sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { lane: 'narration' }));
 
     const acceptRoleplayCheck = async () => {
         const proposal = getState().pendingRoleplayCheck;
@@ -867,16 +978,14 @@ Translate the player's committed action into the single bounded combat_exchange 
                 setupNarrative: proposal.setupNarrative,
                 setupMessageId: proposal.setupMessageId,
                 onFollowUpRolls: (rolls, meta) => {
-                    // Carry declared-but-unapplied loot into the re-staged proposal so the
-                    // eventual roll-free outcome still gets the grant-or-deny reminder.
-                    // A follow-up response is itself a withheld setup — carry its narration
-                    // the same way so chained checks don't erase fiction either. The
-                    // lineage id keeps the heat ledger from counting the moment twice.
+                    // The follow-up response's own events and narration: a
+                    // withheld follow-up is the re-staged proposal's setup
+                    // (chained checks don't erase fiction), the declared loot
+                    // rides on, the lineage id keeps the heat ledger honest.
                     stagedFollowUp = stageRoleplayCheck(rolls, meta.playerAction || proposal.playerAction, {
-                        preNarrated: meta.preNarrated,
+                        events: meta.events || null,
+                        narrative: meta.narrative || '',
                         loot: meta.pendingLoot || null,
-                        setupNarrative: meta.setupNarrative || '',
-                        setupMessageId: meta.setupMessageId || null,
                         supersedesId: proposal.id,
                     });
                 },
@@ -934,14 +1043,14 @@ Translate the player's committed action into the single bounded combat_exchange 
             );
             if (events?.requestedRolls?.length > 0) {
                 // Upheld/revised rulings are JSON-only responses; the original withheld
-                // setup is still the scene the player never saw, so carry it forward.
+                // setup is still the scene the player never saw, so it carries forward
+                // (`setupFrom`), and the same moment re-adjudicated is one heat entry.
                 stageRoleplayCheck(events.requestedRolls, proposal.playerAction, {
-                    challengeUsed: true,
-                    preNarrated: turnFlags(events).preNarratedOutcome,
+                    events,
                     loot: proposal.loot,
-                    setupNarrative: proposal.setupNarrative,
-                    setupMessageId: proposal.setupMessageId,
-                    supersedesId: proposal.id, // same moment re-adjudicated: one heat entry
+                    setupFrom: proposal,
+                    supersedesId: proposal.id,
+                    challengeUsed: true,
                 });
             } else {
                 // The DM withdrew (or its re-proposal was policy-rejected): this
@@ -976,11 +1085,14 @@ Translate the player's committed action into the single bounded combat_exchange 
     };
 
     const changeRoleplayApproach = () => {
-        // No dice will ever resolve this setup, so reveal it instead of erasing its
-        // fiction — unless it pre-narrated an outcome that never happened.
-        const proposal = getState().pendingRoleplayCheck;
+        // ONE state for the whole sync body (2026-10-13 P2 — it read the ref
+        // four times). No dice will ever resolve this setup, so reveal it
+        // instead of erasing its fiction — unless it pre-narrated an outcome
+        // that never happened.
+        const current = getState();
+        const proposal = current.pendingRoleplayCheck;
         const setupMessage = proposal?.setupMessageId
-            ? getState().messages.find(m => m.id === proposal.setupMessageId)
+            ? (current.messages || []).find(m => m.id === proposal.setupMessageId)
             : null;
         const revealSetup = !!(setupMessage?.hidden && setupMessage.content?.trim() && !proposal.preNarrated);
         if (revealSetup) dispatch({ type: 'REVEAL_MESSAGE', payload: { id: proposal.setupMessageId } });
@@ -988,8 +1100,8 @@ Translate the player's committed action into the single bounded combat_exchange 
             // A set-aside ruling still binds the DM: an ordinary proposal must return
             // unchanged on a retry, and an upheld final ruling stays final.
             const ruling = buildRollRulingRecord(proposal, 'set_aside', {
-                messageCount: (getState().messages || []).length,
-                location: getState().currentLocation,
+                messageCount: (current.messages || []).length,
+                location: current.currentLocation,
             });
             if (ruling) dispatch({ type: 'RECORD_ROLL_RULING', payload: ruling });
         }

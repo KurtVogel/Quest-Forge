@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
 import { createCharacter } from '../engine/characterUtils.js';
 import { createTurnRunner } from './turnOrchestrator.js';
+import { markTurn } from './turnFlags.js';
 
 /**
  * The turn runner against the REAL parser, applyEvents, and reducer — only the
@@ -176,7 +177,7 @@ describe('turn runner — missing-events nudge', () => {
         });
         const goldBefore = getState().character.gold;
 
-        await runner.sendToLLM('Begin the adventure.', null, { openingScene: true });
+        await runner.sendToLLM('Begin the adventure.', null, { lane: 'opening' });
 
         expect(sendMessage).toHaveBeenCalledTimes(1);
         expect(sendMessage.mock.calls[0][0].userMessage).toContain('emitted NO JSON event block');
@@ -263,7 +264,7 @@ describe('turn runner — table-talk world pause (security-shaped: OOC can never
         const goldBefore = getState().character.gold;
         const locationBefore = getState().currentLocation;
 
-        const events = await runner.sendToLLM('DM, where are we again?', 'DM, where are we again?', { tableTalk: true });
+        const events = await runner.sendToLLM('DM, where are we again?', 'DM, where are we again?', { lane: 'tableTalk' });
 
         expect(events).toBeNull();
         expect(getState().character.gold).toBe(goldBefore);
@@ -287,7 +288,7 @@ describe('turn runner — table-talk world pause (security-shaped: OOC can never
             return 'Recap: you are at the ford.';
         });
         const { runner } = createHarness({ streamMessage });
-        await runner.sendToLLM('OOC: what happened last session?', 'OOC: what happened last session?', { tableTalk: true });
+        await runner.sendToLLM('OOC: what happened last session?', 'OOC: what happened last session?', { lane: 'tableTalk' });
         expect(streamMessage).toHaveBeenCalledTimes(1);
     });
 
@@ -301,7 +302,7 @@ describe('turn runner — table-talk world pause (security-shaped: OOC can never
         const { runner, getState } = createHarness({ streamMessage: scriptedStream([response]), sendMessage });
         const before = { gold: getState().character.gold, location: getState().currentLocation };
 
-        const events = await runner.sendToLLM(RECAP_REQUEST_MESSAGE, RECAP_REQUEST_MESSAGE, { tableTalk: isTableTalkMessage(RECAP_REQUEST_MESSAGE) });
+        const events = await runner.sendToLLM(RECAP_REQUEST_MESSAGE, RECAP_REQUEST_MESSAGE, { lane: isTableTalkMessage(RECAP_REQUEST_MESSAGE) ? 'tableTalk' : 'standard' });
 
         expect(events).toBeNull();
         expect(getState().character.gold).toBe(before.gold);
@@ -361,8 +362,7 @@ describe('turn runner — challenge ruling (both branches)', () => {
             sendMessage: vi.fn(async () => ''),
         });
         runner.stageRoleplayCheck(proposalRolls, 'I persuade the sergeant.', {
-            setupNarrative: 'The sergeant hesitates at the gate.',
-            setupMessageId: 'msg-setup-1',
+            setupFrom: { setupNarrative: 'The sergeant hesitates at the gate.', setupMessageId: 'msg-setup-1' },
         });
         expect(getState().pendingRoleplayCheck.challengeUsed).toBe(false);
 
@@ -428,8 +428,8 @@ describe('turn runner — change approach (reveal + set-aside ruling)', () => {
         const events = await runner.sendToLLM('I sneak past the sergeant.', 'I sneak past the sergeant.');
         expect(runner.getLastCommittedTurn().hidden).toBe(true);
         runner.stageRoleplayCheck(events.requestedRolls, 'I sneak past the sergeant.', {
-            setupNarrative: runner.getLastCommittedTurn().content,
-            setupMessageId: events.turn.setupMessageId,
+            events,
+            narrative: runner.getLastCommittedTurn().content,
         });
 
         runner.changeRoleplayApproach();
@@ -450,10 +450,11 @@ describe('turn runner — change approach (reveal + set-aside ruling)', () => {
             sendMessage: vi.fn(async () => ''),
         });
         const events = await runner.sendToLLM('I sneak past the sergeant.', 'I sneak past the sergeant.');
+        // The response's own flag decides `preNarrated` (the carry rule).
+        markTurn(events, { preNarratedOutcome: true });
         runner.stageRoleplayCheck(events.requestedRolls, 'I sneak past the sergeant.', {
-            preNarrated: true,
-            setupNarrative: runner.getLastCommittedTurn().content,
-            setupMessageId: events.turn.setupMessageId,
+            events,
+            narrative: runner.getLastCommittedTurn().content,
         });
 
         runner.changeRoleplayApproach();
@@ -561,7 +562,7 @@ describe('turn runner — an empty reply never commits a blank turn (2026-09-06 
 
     it('a narration-only empty reply throws too (the caller retries the narration)', async () => {
         const { runner, getState } = createHarness({ streamMessage: scriptedStream(['']) });
-        await expect(runner.sendToLLM('Narrate the result.', null, { narrationOnly: true })).rejects.toThrow(/empty response/);
+        await expect(runner.sendToLLM('Narrate the result.', null, { lane: 'narration' })).rejects.toThrow(/empty response/);
         expect(getState().messages.filter(m => m.role === 'assistant')).toHaveLength(0);
     });
 
@@ -582,7 +583,7 @@ describe('turn runner — a JSON-only reply on an event-discarding lane is a fai
     it('narration-only: throws, commits no bubble, applies nothing', async () => {
         const { runner, getState } = createHarness({ streamMessage: scriptedStream([jsonOnly]) });
         const goldBefore = getState().character.gold;
-        await expect(runner.sendToLLM('Narrate the exchange.', null, { narrationOnly: true })).rejects.toThrow(/only a data block/);
+        await expect(runner.sendToLLM('Narrate the exchange.', null, { lane: 'narration' })).rejects.toThrow(/only a data block/);
         expect(getState().messages.filter(m => m.role === 'assistant')).toHaveLength(0);
         expect(getState().character.gold).toBe(goldBefore);
     });
@@ -590,7 +591,7 @@ describe('turn runner — a JSON-only reply on an event-discarding lane is a fai
     it('table talk: throws, commits no bubble, applies nothing', async () => {
         const { runner, getState } = createHarness({ streamMessage: scriptedStream([jsonOnly]) });
         const hpBefore = getState().character.currentHP;
-        await expect(runner.sendToLLM('OOC: recap please', 'OOC: recap please', { tableTalk: true })).rejects.toThrow(/only a data block/);
+        await expect(runner.sendToLLM('OOC: recap please', 'OOC: recap please', { lane: 'tableTalk' })).rejects.toThrow(/only a data block/);
         expect(getState().messages.filter(m => m.role === 'assistant')).toHaveLength(0);
         expect(getState().character.currentHP).toBe(hpBefore);
     });
@@ -614,7 +615,7 @@ describe('turn runner — an opening scene that asks for a roll stands visible (
         const { runner, getState } = createHarness({ streamMessage: scriptedStream([chaseOpening]), sendMessage });
         const inventoryBefore = getState().inventory.length;
 
-        const events = await runner.sendToLLM('[SYSTEM: open the campaign]', null, { openingScene: true });
+        const events = await runner.sendToLLM('[SYSTEM: open the campaign]', null, { lane: 'opening' });
 
         expect(events.requestedRolls).toEqual([]);
         const committed = runner.getLastCommittedTurn();
@@ -648,7 +649,7 @@ describe('turn runner — the post-stream helpers ride the turn abort signal (20
             streamMessage: scriptedStream(['You wake in the hayloft of the Greyfell inn. What do you do?']),
             sendMessage,
         });
-        await runner.sendToLLM('[SYSTEM: open the campaign]', null, { openingScene: true });
+        await runner.sendToLLM('[SYSTEM: open the campaign]', null, { lane: 'opening' });
         expect(sendMessage).toHaveBeenCalledTimes(1);
         const call = sendMessage.mock.calls[0][0];
         expect(call.signal).toBeInstanceOf(AbortSignal);
@@ -690,7 +691,7 @@ describe('turn runner — fight-starting response shapes (2026-09-19 P1 ×2)', (
         const { runner, getState } = createHarness({ streamMessage: scriptedStream([response]) });
         const inventoryBefore = getState().inventory.length;
 
-        await runner.sendToLLM('[SYSTEM: open the campaign]', null, { openingScene: true });
+        await runner.sendToLLM('[SYSTEM: open the campaign]', null, { lane: 'opening' });
 
         expect(getState().combat.active).toBe(true);
         expect(getState().inventory.length).toBe(inventoryBefore + 1);

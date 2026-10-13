@@ -17,6 +17,7 @@ import {
     briefNpcFieldForPrompt,
     curateNpcsForPrompt,
     dispatchClassifiedNpcUpdate,
+    findCompanionRecord,
     listNpcImpressions,
     splitBondMoments,
 } from './npcRoster.js';
@@ -548,7 +549,7 @@ export const KNOWN_NPC_NOTES_MAX = 300;
 export const SESSION_HISTORY_CONSEQUENCES = 3;
 export const SESSION_HISTORY_CONSEQUENCE_CHARS = 150;
 
-export function buildJournalContext(journal, npcs, currentLocation, { presentNames = null, messages = null, storyMemory = [], locations = [] } = {}) {
+export function buildJournalContext(journal, npcs, currentLocation, { presentNames = null, partyNames = [], messages = null, storyMemory = [], locations = [] } = {}) {
     const parts = [];
 
     if (currentLocation) {
@@ -638,8 +639,14 @@ export function buildJournalContext(journal, npcs, currentLocation, { presentNam
         }
     }
 
-    // NPC tracker — curated by importance, pins, location, and tension (not recency alone)
-    const rosterNpcs = (npcs || []).filter(n => n.rosterTier === 'character' || !n.rosterTier);
+    // NPC tracker — curated by importance, pins, location, and tension (not
+    // recency alone). A party companion is never a KNOWN NPCs line (2026-10-13
+    // prompt-building P2): their roster record renders ONCE, on their party
+    // line — a present companion used to take a reserved slot here beside it.
+    const companionRecords = new Set((Array.isArray(partyNames) ? partyNames : [])
+        .map(name => findCompanionRecord(npcs, name))
+        .filter(Boolean));
+    const rosterNpcs = (npcs || []).filter(n => (n.rosterTier === 'character' || !n.rosterTier) && !companionRecords.has(n));
     if (rosterNpcs.length > 0) {
         const MAX_PROMPT_NPCS = 8;
         const shown = curateNpcsForPrompt(rosterNpcs, { location: currentLocation, limit: MAX_PROMPT_NPCS, presentNames, messages });

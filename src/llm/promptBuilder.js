@@ -7,25 +7,26 @@ import { ABILITY_SHORT, classDisplayName, getFightingStyleLabel, getMartialArche
 import { describeArmorAc, describeShieldAc, formatModifier, getModifier, getProficiencyBonus, getSavingThrowModifier, hasListEntry, isProficientWithWeapon } from '../engine/rules.js';
 import { SUPPORTED_ENEMY_CONDITIONS_SENTENCE } from '../engine/enemyStats.js';
 import { getDmBonusXpCap, getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
-import { buildJournalContext } from '../engine/worldJournal.js';
+import { buildJournalContext, describeBondForPrompt } from '../engine/worldJournal.js';
 import { findSubjectsInText } from '../engine/textMatch.js';
 import { buildWonderBlock } from '../engine/wonder.js';
 import { buildPresenceText } from './narrativeMessages.js';
 import { buildStoryMemoryPromptBlock, formatSecrecyTag } from '../engine/storyMemory.js';
 import { describeCatalogForPrompt } from '../data/items.js';
-import { isShieldItem } from '../engine/equipment.js';
+import { isShieldItem, isWornArmor } from '../engine/equipment.js';
 import { formatCurrency } from '../engine/currency.js';
 import { CLASSES } from '../data/classes.js';
 import { cleanTextField, normalizeCampaignPremise } from '../config/contentLimits.js';
+import { cleanText, textOr } from '../engine/text.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
-import { TABLE_TALK_STANDING_RULE } from './tableTalk.js';
+import { EPILOGUE_RESPONSE_MODE, TABLE_TALK_RESPONSE_MODE, TABLE_TALK_STANDING_RULE } from './tableTalk.js';
 import { buildWorldTempoBlock, computeRecentHeat } from '../engine/worldTempo.js';
 import { buildRegionalHearsayBlock } from '../engine/regionalHearsay.js';
 import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
 import { describeSpellbookForPrompt, describeSpellSlotsForPrompt, isSpellcaster } from '../engine/spellcasting.js';
 import { isLowLevelSolo } from '../engine/combatPredicates.js';
-import { listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../engine/npcRoster.js';
-import { buildRelationshipBeatBlock, describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
+import { briefNpcFieldForPrompt, findCompanionRecord, resolveCompanionLook } from '../engine/npcRoster.js';
+import { buildRelationshipBeatBlock } from '../engine/relationshipArc.js';
 import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
 import { describeStateTag, liveWorldFacts } from '../engine/worldFacts.js';
 
@@ -132,14 +133,25 @@ export function buildSystemPrompt(options) {
  * every dynamic block has a ceiling from its inputs' caps, and a test that can
  * read the blocks by name can pin each one instead of only the total.
  */
-export function buildSystemPromptParts({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, narrationOnly = false, intentOnly = false, storyMemoryPool = null }) {
+export function buildSystemPromptParts({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, narrationOnly = false, intentOnly = false, nudgeOnly = false, mode = null, storyMemoryPool = null }) {
     // `intentOnly` (2026-09-30 prompt-building Lap-3 P2): the combat INTENT
     // call translates one committed action into a bounded combat_exchange
     // whose targets are enemy ids and whose actions are the slot whitelist —
     // it carried ~38k dynamic chars (the narration set above PLUS KNOWN NPCs,
     // the place line, and recent rulings) for ~300 bytes of JSON every round.
-    // It keeps character, party, inventory, DM REMINDERS (the death_save slot
-    // and the safety block live there), and the full combat block.
+    // It keeps character, party (mechanics only since 2026-10-13), inventory,
+    // DM REMINDERS (the death_save slot and the safety block live there), and
+    // the full combat block.
+    // `nudgeOnly` (2026-10-13 chat-orchestration P2): the missing-events
+    // nudge asks for a JSON-only reply whitelisted to quest_updates (+ the
+    // opening's starting_items) — it needs ACTIVE QUESTS (update, never
+    // duplicate), INVENTORY (what the hero already owns), the character line
+    // and the cached prefix (the premise), and nothing else of the 82k-char
+    // dynamic half it used to carry.
+    // `mode` (2026-10-13 prompt-building P2): the response MODE of a lane —
+    // `combatIntent` / `tableTalk` / `epilogue` — is a PART of the prompt,
+    // pushed by this assembler, never string-appended by a caller after it
+    // returns (the DEV size log and the block pins never saw them).
     // `storyMemoryPool` (2026-09-30 story-memory Lap-3 P1): `storyMemory` is
     // the CURATED list to SHOW (DRAMATIC CALLBACKS, ≤5 cards); an NPC's open
     // thread is a LOOKUP (the newest active promise linked to them) and must
@@ -148,7 +160,7 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
     // messages right after the DM paid it off. Callers that pass only
     // `storyMemory` (the builder-level tests) keep the old single list.
     const threadPool = Array.isArray(storyMemoryPool) ? storyMemoryPool : (storyMemory || []);
-    const lean = narrationOnly || intentOnly;
+    const lean = narrationOnly || intentOnly || nudgeOnly;
     // `narrationOnly` (2026-09-23 combat-exchange P2): the combat narration
     // call retells RESOLVED EVENTS the engine already committed — it needs the
     // combat block, the character/party, KNOWN NPCs present, and tone, and
@@ -156,6 +168,18 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
     // TRANSITION HISTORY / INVENTORY (10k+ chars of the dynamic half, re-sent
     // on half of a fight's DM calls). Those blocks are skipped; the cached
     // static prefix is untouched so the cache key holds.
+    // ONE normalization of the shared inputs (2026-10-13 nit): the assembler
+    // used to re-read `messages` two ways, `messageCount || 0` ten times and
+    // `!!combat?.active` five — every block below reads this record.
+    const ctx = {
+        messages: Array.isArray(messages) ? messages : null,
+        messageCount: Number.isFinite(messageCount) ? messageCount : 0,
+        combatActive: !!combat?.active,
+        fronts: Array.isArray(fronts) ? fronts : [],
+        npcs: Array.isArray(npcs) ? npcs : [],
+        party: Array.isArray(party) ? party : [],
+        locations: Array.isArray(locations) ? locations : [],
+    };
     /** Named [{name, text}] parts — joined in push order; names feed the DEV size log only. */
     const namedParts = [];
     const parts = {
@@ -249,95 +273,105 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
 
     // ——— DYNAMIC STATE (changes turn to turn; nothing below is cacheable) ———
 
-    const lowLevelSafety = buildLowLevelSoloSafetyBlock(character, party);
-    if (lowLevelSafety) {
-        parts.push(lowLevelSafety, 'soloSafety');
+    // ONE judgement of the hero's state per build (2026-10-13 prompt-building
+    // P2): the solo-safety block, the STATUS line and the DM REMINDERS used to
+    // ask `isLowLevelSolo` twice and compose DYING / DEAD in two places.
+    const solo = !nudgeOnly && isLowLevelSolo(character, ctx.party);
+    const heroStatus = describeHeroStatus(character, combat);
+
+    if (solo) {
+        parts.push(buildLowLevelSoloSafetyBlock(character), 'soloSafety');
     }
 
-    // World tempo replaces the old always-visible fronts dossier (DECISIONS.md
-    // 2026-07-14): the DM sees pace guidance and, at most, ONE permitted
-    // symptom card — never clocks, portents, stages, or notes. Hiding beats
-    // instructing: what isn't in the prompt cannot leak or escalate.
-    const tempoBlock = buildWorldTempoBlock({
-        fronts: fronts || [],
-        worldTempo: worldTempo || null,
-        paceDial,
-        heat: computeRecentHeat({
-            messageCount: messageCount || 0,
-            messages: messages || null,
-            combat,
-            character,
-            recentEncounters: recentEncounters || [],
-            recentChecks: recentChecks || [],
+    if (!nudgeOnly) {
+        // World tempo replaces the old always-visible fronts dossier (DECISIONS.md
+        // 2026-07-14): the DM sees pace guidance and, at most, ONE permitted
+        // symptom card — never clocks, portents, stages, or notes. Hiding beats
+        // instructing: what isn't in the prompt cannot leak or escalate.
+        const tempoBlock = buildWorldTempoBlock({
+            fronts: ctx.fronts,
             worldTempo: worldTempo || null,
-        }),
-        recentEncounters: recentEncounters || [],
-        messageCount: messageCount || 0,
-        messages: messages || null,
-        combatActive: !!combat?.active,
-        solo: !!character && (!party || party.length === 0),
-    });
-    if (tempoBlock) {
-        parts.push(tempoBlock, 'worldTempo');
-    }
+            paceDial,
+            heat: computeRecentHeat({
+                messageCount: ctx.messageCount,
+                messages: ctx.messages,
+                combat,
+                character,
+                recentEncounters: recentEncounters || [],
+                recentChecks: recentChecks || [],
+                worldTempo: worldTempo || null,
+            }),
+            recentEncounters: recentEncounters || [],
+            messageCount: ctx.messageCount,
+            messages: ctx.messages,
+            combatActive: ctx.combatActive,
+            solo: !!character && ctx.party.length === 0,
+        });
+        if (tempoBlock) {
+            parts.push(tempoBlock, 'worldTempo');
+        }
 
-    // Living world (DECISIONS.md 2026-08-05): a long-absence return surfaces
-    // installed off-screen developments, and the hero's traveled deeds surface
-    // as distorted NPC hearsay. Both are private, windowed, and gated on the
-    // hero still being at the arrival place.
-    const awayBlock = buildWhileYouWereAwayBlock(absenceDrift, {
-        currentLocation,
-        locations: locations || [],
-        messages: messages || null,
-        messageCount: messageCount || 0,
-        // Render-time liveness + roster check (2026-09-08 living-world P2).
-        fronts: fronts || [],
-        npcs: npcs || [],
-    });
-    // NPC initiative (2026-09-13 overhaul): one bonded NPC may reach out on
-    // their own while their engine-rolled window is open; re-judged at render.
-    const beatBlock = buildRelationshipBeatBlock(relationshipBeat, npcs || [], {
-        messageCount: messageCount || 0,
-        combatActive: !!combat?.active,
-    });
-    if (beatBlock) {
-        parts.push(beatBlock, 'relationshipBeat');
-    }
-    if (awayBlock) {
-        parts.push(awayBlock, 'absenceDrift');
-    }
-    // The wonder die (2026-09-18): while the engine-rolled window is open, the
-    // DM must land ONE strange invitation on screen; re-judged at render.
-    const wonderBlock = buildWonderBlock(wonder, {
-        messageCount: messageCount || 0,
-        messages: messages || null,
-        combatActive: !!combat?.active,
-        fronts: fronts || [],
-    });
-    if (wonderBlock) {
-        parts.push(wonderBlock, 'wonder');
-    }
-    const hearsayBlock = buildRegionalHearsayBlock(regionalHearsay, {
-        currentLocation,
-        locations: locations || [],
-        messages: messages || null,
-        messageCount: messageCount || 0,
-    });
-    if (hearsayBlock) {
-        parts.push(hearsayBlock, 'regionalHearsay');
+        // Living world (DECISIONS.md 2026-08-05): a long-absence return surfaces
+        // installed off-screen developments, and the hero's traveled deeds surface
+        // as distorted NPC hearsay. Both are private, windowed, and gated on the
+        // hero still being at the arrival place.
+        const awayBlock = buildWhileYouWereAwayBlock(absenceDrift, {
+            currentLocation,
+            locations: ctx.locations,
+            messages: ctx.messages,
+            messageCount: ctx.messageCount,
+            // Render-time liveness + roster check (2026-09-08 living-world P2).
+            fronts: ctx.fronts,
+            npcs: ctx.npcs,
+        });
+        // NPC initiative (2026-09-13 overhaul): one bonded NPC may reach out on
+        // their own while their engine-rolled window is open; re-judged at render.
+        const beatBlock = buildRelationshipBeatBlock(relationshipBeat, ctx.npcs, {
+            messageCount: ctx.messageCount,
+            combatActive: ctx.combatActive,
+        });
+        if (beatBlock) {
+            parts.push(beatBlock, 'relationshipBeat');
+        }
+        if (awayBlock) {
+            parts.push(awayBlock, 'absenceDrift');
+        }
+        // The wonder die (2026-09-18): while the engine-rolled window is open, the
+        // DM must land ONE strange invitation on screen; re-judged at render.
+        const wonderBlock = buildWonderBlock(wonder, {
+            messageCount: ctx.messageCount,
+            messages: ctx.messages,
+            combatActive: ctx.combatActive,
+            fronts: ctx.fronts,
+        });
+        if (wonderBlock) {
+            parts.push(wonderBlock, 'wonder');
+        }
+        const hearsayBlock = buildRegionalHearsayBlock(regionalHearsay, {
+            currentLocation,
+            locations: ctx.locations,
+            messages: ctx.messages,
+            messageCount: ctx.messageCount,
+        });
+        if (hearsayBlock) {
+            parts.push(hearsayBlock, 'regionalHearsay');
+        }
     }
 
     // Character info
     if (character) {
-        parts.push(buildCharacterBlock(character, combat), 'character');
-        if (character.pendingActionSurge) {
+        parts.push(buildCharacterBlock(character, combat, heroStatus.line), 'character');
+        if (character.pendingActionSurge && !nudgeOnly) {
             parts.push(buildActionSurgeBlock(character), 'actionSurge');
         }
     }
 
-    // Party / Companions
-    if (party && party.length > 0) {
-        parts.push(buildPartyBlock(party, npcs || [], threadPool, { messages: Array.isArray(messages) ? messages : null, messageCount: messageCount || 0 }), 'party');
+    // Party / Companions. The intent call reads companion ids, HP, status and
+    // actions and nothing of the bond (2026-10-13 prompt-building P2: 8.5k of
+    // the intent call's 19.1k dynamic chars were bond prose the translation
+    // cannot use); the nudge reads none of it.
+    if (ctx.party.length > 0 && !nudgeOnly) {
+        parts.push(buildPartyBlock(ctx.party, ctx.npcs, threadPool, { messages: ctx.messages, messageCount: ctx.messageCount, mechanicsOnly: intentOnly }), 'party');
     }
 
     // Inventory
@@ -345,8 +379,8 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
         parts.push(buildInventoryBlock(inventory, character), 'inventory');
     }
 
-    // Active quests
-    if (quests && quests.length > 0 && !lean) {
+    // Active quests — the nudge's whole reason (update, never duplicate).
+    if (quests && quests.length > 0 && (!lean || nudgeOnly)) {
         const activeQuests = quests.filter(q => q.status === 'active');
         if (activeQuests.length > 0) {
             parts.push(buildQuestBlock(activeQuests), 'quests');
@@ -357,19 +391,19 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
     // Not in combat (2026-09-21 audit P2): the narration prompt's RESOLVED
     // EVENTS is the one carrier of an exchange's dice, and the intent call
     // needs none — the block only repeated engine internals there.
-    if (rollHistory && rollHistory.length > 0 && !combat?.active) {
+    if (rollHistory && rollHistory.length > 0 && !ctx.combatActive && !nudgeOnly) {
         parts.push(buildRecentRollsBlock(rollHistory.slice(-5)), 'recentRolls');
     }
 
     // Recent no-dice check rulings — table history the DM must not re-litigate.
-    if (recentRulings && recentRulings.length > 0 && !intentOnly) {
+    if (recentRulings && recentRulings.length > 0 && !intentOnly && !nudgeOnly) {
         parts.push(buildRecentRulingsBlock(recentRulings), 'recentRulings');
     }
 
     // Canonical world facts — these NEVER get compressed or forgotten
     const liveFacts = liveWorldFacts(worldFacts);
     if (liveFacts.length > 0 && !lean) {
-        parts.push(buildWorldFactsBlock(liveFacts, { messages: Array.isArray(messages) ? messages : null, messageCount: messageCount || 0 }), 'worldFacts');
+        parts.push(buildWorldFactsBlock(liveFacts, { messages: ctx.messages, messageCount: ctx.messageCount }), 'worldFacts');
     }
 
     // Session memory — journal entries and NPC tracker
@@ -377,81 +411,92 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
     // the same presence judgement RAG retrieval and callback curation make,
     // from the last narrative messages, so the person the hero is talking to
     // can never be ranked out of the block by richer dossiers elsewhere.
-    const rosterNames = (npcs || []).map(n => n?.name).filter(Boolean);
-    const presentNames = rosterNames.length > 0 && Array.isArray(messages) && messages.length > 0
-        ? findSubjectsInText(buildPresenceText(messages), rosterNames, 8)
+    const rosterNames = ctx.npcs.map(n => n?.name).filter(Boolean);
+    const presentNames = rosterNames.length > 0 && ctx.messages && ctx.messages.length > 0
+        ? findSubjectsInText(buildPresenceText(ctx.messages), rosterNames, 8)
         : null;
+    const partyNames = ctx.party.map(c => c?.name).filter(Boolean);
     // An empty journal skips SESSION HISTORY and LOCATION TRANSITION HISTORY
     // (both derive from it) while the place card and KNOWN NPCs still render.
-    const journalContext = intentOnly ? '' : buildJournalContext(narrationOnly ? [] : (journal || []), npcs || [], currentLocation, {
+    // A party companion is never a KNOWN NPCs line (2026-10-13 P2): their
+    // record renders ONCE, on their party line.
+    const journalContext = (intentOnly || nudgeOnly) ? '' : buildJournalContext(narrationOnly ? [] : (journal || []), ctx.npcs, currentLocation, {
         presentNames,
-        messages: Array.isArray(messages) ? messages : null,
+        partyNames,
+        messages: ctx.messages,
         storyMemory: threadPool,
-        locations: Array.isArray(locations) ? locations : [],
+        locations: ctx.locations,
     });
     if (journalContext) {
         parts.push(journalContext, 'journalAndNpcs');
     }
 
-    // Hero tells (WOW 2026-09-23): what the people IN THIS SCENE have noticed
-    // of the hero's manner — standing knowledge for the witnesses present
-    // (party companions are always present), plus the engine-rolled window
-    // in which one of them may say it out loud; both re-judged at render.
-    const sceneNames = [
-        ...(presentNames || []),
-        ...(Array.isArray(party) ? party.map(c => c?.name).filter(Boolean) : []),
-    ];
-    const tellsBlock = buildHeroTellsBlock(heroTells || [], {
-        presentNames: sceneNames,
-        messages: Array.isArray(messages) ? messages : null,
-        messageCount: messageCount || 0,
-        combatActive: !!combat?.active,
-    });
-    if (tellsBlock) {
-        parts.push(tellsBlock, 'heroTells');
-    }
-    const tellBeatBlock = buildHeroTellBeatBlock(heroTellBeat, heroTells || [], {
-        presentNames: sceneNames,
-        messages: Array.isArray(messages) ? messages : null,
-        messageCount: messageCount || 0,
-        combatActive: !!combat?.active,
-    });
-    if (tellBeatBlock) {
-        parts.push(tellBeatBlock, 'heroTellBeat');
-    }
+    if (!nudgeOnly) {
+        // Hero tells (WOW 2026-09-23): what the people IN THIS SCENE have noticed
+        // of the hero's manner — standing knowledge for the witnesses present
+        // (party companions are always present), plus the engine-rolled window
+        // in which one of them may say it out loud; both re-judged at render.
+        const sceneNames = [...(presentNames || []), ...partyNames];
+        const tellsBlock = buildHeroTellsBlock(heroTells || [], {
+            presentNames: sceneNames,
+            messages: ctx.messages,
+            messageCount: ctx.messageCount,
+            combatActive: ctx.combatActive,
+        });
+        if (tellsBlock) {
+            parts.push(tellsBlock, 'heroTells');
+        }
+        const tellBeatBlock = buildHeroTellBeatBlock(heroTellBeat, heroTells || [], {
+            presentNames: sceneNames,
+            messages: ctx.messages,
+            messageCount: ctx.messageCount,
+            combatActive: ctx.combatActive,
+        });
+        if (tellBeatBlock) {
+            parts.push(tellBeatBlock, 'heroTellBeat');
+        }
 
-    // Active constraints — synthesized DM reminders from world state and threats
-    const constraints = buildActiveConstraints(liveFacts, character, party, combat);
-    if (constraints) {
-        parts.push(constraints, 'dmReminders');
-    }
+        // Active constraints — synthesized DM reminders from world state and threats
+        const constraints = buildActiveConstraints(liveFacts, heroStatus.reminder, solo);
+        if (constraints) {
+            parts.push(constraints, 'dmReminders');
+        }
 
-    const storyMemoryBlock = buildStoryMemoryPromptBlock(storyMemory || []);
-    if (storyMemoryBlock) {
-        parts.push(storyMemoryBlock, 'storyMemory');
-    }
+        const storyMemoryBlock = buildStoryMemoryPromptBlock(storyMemory || []);
+        if (storyMemoryBlock) {
+            parts.push(storyMemoryBlock, 'storyMemory');
+        }
 
-    // RAG: retrieved memories most relevant to the current player action
-    const ragBlock = buildRetrievedMemoriesBlock(retrievedMemories);
-    if (ragBlock) {
-        parts.push(ragBlock, 'retrievedMemories');
-    }
+        // RAG: retrieved memories most relevant to the current player action
+        const ragBlock = buildRetrievedMemoriesBlock(retrievedMemories);
+        if (ragBlock) {
+            parts.push(ragBlock, 'retrievedMemories');
+        }
 
-    // "Remember when…" (WOW 2026-09-18): on a recall turn the engine's dossier
-    // of what ACTUALLY happened rides the tail, after the ambient memories, so
-    // the answer comes from the record and never from a plausible fabrication.
-    if (recallRecord && typeof recallRecord === 'string' && recallRecord.trim()) {
-        parts.push(recallRecord, 'recallRecord');
-    }
+        // "Remember when…" (WOW 2026-09-18): on a recall turn the engine's dossier
+        // of what ACTUALLY happened rides the tail, after the ambient memories, so
+        // the answer comes from the record and never from a plausible fabrication.
+        if (recallRecord && typeof recallRecord === 'string' && recallRecord.trim()) {
+            parts.push(recallRecord, 'recallRecord');
+        }
 
-    // Combat state
-    if (combat?.active) {
-        parts.push(buildCombatBlock(combat, character, { narrationOnly }), 'combat');
+        // Combat state
+        if (ctx.combatActive) {
+            parts.push(buildCombatBlock(combat, character, { narrationOnly }), 'combat');
+        }
     }
 
     // Tiny static tail: RESPONSE_FORMAT moved into the cached prefix, but the
     // trailing-JSON habit lives on recency — keep a short reminder last.
     parts.push(FORMAT_REMINDER, 'formatReminder');
+
+    // A lane's response MODE is the tail on that lane — AFTER the reminder, by
+    // design (2026-10-13): each mode states its own format contract (JSON
+    // only / no JSON at all), and the generic reminder's "prose first" must
+    // not be the last word over it. Same bytes the callers used to append.
+    if (mode && RESPONSE_MODES[mode]) {
+        parts.push(RESPONSE_MODES[mode], 'responseMode');
+    }
 
     return namedParts;
 }
@@ -868,27 +913,70 @@ function responseFormatFor(character) {
 const FORMAT_REMINDER = `## FINAL FORMAT REMINDER
 Follow the RESPONSE FORMAT contract above: immersive narrative prose first, then — whenever this turn carries events, requested rolls, or combat intent — exactly one fenced \`\`\`json event block as the very LAST thing in the response. Never narrate mechanics the engine owns, and never leave a required event out of the block.`;
 
-function buildCharacterBlock(character, combat = null) {
+/**
+ * The combat INTENT call's response mode (JSON only). It lived as a literal
+ * inside the orchestrator's `sendToLLM` until 2026-10-13; the table-talk and
+ * epilogue modes stay in `tableTalk.js` (that module owns the OOC lane) and
+ * are pushed by the same assembler through `RESPONSE_MODES`.
+ */
+export const COMBAT_INTENT_RESPONSE_MODE = `## CURRENT RESPONSE MODE — COMBAT INTENT ONLY
+Translate the player's committed action into the single bounded combat_exchange required by the live combat rules. Return ONLY the trailing fenced JSON event block: no narrative, setup, outcome, commentary, or prose outside the JSON. Keep descriptions brief. If the player names a spell from their available spell list, the cast slot MUST use exactly that spell — never substitute another. If they name magic outside their list, adapt it to the closest available option. The engine will resolve mechanics and make a separate narration-only request from the authoritative result.`;
+
+/** The response-mode parts by lane name — `buildSystemPromptParts({ mode })`. */
+export const RESPONSE_MODES = Object.freeze({
+    combatIntent: COMBAT_INTENT_RESPONSE_MODE,
+    tableTalk: TABLE_TALK_RESPONSE_MODE,
+    epilogue: EPILOGUE_RESPONSE_MODE,
+});
+
+/**
+ * The hero's STATE as the prompt tells it, composed ONCE (2026-10-13
+ * prompt-building P2): `line` is the STATUS bullet on PLAYER CHARACTER,
+ * `reminder` the DM REMINDERS restatement at the prompt's tail (a recency
+ * choice worth keeping — the TEXT is what wanted one composer, so the next
+ * channel change edits one place). DEFEATED has a line and no reminder.
+ * The death-save channel is combat-gated (2026-08-31 P2): mid-combat the
+ * save is a { "action": "death_save" } player slot in combat_exchange — the
+ * requested_rolls lane is REJECTED there; out of combat it is the only lane.
+ */
+export function describeHeroStatus(character, combat = null) {
+    if (!character || typeof character !== 'object') return { line: '', reminder: '' };
+    if (character.isDead) {
+        return {
+            line: '\n- **STATUS: DEAD** — the campaign is over. Only out-of-character table talk (an epilogue, a recap) remains; the hero never acts, speaks, or perceives again.',
+            reminder: 'THE HERO IS DEAD and this campaign has ended. Nothing new begins: no spirit, no successor, no next scene. Answer only out-of-character table talk — an epilogue of what became of the world, or a recap — and never narrate the hero acting.',
+        };
+    }
+    if (character.lowLevelDefeat) {
+        return {
+            line: '\n- **STATUS: DEFEATED** — unconscious or at the enemy\'s mercy at 0 HP. This is a non-lethal setback: do NOT request death saves or emit player_death. Narrate capture, subdual, loss, leverage, rescue, or an escape opening.',
+            reminder: '',
+        };
+    }
+    if (character.dying) {
+        const ds = character.deathSaves || { successes: 0, failures: 0 };
+        const tally = `${ds.successes}/3 successes, ${ds.failures}/3 failures`;
+        const inCombat = !!combat?.active;
+        const channel = inCombat
+            ? 'Declare { "action": "death_save" } as their only player slot in each combat_exchange.'
+            : 'Request { "type": "death_save" } as their roll each round.';
+        const reminderChannel = inCombat
+            ? 'Their only player slot is { "action": "death_save" } inside combat_exchange.'
+            : 'Request { "type": "death_save" } via requested_rolls each round.';
+        return {
+            line: `\n- **STATUS: DYING** — unconscious at 0 HP. Death saves: ${tally}. ${channel}`,
+            reminder: `THE PLAYER IS DYING — unconscious at 0 HP (death saves: ${tally}). ${reminderChannel} They cannot act, speak, or perceive.`,
+        };
+    }
+    return { line: '', reminder: '' };
+}
+
+function buildCharacterBlock(character, combat = null, deathStatus = '') {
     // The level-constant lines (race, class, stats, saves, skills, speed,
     // style, archetype, traits, features) render in the cached `## HERO
     // SHEET` block that ends the prefix (2026-09-26); this block is the LIVE
-    // half only — every line here can change between two turns.
-    let deathStatus = '';
-    if (character.isDead) {
-        deathStatus = '\n- **STATUS: DEAD** — the campaign is over. Only out-of-character table talk (an epilogue, a recap) remains; the hero never acts, speaks, or perceives again.';
-    } else if (character.lowLevelDefeat) {
-        deathStatus = '\n- **STATUS: DEFEATED** — unconscious or at the enemy\'s mercy at 0 HP. This is a non-lethal setback: do NOT request death saves or emit player_death. Narrate capture, subdual, loss, leverage, rescue, or an escape opening.';
-    } else if (character.dying) {
-        const ds = character.deathSaves || { successes: 0, failures: 0 };
-        // Channel is combat-gated (2026-08-31 P2): mid-combat, death saves are
-        // { "action": "death_save" } player slots in combat_exchange — the
-        // requested_rolls lane is REJECTED there; out of combat it is the only
-        // valid lane. Rendering both unconditionally contradicted itself.
-        const channel = combat?.active
-            ? 'Declare { "action": "death_save" } as their only player slot in each combat_exchange.'
-            : 'Request { "type": "death_save" } as their roll each round.';
-        deathStatus = `\n- **STATUS: DYING** — unconscious at 0 HP. Death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures. ${channel}`;
-    }
+    // half only — every line here can change between two turns. The STATUS
+    // line is `describeHeroStatus(...).line`, composed by the assembler.
 
     // Class resources status
     let resourceLines = '';
@@ -1010,7 +1098,13 @@ The player has already spent Action Surge. Their next declared action gets one a
 - The client clears this state only after both validated slots commit successfully.`;
 }
 
-function buildPartyBlock(party, npcs = [], storyMemory = [], { messages = null, messageCount } = {}) {
+/** The party line's look cap — the one field the party line renders that the bond composer does not. */
+const PARTY_LOOK_MAX = 300;
+
+/** Sentence-case a bond composer line ("between you now: …" → "Between you now: …"). */
+const sentenceCase = (line) => (line ? `${line[0].toUpperCase()}${line.slice(1)}` : line);
+
+function buildPartyBlock(party, npcs = [], storyMemory = [], { messages = null, messageCount, mechanicsOnly = false } = {}) {
     return `## COMPANIONS (PARTY)
 These characters are currently traveling with the player. They act in combat and can be conversed with.
 ${party.map(c => {
@@ -1019,42 +1113,30 @@ ${party.map(c => {
         const weaponBonus = c.weaponBonus || 0;
         const keepsakes = (c.keepsakes || []).length ? ` | Keepsakes from the hero: ${c.keepsakes.join('; ')}` : '';
         const line = `- **${c.name}** (id: ${c.id}) | Role: ${c.role || 'ally'} | Lvl: ${c.level} | HP: ${c.hp}/${c.maxHp} | AC: ${c.ac} | Attack: ${c.weapon || 'Unarmed'} ${formatModifier((c.attackBonus ?? 0) + weaponBonus)} (${c.damage || '1d4+1'}${weaponBonus ? `+${weaponBonus}` : ''}) | Status: ${status} | Affinity: ${c.affinity}/100${conditions}${keepsakes}`;
+        // The intent call translates ids and actions; the bond is not its
+        // business (2026-10-13 P2).
+        if (mechanicsOnly) return line;
         // The companion's personal bond with the hero lives in their roster NPC
-        // record ("one system owns all bonds") — surface it right on the party
-        // line so it never depends on KNOWN NPCs curation.
-        const dossier = npcs.find(npc => namesMatch(npc.name, c.name));
+        // record ("one system owns all bonds") — it renders HERE, once: a
+        // companion is never a KNOWN NPCs line (2026-10-13 P2: each present
+        // companion used to render twice, through two bond composers at two
+        // caps). The bond lines are `describeBondForPrompt`'s, sentence-cased.
+        const dossier = findCompanionRecord(npcs, c.name);
         const bond = [];
         // The companion's registered look rides the party line (2026-09-12) so
         // the DM's own prose keeps a bald, dark-skinned companion bald and
-        // dark-skinned even when KNOWN NPCs curation drops their record.
+        // dark-skinned.
         const look = resolveCompanionLook(c, npcs);
         const identity = [look.species, look.gender].filter(Boolean).join(' ');
         if (look.appearance || identity) {
-            bond.push(`  Looks${identity ? ` (${identity})` : ''}: ${(look.appearance || 'no recorded description').slice(0, 300)}`);
+            bond.push(`  Looks${identity ? ` (${identity})` : ''}: ${(look.appearance || 'no recorded description').slice(0, PARTY_LOOK_MAX)}`);
         }
-        // Where they stand + the live thread (2026-09-13 overhaul slice 1).
-        const stage = dossier ? describeStageForPrompt(dossier) : '';
-        if (stage) bond.push(`  Bond: ${stage}`);
-        const thread = dossier ? resolveOpenThread(dossier, storyMemory) : null;
-        if (thread) bond.push(`  Between you now: ${thread.text}`);
-        // A companion is rarely "away", but an open thread can still go stale.
-        const absence = dossier ? describeAbsence(dossier, { messages, messageCount }) : null;
-        if (absence) bond.push(`  Apart: ${absence.line}`);
-        if (dossier?.stanceToPlayer) {
-            bond.push(`  Toward the hero: ${String(dossier.stanceToPlayer).slice(0, 300)}`);
-        }
-        // Two tiers (2026-09-12): the key moments the companion's bond turns
-        // on, then what is recent — same shape as the KNOWN NPCs line.
-        const { key, recent } = splitBondMoments(dossier?.bondMoments);
-        if (key.length > 0) {
-            bond.push(`  Key moments with the hero: ${key.slice(-3).map(m => m.text).join('; ').slice(0, 300)}`);
-        }
-        const lately = [
-            ...listNpcImpressions(dossier, 'stanceToPlayer').slice(-2),
-            ...recent.slice(0, key.length > 0 ? 1 : 2).map(m => m.text),
-        ];
-        if (lately.length > 0) {
-            bond.push(`  Lately with the hero: ${lately.join('; ').slice(0, 300)}`);
+        if (dossier) {
+            const stance = briefNpcFieldForPrompt(dossier.stanceToPlayer, PARTY_LOOK_MAX);
+            if (stance) bond.push(`  Toward the hero: ${stance}`);
+            for (const bondLine of describeBondForPrompt(dossier, storyMemory, { messages, messageCount })) {
+                bond.push(`  ${sentenceCase(bondLine)}`);
+            }
         }
         return bond.length > 0 ? `${line}\n${bond.join('\n')}` : line;
     }).join('\n')}
@@ -1081,7 +1163,9 @@ function buildInventoryBlock(inventory, character) {
             // ONE AC read with the engine (2026-09-26 rules-math P2): the
             // annotation used to skip the magicBonus fallback getArmorClass
             // honors, so a non-catalog magic armor showed two numbers in one prompt.
-            if (i.baseAC && !isShieldItem(i)) {
+            // `isWornArmor` is the one armor read (2026-10-10 rule; the inline
+            // `baseAC && !shield` twin annotated a costume with a baseAC).
+            if (isWornArmor(i)) {
                 const armorAc = describeArmorAc(i);
                 if (armorAc !== null) desc += ` [AC ${armorAc}, ${i.armorType || 'unknown'} armor]`;
             }
@@ -1123,7 +1207,7 @@ function buildInventoryBlock(inventory, character) {
 const CARRIED_PROMPT_CAP = 25;
 
 function isMechanicalItem(i) {
-    return !!(i.damage || i.baseAC || isShieldItem(i) || i.type === 'consumable' || i.magicBonus);
+    return !!(i.damage || isWornArmor(i) || isShieldItem(i) || i.type === 'consumable' || i.magicBonus);
 }
 
 // Genuinely static (closes over nothing but the app's item catalog data), so
@@ -1150,13 +1234,15 @@ const QUEST_OVERFLOW_NAMES = 8;
 function buildQuestBlock(quests) {
     const shown = quests.slice(-QUEST_PROMPT_CAP);
     const omitted = quests.slice(0, quests.length - shown.length);
+    // Typed reads, never `String()` belts (2026-10-13 nit): the load
+    // sanitizer types every row, so a non-string here is no text at all.
     const clampDesc = (text) => {
-        const desc = String(text || 'No details');
+        const desc = textOr(text, 'No details');
         return desc.length > QUEST_DESC_PROMPT_MAX ? `${desc.slice(0, QUEST_DESC_PROMPT_MAX).trimEnd()}…` : desc;
     };
     // Names are clamped here too (2026-09-14 audit P2 belt): the load
     // sanitizer types them, but a 200k-char name rode the prompt in full.
-    const clampName = (name) => (typeof name === 'string' ? name : String(name ?? 'Untitled quest')).slice(0, QUEST_NAME_PROMPT_MAX);
+    const clampName = (name) => textOr(name, 'Untitled quest').slice(0, QUEST_NAME_PROMPT_MAX);
     const lines = shown.map(q => `- **${clampName(q.name)}** [id: ${q.id}]: ${clampDesc(q.description)}`).join('\n');
     // Omitted quests keep their names in view so the DM can still close them
     // (and never re-opens a duplicate) without paying for their descriptions.
@@ -1217,7 +1303,7 @@ function buildRecentRulingsBlock(recentRulings) {
     const rules = RULING_KINDS.filter(kind => kinds.has(kind)).map(kind => RULING_RULES[kind]);
     const lines = recentRulings.map(r => {
         const check = `${r.skill || 'check'}${r.dc != null ? ` DC ${r.dc}` : ''}`;
-        const challenge = String(r.challenge || '');
+        const challenge = cleanText(r.challenge);
         const shownChallenge = challenge.length > RULING_CHALLENGE_PROMPT_MAX
             ? `${challenge.slice(0, RULING_CHALLENGE_PROMPT_MAX).trimEnd()}…`
             : challenge;
@@ -1270,10 +1356,9 @@ function buildSpellbookBlock(character) {
 ${lines}`;
 }
 
-// "Solo" = no battle-ready companion (engine-owned isLowLevelSolo — DECISIONS.md 2026-07-17).
-function buildLowLevelSoloSafetyBlock(character, party) {
-    if (!isLowLevelSolo(character, party)) return '';
-
+// "Solo" = no battle-ready companion (engine-owned isLowLevelSolo — DECISIONS.md
+// 2026-07-17). The assembler judges it ONCE and calls this only when it holds.
+function buildLowLevelSoloSafetyBlock(character) {
     const level = character.level ?? 1;
     const budget = level <= 1
         ? 'Level 1 solo budget: at most one standard weak foe, or two fragile foes that can be split, delayed, bluffed, avoided, or made to hesitate. A named major NPC plus guards is NOT a fair level-1 fight.'
@@ -1292,11 +1377,25 @@ This overrides CUSTOM DM INSTRUCTIONS, tone presets, and any "brutal/no hand-hol
 /** Max world facts to inject directly into the prompt. Older facts are still in RAG. */
 const MAX_PROMPT_WORLD_FACTS = 15;
 
+/**
+ * Newest fact first on the CONVERSATIONAL clock (2026-10-13 nit): every fact
+ * is born with `atMessage` (2026-09-30) and `describeStateTag` on the same
+ * line reads it, while the two sort sites read the wall-clock `timestamp`.
+ * One comparator: `atMessage` decides, the wall clock breaks a tie and orders
+ * the legacy rows that have none.
+ */
+function compareFactRecency(a, b) {
+    const atA = Number.isFinite(a?.atMessage) ? a.atMessage : -1;
+    const atB = Number.isFinite(b?.atMessage) ? b.atMessage : -1;
+    if (atB !== atA) return atB - atA;
+    return (Number.isFinite(b?.timestamp) ? b.timestamp : 0) - (Number.isFinite(a?.timestamp) ? a.timestamp : 0);
+}
+
 function buildWorldFactsBlock(worldFacts, { messages = null, messageCount } = {}) {
     if (!worldFacts || worldFacts.length === 0) return '';
 
-    // Sort by timestamp descending (most recent first), take the most recent N
-    const sorted = [...worldFacts].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    // Newest first, take the most recent N
+    const sorted = [...worldFacts].sort(compareFactRecency);
     const shown = sorted.slice(0, MAX_PROMPT_WORLD_FACTS);
     const hiddenCount = Math.max(0, worldFacts.length - MAX_PROMPT_WORLD_FACTS);
 
@@ -1312,7 +1411,7 @@ function buildWorldFactsBlock(worldFacts, { messages = null, messageCount } = {}
         // so the DM judges whether it still holds — never expired by the engine.
         // An intent is not a deed (2026-10-07): a plan carries its age the same
         // way and reads "planned", so a scheme never hardens into history.
-        byCategory[cat].push(`${describeStateTag(f, { messages, messageCount })}${formatSecrecyTag(f.knownBy)}${String(f.fact ?? '')}`);
+        byCategory[cat].push(`${describeStateTag(f, { messages, messageCount })}${formatSecrecyTag(f.knownBy)}${cleanText(f.fact)}`);
     }
     const lines = Object.entries(byCategory)
         .map(([cat, facts]) => `**[${cat.toUpperCase()}]**\n${facts.map(f => `- ${f}`).join('\n')}`)
@@ -1330,7 +1429,7 @@ function buildWorldFactsBlock(worldFacts, { messages = null, messageCount } = {}
  * Highlights active threats, deadlines, and relationship pressures
  * so the DM can't forget them even in a long session.
  */
-function buildActiveConstraints(worldFacts, character, party, combat = null) {
+function buildActiveConstraints(worldFacts, heroReminder = '', solo = false) {
     const reminders = [];
     // (Active quests are NOT re-listed here — the ACTIVE QUESTS block a few
     // hundred lines up already carries them; the duplicate name list was pure
@@ -1346,27 +1445,21 @@ function buildActiveConstraints(worldFacts, character, party, combat = null) {
     const THREAT_REMINDER_CHARS = 200;
     const threatKeywords = ['hunting', 'pursuing', 'wants the player dead', 'deadline', 'bounty', 'wanted'];
     const threatFacts = (worldFacts || [])
-        .filter(f => threatKeywords.some(kw => String(f?.fact ?? '').toLowerCase().includes(kw)))
-        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        .map(f => ({ ...f, fact: cleanText(f?.fact) }))
+        .filter(f => threatKeywords.some(kw => f.fact.toLowerCase().includes(kw)))
+        .sort(compareFactRecency)
         .slice(0, MAX_THREAT_REMINDERS);
     if (threatFacts.length > 0) {
-        reminders.push(`Active threats/pressures:\n${threatFacts.map(f => `- ${String(f.fact).slice(0, THREAT_REMINDER_CHARS)}`).join('\n')}`);
+        reminders.push(`Active threats/pressures:\n${threatFacts.map(f => `- ${f.fact.slice(0, THREAT_REMINDER_CHARS)}`).join('\n')}`);
     }
 
-    // Character death reminder
-    if (character?.isDead) {
-        reminders.push(`THE HERO IS DEAD and this campaign has ended. Nothing new begins: no spirit, no successor, no next scene. Answer only out-of-character table talk — an epilogue of what became of the world, or a recap — and never narrate the hero acting.`);
-    } else if (character?.dying) {
-        const ds = character.deathSaves || { successes: 0, failures: 0 };
-        // Combat-gated to match the character block (2026-08-31 P2): exactly
-        // one death-save channel is valid per state.
-        const channel = combat?.active
-            ? 'Their only player slot is { "action": "death_save" } inside combat_exchange.'
-            : 'Request { "type": "death_save" } via requested_rolls each round.';
-        reminders.push(`THE PLAYER IS DYING — unconscious at 0 HP (death saves: ${ds.successes}/3 successes, ${ds.failures}/3 failures). ${channel} They cannot act, speak, or perceive.`);
+    // The hero's state, restated at the tail — `describeHeroStatus(...).reminder`
+    // (DEAD / DYING with the combat-gated channel; the assembler composed it).
+    if (heroReminder) {
+        reminders.push(heroReminder);
     }
 
-    if (isLowLevelSolo(character, party)) {
+    if (solo) {
         reminders.push(`Low-level solo safety is active: follow the HARD SYSTEM CONSTRAINT above. Keep danger gritty, but avoid unwinnable forced fights and use non-lethal defeat at 0 HP.`);
     }
 

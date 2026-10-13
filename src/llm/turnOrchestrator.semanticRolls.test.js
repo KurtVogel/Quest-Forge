@@ -89,7 +89,7 @@ describe('turn runner — semantic text-roll merge', () => {
             streamMessage: scriptedStream(['Recap: you are at the ford. Maybe roll Perception sometime.']),
         });
 
-        await runner.sendToLLM('DM, recap please.', 'DM, recap please.', { tableTalk: true });
+        await runner.sendToLLM('DM, recap please.', 'DM, recap please.', { lane: 'tableTalk' });
 
         expect(detectMock).not.toHaveBeenCalled();
     });

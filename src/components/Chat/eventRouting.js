@@ -63,13 +63,19 @@ export function extractProposalLoot(events) {
  *
  * @param {object|null} events - normalized events from parseResponse (with the
  *   underscore-prefixed orchestration flags ChatPanel stamps on them).
- * @param {object} opts
- * @param {boolean} opts.combatWasActive - combat.active when the response landed.
+ * @param {object} [opts]
+ * @param {boolean} [opts.combatWasActive] - combat.active when the call was
+ *   made. Defaults to the turn's own ENTRY flag (`turnFlags(events)
+ *   .combatWasActive`, stamped by the orchestrator — 2026-10-13 P2): the
+ *   component used to re-read its lagging ref after the dispatches.
  * @returns {{ route: string, combatIntentHandled: boolean, reason?: string, proposalLoot?: object|null }}
  *   `reason` is the player-facing rejection reason for REJECT_COMBAT_EXCHANGE
  *   routes; `combatIntentHandled` tells a combat-intent turn whether to CANCEL.
  */
-export function routeTurnEvents(events, { combatWasActive = false } = {}) {
+export function routeTurnEvents(events, opts = {}) {
+    const combatWasActive = typeof opts.combatWasActive === 'boolean'
+        ? opts.combatWasActive
+        : !!turnFlags(events).combatWasActive;
     const combatStartedNow = !!events?.combatStart;
     if (events?.combatExchangeRejected) {
         return {

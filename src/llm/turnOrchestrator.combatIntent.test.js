@@ -80,7 +80,7 @@ describe('turn runner — combat-intent RAG skip', () => {
         });
         const { runner } = createHarness({ streamMessage, combatActive: true });
 
-        await runner.sendToLLM('I attack the goblin.', 'I attack the goblin.', { combatIntentOnly: true });
+        await runner.sendToLLM('I attack the goblin.', 'I attack the goblin.', { lane: 'combatIntent' });
 
         expect(streamMessage).toHaveBeenCalledTimes(1);
         expect(retrieveRelevantMock).not.toHaveBeenCalled();
@@ -116,7 +116,7 @@ describe('turn runner — empty combat-intent messages (queue 2026-08-09, playte
         });
         const { runner, getState } = createHarness({ streamMessage, combatActive: true });
 
-        const events = await runner.sendToLLM('I attack the goblin.', 'I attack the goblin.', { combatIntentOnly: true });
+        const events = await runner.sendToLLM('I attack the goblin.', 'I attack the goblin.', { lane: 'combatIntent' });
 
         expect(events).toBeTruthy(); // events still flow to the caller for routing
         expect(getState().messages.filter(m => m.role === 'assistant')).toHaveLength(0);
@@ -131,7 +131,7 @@ describe('turn runner — empty combat-intent messages (queue 2026-08-09, playte
         });
         const { runner, getState } = createHarness({ streamMessage, combatActive: true });
 
-        await runner.sendToLLM('I attack the goblin.', 'I attack the goblin.', { combatIntentOnly: true });
+        await runner.sendToLLM('I attack the goblin.', 'I attack the goblin.', { lane: 'combatIntent' });
 
         const assistants = getState().messages.filter(m => m.role === 'assistant');
         expect(assistants).toHaveLength(1);

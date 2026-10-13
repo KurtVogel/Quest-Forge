@@ -15,6 +15,9 @@
  * - playerAuthorityRollRejected — every proposed roll was a player-authority override
  * - preNarratedOutcome — the setup narrated the result before the dice
  * - setupMessageId / setupHidden — the committed setup row and whether it was withheld
+ * - combatWasActive — the ENTRY combat flag the call read (2026-10-13): the
+ *   caller routes the events against it, never against a ref re-read after
+ *   the dispatches
  */
 
 const EMPTY = Object.freeze({});

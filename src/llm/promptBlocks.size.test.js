@@ -129,7 +129,7 @@ const PREFIX_END = 'heroSheet'; // the last per-campaign constant block (2026-09
  */
 const DYNAMIC_CEILINGS = {
     character: 1500,       // 1,108
-    party: 13000,          // 11,796 — four companions, every bond field at its cap
+    party: 12500,          // 11,156 — four companions, every bond field at its cap (one bond composer since 2026-10-13)
     inventory: 3000,       // 2,551 — 60 rows, names + values only
     quests: 7500,          // 6,554 — the block's own row cap + the 8-name overflow tail
     recentRolls: 1000,     // 744
@@ -203,9 +203,26 @@ describe('prompt blocks — per-block ceilings, prefix stability, per-call-type 
         expect(intent).toBeLessThan(ordinary * 0.35);
         expect(narration).toBeLessThan(ordinary * 0.6);
         expect(intent).toBeLessThan(narration);
-        // Ceilings for the two combat calls (measured 2026-09-30, ~10 % headroom).
-        expect(intent).toBeLessThan(30000);
+        // Ceilings for the two combat calls (measured 2026-09-30, ~10 % headroom;
+        // the intent call re-measured 2026-10-13 at 12,370 once its party line
+        // went mechanics-only — 8.5k of bond prose off every round).
+        expect(intent).toBeLessThan(14000);
         expect(narration).toBeLessThan(45000);
+    });
+
+    // 2026-10-13 chat-orchestration P2: the missing-events nudge used to build
+    // the ORDINARY prompt (82.5k dynamic chars on this fixture) for a reply
+    // whitelisted to quest_updates / starting_items. Its projection is the
+    // character line, INVENTORY and ACTIVE QUESTS — measured 10,568.
+    it('the nudge lane\'s dynamic half is the character line, the inventory and the quests', () => {
+        const parts = build(stateA, { nudgeOnly: true, storyMemory: [], retrievedMemories: [] });
+        const names = parts.map(p => p.name);
+        expect(names.slice(names.indexOf(PREFIX_END) + 1)).toEqual(['character', 'inventory', 'quests', 'formatReminder']);
+        const dynamic = parts.slice(names.indexOf(PREFIX_END) + 1).reduce((n, p) => n + p.text.length, 0);
+        expect(dynamic).toBeLessThan(12000);
+        // The prefix is the same bytes as the ordinary turn's — the cache holds.
+        const prefixOf = (list) => list.slice(0, list.findIndex(p => p.name === PREFIX_END) + 1).map(p => p.text).join('\n\n');
+        expect(prefixOf(parts)).toBe(prefixOf(partsA));
     });
 
     // 2026-10-02 progression Lap-3: the prefix-stability pin above varies LIVE

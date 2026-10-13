@@ -177,3 +177,13 @@ describe('attack-as-check route (Codex 2026-08-09)', () => {
         expect(routed.route).toBe(TURN_ROUTES.ROLL_PROPOSAL);
     });
 });
+
+describe('routeTurnEvents reads the turn\'s ENTRY combat flag by default (2026-10-13 chat-orchestration P2)', () => {
+    it('in-combat rolls are rejected from the flag alone; a caller-passed flag still wins', () => {
+        const events = { requestedRolls: [{ type: 'attack' }], turn: { combatWasActive: true } };
+        expect(routeTurnEvents(events).route).toBe(TURN_ROUTES.IN_COMBAT_ROLLS_REJECTED);
+        expect(routeTurnEvents(events, { combatWasActive: false }).route).toBe(TURN_ROUTES.ROLL_PROPOSAL);
+        expect(routeTurnEvents({ requestedRolls: [{ type: 'attack' }] }).route).toBe(TURN_ROUTES.ROLL_PROPOSAL);
+        expect(routeTurnEvents(null).route).toBe(TURN_ROUTES.NARRATIVE);
+    });
+});

@@ -399,17 +399,15 @@ export async function handleRequestedRolls(requestedRolls, {
         // A follow-up response is itself a withheld setup, so any declared loot is still
         // unapplied — carry the pending-loot reminder until a roll-free outcome lands.
         if (followUpEvents?.requestedRolls?.length > 0) {
-            // The follow-up response is itself a withheld setup when hidden — carry
-            // its narration forward so chained checks can't erase fiction either.
-            const followUp = turnFlags(followUpEvents);
-            const followUpSetup = followUp.setupHidden ? followUpNarrative : '';
+            // The follow-up response's own events and narration ride to the
+            // runner's `stageRoleplayCheck`, which states the carry rule ONCE
+            // (2026-10-13): a withheld follow-up is the re-staged setup.
             if (onFollowUpRolls) {
                 onFollowUpRolls(followUpEvents.requestedRolls, {
                     playerAction,
-                    preNarrated: followUp.preNarratedOutcome || false,
+                    events: followUpEvents,
+                    narrative: followUpNarrative,
                     pendingLoot,
-                    setupNarrative: followUpSetup,
-                    setupMessageId: followUp.setupHidden ? followUp.setupMessageId : null,
                 });
             } else {
                 // Follow-up rolls always re-stage as a fresh proposal via the

@@ -7,6 +7,7 @@ import { COMBAT_PHASES } from '../../engine/combatPredicates.js';
 import { planCombatExchange, planOpeningExchange } from '../../engine/combatExchange.js';
 import { describeFightCost, describeFightResonance } from '../../engine/fightTally.js';
 import { combatNarrationPrompt } from '../../llm/combatNarration.js';
+import { buildCastNarrationPrompt, buildCueNarrationPrompt } from '../../llm/engineNarration.js';
 import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildScribeContext, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
 import { EPILOGUE_REQUEST_MESSAGE, isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
@@ -294,7 +295,7 @@ export default function ChatPanel() {
 
         // The authored premise and live starting inventory are already in the system
         // prompt. The one-time opening also reconciles explicit premise possessions.
-        runner.sendToLLM(buildCampaignOpeningPrompt(), null, { openingScene: true })
+        runner.sendToLLM(buildCampaignOpeningPrompt(), null, { lane: 'opening' })
             .then(() => {
                 // The committed-turn record, never a state read: stateRef has not
                 // re-rendered yet in this task (live playtest #6's stale-Scribe root
@@ -462,24 +463,11 @@ export default function ChatPanel() {
         if (!cueMessage) return;
 
         narratedCueIdsRef.current.add(cueMessage.id);
-        const cue = cueMessage.narrationCue;
-        const combatLine = s.combat?.active
-            ? 'Combat is active; do not advance enemy turns, request rolls, or resolve any enemy actions.'
-            : 'Do not advance time or introduce a new challenge.';
-        const narrationRequest = [
-            '[SYSTEM: The engine just resolved a player-triggered mechanic. Narrate only the felt fictional beat.',
-            'Write one short paragraph maximum, usually one or two sentences.',
-            'Do not mention JSON, UI, numbers, dice, HP totals, resources, or system messages.',
-            'Do not apply healing, spend resources, request rolls, add items, alter combat, or emit JSON.',
-            combatLine,
-            'Do not end with "What do you do?" unless the scene genuinely needs a prompt.',
-            `Mechanic: ${cue.mechanic}. Action type: ${cue.actionType || 'action'}. Effect: ${cue.effect}.`,
-            `System result to interpret fictionally: ${cueMessage.content}]`,
-        ].join(' ');
+        const narrationRequest = buildCueNarrationPrompt(cueMessage.narrationCue, cueMessage.content, { combatActive: !!s.combat?.active });
 
         setIsLoading(true);
         clearStreamingDisplay();
-        runner.sendToLLM(narrationRequest, null, { narrationOnly: true })
+        runner.sendToLLM(narrationRequest, null, { lane: 'narration' })
             .catch(error => {
                 if (error.name !== 'AbortError') {
                     dispatch({
@@ -586,8 +574,7 @@ export default function ChatPanel() {
         clearStreamingDisplay();
         setLoadingStatus('Narrating combat outcome');
         runner.sendToLLM(narrationPrompt, null, {
-            narrationOnly: true,
-            combatNarration: true,
+            lane: 'combatNarration',
             onNarrative: text => { narrative = text; },
         })
             .then(() => {
@@ -741,15 +728,16 @@ export default function ChatPanel() {
         try {
             let dmNarrative = '';
             const events = await runner.sendToLLM(trimmed, trimmed, {
-                combatIntentOnly: startedCombatIntent,
-                tableTalk: tableTalkTurn,
+                lane: startedCombatIntent ? 'combatIntent' : (tableTalkTurn ? 'tableTalk' : 'standard'),
                 onNarrative: text => { dmNarrative = text; },
             });
 
             const combatStartedNow = !!events?.combatStart;
             // The routing decision is pure and unit-tested in eventRouting.js;
-            // this switch only executes the chosen route's side effects.
-            const routed = routeTurnEvents(events, { combatWasActive: stateRef.current.combat?.active });
+            // this switch only executes the chosen route's side effects. It
+            // reads the turn's own ENTRY combat flag (turnFlags) — never the
+            // lagging ref after the dispatches (2026-10-13 P2).
+            const routed = routeTurnEvents(events);
             const combatIntentHandled = routed.combatIntentHandled;
             if (routed.route === TURN_ROUTES.COMBAT_REJECTED
                 || routed.route === TURN_ROUTES.IN_COMBAT_ROLLS_REJECTED) {
@@ -769,10 +757,9 @@ export default function ChatPanel() {
                 // the post-roll outcome, or revealed if the player changes approach.
                 // Prose-detected checks stay visible, so they carry no setup payload.
                 runner.stageRoleplayCheck(events.requestedRolls, trimmed, {
-                    preNarrated: turnFlags(events).preNarratedOutcome,
+                    events,
+                    narrative: dmNarrative,
                     loot: routed.proposalLoot,
-                    setupNarrative: turnFlags(events).setupHidden ? dmNarrative : '',
-                    setupMessageId: turnFlags(events).setupHidden ? turnFlags(events).setupMessageId : null,
                 });
             } else if (routed.route === TURN_ROUTES.ATTACK_AS_CHECK) {
                 await runner.sendRollCorrection({ attackAsCheck: true, playerAction: trimmed });
@@ -787,24 +774,11 @@ export default function ChatPanel() {
             if (needsSpellCastNarration(events, {
                 dmNarrative,
                 combatIntentHandled,
-                combatActive: stateRef.current.combat?.active,
+                // The turn's ENTRY flag, never the lagging ref (2026-10-13 P2).
+                combatActive: !!turnFlags(events).combatWasActive,
             })) {
-                // Derived from the turn's own events, never a same-task state
-                // read: the reducer's "casts X" system lines have not rendered
-                // into stateRef yet in this task (queue 2026-08-08 — the fixed
-                // stale-Scribe bug's sibling), and the narration prompt forbids
-                // repeating numbers anyway, so spell + target is the whole cue.
-                const castResults = events.spellCasts
-                    .map(cast => `The hero casts ${cast.spell}${cast.target && !/^self$/i.test(cast.target) ? ` on ${cast.target}` : ''}.`)
-                    .join(' ');
-                const castNarrationRequest = [
-                    '[SYSTEM: Your previous response declared a spell casting but contained no prose — the player saw nothing.',
-                    'The engine has already resolved the mechanics; do not emit spell_cast again or any JSON.',
-                    'Narrate the casting and what the magic does, reveals, opens, or aids, in 1-3 short paragraphs, unvarnished, continuing the same scene.',
-                    'Do not state healing numbers or slot counts; the system line already reported them.',
-                    castResults ? `Engine result to interpret fictionally: ${castResults}]` : ']',
-                ].join(' ');
-                await runner.sendToLLM(castNarrationRequest, null, { narrationOnly: true });
+                // The prompt is derived from the turn's own events (llm/engineNarration.js).
+                await runner.sendToLLM(buildCastNarrationPrompt(events.spellCasts), null, { lane: 'narration' });
             }
 
             // Extract world-state from the FINAL narrated outcome (where the real facts

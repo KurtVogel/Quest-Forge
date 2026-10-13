@@ -128,8 +128,7 @@ describe('challengeRoleplayCheck — Stop mid-reconsideration (always pre-dice)'
             streamMessage: vi.fn(async () => { throw abortError(); }),
         });
         runner.stageRoleplayCheck(CHECK, 'I sneak in.', {
-            setupNarrative: 'You edge toward the postern gate…',
-            setupMessageId: 'msg-hidden-setup',
+            setupFrom: { setupNarrative: 'You edge toward the postern gate…', setupMessageId: 'msg-hidden-setup' },
         });
         const staged = getState().pendingRoleplayCheck;
         expect(staged).toBeTruthy();

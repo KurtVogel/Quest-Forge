@@ -1419,9 +1419,26 @@ function meaningfulNameTokens(name) {
  * from nothing, and came back as a different person every time. The roster
  * record is the living canon and wins; the party record is the fallback.
  */
+/**
+ * THE roster record a party companion's name resolves to (2026-10-13): the
+ * exact (case-folded) name when one exists, else the first short/long-form
+ * match through `namesMatch`. The party line, the companion look and the
+ * KNOWN NPCs exclusion all read this one rule, so the record the party line
+ * renders is exactly the record KNOWN NPCs leaves out.
+ */
+export function findCompanionRecord(npcs, name) {
+    const wanted = typeof name === 'string' ? name.trim() : '';
+    if (!wanted) return null;
+    const roster = Array.isArray(npcs) ? npcs : [];
+    const folded = wanted.toLowerCase();
+    return roster.find(npc => typeof npc?.name === 'string' && npc.name.trim().toLowerCase() === folded)
+        || roster.find(npc => namesMatch(npc?.name, wanted))
+        || null;
+}
+
 export function resolveCompanionLook(companion, npcs = []) {
     const name = String(companion?.name || '').trim();
-    const dossier = name ? (Array.isArray(npcs) ? npcs : []).find(npc => namesMatch(npc?.name, name)) : null;
+    const dossier = findCompanionRecord(npcs, name);
     const pick = field => {
         const fromRoster = typeof dossier?.[field] === 'string' ? dossier[field].trim() : '';
         const fromParty = typeof companion?.[field] === 'string' ? companion[field].trim() : '';

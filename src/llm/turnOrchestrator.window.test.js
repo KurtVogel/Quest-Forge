@@ -112,7 +112,7 @@ function createHarness({ lagging = true, replies = [], state: initial = baseStat
 /** ChatPanel.submitPlayerMessage's ordinary route, in its order. */
 async function playTurn(h, line, { tableTalk = false } = {}) {
     h.dispatch({ type: 'ADD_MESSAGE', payload: { role: 'user', content: line } });
-    await h.runner.sendToLLM(line, line, { tableTalk });
+    await h.runner.sendToLLM(line, line, { lane: tableTalk ? 'tableTalk' : 'standard' });
     if (!tableTalk) h.runner.runPostTurnExtraction(line);
     await h.runner.runAutoSummarize();
     await flushMemoryQueue();
@@ -194,8 +194,8 @@ describe('the player\'s line reaches the provider ONCE (2026-10-01 chat-orchestr
         h.dispatch({ type: 'ADD_MESSAGE', payload: { role: 'user', content: action } });
         const events = await h.runner.sendToLLM(action, action);
         h.runner.stageRoleplayCheck(events.requestedRolls, action, {
-            setupNarrative: h.runner.getLastCommittedTurn().content,
-            setupMessageId: events.turn.setupMessageId,
+            events,
+            narrative: h.runner.getLastCommittedTurn().content,
         });
         await settle();
 
@@ -230,7 +230,7 @@ describe('the engine-prompt lanes keep the whole transcript', () => {
         const h = fightHarness(['```json\n{"combat_exchange": {"player_slots": [{"action": "attack", "strikes": [{"target": "Marsh bandit"}]}], "enemy_intents": []}}\n```']);
         const line = 'I cut at the nearest bandit.';
         h.dispatch({ type: 'ADD_MESSAGE', payload: { role: 'user', content: line } });
-        await h.runner.sendToLLM(line, line, { combatIntentOnly: true });
+        await h.runner.sendToLLM(line, line, { lane: 'combatIntent' });
 
         const call = h.calls[0];
         expect(call.userMessage).toBe(line);
@@ -245,7 +245,7 @@ describe('the engine-prompt lanes keep the whole transcript', () => {
         h.dispatch({ type: 'ADD_MESSAGE', payload: { role: 'user', content: line } });
         await settle();
         const prompt = '[SYSTEM: narrate the resolved exchange.]';
-        await h.runner.sendToLLM(prompt, null, { narrationOnly: true, combatNarration: true });
+        await h.runner.sendToLLM(prompt, null, { lane: 'combatNarration' });
 
         const call = h.calls[0];
         expect(call.userMessage).toBe(prompt);

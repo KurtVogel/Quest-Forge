@@ -78,8 +78,8 @@ describe('turn runner — a combat round is two DM stream calls, each with its o
         const sendMessage = vi.fn(async () => '');
         const { runner, getState } = createHarness({ streamMessage, sendMessage });
 
-        await runner.sendToLLM('I attack the goblin.', 'I attack the goblin.', { combatIntentOnly: true });
-        await runner.sendToLLM('[SYSTEM: Combat exchange exchange-1 has already been resolved completely by the engine. RESOLVED EVENTS: **Testa attacks Goblin** — Rolled **17** vs AC 13; **Hit for 8 damage.**]', null, { narrationOnly: true, combatNarration: true });
+        await runner.sendToLLM('I attack the goblin.', 'I attack the goblin.', { lane: 'combatIntent' });
+        await runner.sendToLLM('[SYSTEM: Combat exchange exchange-1 has already been resolved completely by the engine. RESOLVED EVENTS: **Testa attacks Goblin** — Rolled **17** vs AC 13; **Hit for 8 damage.**]', null, { lane: 'combatNarration' });
 
         expect(streamMessage).toHaveBeenCalledTimes(2);
         expect(sendMessage).not.toHaveBeenCalled();
@@ -119,7 +119,7 @@ describe('turn runner — a combat round is two DM stream calls, each with its o
         });
         const { runner } = createHarness({ streamMessage });
 
-        await runner.sendToLLM('[SYSTEM: narrate the cast.]', null, { narrationOnly: true });
+        await runner.sendToLLM('[SYSTEM: narrate the cast.]', null, { lane: 'narration' });
 
         const [prompt] = streamMessage.mock.calls.map(call => call[0].systemPrompt);
         for (const heading of SKIPPED_ON_NARRATION) expect(prompt).toContain(heading);

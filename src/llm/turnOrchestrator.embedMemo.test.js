@@ -108,8 +108,8 @@ describe('check turn query embeds (2026-09-22 roll-resolution P2)', () => {
         const events = await runner.sendToLLM(ACTION, ACTION);
         expect(events.requestedRolls).toHaveLength(1);
         runner.stageRoleplayCheck(events.requestedRolls, ACTION, {
-            setupNarrative: runner.getLastCommittedTurn().content,
-            setupMessageId: events.turn.setupMessageId,
+            events,
+            narrative: runner.getLastCommittedTurn().content,
         });
         expect(queryEmbeds()).toHaveLength(1);
 
