@@ -235,16 +235,22 @@ function attachCapture(page) {
                         reqModel = body.model || '';
                     }
                     const requestedModel = reqModel;
-                    const isMachinery = isGemini && reqModel === APP_MACHINERY_MODEL;
-                    // The arm: the app's constant rides in the URL, so the harness swaps it here.
-                    if (isMachinery && MACHINERY_MODEL !== APP_MACHINERY_MODEL) {
-                        url = url.replace(`/models/${APP_MACHINERY_MODEL}:`, `/models/${MACHINERY_MODEL}:`);
-                        reqModel = MACHINERY_MODEL;
-                    }
                     const lane = laneOf(sys, url);
                     // The DM prompt carries the cached prefix; a background director on the DM model does not.
                     const isDmPrompt = /## CRITICAL RULES|## PLAYER CHARACTER/.test(sys);
-                    const kind = lane === 'embed' ? 'embed' : (!isMachinery && reqModel === DM.model && isDmPrompt) ? 'dm' : (!isMachinery && reqModel === DM.model) ? 'director' : 'machinery';
+                    // The DM and the machinery are the SAME model since 2026-10-13
+                    // (3.8 Flash both), so a call is classified by its PROMPT, never
+                    // by its model id: a DM prompt is the DM, a known machinery lane
+                    // is machinery, anything else on the DM model is a director. The
+                    // model-id rule tagged every DM call "machinery" on the first
+                    // Flash smoke (0 DM calls, every evidence cell "missing").
+                    const isMachinery = isGemini && !isDmPrompt && (lane !== 'other' || reqModel !== DM.model);
+                    // The arm: the app's constant rides in the URL, so the harness swaps it here.
+                    if (isMachinery && reqModel === APP_MACHINERY_MODEL && MACHINERY_MODEL !== APP_MACHINERY_MODEL) {
+                        url = url.replace(`/models/${APP_MACHINERY_MODEL}:`, `/models/${MACHINERY_MODEL}:`);
+                        reqModel = MACHINERY_MODEL;
+                    }
+                    const kind = lane === 'embed' ? 'embed' : isDmPrompt ? 'dm' : isMachinery ? 'machinery' : 'director';
                     let embedDims = null;
                     if (lane === 'embed') {
                         const reqs = body.requests || [body];
