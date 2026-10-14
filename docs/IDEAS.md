@@ -3451,3 +3451,22 @@ nudge (two whitelisted channels) carries the ORDINARY prompt's 82.5k-char dynami
 09-30 `intentOnly` treatment. Payoff: ~2k tokens off every combat round, ~15k off every nudge, one fewer
 composer per record, one name per lane.
 
+
+### [strengthening] A verifier reads the lane, not the world; a guard whose writer is unreachable is dead however well it is typed; a lane "for legacy callers" names one caller or it is dead — status: `idea` (2026-10-14)
+Three rules from the memory-journal + progression Lap-4 pass (2026-10-14), each reproduced with a
+throwaway test. **(1)** The post-journal verifier snapshots the commitments, waits for two Flash calls,
+then diffs against LIVE `getState()`. Play continues meanwhile, so the player's own next turn can be
+the "loss": a quest the DM completes on that turn is reported as forgotten, beside the engine's own
+"quest completed" XP line. A lane's verifier must diff the lane's own dispatches replayed over the
+snapshot (the 10-13 `lastCommittedTurn.stateAfter` shape), or every record it watches needs a
+"settled at" stamp the diff can read. **(2)** `combat.xpAwarded` was load-typed on 09-18 and has an
+initial-state comment, but its only writers run while `applyEvents` drops every DM event in combat,
+so the END_COMBAT guard that reads it can never fire. The 10-02 marker rule ("grep the WRITER before
+trusting the code it gates") applies to every flag a guard reads, not only `session.*`. **(3)** The
+meta-less ADD_EXP / LEVEL_UP branches are documented as engine/legacy lanes and pinned by four tests,
+yet nothing dispatches them; the LEVEL_UP one still grants a whole level. A dead lane with a pin is
+the most expensive dead code because the suite defends it. Companions: a raw `summary.key_decisions`
+read one line after its typed twin silently drops the cadence's NPC lane, and both DM XP lanes judge
+"hero is down" on `dying` alone, so a 30-XP flourish fully heals a stabilized, unconscious hero.
+Payoff: no false "Journal check" lines, one hero-down rule across every XP door, and three dead
+guards gone.
