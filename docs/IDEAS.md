@@ -1834,6 +1834,13 @@ per-RAG-row retrieval hit count (AI Dungeon's Memory Bank evicts by use; ours by
 Queue) — engine-stamped `hits` / `lastHitMessage` on RAG rows (never a survival rule; AI Dungeon's
 least-used eviction admits "very old memories might stay forever if used frequently"), the DM
 response's `cachedContentTokenCount` per turn, both in the inspector and the `eval:memory` report.
+**[memory-research] 2026-10-14 (Lane C):** the readout is half blind on the OpenAI lane — GPT-5.6+ bills cache
+WRITES at 1.25× and matches reads only at lookup boundaries, our one `system` message has no boundary
+where the byte-stable prefix ends (so the prefix is never read and the whole prompt is written every
+turn), and `parseUsage` never reads `usage.prompt_tokens_details.cache_write_tokens`; queued as **M1
+"Tell the provider where the prefix ends"** (`MEMORY_RESEARCH.md` Adoption Queue): a written-token
+readout beside the cached one, the system prompt as two leading messages (the whole fix on xAI's
+message-level cache), an explicit `prompt_cache_breakpoint` on the prefix part for gpt-5.6+.
 Dev/settings panel to make the invisible memory stack inspectable during real-play tuning.
 Motivation: callbacks, RAG hits, and front symptoms are engine-curated but player-invisible —
 hard to tune salience without seeing what the DM actually received.
