@@ -192,6 +192,50 @@ flirtation/tension, fears, private vows, unresolved clues, foreshadowing, and NP
   (not queued): sticky/delay for cards, use-count eviction, heat-weighted salience,
   importance-triggered reflection, a Scribe `resolves:` verdict.
 
+### [wow] Memory callbacks: old, dated, voiced — and the payoff judged — status: `idea` (wow audit 2026-10-14, W1 ×2; `docs/SCHEDULED_WOW.md` 2026-10-14)
+The "it remembered that tiny thing" moment, held against King of Dragon Pass / Six Ages, Pentiment,
+Crusader Kings 3's Memories, Hades, Wildermyth and Telltale's "will remember that": a callback that
+feels planned is OLD (outside anyone's short memory), DATED, VOICED by someone who was there, and
+visibly LANDED. What we ship is genre-deep below the prompt (typed cards, containment merge,
+terminal `resolved`, scene-driven curation, the record lane proved on three DMs) and flat at the
+block: a card is born with `lastSeenMessage = now` and `scoreStoryMemory` pays it `3 − age/20`, the
+largest term after presence, so the present scene's own cards take the five DRAMATIC CALLBACK slots
+while the 20-row window already carries them in prose (the 09-30 proof run: the block rendered on
+6 of 7 return turns, the fight's wound card among its five on none; a Flash campaign mints 18–21
+cards per 31 turns, so most of the pool is always young); the line prints no age (`describeTurnsAgo`
+is on every other memory line in the game) and nothing about who could voice it, so a callback
+arrives as narrator exposition; and nothing judges or shows the payoff — the DM's `used` was a
+silent no-op until the id reached the line (2026-10-12), `captureInjection` records what was
+offered and nothing records what landed, and every eval scores recall when ASKED.
+- **Slice A — a callback is what the window forgot (W1).** `curateStoryMemory` offers only cards
+  whose newest stamp lies outside the DM window (`CALLBACK_MIN_AGE`, one constant beside
+  `CALLBACK_COOLDOWN_MESSAGES`) and the recency term inverts into a mild age bonus past it (an older
+  beat is the better callback; presence +5 and place +4 keep it about the scene); a fresh engine
+  wound rides the same rule — offered the first calm scene after the window slides past the fight,
+  which answers the 09-30 "fresh wound boost" taste call without a location-independent boost. Each
+  line gains `N turns ago` from `firstSeenMessage` and `could say it: <present linked names | the
+  hero>` derived from `linkedNpcNames` / `knownBy` / `witnessed`; the header asks that a callback be
+  SAID by a present character on its line with its particular and its age, or recalled as the hero's
+  own thought — never narrator exposition of a thing no one present could know (CRITICAL RULE 9
+  applied to the callback). Zero calls; the block gets shorter; prefix untouched. Proof: the 09-30
+  fixture replayed (the wound card offered on the first calm scene after the window), then 20
+  ordinary turns per DM counted by slice B.
+- **Slice B — the engine judges the payoff and the player sees it (W1).** `detectCallbackPayoff
+  (narrative, curated)` — meaning-token containment ≥ 0.5 (the verifier's bar, `textMatch`) of a
+  curated card in the DM's reply — stamps `lastUsedMessage` + `usedCount` whether or not
+  `memory_updates` arrived (a DM `used` still counts, `resolved` stays the DM's call); the DM row gets
+  `callbackMarks` like `bondMarks` (a `↺ <subject>` chip, tap → the card on the Journal) AFTER the
+  fact, never before — one chip on the line that paid off, not the "what the DM remembers" panel the
+  memory-research routine retired 2026-10-07; the Inspector's "Call cost & cache" adds offered /
+  landed and the grand-run rubric gains the 08-22 scorecard's first column. Zero calls. A false
+  positive rests a restated card for 8 turns — nothing lost. Proof: the conversion rate per DM on
+  the next grand run, the first number this moment has had.
+- Why here: pillar 2 (the engine decides what counts as remembered and whether it was), pillar 4
+  (fewer lines, not more), the memory-research doctrine's belief 3 (sparse callbacks) kept —
+  sharpened from "at most one" to "one the window could not have supplied". Related trial rows in
+  `docs/MEMORY_RESEARCH.md` ("sticky / delay / probability for callback cards"): slice A IS the
+  delay half, engine-side; sticky stays rejected (it fights the cooldown).
+
 ### [wow] "Remember when…": the engine and the DM conspire to answer from the record — status: `shipped` (2026-09-18, one day after proposed — `llm/recallIntent.js` + `engine/recallDossier.js` + the orchestrator's record lane + `## THE RECORD`; DECISIONS.md 2026-09-18; **live-verified 2026-09-19 on Gemini Pro** — `docs/RECALL_WONDER_PLAYTEST_2026-09-19.md`: 0 contradicted / 0 laundered / 0 fabricated after three fixes; a calmer-premise rerun and the M1 lexical channel remain) (Vesa, 2026-09-17), priority: **HIGHEST — "THAT'S the moneyshot"**
 **Vesa (live play 2026-09-17):** when the player asks a character about past events —
 "remember when…", "what happened at…", "what did she say…", "who was it that…" — the engine
@@ -896,7 +940,8 @@ cases), so the next unit of "significantly better" comes from the magic, not the
 Add an experience-quality section to the directed-playtest brief and score it with the same
 rigor as the bug hunts: callback conversion rate (DRAMATIC CALLBACK cards injected vs
 actually woven in well — the memory inspector already records injections, so the
-denominator exists), stance/bond-informed NPC dialogue (do NPCs speak from their recorded
+denominator exists; **the numerator is the 2026-10-14 wow slice B below, "[wow] Memory
+callbacks: old, dated, voiced" — engine-judged, never measured as of that date**), stance/bond-informed NPC dialogue (do NPCs speak from their recorded
 stance and history?), quiet-scene quality (tempo QUIET scenes should be complete scenes,
 not filler), ordinary-turn brevity (LLM-rich ≠ verbose, per the north star), consequence
 follow-through, and foe/scenery variety beyond what FOE FATIGUE already forces. Extends the
@@ -3066,7 +3111,7 @@ non-channels (`combat_end`, `resources_used`) as "never emit". From the 2026-09-
 
 ---
 
-### [strengthening] A curated list is a projection for display, not a lookup table; one lane's two calls deserve two projections; an O(transcript) helper is cheap until a turn calls it K + 2N times — status: `idea` (2026-09-30 audit, story-memory + prompt-building Lap 3; queue lines in SCHEDULED_STRENGTHENING.md)
+### [strengthening] A curated list is a projection for display, not a lookup table; one lane's two calls deserve two projections; an O(transcript) helper is cheap until a turn calls it K + 2N times — status: `shipped` (all three 2026-09-30: `storyMemoryPool` for the open-thread lookup, the `intentOnly` projection, the memoized `conversationalDistance` — DECISIONS.md 2026-09-30; marked by the 2026-10-14 wow audit, the rules stay as written)
 Three rules from the story-memory + prompt-building Lap-3 pass (2026-09-30), every number measured
 against the real reducer, `curateStoryMemory`, `findPresentNpcs` and `buildSystemPrompt` on a
 2,000-row / 200-NPC / 300-card / 40-entry state. **(1)** `buildSystemPrompt` takes ONE `storyMemory`
