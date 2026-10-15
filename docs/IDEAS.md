@@ -3522,3 +3522,24 @@ read one line after its typed twin silently drops the cadence's NPC lane, and bo
 "hero is down" on `dying` alone, so a 30-XP flourish fully heals a stabilized, unconscious hero.
 Payoff: no false "Journal check" lines, one hero-down rule across every XP door, and three dead
 guards gone.
+
+### [strengthening] A wire key the reader cannot know is a key it can only invent; a gate and a growth on one field cancel when the growth runs unconditionally; a cooldown stamped by the non-empty branch has a hole; a comment that promises "later" is a test to write — status: `idea` (2026-10-15)
+Four rules from the hidden-fronts + living-world Lap-1 pass that opened the third cycle (2026-10-15),
+each reproduced with a throwaway test. **(1)** `front_updates` keeps `title`, and the DM sees only
+front ids and factions — so the only title it can send is an invented one, which the resolution then
+mints as player-facing canon (the fact, the 🕰️ line, the hearsay). For every key a wire normalizer
+keeps, grep what the prompt SHOWS the DM of that record. **(2)** The tempo directive's theater gate
+clamps an out-of-theater grant to whispers, and the handler then records that very place as the
+front's theater, so the clamp holds for exactly one cadence. When a handler both judges a value and
+records it, the record must read the judgement. **(3)** The absence-drift cooldown lives on the
+installed RESULT, and a quiet result (nothing changed, or the director gave up) writes none — one
+homecoming fires a second drift at the next door whose name shares no token. Stamp the attempt
+separately from the result, as the beat cooldowns do. **(4)** The handler and its test both say a
+region met while the front web is full "may trigger later when a slot frees up"; the registry write
+runs before the gates, and the next profile of any place in that land finds the region known. For
+every "later" in a comment, find the dispatch that makes later happen. Companion: the successor
+dedupe judges faction names against RESOLVED fronts, while the aftermath prompt invites the resolved
+front's survivors and forbids only an active front's faction — an installer's `existing` set is a
+contract with its prompt. Payoff: front titles stay private, the theater gate means what it says,
+one drift per homecoming whatever the director said, and new lands get their natives once the web
+has room (or an honest comment).
