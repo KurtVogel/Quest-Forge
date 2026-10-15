@@ -198,9 +198,16 @@ export function sanitizeLivingWorldSession(session, { maxMessageCount } = {}) {
     // a stamp past the end (`1e9`) used to survive LOAD_GAME and silence
     // that beat forever, since `messageCount - last < cooldown` holds for
     // any negative difference.
-    for (const field of ['lastWonderMessage', 'lastHeroTellBeatMessage', 'lastRelationshipBeatMessage']) {
+    for (const field of ['lastWonderMessage', 'lastHeroTellBeatMessage', 'lastRelationshipBeatMessage', 'lastAbsenceDriftMessage']) {
         if (session[field] === undefined) continue;
         next[field] = clampMessageStamp(session[field], maxMessageCount);
+    }
+    // The deferred-region ledger (2026-10-15): short strings, cap 6.
+    if (session.deferredRegions !== undefined) {
+        next.deferredRegions = (Array.isArray(session.deferredRegions) ? session.deferredRegions : [])
+            .map(region => text(region, 120))
+            .filter(Boolean)
+            .slice(-6);
     }
     // The hero's death stamp (the last chapter, 2026-09-30): complete-or-null,
     // `atMessage` clamped to the transcript like the beat cooldowns.

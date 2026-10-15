@@ -21,6 +21,7 @@
  * player-facing receipt line render from the same dossier.
  */
 
+import { isRecordEntry } from './journalEntry.js';
 import { tokenSet } from './textMatch.js';
 import { findSubjectsInText } from './textMatch.js';
 import { collectNarrativeEntries } from '../llm/narrativeMessages.js';
@@ -289,7 +290,7 @@ export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CH
 
     // 2. Journal — the chronicle of what happened, never a fallback stub.
     const journal = pick(
-        (Array.isArray(state?.journal) ? state.journal : []).filter(j => j && typeof j === 'object' && !j.fallback && typeof j.summary === 'string'),
+        (Array.isArray(state?.journal) ? state.journal : []).filter(isRecordEntry),
         scorer,
         j => `${j.summary} ${(Array.isArray(j.keyDecisions) ? j.keyDecisions : []).join(' ')} ${(Array.isArray(j.consequences) ? j.consequences : []).join(' ')}`,
         CAPS.journal,

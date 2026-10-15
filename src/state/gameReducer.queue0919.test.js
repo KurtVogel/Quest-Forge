@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { buildMessageWindow } from '../components/Chat/turnVisibility.js';
 import { MESSAGE_CONTENT_MAX } from '../config/contentLimits.js';
+import { foldExperience } from '../engine/progression.js';
 
 const SCORES = { strength: 16, dexterity: 12, constitution: 15, intelligence: 10, wisdom: 10, charisma: 8 };
 
@@ -25,7 +26,7 @@ describe('END_COMBAT on an idle envelope (2026-09-19 P1)', () => {
             class: 'cleric',
             sustainedSpell: { key: 'shieldOfFaith', name: 'Shield of Faith', acBonus: 2, targetType: 'self' },
         }));
-        const next = gameReducer(state, { type: 'END_COMBAT', payload: { llmAwardedXp: false } });
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
         expect(next).toBe(state);
     });
 });
@@ -69,10 +70,10 @@ describe('no DM XP lane ends a death-save clock (2026-09-19 ruling)', () => {
         expect(next.character.dying).toBe(true);
     });
 
-    it('engine-computed XP (a bare number) keeps the 08-30 revive', () => {
+    it('engine-computed XP (the fold) keeps the 08-30 revive', () => {
         const state = dying();
         state.character.exp = 290;
-        const next = gameReducer(state, { type: 'ADD_EXP', payload: 30 });
+        const next = foldExperience(state, 30, { reason: 'battle complete' });
         expect(next.character.level).toBe(2);
         expect(next.character.dying).toBe(false);
         expect(next.character.currentHP).toBe(next.character.maxHP);

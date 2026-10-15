@@ -28,15 +28,31 @@ const CARRIED_CONTAINMENT = 0.5;
 const CARRY_STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'their', 'her', 'his', 'them', 'they', 'was', 'were', 'has', 'have', 'had', 'will', 'would', 'agreed', 'promised', 'swore']);
 const carryTokens = (value) => tokenSet(value, { stopWords: CARRY_STOP_WORDS, minLength: 3, foldPossessives: true });
 
-/** The commitments as they stand now: `{ quests, facts, threads, promises }`, each a Map of id → label, plus `carriers` (the full texts of every active promise and open thread), `promiseTexts` (id → full text), `resolvedThreads` (NPC id → the message the thread was SETTLED at, from the reducer's `openThreadResolvedMessage` stamp), and `messageCount` (the transcript length at the snapshot). */
+/**
+ * The commitments as they stand now: `{ quests, facts, threads, promises }`,
+ * each a Map of id → label, plus `carriers` (the full texts of every active
+ * promise and open thread), `promiseTexts` (id → full text), the three SETTLED
+ * maps — `resolvedThreads` (NPC id → the message the thread was settled at,
+ * the reducer's `openThreadResolvedMessage` stamp), `closedQuests` (quest id
+ * → `closedAtMessage`, stamped by COMPLETE_QUEST / FAIL_QUEST) and
+ * `settledFacts` (fact id → `supersededAtMessage` / `retractedAtMessage`) —
+ * and `messageCount` (the transcript length at the snapshot).
+ */
 export function snapshotCommitments(state = {}) {
     const quests = new Map();
+    const closedQuests = new Map();
     for (const quest of (Array.isArray(state.quests) ? state.quests : [])) {
-        if (quest && typeof quest.id === 'string' && (quest.status || 'active') === 'active') quests.set(quest.id, text(quest.name) || quest.id);
+        if (!quest || typeof quest.id !== 'string') continue;
+        if ((quest.status || 'active') === 'active') quests.set(quest.id, text(quest.name) || quest.id);
+        else if (Number.isFinite(quest.closedAtMessage)) closedQuests.set(quest.id, quest.closedAtMessage);
     }
     const facts = new Map();
+    const settledFacts = new Map();
     for (const fact of (Array.isArray(state.worldFacts) ? state.worldFacts : [])) {
-        if (fact && fact.pinned === true && typeof fact.id === 'string' && isLiveFact(fact)) facts.set(fact.id, text(fact.fact).slice(0, 80));
+        if (!fact || typeof fact.id !== 'string') continue;
+        if (fact.pinned === true && isLiveFact(fact)) facts.set(fact.id, text(fact.fact).slice(0, 80));
+        else if (Number.isFinite(fact.retractedAtMessage)) settledFacts.set(fact.id, fact.retractedAtMessage);
+        else if (Number.isFinite(fact.supersededAtMessage)) settledFacts.set(fact.id, fact.supersededAtMessage);
     }
     const threads = new Map();
     const resolvedThreads = new Map();
@@ -60,28 +76,41 @@ export function snapshotCommitments(state = {}) {
             if (text(card.text)) carriers.push(text(card.text));
         }
     }
-    return { quests, facts, threads, promises, promiseTexts, carriers, resolvedThreads, messageCount };
+    return { quests, facts, threads, promises, promiseTexts, carriers, resolvedThreads, closedQuests, settledFacts, messageCount };
 }
 
 /**
  * What `before` had that `after` no longer carries: `[{ kind, label }]`.
  * A quest is lost when it is gone or no longer active; a pinned fact when it
  * is no longer live; a thread when the NPC's `openThread` is empty (a
- * REPLACED thread is not a loss — the cadence may move the beat — and neither
- * is one a lane SETTLED at or after the snapshot: `openThreadResolved: true`
- * stamps `openThreadResolvedMessage`, and the 2026-10-03 Sol run's 📓 line
- * reported a serving woman's thread the Scribe had just closed); a promise
+ * REPLACED thread is not a loss — the cadence may move the beat); a promise
  * card when it is no longer active AND no other active promise or open
  * thread still says it (a reworded successor is not a loss).
+ *
+ * THE SETTLED RULE, for all three stamped kinds: a commitment a lane settled
+ * AT OR AFTER the snapshot is not a loss — the verifier runs after two Flash
+ * calls against the LIVE state while play continues. Threads since
+ * 2026-10-03 (`openThreadResolved: true` stamps `openThreadResolvedMessage`;
+ * the Sol run's 📓 line reported a serving woman's thread the Scribe had just
+ * closed); quests and facts since 2026-10-14 (memory-journal P1, measured:
+ * the DM's next reply COMPLETED the quest, +38 XP, and the line said the
+ * record no longer carried it — COMPLETE_QUEST stamps `closedAtMessage`, a
+ * flip or a retraction stamps the fact).
  */
 export function diffCommitments(before, after) {
     const losses = [];
-    for (const [id, label] of before.quests) if (!after.quests.has(id)) losses.push({ kind: 'quest', label });
-    for (const [id, label] of before.facts) if (!after.facts.has(id)) losses.push({ kind: 'fact', label });
+    const snapshotAt = before.messageCount ?? 0;
+    const settledSince = (stamp) => Number.isFinite(stamp) && stamp >= snapshotAt;
+    for (const [id, label] of before.quests) {
+        if (after.quests.has(id) || settledSince(after.closedQuests?.get(id))) continue;
+        losses.push({ kind: 'quest', label });
+    }
+    for (const [id, label] of before.facts) {
+        if (after.facts.has(id) || settledSince(after.settledFacts?.get(id))) continue;
+        losses.push({ kind: 'fact', label });
+    }
     for (const [id, label] of before.threads) {
-        if (after.threads.has(id)) continue;
-        const settledAt = after.resolvedThreads?.get(id);
-        if (Number.isFinite(settledAt) && settledAt >= (before.messageCount ?? 0)) continue;
+        if (after.threads.has(id) || settledSince(after.resolvedThreads?.get(id))) continue;
         losses.push({ kind: 'thread', label });
     }
     const carriers = (after.carriers || []).map(carryTokens).filter(set => set.size > 0);

@@ -149,10 +149,8 @@ describe('D&D 5e XP progression', () => {
         expect(state.abilityScoreImprovementsApplied).toBe(1);
     });
 
-    it('does not let milestone level-ups exceed level 20', () => {
-        const result = awardExperience({ ...character, level: 20, exp: 0 }, 0, {
-            milestoneLevelUp: true,
-        });
+    it('does not let XP cross level 20', () => {
+        const result = awardExperience({ ...character, level: 20, exp: 0 }, 60000);
 
         expect(result.character.level).toBe(20);
         expect(result.messages.some(m => m.content.includes('Level Up'))).toBe(false);

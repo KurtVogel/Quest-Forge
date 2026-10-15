@@ -55,8 +55,9 @@ describe('P1/P2: LOAD_GAME', () => {
         const next = load([{ id: 'mem-p', text: 'Oren owes the hero a boat.', type: 'promise', salience: 5, lastUsedMessage: 1e9, lastSeenMessage: 1e9, firstSeenMessage: 1e9 }]);
         const [card] = next.storyMemory;
         expect(card).toMatchObject({ lastUsedMessage: 51, lastSeenMessage: 51, firstSeenMessage: 51 });
-        // The cooldown counts from message 51; after 8+ conversational messages the card scores.
-        const later = { ...next, messages: transcript(70) };
+        // The cooldown counts from message 51 and the card was "seen" there too:
+        // past the DM window (CALLBACK_MIN_AGE 20, WOW 2026-10-14) it scores.
+        const later = { ...next, messages: transcript(80) };
         const curated = curateStoryMemory({ memories: later.storyMemory, query: 'boat', messages: later.messages });
         expect(curated[0]?.id).toBe('mem-p');
     });
@@ -78,6 +79,7 @@ describe('P1/P2: LOAD_GAME', () => {
     it('a journal summary is typed and clamped at load (the RAG seed source)', () => {
         const next = load([], { journal: [{ summary: 'S'.repeat(5000), timestamp: 1 }, { summary: { nested: true }, timestamp: 2 }] });
         expect(next.journal[0].summary).toHaveLength(2000);
-        expect(next.journal[1].summary).toBe('');
+        // A summary-less row is junk and drops (normalizeJournalEntry, 2026-10-14).
+        expect(next.journal).toHaveLength(1);
     });
 });

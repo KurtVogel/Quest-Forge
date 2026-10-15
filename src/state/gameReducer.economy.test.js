@@ -459,7 +459,7 @@ describe('CLAIM_LOOT_SOURCE', () => {
 });
 
 describe('LEVEL_UP', () => {
-    it('awards a milestone level-up and appends narration messages', () => {
+    it('pays the front tier of XP for a DM milestone and appends the receipt (one lane since 2026-10-14)', () => {
         const state = makeState({
             character: {
                 level: 1,
@@ -475,31 +475,18 @@ describe('LEVEL_UP', () => {
         });
         const next = gameReducer(state, {
             type: 'LEVEL_UP',
-            payload: { reason: 'defeated the warlord' },
+            payload: { bonusExp: 0, _meta: { sourceId: 'msg-1' } },
         });
-        expect(next.character.level).toBeGreaterThan(1);
-        expect(next.messages.length).toBeGreaterThan(0);
+        // Half the L1→2 threshold (300): the milestone banks XP, never a level.
+        expect(next.character.level).toBe(1);
+        expect(next.character.exp).toBe(150);
+        expect(next.messages.at(-1).content).toContain('story milestone');
     });
 
-    it('marks xpAwarded on the active combat state', () => {
-        const state = {
-            ...makeState({
-                character: {
-                    level: 1,
-                    exp: 0,
-                    currentHP: 12,
-                    maxHP: 12,
-                    class: 'fighter',
-                    abilityScores: {
-                        strength: 16, dexterity: 12, constitution: 14,
-                        intelligence: 10, wisdom: 10, charisma: 8,
-                    },
-                },
-            }),
-            combat: { ...initialGameState.combat, active: true },
-        };
-        const next = gameReducer(state, { type: 'LEVEL_UP', payload: {} });
-        expect(next.combat.xpAwarded).toBe(true);
+    it('a payload that is not a record is a no-op (the meta-less whole-level lane is gone)', () => {
+        const state = makeState({ character: { level: 1, exp: 0, currentHP: 12, maxHP: 12, class: 'fighter' } });
+        expect(gameReducer(state, { type: 'LEVEL_UP', payload: undefined })).toBe(state);
+        expect(gameReducer(state, { type: 'LEVEL_UP', payload: 'milestone' })).toBe(state);
     });
 });
 

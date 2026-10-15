@@ -167,13 +167,13 @@ describe('LOAD_GAME combat envelope flags and round (2026-09-11 combat-exchange 
         expect(next.combat.active).toBe(false);
         expect(next.combat.phase).toBeNull();
         expect(next.combat.round).toBe(1);
-        expect(next.combat.xpAwarded).toBe(false);
         expect(next.combat.bonusActionUsed).toBe(false);
         expect(promptOf(next)).not.toContain('## ACTIVE COMBAT');
     });
 
-    it('"no" xpAwarded reads false so END_COMBAT still pays for slain foes', () => {
-        const next = load({ active: true, phase: 'awaiting_player', enemies: [{ ...worg, hp: 0, condition: 'dead' }], turnOrder: [{ type: 'player', name: 'Survivor', initiative: 15 }], round: 2, xpAwarded: 'no' });
+    it('a legacy xpAwarded flag is dropped at load (the guard is gone, 2026-10-14) and END_COMBAT pays for slain foes', () => {
+        const next = load({ active: true, phase: 'awaiting_player', enemies: [{ ...worg, hp: 0, condition: 'dead' }], turnOrder: [{ type: 'player', name: 'Survivor', initiative: 15 }], round: 2, xpAwarded: true });
+        expect(next.combat.xpAwarded).toBeUndefined();
         const ended = gameReducer(next, { type: 'END_COMBAT', payload: { autoVictory: true } });
         expect(ended.character.exp).toBeGreaterThan(900);
     });

@@ -39,8 +39,8 @@ const ARGS = { apiKey: 'sk-test', model: 'test-model', systemPrompt: 'You are th
 describe('usage normalizers — one adapter shape from each provider family', () => {
     it('OpenAI-compatible: prompt_tokens + prompt_tokens_details.cached_tokens + completion_tokens; missing cache reads 0; junk reads null', () => {
         expect(normalizeOpenAIUsage({ prompt_tokens: 12000, prompt_tokens_details: { cached_tokens: 9000 }, completion_tokens: 300 }))
-            .toEqual({ promptTokens: 12000, cachedTokens: 9000, outputTokens: 300 });
-        expect(normalizeOpenAIUsage({ prompt_tokens: 500 })).toEqual({ promptTokens: 500, cachedTokens: 0, outputTokens: null });
+            .toEqual({ promptTokens: 12000, cachedTokens: 9000, writtenTokens: 0, outputTokens: 300 });
+        expect(normalizeOpenAIUsage({ prompt_tokens: 500 })).toEqual({ promptTokens: 500, cachedTokens: 0, writtenTokens: 0, outputTokens: null });
         expect(normalizeOpenAIUsage({ prompt_tokens: '500' })).toBeNull();
         expect(normalizeOpenAIUsage(null)).toBeNull();
         expect(normalizeOpenAIUsage('usage')).toBeNull();
@@ -97,7 +97,7 @@ describe('providers report usage through onUsage and keep returning the text', (
         expect(text).toBe('The door creaks.');
         const body = JSON.parse(fetchMock.mock.calls[0][1].body);
         expect(body.stream_options).toEqual({ include_usage: true });
-        expect(onUsage).toHaveBeenCalledWith({ promptTokens: 12000, cachedTokens: 6000, outputTokens: 30 });
+        expect(onUsage).toHaveBeenCalledWith({ promptTokens: 12000, cachedTokens: 6000, writtenTokens: 0, outputTokens: 30 });
     });
 
     it('xAI stream does NOT send stream_options (usage rides the final chunk unasked) and still reports it', async () => {
@@ -109,7 +109,7 @@ describe('providers report usage through onUsage and keep returning the text', (
         const onUsage = vi.fn();
         expect(await streamXaiMessage({ ...ARGS, apiKey: 'xai-test', onChunk: () => {}, onUsage })).toBe('Creak.');
         expect(JSON.parse(fetchMock.mock.calls[0][1].body).stream_options).toBeUndefined();
-        expect(onUsage).toHaveBeenCalledWith({ promptTokens: 900, cachedTokens: 700, outputTokens: 3 });
+        expect(onUsage).toHaveBeenCalledWith({ promptTokens: 900, cachedTokens: 700, writtenTokens: 0, outputTokens: 3 });
     });
 
     it('a throwing onUsage is the caller\'s problem, never a failed reply', async () => {
@@ -187,8 +187,8 @@ describe('adapter pass-through', () => {
         await sendMessage({ provider: 'xai', apiKey: 'xai-test', model: 'grok', systemPrompt: 's', messageHistory: [], userMessage: 'u', onUsage, conversationId: 'conv-1', maxRetries: 0 });
         await streamMessage({ provider: 'xai', apiKey: 'xai-test', model: 'grok', systemPrompt: 's', messageHistory: [], userMessage: 'u', onChunk: () => {}, onUsage, conversationId: 'conv-1' });
         expect(onUsage.mock.calls.map(c => c[0])).toEqual([
-            { promptTokens: 10, cachedTokens: 0, outputTokens: 1 },
-            { promptTokens: 20, cachedTokens: 15, outputTokens: 1 },
+            { promptTokens: 10, cachedTokens: 0, writtenTokens: 0, outputTokens: 1 },
+            { promptTokens: 20, cachedTokens: 15, writtenTokens: 0, outputTokens: 1 },
         ]);
         for (const call of fetchMock.mock.calls) expect(call[1].headers['x-grok-conv-id']).toBe('conv-1');
     });

@@ -15,6 +15,14 @@ import { isNetworkFailure, makeHttpError } from './sse.js';
 const isReasoningModel = (model) => /^(gpt-[5-9]|o\d)/.test(model || '');
 
 /**
+ * Explicit prompt caching exists on gpt-5.6 and later (the caching guide,
+ * read 2026-10-14): these models match cache READS only at breakpoints, so
+ * without one our byte-stable prefix is never served from cache and the
+ * whole prompt is a 1.25× write every turn. Earlier families stay implicit.
+ */
+export const isExplicitCacheModel = (model) => /^gpt-(?:5\.(?:[6-9]|\d{2,})|[6-9])/.test(model || '');
+
+/**
  * Reasoning tokens count against `max_completion_tokens`, so the gpt-4o
  * ceiling (16,384) left a heavy-reasoning long turn hitting `length` and the
  * truncation error retrying at the same cap (2026-09-06 audit). 32,768
@@ -84,6 +92,8 @@ const { send: sendRaw, stream: streamRaw } = makeOpenAICompatProvider({
     // The final stream chunk carries `usage` (cached_tokens included) only
     // with stream_options.include_usage (2026-09-30 cache telemetry).
     streamUsage: true,
+    // The prefix boundary, told to OpenAI (memory-research M1, 2026-10-14).
+    explicitCacheFor: isExplicitCacheModel,
 });
 
 /** Send a non-streaming message to OpenAI. */

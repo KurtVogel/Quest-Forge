@@ -171,6 +171,7 @@ describe('story memory curation', () => {
         const block = buildStoryMemoryPromptBlock(cards);
         expect(block).toContain('## DRAMATIC CALLBACK OPPORTUNITIES');
         expect(block).toContain('Use at most ONE naturally');
+        expect(block).toContain('could say it: the hero (a passing thought)');
         expect(block).toContain('Callback 0');
         expect(block).not.toContain('Callback 6');
     });
@@ -351,28 +352,31 @@ describe('scene-driven curation and conversational windows (2026-09-06 audit)', 
     });
 
     it('the callback cooldown is measured in conversational messages when the card carries a use stamp', () => {
-        const card = { ...celeste, lastUsedMessage: 10, lastSeenMessage: 10 };
+        // Seen at 10 (past the DM window by the time it is checked), paid off at 40.
+        const card = { ...celeste, lastUsedMessage: 40, lastSeenMessage: 10 };
         // Four conversational messages since the DM paid it off: still cooling.
-        expect(scoreStoryMemory(card, { query: 'x', messages: transcript(14) })).toBe(0);
+        expect(scoreStoryMemory(card, { query: 'x', messages: transcript(44) })).toBe(0);
         // System lines and hidden rows never age the window (the ledger rule).
         const padded = [
-            ...transcript(14),
+            ...transcript(44),
             ...Array.from({ length: 10 }, () => ({ role: 'system', content: 'Rolled 12.' })),
             { role: 'user', content: 'withheld setup', hidden: true },
         ];
         expect(scoreStoryMemory(card, { query: 'x', messages: padded })).toBe(0);
         // Eight conversational messages later the card is eligible again.
-        expect(scoreStoryMemory(card, { query: 'x', messages: transcript(18) })).toBeGreaterThan(0);
+        expect(scoreStoryMemory(card, { query: 'x', messages: transcript(48) })).toBeGreaterThan(0);
         // Without the transcript the raw index gap is the fallback measure.
-        expect(scoreStoryMemory(card, { query: 'x', messageCount: 14 })).toBe(0);
-        expect(scoreStoryMemory(card, { query: 'x', messageCount: 18 })).toBeGreaterThan(0);
+        expect(scoreStoryMemory(card, { query: 'x', messageCount: 44 })).toBe(0);
+        expect(scoreStoryMemory(card, { query: 'x', messageCount: 48 })).toBeGreaterThan(0);
     });
 
-    it('the recency bonus decays with conversational age (3 points fresh, gone after ~60 messages)', () => {
+    it('a card inside the DM window scores 0 and the age bonus grows to +3 past it (WOW 2026-10-14 inverted the recency term)', () => {
         const stamped = { ...celeste, lastSeenMessage: 18 };
-        const fresh = scoreStoryMemory(stamped, { query: 'x', messages: transcript(18) });
-        const stale = scoreStoryMemory(stamped, { query: 'x', messages: transcript(90) });
-        expect(fresh - stale).toBeCloseTo(3, 5);
+        expect(scoreStoryMemory(stamped, { query: 'x', messages: transcript(18) })).toBe(0);
+        const edge = scoreStoryMemory(stamped, { query: 'x', messages: transcript(38) });
+        const stale = scoreStoryMemory(stamped, { query: 'x', messages: transcript(110) });
+        expect(edge).toBeGreaterThan(0);
+        expect(stale - edge).toBeCloseTo(3, 5);
     });
 
     it('legacy cards without message stamps fall back to their wall-clock stamps', () => {

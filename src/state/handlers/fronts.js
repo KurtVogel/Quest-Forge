@@ -11,12 +11,13 @@ import {
     normalizeFront,
     normalizeFrontProposal,
     normalizeFrontUpdate,
+    cadenceIdFor,
 } from '../../engine/fronts.js';
 import { DM_CLOCK_GAIN_WINDOW, MAX_ACTIVE_FRONTS, normalizeTempoDirective, WEB_TARGET_FRONTS } from '../../engine/worldTempo.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
 import { DIRECTOR_MAX_ATTEMPTS, getDirectorFailure, RETRYABLE_DIRECTORS } from '../../engine/directorRetry.js';
-import { awardExperience, getFrontResolutionMilestoneXp } from '../../engine/progression.js';
-import { upsertLocation } from '../../engine/locationRegistry.js';
+import { foldExperience, getFrontResolutionMilestoneXp } from '../../engine/progression.js';
+import { isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
 import { gameReducer } from '../gameReducer.js';
 import { systemMessage } from './shared.js';
 
@@ -100,8 +101,15 @@ export const handlers = {
             currentLocation: state.currentLocation,
         });
         // Theaters grow organically: placing a front's symptom somewhere
-        // records that place as part of the front's home territory.
-        const locations = directive.frontId && directive.where
+        // records that place as part of the front's home territory — but only
+        // when the grant was IN theater or the front had none (2026-10-15
+        // hidden-fronts P2, measured): a directive clamped to whispers for
+        // lying OUTSIDE a homed front's theater used to record its `where` as
+        // that front's theater anyway, so the same ask landed at full band one
+        // quiet cadence later — the gate was a one-cadence delay. The engine's
+        // own judgement (normalizeTempoDirective's `inTheater`) decides.
+        const growsTheater = !!directive.frontId && !!directive.where && directive.inTheater !== false;
+        const locations = growsTheater
             ? upsertLocation(state.locations || [], directive.where, { theaterFrontIds: [directive.frontId] })
             : state.locations || [];
         return {
@@ -299,13 +307,9 @@ export const handlers = {
         // moment — never via the LLM's exp_awarded channel. The resolution's
         // own one-shot guard is the replay ledger.
         if (next.character) {
-            const awarded = awardExperience(
-                next.character,
-                getFrontResolutionMilestoneXp(next.character.level),
-                { reason: `campaign milestone — "${updatedFront.title}" ended` }
-            );
-            next.character = awarded.character;
-            next.messages = [...next.messages, ...awarded.messages];
+            next = foldExperience(next, getFrontResolutionMilestoneXp(next.character.level), {
+                reason: `campaign milestone — "${updatedFront.title}" ended`,
+            });
         }
         // Aftermath hook: a background director decides (later, outside the
         // reducer) whether this specific victory leaves survivors, debts, or a
@@ -370,7 +374,9 @@ export const handlers = {
         if (!pending || typeof pending.key !== 'string' || !pending.key
             || payload.sessionId !== state.session?.id || payload.key !== pending.key) return state;
         const seededRegions = [...(state.session?.seededRegions || []), pending.region].slice(-12);
-        const session = { ...state.session, pendingRegionalFronts: null, seededRegions };
+        // A region seeded now leaves the deferred ledger (2026-10-15).
+        const deferredRegions = (state.session?.deferredRegions || []).filter(region => !isSameRegion(region, pending.region));
+        const session = { ...state.session, pendingRegionalFronts: null, seededRegions, deferredRegions };
         const fronts = state.fronts || [];
         const activeCount = fronts.filter(f => (f.status || 'active') === 'active').length;
         // Like the aftermath installer, regional natives top the web up to
@@ -425,9 +431,19 @@ export const handlers = {
         const journalEnd = Math.max(0, Math.round(Number(action.payload?.journalEnd) || 0));
         const previousEnd = state.session?.frontDirector?.lastJournalEnd || 0;
         if (!cadenceId || journalEnd <= previousEnd) return state;
+        // "The immediately previous cadence" is the previous JOURNAL cadence,
+        // not the last APPLIED batch (2026-10-15 hidden-fronts nit): a failed
+        // reflection left a two-cadences-ago gain reading as last cadence's
+        // and held the front's clock one cadence longer than the rule says.
+        const journal = Array.isArray(state.journal) ? state.journal : [];
+        const thisIdx = journal.findIndex(entry => entry?.messageRange?.[1] === journalEnd);
+        const previousEntry = thisIdx > 0 ? journal[thisIdx - 1] : (thisIdx === -1 ? journal.at(-1) : null);
+        const previousCadenceId = Number.isInteger(previousEntry?.messageRange?.[1])
+            ? cadenceIdFor(state.session?.id, previousEntry.messageRange[1])
+            : (state.session?.frontDirector?.lastCadenceId || null);
         const result = applyFrontAdvanceBatch(state.fronts || [], {
             cadenceId,
-            previousCadenceId: state.session?.frontDirector?.lastCadenceId || null,
+            previousCadenceId,
             advances: action.payload?.advances,
         });
         return {

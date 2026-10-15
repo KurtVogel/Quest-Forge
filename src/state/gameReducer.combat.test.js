@@ -184,7 +184,6 @@ describe('combat victory finalization', () => {
                 turnOrder: [{ type: 'player', name: 'Astra', initiative: 14 }],
                 currentTurn: 0,
                 round: 2,
-                xpAwarded: false,
             },
         };
 
@@ -223,7 +222,6 @@ describe('lost/escaped-fight XP for genuinely slain foes', () => {
                 enemies,
                 turnOrder: [{ type: 'player', name: 'Astra', initiative: 14 }],
                 phase: 'awaiting_narration',
-                xpAwarded: false,
                 lastExchangeResult: { exchangeId: 'ex-1', kind: 'exchange', terminal },
             },
         };
@@ -262,15 +260,6 @@ describe('lost/escaped-fight XP for genuinely slain foes', () => {
         expect(next.character.exp).toBeGreaterThan(0);
     });
 
-    it('does not double-award on defeat when XP was already earned during the fight', () => {
-        const state = makeTerminalState('defeat', [
-            { id: 'enemy-1', name: 'Bruiser', hp: 0, maxHp: 20, ac: 13, condition: 'dead' },
-        ]);
-        state.combat.xpAwarded = true;
-        const next = gameReducer(state, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: 'ex-1' } });
-        expect(next.combat.active).toBe(false);
-        expect(next.character.exp).toBe(0);
-    });
 });
 
 describe('enemy-stat validation at every entry point', () => {
@@ -643,7 +632,6 @@ describe('END_COMBAT client-side XP fallback', () => {
                 ...initialGameState.combat,
                 active: true,
                 enemies,
-                xpAwarded: false,
                 ...combatOverrides,
             },
         };
@@ -709,27 +697,6 @@ describe('END_COMBAT client-side XP fallback', () => {
         ]);
         const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
         expect(next.character.exp).toBe(53); // plain 7*2 + 13*3
-    });
-
-    it('stays silent when the DM already awarded XP this turn (llmAwardedXp)', () => {
-        const state = endCombatState([
-            { id: 'e1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' },
-        ]);
-        const next = gameReducer(state, { type: 'END_COMBAT', payload: { llmAwardedXp: true } });
-
-        expect(next.character.exp).toBe(0);
-        expect(next.messages.some(m => (m.content || '').includes('XP'))).toBe(false);
-    });
-
-    it('stays silent when XP was already earned earlier in the fight (combat.xpAwarded)', () => {
-        const state = endCombatState(
-            [{ id: 'e1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' }],
-            { xpAwarded: true },
-        );
-        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
-
-        expect(next.character.exp).toBe(0);
-        expect(next.messages.some(m => (m.content || '').includes('XP'))).toBe(false);
     });
 
     it('awards nothing when every foe escaped a lost fight', () => {

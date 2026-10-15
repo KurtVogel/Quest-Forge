@@ -146,15 +146,16 @@ function leaveFightMark(next, { woundCard, memories }) {
 }
 
 /**
- * Client-side XP — only when NO XP was earned for this fight at all: neither
- * by the DM this turn (llmAwardedXp) nor at any point during it
- * (combat.xpAwarded). Prevents the manual "End Combat" button double-awarding.
- * A lost / abandoned fight still pays, but only for foes genuinely slain
- * before the end — never for enemies who fled or accepted a surrender while
- * the player ultimately went down or ran.
+ * Engine-owned fight XP at the terminal. A lost / abandoned fight still pays,
+ * but only for foes genuinely slain before the end — never for enemies who
+ * fled or accepted a surrender while the player ultimately went down or ran.
+ * The two "already awarded" guards (`combat.xpAwarded`, `llmAwardedXp`) are
+ * gone (2026-10-14 progression P2): the flag was written only by the DM XP
+ * lanes during active combat, where applyEvents drops every DM event, and no
+ * dispatcher ever passed the parameter — guards nothing could arm.
  */
-function awardFightXp(before, next, { llmAwardedXp, slainXpOnly }) {
-    if (llmAwardedXp || before.combat.xpAwarded || !before.character) return next;
+function awardFightXp(before, next, { slainXpOnly }) {
+    if (!before.character) return next;
     const overcome = (before.combat.enemies || []).filter(enemy => (slainXpOnly
         ? enemyOutcome(enemy) === 'defeated'
         : enemyOutcome(enemy) !== 'active'));
@@ -225,7 +226,6 @@ export const handlers = {
                 turnOrder,
                 currentTurn: openingActorIds.length > 0 ? 0 : Math.max(0, playerIdx),
                 round: 1,
-                xpAwarded: false,
                 bonusActionUsed: false,
                 phase,
                 openingActorIds,
@@ -274,10 +274,7 @@ export const handlers = {
         next = releaseSustainedSpell(next);
         next = announceDownedCompanions(next);
         next = leaveFightMark(next, remembered);
-        return awardFightXp(state, next, {
-            llmAwardedXp: !!action.payload?.llmAwardedXp,
-            slainXpOnly: !!action.payload?.slainXpOnly,
-        });
+        return awardFightXp(state, next, { slainXpOnly: !!action.payload?.slainXpOnly });
     },
 
     BEGIN_COMBAT_INTENT(state) {

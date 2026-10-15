@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { buildMessageWindow } from '../components/Chat/turnVisibility.js';
+import { foldExperience } from '../engine/progression.js';
 
 const hero = {
     name: 'Astra',
@@ -92,13 +93,16 @@ describe('recentExpAwards replay ledger — the reported double-award', () => {
         expect(later.character.exp).toBe(300);
     });
 
-    it('leaves engine-path bare-number dispatches completely unguarded', () => {
+    it('engine awards never touch the ledger — they fold awardExperience directly (one lane since 2026-10-14)', () => {
         // Engine XP (combat, quests, fronts) is one-shot by construction — two
         // identical engine awards back to back are always genuine.
-        let state = gameReducer(makeState(), { type: 'ADD_EXP', payload: 150 });
-        const again = gameReducer(state, { type: 'ADD_EXP', payload: 150 });
+        let state = foldExperience(makeState(), 150, { reason: 'battle complete' });
+        const again = foldExperience(state, 150, { reason: 'battle complete' });
         expect(again.character.exp).toBe(300);
         expect(again.recentExpAwards).toHaveLength(0);
+        // The reducer's ADD_EXP is the DM lane alone: a bare number is a no-op.
+        const bare = gameReducer(makeState(), { type: 'ADD_EXP', payload: 150 });
+        expect(bare.character.exp).toBe(0);
     });
 });
 
@@ -133,10 +137,13 @@ describe('recentExpAwards guards the LEVEL_UP lane', () => {
         expect(echo.messages.some(m => (m.content || '').includes('Duplicate XP award ignored'))).toBe(true);
     });
 
-    it('leaves meta-less LEVEL_UP dispatches unguarded (engine/legacy path)', () => {
+    it('a meta-less LEVEL_UP is the DM lane with an empty ledger key — never a whole level (2026-10-14)', () => {
         let state = gameReducer(makeState(), { type: 'LEVEL_UP', payload: { bonusExp: 0, reason: 'milestone' } });
+        expect(state.character.level).toBe(3);
+        expect(state.character.exp).toBe(900); // the front tier, not a level
         const again = gameReducer(state, { type: 'LEVEL_UP', payload: { bonusExp: 0, reason: 'milestone' } });
-        expect(again.character.level).toBe(5);
+        expect(again.character.exp).toBe(900); // the constant signature catches the echo
+        expect(again.messages.at(-1).content).toContain('Duplicate level-up ignored');
     });
 });
 
@@ -234,8 +241,8 @@ describe('DM XP lanes are bounded engine-side (2026-09-07)', () => {
         expect(line).toContain('Max level reached');
     });
 
-    it('engine-path (meta-less) awards stay unbounded', () => {
-        const state = gameReducer(makeState(), { type: 'ADD_EXP', payload: 10000 });
+    it('engine awards (the fold) stay unbounded', () => {
+        const state = foldExperience(makeState(), 10000, { reason: 'campaign milestone' });
         expect(state.character.level).toBeGreaterThan(4);
         expect(state.messages.some(m => (m.content || '').includes('capped'))).toBe(false);
     });
@@ -277,8 +284,8 @@ describe('XP receipts — rows per award and what the DM window carries', () => 
 
     it('a level-crossing engine award posts TWO rows that fold into ONE window row', () => {
         const base = makeState();
-        // Engine lane (a bare number — combat / quest / front XP): L3 needs 1800.
-        const state = gameReducer(base, { type: 'ADD_EXP', payload: 1800 });
+        // Engine lane (the fold — combat / quest / front XP): L3 needs 1800.
+        const state = foldExperience(base, 1800, { reason: 'battle complete' });
         const rows = added(base, state);
         expect(state.character.level).toBe(4);
         expect(rows.map(m => m.dmVisible)).toEqual([true, true]);

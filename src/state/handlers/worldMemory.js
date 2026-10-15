@@ -2,6 +2,7 @@
  * Long-term memory: world facts (near-duplicate rejection), story-memory
  * cards, journal entries/summarization marks, and the campaign chronicle.
  */
+import { normalizeJournalEntry } from '../../engine/journalEntry.js';
 import { planWorldFactAdditions } from '../../engine/worldFacts.js';
 import {
     applyStoryMemoryDormancy,
@@ -163,7 +164,11 @@ export const handlers = {
                     // A paid-off beat's text is frozen with its status
                     // (2026-09-16 P2 belt): an id-keyed re-report used to
                     // rewrite what the resolved card says.
-                    text: resolved ? existing.text : pickMergedCardText(existing.text, card.text),
+                    // An ENGINE card's text is the engine's (proof playtest
+                    // 2026-09-30: the Scribe rewrote END_COMBAT's wound card into
+                    // its own words and the fight's particular was gone); a
+                    // re-report may revive or relink it, never reword it.
+                    text: resolved || existing.source === 'engine' ? existing.text : pickMergedCardText(existing.text, card.text),
                     firstSeenAt: existing.firstSeenAt,
                     lastSeenAt: Date.now(),
                     lastSeenMessage: messageCount,
@@ -216,17 +221,55 @@ export const handlers = {
         const messageCount = (state.messages || []).length;
         const { used, ...fields } = update;
         const now = Date.now();
-        const stamps = {
-            lastSeenAt: now,
-            lastSeenMessage: messageCount,
-            ...(used && { lastUsedAt: now, lastUsedMessage: messageCount }),
-        };
         return {
             ...state,
             storyMemory: state.storyMemory.map((memory, i) => i === idx
-                ? normalizeStoryMemoryCard({ ...memory, ...fields, ...stamps, id: memory.id }, memory)
+                ? normalizeStoryMemoryCard({
+                    ...memory,
+                    ...fields,
+                    lastSeenAt: now,
+                    lastSeenMessage: messageCount,
+                    // A landing counts (WOW 2026-10-14) beside the clocks.
+                    ...(used && { lastUsedAt: now, lastUsedMessage: messageCount, usedCount: (memory.usedCount || 0) + 1 }),
+                    id: memory.id,
+                }, memory)
                 : memory),
         };
+    },
+
+    /**
+     * The engine judged that the DM's reply paid off curated callbacks (WOW
+     * 2026-10-14, `detectCallbackPayoff`): the cards rest (`lastUsedMessage`)
+     * and count (`usedCount`) exactly as a DM-marked `used` does, and the DM
+     * row carries a `↺` chip per landed card (the bondMarks pattern) so the
+     * player sees the callback land. Zero calls.
+     */
+    MARK_CALLBACK_PAYOFF(state, action) {
+        const ids = new Set((Array.isArray(action.payload?.cardIds) ? action.payload.cardIds : []).filter(id => typeof id === 'string' && id));
+        const messageId = typeof action.payload?.messageId === 'string' ? action.payload.messageId : '';
+        if (ids.size === 0) return state;
+        const messageCount = (state.messages || []).length;
+        const now = Date.now();
+        const landed = [];
+        const storyMemory = (state.storyMemory || []).map(card => {
+            if (!card || !ids.has(card.id)) return card;
+            landed.push(card);
+            return normalizeStoryMemoryCard({ ...card, lastUsedAt: now, lastUsedMessage: messageCount, usedCount: (card.usedCount || 0) + 1, id: card.id }, card);
+        });
+        if (landed.length === 0) return state;
+        const marks = landed.map(card => ({ name: card.subject || card.type, kind: 'callback', label: `callback landed: ${String(card.text || '').slice(0, 120)}` }));
+        const idx = messageId ? (state.messages || []).findIndex(m => m?.id === messageId) : -1;
+        const messages = idx === -1 ? state.messages : state.messages.map((m, i) => {
+            if (i !== idx) return m;
+            const existing = Array.isArray(m.bondMarks) ? m.bondMarks : [];
+            const merged = [...existing];
+            for (const mark of marks) {
+                if (merged.some(known => known.name === mark.name && known.kind === mark.kind)) continue;
+                merged.push(mark);
+            }
+            return { ...m, bondMarks: merged.slice(-6) };
+        });
+        return { ...state, storyMemory, messages };
     },
 
     // Mark a batch of messages as summarized (excluded from future LLM history)
@@ -247,11 +290,13 @@ export const handlers = {
     },
 
     ADD_JOURNAL_ENTRY(state, action) {
-        const journal = [...state.journal, {
-            id: action.payload.id || `journal-${Date.now()}`,
-            timestamp: action.payload.timestamp || Date.now(),
-            ...action.payload,
-        }];
+        // THE journal row (2026-10-14 memory-journal P2): known keys, the live
+        // clamps, the span inside the transcript — the raw spread used to
+        // persist whatever the payload carried. A row without a summary is
+        // refused (the cadence never writes one).
+        const entry = normalizeJournalEntry(action.payload, { maxMessageCount: (state.messages || []).length });
+        if (!entry) return state;
+        const journal = [...state.journal, entry];
         // The cadence's engine ticks, in order: the NPC-initiative tick
         // (2026-09-13 overhaul — if no beat is pending and the cooldown has
         // passed, the one bonded NPC with the most pull may reach out; the

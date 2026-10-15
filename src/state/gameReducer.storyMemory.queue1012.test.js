@@ -29,14 +29,16 @@ describe('P1 — the callbacks block prints the id memory_updates addresses', ()
             payload: { type: 'promise', subject: 'Oren', text: 'The hero swore to Oren to mend the sundial before harvest.', salience: 4 },
         });
         const card = state.storyMemory[0];
+        // Past the DM window the card is offered (CALLBACK_MIN_AGE, WOW 2026-10-14).
+        state = { ...state, messages: talk(30) };
         const block = buildStoryMemoryPromptBlock(curateStoryMemory({ memories: state.storyMemory, query: 'Oren sundial', messages: state.messages }));
         const id = block.match(/\| id: ([^\s|)]+)/)?.[1];
         expect(id).toBe(card.id);
         expect(block).toMatch(/using the id shown on its line/);
 
-        state = { ...state, messages: talk(10) };
+        state = { ...state, messages: talk(32) };
         state = gameReducer(state, { type: 'UPDATE_STORY_MEMORY', payload: { id, used: true } });
-        expect(state.storyMemory[0].lastUsedMessage).toBe(10);
+        expect(state.storyMemory[0].lastUsedMessage).toBe(32);
         expect(state.storyMemory[0].lastUsedAt).toEqual(expect.any(Number));
         // …and the cooldown it sets holds the card out of the next curation.
         expect(curateStoryMemory({ memories: state.storyMemory, query: 'Oren sundial', messages: state.messages })).toHaveLength(0);

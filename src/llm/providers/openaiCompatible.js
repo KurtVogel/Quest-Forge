@@ -23,13 +23,34 @@ const assertCompleteResponse = makeCompletionGuard({
     truncatedReason: 'length',
 });
 
+/** The split is usable when both halves are non-empty strings. */
+function usableParts(parts) {
+    return !!parts && typeof parts.prefix === 'string' && parts.prefix && typeof parts.dynamic === 'string' && parts.dynamic;
+}
+
 /**
  * Convert our message format to the OpenAI-compatible chat format.
+ *
+ * The prefix boundary is TOLD to the provider (memory-research M1,
+ * 2026-10-14): with `systemPromptParts` the system prompt rides as TWO
+ * leading system messages — the byte-stable prefix first, the dynamic half
+ * second. xAI matches its cache at message granularity, so the prefix
+ * message is the whole fix there; OpenAI gpt-5.6+ matches only at cache
+ * breakpoints, so `explicitCache` puts one on the prefix message's text
+ * part. One message, as before, when no split is given.
  */
-function formatMessages(systemPrompt, messageHistory, userMessage) {
-    const messages = [
-        { role: 'system', content: systemPrompt },
-    ];
+export function formatMessages(systemPrompt, messageHistory, userMessage, { systemPromptParts = null, explicitCache = false } = {}) {
+    const messages = usableParts(systemPromptParts)
+        ? [
+            {
+                role: 'system',
+                content: explicitCache
+                    ? [{ type: 'text', text: systemPromptParts.prefix, prompt_cache_breakpoint: { mode: 'explicit' } }]
+                    : systemPromptParts.prefix,
+            },
+            { role: 'system', content: systemPromptParts.dynamic },
+        ]
+        : [{ role: 'system', content: systemPrompt }];
 
     for (const msg of messageHistory) {
         messages.push({
@@ -64,9 +85,48 @@ function formatMessages(systemPrompt, messageHistory, userMessage) {
  *   (2026-08-22 OpenAI playtest).
  * @param {function} [options.maxOutputTokensFor] - Output cap by model id
  *   (defaults to DEFAULT_MAX_TOKENS for every model).
+ * @param {function} [options.explicitCacheFor] - Predicate on the model id:
+ *   true sends `prompt_cache_options: { mode: 'explicit' }` and a
+ *   `prompt_cache_breakpoint` on the prefix message (OpenAI gpt-5.6+). A 400
+ *   naming either field drops both for the rest of the session (one-time
+ *   fallback, the affinity header's pattern) and tells the caller.
  * @returns {{ send: function, stream: function }}
  */
-export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key, maxTokensParam = 'max_tokens', temperatureUnsupported = () => false, maxOutputTokensFor = () => DEFAULT_MAX_TOKENS, streamUsage = false, extraHeaders = () => ({}) }) {
+export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key, maxTokensParam = 'max_tokens', temperatureUnsupported = () => false, maxOutputTokensFor = () => DEFAULT_MAX_TOKENS, streamUsage = false, extraHeaders = () => ({}), explicitCacheFor = () => false }) {
+    let explicitCacheRejected = false;
+    const wantsExplicitCache = (args) => !explicitCacheRejected && usableParts(args.systemPromptParts) && !!explicitCacheFor(args.model);
+    const namesCacheField = (error) => /prompt_cache_(?:breakpoint|options)/i.test(String(error?.message || ''));
+
+    /**
+     * One request, with the explicit-cache fields when the model takes them
+     * and ONE re-send without them on a 400 that names them (the unverified
+     * step: a text part with a breakpoint on a Chat Completions `system`
+     * message). The retry is the same request minus two fields; the player
+     * never sees the first reply.
+     */
+    async function requestWithCacheFallback(args, bodyFor) {
+        const explicit = wantsExplicitCache(args);
+        const init = (body) => ({
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${mapApiKey(args.apiKey)}`,
+            },
+            body: JSON.stringify(body),
+            signal: args.signal,
+        });
+        let response = await fetchWithExtraHeaders(args, init(bodyFor(explicit)));
+        if (!response.ok && explicit && response.status === 400) {
+            const error = await httpError(response);
+            if (!namesCacheField(error)) throw error;
+            explicitCacheRejected = true;
+            args.onCacheBreakpointRejected?.();
+            response = await fetchWithExtraHeaders(args, init(bodyFor(false)));
+        }
+        if (!response.ok) throw await httpError(response);
+        return response;
+    }
+
     /**
      * One fetch with the provider's extra headers (2026-09-30 cache telemetry:
      * xAI's `x-grok-conv-id` routes a conversation to one server so its
@@ -103,25 +163,14 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
 
     /** Send a non-streaming message. (thinkingBudget is Gemini-only; ignored here.) */
     async function send(args) {
-        const { apiKey, model, systemPrompt, messageHistory, userMessage, temperature, maxOutputTokens, signal, onUsage } = args;
-        const response = await fetchWithExtraHeaders(args, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${mapApiKey(apiKey)}`,
-            },
-            body: JSON.stringify({
-                model,
-                messages: formatMessages(systemPrompt, messageHistory, userMessage),
-                ...(temperatureUnsupported(model) ? {} : { temperature: temperature ?? 0.9 }),
-                [maxTokensParam]: Number.isFinite(maxOutputTokens) ? maxOutputTokens : maxOutputTokensFor(model),
-            }),
-            signal,
-        });
-
-        if (!response.ok) {
-            throw await httpError(response);
-        }
+        const { model, systemPrompt, systemPromptParts, messageHistory, userMessage, temperature, maxOutputTokens, onUsage } = args;
+        const response = await requestWithCacheFallback(args, (explicitCache) => ({
+            model,
+            messages: formatMessages(systemPrompt, messageHistory, userMessage, { systemPromptParts, explicitCache }),
+            ...(temperatureUnsupported(model) ? {} : { temperature: temperature ?? 0.9 }),
+            [maxTokensParam]: Number.isFinite(maxOutputTokens) ? maxOutputTokens : maxOutputTokensFor(model),
+            ...(explicitCache ? { prompt_cache_options: { mode: 'explicit' } } : {}),
+        }));
 
         const data = asRecord(await response.json());
         const message = data.choices?.[0]?.message;
@@ -139,33 +188,22 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
 
     /** Stream a message, calling onChunk with each text fragment. */
     async function stream(args) {
-        const { apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, maxOutputTokens, onUsage } = args;
-        const response = await fetchWithExtraHeaders(args, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${mapApiKey(apiKey)}`,
-            },
-            body: JSON.stringify({
-                model,
-                messages: formatMessages(systemPrompt, messageHistory, userMessage),
-                ...(temperatureUnsupported(model) ? {} : { temperature: temperature ?? 0.9 }),
-                // A passed cap is honored like the send's (2026-10-12 — the
-                // stream ignored it); the DM lane passes none and keeps the
-                // per-model cap (REASONING_MAX_TOKENS on a reasoning model).
-                [maxTokensParam]: Number.isFinite(maxOutputTokens) ? maxOutputTokens : maxOutputTokensFor(model),
-                stream: true,
-                // OpenAI reports usage on a stream only when asked; the final
-                // chunk then carries it (cached_tokens included). xAI sends it
-                // unasked, so the flag is per provider.
-                ...(streamUsage ? { stream_options: { include_usage: true } } : {}),
-            }),
-            signal,
-        });
-
-        if (!response.ok) {
-            throw await httpError(response);
-        }
+        const { model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk, temperature, maxOutputTokens, onUsage } = args;
+        const response = await requestWithCacheFallback(args, (explicitCache) => ({
+            model,
+            messages: formatMessages(systemPrompt, messageHistory, userMessage, { systemPromptParts, explicitCache }),
+            ...(temperatureUnsupported(model) ? {} : { temperature: temperature ?? 0.9 }),
+            // A passed cap is honored like the send's (2026-10-12 — the
+            // stream ignored it); the DM lane passes none and keeps the
+            // per-model cap (REASONING_MAX_TOKENS on a reasoning model).
+            [maxTokensParam]: Number.isFinite(maxOutputTokens) ? maxOutputTokens : maxOutputTokensFor(model),
+            stream: true,
+            // OpenAI reports usage on a stream only when asked; the final
+            // chunk then carries it (cached_tokens included). xAI sends it
+            // unasked, so the flag is per provider.
+            ...(streamUsage ? { stream_options: { include_usage: true } } : {}),
+            ...(explicitCache ? { prompt_cache_options: { mode: 'explicit' } } : {}),
+        }));
 
         let fullText = '';
         let refusalText = '';
@@ -198,11 +236,13 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
 
 /**
  * Token usage in the adapter's one shape (2026-09-30 cache telemetry):
- * `{ promptTokens, cachedTokens, outputTokens }` from an OpenAI-compatible
- * `usage` object — `prompt_tokens`, `prompt_tokens_details.cached_tokens`
- * (OpenAI and xAI report the cache hit there), `completion_tokens`. Missing
- * or non-numeric fields read as null / 0; a throw in the callback is the
- * caller's and never fails the reply.
+ * `{ promptTokens, cachedTokens, writtenTokens, outputTokens }` from an
+ * OpenAI-compatible `usage` object — `prompt_tokens`,
+ * `prompt_tokens_details.cached_tokens` (OpenAI and xAI report the cache hit
+ * there), `prompt_tokens_details.cache_write_tokens` (OpenAI's 1.25× cache
+ * WRITE, 2026-10-14 — the field the 09-30 telemetry lacked), `completion_tokens`.
+ * Missing or non-numeric fields read as null / 0; a throw in the callback is
+ * the caller's and never fails the reply.
  */
 export function normalizeOpenAIUsage(usage) {
     if (!usage || typeof usage !== 'object') return null;
@@ -212,6 +252,7 @@ export function normalizeOpenAIUsage(usage) {
     return {
         promptTokens,
         cachedTokens: num(usage.prompt_tokens_details?.cached_tokens) ?? 0,
+        writtenTokens: num(usage.prompt_tokens_details?.cache_write_tokens) ?? 0,
         outputTokens: num(usage.completion_tokens),
     };
 }

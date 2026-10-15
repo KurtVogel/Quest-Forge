@@ -96,6 +96,14 @@ export function isAbsenceDriftLocalNpc(npc, locationName) {
         || (npc.basedIn && isSameLocation(npc.basedIn, here)));
 }
 
+/** Does this active front hold theater at the record? The installer's check for the front the director's context OFFERED (2026-10-15). */
+export function isDriftTheaterFront(fronts, locationRecord, frontId) {
+    if (!locationRecord || !frontId) return false;
+    const theaterIds = Array.isArray(locationRecord.theaterFrontIds) ? locationRecord.theaterFrontIds : [];
+    return theaterIds.includes(frontId)
+        && (Array.isArray(fronts) ? fronts : []).some(front => front?.id === frontId && (front.status || 'active') === 'active');
+}
+
 /**
  * THE front an absence drift may show a symptom of at a place: the first
  * active front holding theater there. One lookup for the director's context
@@ -350,8 +358,9 @@ export function computeRecentHeat(state, { window = 15 } = {}) {
         reasons.push('combat is happening right now');
     }
 
-    const recentFights = (state.recentEncounters || [])
-        .filter(entry => Number.isFinite(entry?.messageIndex)
+    // The typed ledger, like the block that renders beside it (2026-10-15 nit).
+    const recentFights = sanitizeRecentEncounters(state.recentEncounters)
+        .filter(entry => Number.isFinite(entry.messageIndex)
             && distanceSince(messages, entry.messageIndex, messageCount) <= window);
     if (recentFights.length > 0) {
         score += Math.min(7, 3 + (recentFights.length - 1) * 2);
@@ -469,11 +478,15 @@ export function normalizeTempoDirective(raw, {
     // DM only weaves the symptom where the fiction allows anyway.
     const registry = Array.isArray(locations) ? locations : [];
     const frontHasTheater = registry.some(record => (record?.theaterFrontIds || []).includes(frontId));
+    // `inTheater` is also the reducer's answer to "may this grant GROW the
+    // theater" (2026-10-15): true when the front has no home yet or the grant
+    // lies inside it; false when the gate clamped the grant to whispers.
+    let inTheater = true;
     if (frontHasTheater) {
         const here = getCurrentLocationRecord(registry, currentLocation);
         const whereIdx = findLocationRecord(registry, cleanText(raw.where, 120));
         const whereRecord = whereIdx === -1 ? null : registry[whereIdx];
-        const inTheater = (!!here && (here.theaterFrontIds || []).includes(frontId))
+        inTheater = (!!here && (here.theaterFrontIds || []).includes(frontId))
             || (!!whereRecord && (whereRecord.theaterFrontIds || []).includes(frontId));
         if (!inTheater) maxIntensity = 'whispers';
     }
@@ -483,6 +496,7 @@ export function normalizeTempoDirective(raw, {
     return {
         frontId,
         maxIntensity,
+        inTheater,
         where: cleanText(raw.where, 120),
         suggestedSymptom: cleanText(raw.suggested_symptom || raw.suggestedSymptom),
         rationale: cleanText(raw.rationale),

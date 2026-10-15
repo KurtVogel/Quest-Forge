@@ -14,7 +14,8 @@ import { sanitizeLivingWorldSession } from '../../engine/livingWorldSession.js';
 import { sanitizeHeroTells } from '../../engine/heroTells.js';
 import { buildHeroDeath, describeEpitaph } from '../../engine/heroDeath.js';
 import { sanitizeQuestRecords } from './quests.js';
-import { cleanTextField, JOURNAL_SUMMARY_MAX, LOCATION_NAME_MAX, MESSAGE_CONTENT_MAX, normalizeCampaignPremise } from '../../config/contentLimits.js';
+import { normalizeJournalEntry } from '../../engine/journalEntry.js';
+import { cleanTextField, LOCATION_NAME_MAX, MESSAGE_CONTENT_MAX, normalizeCampaignPremise } from '../../config/contentLimits.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { canonicalEnemyId, enemyOutcome, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES } from '../../engine/combatPredicates.js';
@@ -116,21 +117,7 @@ function typeLoadedWorldFacts(list, maxMessageCount) {
         : f));
 }
 
-const JOURNAL_LIST_MAX_ITEMS = 8;
-const JOURNAL_LIST_ITEM_MAX = 300;
 /** The load twin of normalizeJournalSummary's list clamp: string elements, 8 × 300. */
-const typeJournalList = (value) => (Array.isArray(value) ? value : [])
-    .map(item => cleanTextField(item, JOURNAL_LIST_ITEM_MAX))
-    .filter(Boolean)
-    .slice(0, JOURNAL_LIST_MAX_ITEMS);
-
-/** A journal entry's [from, to] message span: two integers inside the transcript, else dropped. */
-const typeMessageRange = (range, messageCount) => {
-    if (!Array.isArray(range) || range.length !== 2 || !range.every(Number.isInteger)) return undefined;
-    const from = Math.max(0, Math.min(messageCount, range[0]));
-    const to = Math.max(from, Math.min(messageCount, range[1]));
-    return [from, to];
-};
 
 const finiteOr = (value, fallback) => {
     const n = Number(value);
@@ -397,30 +384,15 @@ function validateSaveState(payload) {
         // P1): an object name rendered "[object Object]" in the prompt every
         // turn and tripped the Quests panel's boundary on every open.
         quests: sanitizeQuestRecords(payload.quests, { maxMessageCount: messageCount }),
+        // THE journal row (2026-10-14 memory-journal P2): the load twin IS the
+        // composer the cadence and ADD_JOURNAL_ENTRY run — known keys only (an
+        // unknown key used to ride `...e` across every reload), every field
+        // typed like the live write (2026-09-18: one object/100k list element
+        // used to mint a 167k system prompt from ONE entry; 2026-09-17: a
+        // 100k summary reached the RAG seed unbounded), the span clamped to
+        // the transcript, a summary-less row dropped.
         journal: Array.isArray(payload.journal)
-            ? payload.journal
-                .filter(e => e && typeof e === 'object')
-                // Heal entries persisted before normalizeJournalSummary: a string-valued
-                // consequences/keyDecisions crashed the prompt build / Journal panel.
-                // …and since 2026-09-18 every field the prompt, the Journal panel,
-                // dormancy, and the RAG seed read is typed like the live write
-                // (normalizeJournalSummary clamps 8 × 300): one object/100k list
-                // element used to mint a 167k system prompt from ONE entry.
-                .map((e, index) => ({
-                    ...e,
-                    id: cleanTextField(e.id, 120) || `journal-loaded-${index}`,
-                    timestamp: Number.isFinite(e.timestamp) ? e.timestamp : Date.now(),
-                    location: cleanTextField(e.location, LOCATION_NAME_MAX) || null,
-                    ...(e.fallback !== undefined && { fallback: strictFlag(e.fallback) }),
-                    ...(e.messageRange !== undefined && { messageRange: typeMessageRange(e.messageRange, messageCount) }),
-                    // The live write clamps at JOURNAL_SUMMARY_MAX (normalizeJournalSummary);
-                    // the load twin types it too (2026-09-17 vector-memory P1: a
-                    // 100k summary reached the RAG seed unbounded and cost its whole
-                    // embed chunk on every mount).
-                    summary: cleanTextField(e.summary, JOURNAL_SUMMARY_MAX),
-                    keyDecisions: typeJournalList(e.keyDecisions),
-                    consequences: typeJournalList(e.consequences),
-                }))
+            ? payload.journal.map(e => normalizeJournalEntry(e, { maxMessageCount: messageCount })).filter(Boolean)
             : [],
         npcs,
         // Heal poisoned saves: a pre-guard non-string fact/category crashed prompt
@@ -571,7 +543,6 @@ function validateSaveState(payload) {
                 turnOrder,
                 currentTurn,
                 round: Math.max(1, Math.trunc(finiteOr(merged.round, 1))),
-                xpAwarded: strictFlag(merged.xpAwarded),
                 bonusActionUsed: strictFlag(merged.bonusActionUsed),
                 phase,
                 openingActorIds: stringList(merged.openingActorIds, 40),

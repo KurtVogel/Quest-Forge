@@ -417,7 +417,6 @@ describe('LOAD_GAME progression migrations', () => {
                     turnOrder: [],
                     currentTurn: 0,
                     round: 1,
-                    xpAwarded: false,
                 },
             },
         });

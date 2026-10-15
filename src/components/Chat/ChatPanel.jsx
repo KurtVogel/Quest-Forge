@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
+import { isRecordEntry } from '../../engine/journalEntry.js';
 import { turnFlags } from '../../llm/turnFlags.js';
 import { useGame } from '../../state/GameContext.jsx';
 import { sendMessage, streamMessage } from '../../llm/adapter.js';
@@ -420,7 +421,7 @@ export default function ChatPanel() {
             // A `fallback` entry ("Auto-summary was unavailable…") is honest
             // bookkeeping, not memory — a content-free row would compete for
             // retrieval slots on every reload (2026-09-06 P2).
-            ...(s.journal || []).filter(j => !j.fallback).map(j => journalMemoryItem(j, rosterNames)),
+            ...(s.journal || []).filter(isRecordEntry).map(j => journalMemoryItem(j, rosterNames)),
             ...(s.npcs || []).filter(n => n.lastNotes || n.notes).map(npcMemoryItem),
             // Non-active cards stay out of retrieval: a resolved promise or a
             // dormant scene beat retrieving beside live ones invites the DM to
@@ -1212,7 +1213,7 @@ const ChatMessage = memo(function ChatMessage({ message, onDelete }) {
                         // The quiet tell (2026-09-13 overhaul): a key moment
                         // landed or a bond moved — a chip, never a score screen.
                         <span key={i} className={`message-bond-mark ${mark.kind || 'moment'}`} title={mark.label || ''}>
-                            ✦ {mark.name}
+                            {mark.kind === 'callback' ? '↺' : '✦'} {mark.name}
                         </span>
                     ))}
                     {onDelete && (

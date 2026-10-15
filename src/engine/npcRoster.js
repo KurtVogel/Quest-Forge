@@ -779,11 +779,21 @@ export function isGenericCreatureName(name) {
 const DESCRIPTIVE_LEAD = /^(?:a|an|some|several|many|few|various|more|another|other|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+/i;
 const DESCRIPTIVE_CLAUSE = /\b(?:looking|wearing|carrying|holding|sharpening|standing|sitting|leaning|who|that|which|with)\s+/i;
 
+// A role noun PLACED is still a description (grand playtest 2026-10-03 Sol:
+// "Serving woman on Market Street" minted a roster record): a generic person
+// word as the head noun before a locative preposition names nobody yet.
+const LOCATIVE_LABEL = /^(.+?)\s+(?:on|at|in|by|near|from|outside|inside|behind|beside)\s+\S/i;
+
 export function isDescriptiveLabel(name) {
     const raw = cleanText(name);
     if (!raw) return false;
     if (DESCRIPTIVE_LEAD.test(raw)) return true;
     if (DESCRIPTIVE_CLAUSE.test(raw)) return true;
+    const locative = raw.match(LOCATIVE_LABEL);
+    if (locative) {
+        const head = tokenizeCreatureName(locative[1]);
+        if (head.length > 0 && isGenericNameToken(head[head.length - 1])) return true;
+    }
     return tokenizeCreatureName(raw).length > 5;
 }
 

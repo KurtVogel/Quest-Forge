@@ -406,7 +406,6 @@ describe('rest and resource mechanics', () => {
             turnOrder: [{ type: 'player', name: 'Astra', initiative: 12 }],
             currentTurn: 0,
             round: 1,
-            xpAwarded: false,
             bonusActionUsed: false,
         };
 
@@ -450,7 +449,6 @@ describe('rest and resource mechanics', () => {
             ],
             currentTurn: 0,
             round: 1,
-            xpAwarded: false,
             bonusActionUsed: false,
         };
 

@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { buildSystemPrompt, buildSystemPromptParts, COMBAT_INTENT_RESPONSE_MODE, describeHeroStatus, RESPONSE_MODES } from './promptBuilder.js';
 import { EPILOGUE_RESPONSE_MODE, TABLE_TALK_RESPONSE_MODE } from './tableTalk.js';
 import { createCharacter } from '../engine/characterUtils.js';
-import { describeBondForPrompt } from '../engine/worldJournal.js';
+import { describeBondForPrompt } from './journalBlocks.js';
 
 const ABILITY_SCORES = { strength: 14, dexterity: 10, constitution: 16, intelligence: 10, wisdom: 18, charisma: 12 };
 

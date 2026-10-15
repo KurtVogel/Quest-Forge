@@ -7,7 +7,7 @@ import { ABILITY_SHORT, classDisplayName, getFightingStyleLabel, getMartialArche
 import { describeArmorAc, describeShieldAc, formatModifier, getModifier, getProficiencyBonus, getSavingThrowModifier, hasListEntry, isProficientWithWeapon } from '../engine/rules.js';
 import { SUPPORTED_ENEMY_CONDITIONS_SENTENCE } from '../engine/enemyStats.js';
 import { getDmBonusXpCap, getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
-import { buildJournalContext, describeBondForPrompt } from '../engine/worldJournal.js';
+import { buildJournalBlocks, describeBondForPrompt } from './journalBlocks.js';
 import { findSubjectsInText } from '../engine/textMatch.js';
 import { buildWonderBlock } from '../engine/wonder.js';
 import { buildPresenceText } from './narrativeMessages.js';
@@ -20,7 +20,7 @@ import { cleanTextField, normalizeCampaignPremise } from '../config/contentLimit
 import { cleanText, textOr } from '../engine/text.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 import { EPILOGUE_RESPONSE_MODE, TABLE_TALK_RESPONSE_MODE, TABLE_TALK_STANDING_RULE } from './tableTalk.js';
-import { buildWorldTempoBlock, computeRecentHeat } from '../engine/worldTempo.js';
+import { buildWorldTempoBlock, computeRecentHeat, isTempoWindowActive } from '../engine/worldTempo.js';
 import { buildRegionalHearsayBlock } from '../engine/regionalHearsay.js';
 import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
 import { describeSpellbookForPrompt, describeSpellSlotsForPrompt, isSpellcaster } from '../engine/spellcasting.js';
@@ -125,6 +125,26 @@ export function buildSystemPrompt(options) {
     }
 
     return promptText;
+}
+
+/** The last per-campaign constant block: everything up to and including it is the byte-stable cache prefix (DECISIONS 2026-09-26). */
+export const PREFIX_END_PART = 'heroSheet';
+
+/**
+ * The prompt split at the prefix boundary (memory-research M1, 2026-10-14):
+ * `{ text, prefix, dynamic }` where `text` is byte-identical to
+ * `buildSystemPrompt`'s join and `prefix` + '\n\n' + `dynamic` = `text`. The
+ * providers that cache by message (xAI) or by explicit breakpoint (OpenAI
+ * gpt-5.6+) are told WHERE the prefix ends; Gemini sends the one string.
+ */
+export function buildSystemPromptSplit(options) {
+    const namedParts = buildSystemPromptParts(options);
+    const end = namedParts.findIndex(part => part.name === PREFIX_END_PART);
+    const prefixParts = end === -1 ? [] : namedParts.slice(0, end + 1);
+    const dynamicParts = end === -1 ? namedParts : namedParts.slice(end + 1);
+    const prefix = prefixParts.map(p => p.text).join('\n\n');
+    const dynamic = dynamicParts.map(p => p.text).join('\n\n');
+    return { text: namedParts.map(p => p.text).join('\n\n'), prefix, dynamic };
 }
 
 /**
@@ -323,6 +343,8 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
             // Render-time liveness + roster check (2026-09-08 living-world P2).
             fronts: ctx.fronts,
             npcs: ctx.npcs,
+            // The tempo window owns the scene's one symptom (2026-10-15).
+            tempoWindowActive: !ctx.combatActive && isTempoWindowActive(worldTempo?.directive || null, ctx.messageCount, ctx.messages),
         });
         // NPC initiative (2026-09-13 overhaul): one bonded NPC may reach out on
         // their own while their engine-rolled window is open; re-judged at render.
@@ -422,15 +444,19 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
     // (both derive from it) while the place card and KNOWN NPCs still render.
     // A party companion is never a KNOWN NPCs line (2026-10-13 P2): their
     // record renders ONCE, on their party line.
-    const journalContext = (intentOnly || nudgeOnly) ? '' : buildJournalContext(narrationOnly ? [] : (journal || []), ctx.npcs, currentLocation, {
-        presentNames,
-        partyNames,
-        messages: ctx.messages,
-        storyMemory: threadPool,
-        locations: ctx.locations,
-    });
-    if (journalContext) {
-        parts.push(journalContext, 'journalAndNpcs');
+    // Four parts, four ceilings (2026-10-14 memory-journal P2): the place
+    // line, SESSION HISTORY, LOCATION TRANSITION HISTORY and KNOWN NPCs each
+    // ride as their own part — one 38k `journalAndNpcs` part let a KNOWN
+    // NPCs regression hide behind a short journal.
+    if (!intentOnly && !nudgeOnly) {
+        const blocks = buildJournalBlocks(narrationOnly ? [] : (journal || []), ctx.npcs, currentLocation, {
+            presentNames,
+            partyNames,
+            messages: ctx.messages,
+            storyMemory: threadPool,
+            locations: ctx.locations,
+        });
+        for (const block of blocks) parts.push(block.text, block.name);
     }
 
     if (!nudgeOnly) {
@@ -817,6 +843,7 @@ const RESPONSE_FORMAT_TAIL = `COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANIC
 - Use \`flee\` only when the fiction establishes a successful escape; it ends combat without XP or pursuit attacks. If escape is uncertain, use a Check slot instead and let its result decide the fiction.
 - \`enemy_intents\`: at most one per living foe, using only \`attack\`, \`defend\`, \`flee\`, or \`surrender\`. An attack targets \`player\` or a living companion id. Missing intent defaults to that foe's basic attack against the hero.
 - **Honor your own telegraph, and let foes break.** Your last narration ended on each standing foe's visible next move; this exchange's \`enemy_intents\` deliver it — the foe shown nocking an arrow at Torvald attacks Torvald, the foe shown backing toward the door flees, the foe shown lowering its blade surrenders — unless the player's action this turn changed it. A foe at bloodied or critical Health with no reason to die fighting BREAKS by the round after it was bloodied: \`flee\`, \`surrender\`, or one desperate attack before it does. Fanatics, the undead, constructs, and beasts guarding young or a kill are the exceptions, and the fiction names the reason. A break is still DECLARED through \`enemy_intents\` (\`flee\` / \`surrender\`) in this JSON reply — never narrated here; the engine resolves it and the narration call tells it. A fight that goes to the last hit point on both sides is the failure, not the default.
+- **A downed hero is not a pause button.** When the hero is DYING or DEFEATED and no companion still stands, a foe does not \`defend\` round after round waiting on the dice: it does what it came to do and the fight ENDS — it takes its prize, drags the body off, or leaves the hero for dead (\`flee\` closes the fight; the hero's fate rests with the death saves and whoever finds them), or the hero's fall was its goal and it stops (\`surrender\` is wrong here; narrate the foe standing down and let the player's next line move the story). The engine never lets a foe strike a fallen hero in the exchange, so say what the foe DOES instead — a foe standing idle over a body is the one wrong answer.
 - **Enemy targeting comes from the fiction, not habit.** Melee foes strike whoever is actually engaging them — a warrior companion holding the front line takes those attacks, not the hero standing behind them. Beasts and brutes hit whatever is closest or loudest; wounded foes turn on whoever just hurt them; smart or ranged foes may deliberately pick the caster or healer. Never route every attack to the hero by default when companions share the fight. Target selection is drawn from the established fiction only — never from comparing HP or AC to pick the weakest victim. Multiple foes do not dogpile one fragile companion in a single exchange unless the fiction has genuinely isolated them, and a companion at 0 HP is out of the fight — foes turn to live threats instead of landing finishing blows on the downed.
 - An enemy intent may include \`"remove_conditions":["prone"]\` when the foe stands, recovers, or otherwise clears an established condition immediately before its own action. Do not remove conditions before the player's earlier slot resolves.
 - A foe with \`stunned\`, \`paralyzed\`, or \`unconscious\` loses its action entirely — the engine skips it and reports it cannot act. When the fiction has it recover, clear the condition with \`remove_conditions\` in that foe's intent; only then does it act again.

@@ -51,7 +51,7 @@ import { bornStoryMemoryCard, findStoryMemoryMatch, normalizeStoryMemoryCard } f
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isDirectionEvidencedInText, isLocationEvidencedInText, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, linkLocations, normalizeTravelDirection, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
-import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, findDriftTheaterFront, getFrontIntensityBand, isAbsenceDriftLocalNpc } from '../../engine/worldTempo.js';
+import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, findDriftTheaterFront, getFrontIntensityBand, isAbsenceDriftLocalNpc, isDriftTheaterFront } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
 import { isStaleCampaignAction, systemMessage, upsertNpc } from './shared.js';
 import { cleanTextField, LOCATION_NAME_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
@@ -98,6 +98,27 @@ function findTouchedNpc(after = [], payload = {}, context = {}) {
 
 /** The presence text a lane threaded on the action's meta (the turn's own texts), or ''. */
 const presenceTextOf = (action) => (typeof action?.meta?.presenceText === 'string' ? action.meta.presenceText : '');
+
+/** May the regional seed buy a DM call: the installer tops the web to MAX_ACTIVE_FRONTS - 1, never the cap. */
+function regionalSeedHasRoom(fronts) {
+    const activeFronts = (Array.isArray(fronts) ? fronts : []).filter(f => (f?.status || 'active') === 'active').length;
+    return activeFronts < MAX_ACTIVE_FRONTS - 1;
+}
+
+function mintRegionalSeed(region, locationName, messages) {
+    return {
+        key: `${region.toLowerCase()}|${(messages || []).length}`,
+        region,
+        locationName,
+    };
+}
+
+/** The deferred-region ledger (2026-10-15): lands met while the web was full, newest last, cap DEFERRED_REGIONS_CAP. */
+export const DEFERRED_REGIONS_CAP = 6;
+function rememberDeferredRegion(list, region) {
+    const kept = (Array.isArray(list) ? list : []).filter(known => !isSameRegion(known, region));
+    return [...kept, region].slice(-DEFERRED_REGIONS_CAP);
+}
 
 export const handlers = {
     // UPDATE_NPC upserts by id or name (see upsertNpc): one create/merge path
@@ -399,6 +420,20 @@ export const handlers = {
         if (!arrived) return next;
         if (destinationIdx === -1) return next;
 
+        // A region met while the front web was full is seeded on the hero's
+        // next arrival in that land once a slot has freed (2026-10-15).
+        const arrivalRegion = locations[destinationIdx].region;
+        const deferred = (state.session?.deferredRegions || []).find(region => isSameRegion(region, arrivalRegion));
+        if (deferred && !state.session?.pendingRegionalFronts
+            && !(state.session?.seededRegions || []).some(known => isSameRegion(known, deferred))
+            && regionalSeedHasRoom(state.fronts)) {
+            next.session = {
+                ...next.session,
+                deferredRegions: (state.session?.deferredRegions || []).filter(region => !isSameRegion(region, deferred)),
+                pendingRegionalFronts: mintRegionalSeed(deferred, locations[destinationIdx].name, state.messages),
+            };
+        }
+
         // Traveling rumor: deterministically pick which of the hero's deeds
         // could plausibly be talk of THIS place, once per (deed, place).
         const selection = selectRegionalHearsay({
@@ -434,7 +469,16 @@ export const handlers = {
         // background director (llm/absenceDrift.js) fires from. Cooldown: one
         // drift per homecoming, not one per stale record the return stroll
         // re-touches (2026-08-05 live playtest fired two within a few turns).
-        const lastDriftAt = state.session?.absenceDrift?.arrivedAtMessage;
+        // The ATTEMPT is what cools (2026-10-15 living-world P2, measured):
+        // `absenceDrift.arrivedAtMessage` is written only when something
+        // installed, so a QUIET homecoming (or the give-up's empty install)
+        // fired a second drift — a second DM-model call — at the next stale
+        // record in town two messages later. `lastAbsenceDriftMessage` is
+        // stamped on every install; the installed block's stamp is the
+        // legacy fallback.
+        const lastDriftAt = Number.isFinite(state.session?.lastAbsenceDriftMessage)
+            ? state.session.lastAbsenceDriftMessage
+            : state.session?.absenceDrift?.arrivedAtMessage;
         const driftCoolingDown = Number.isFinite(lastDriftAt)
             && distanceSince(state.messages, lastDriftAt, messageIndex) < ABSENCE_DRIFT_COOLDOWN_MESSAGES;
         // Nested-place guard (live playtest #7): the shop, its street, and the
@@ -489,7 +533,9 @@ export const handlers = {
         // keyless install through with no locality check at all.
         if (!pending || typeof pending.key !== 'string' || !pending.key
             || payload.sessionId !== state.session?.id || payload.key !== pending.key) return state;
-        const session = { ...state.session, pendingAbsenceDrift: null };
+        // Every install — rich, quiet, or the give-up's empty one — stamps the
+        // homecoming's cooldown (2026-10-15 living-world P2).
+        const session = { ...state.session, pendingAbsenceDrift: null, lastAbsenceDriftMessage: pending.returnMessage };
         const drift = payload.drift && typeof payload.drift === 'object' ? payload.drift : {};
         // Strings only — `String(object)` minted "[object Object]" canon.
         const text = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
@@ -533,9 +579,15 @@ export const handlers = {
         const locations = state.locations || [];
         const idx = findLocationRecord(locations, pending.locationName);
         const record = idx === -1 ? null : locations[idx];
-        // The same lookup the director's context used: the symptom was written
-        // for exactly this front.
-        const theaterFront = findDriftTheaterFront(state.fronts, record);
+        // The symptom binds to the front the director's context OFFERED
+        // (`drift.frontId`, 2026-10-15 living-world nit) if it still holds
+        // theater here and is still active — never to "the first theater
+        // front" re-read at install, which a resolution in between re-bound
+        // the symptom to. A legacy reply without the id keeps the old lookup.
+        const offeredId = text(drift.frontId, 120);
+        const theaterFront = offeredId
+            ? (isDriftTheaterFront(state.fronts, record, offeredId) ? (state.fronts || []).find(front => front?.id === offeredId) : null)
+            : findDriftTheaterFront(state.fronts, record);
         const symptomText = text(drift.frontSymptom, 240);
         const frontSymptom = theaterFront && symptomText
             ? { frontId: theaterFront.id, maxIntensity: getFrontIntensityBand(theaterFront), text: symptomText }
@@ -681,20 +733,22 @@ export const handlers = {
         if (priorRegions.some(known => isSameRegion(known, region))) return next;
         if ((state.session?.seededRegions || []).some(known => isSameRegion(known, region))) return next;
         if (state.session?.pendingRegionalFronts) return next;
-        const activeFronts = (state.fronts || []).filter(f => (f.status || 'active') === 'active').length;
         // The installer only tops the web to MAX_ACTIVE_FRONTS - 1 (one slot
         // always stays free), so with no room below that line the marker would
-        // only buy a wasted DM call. The region stays unseeded and can trigger
-        // later when a slot frees up.
-        if (activeFronts >= MAX_ACTIVE_FRONTS - 1) return next;
-
+        // only buy a wasted DM call. The region is DEFERRED (2026-10-15
+        // living-world P2, measured): the profile write above stores the
+        // region on the record BEFORE this gate, so every later classification
+        // in that land returned at "known region" and the promise to "trigger
+        // later when a slot frees up" was never kept. A deferred region is
+        // re-judged on the hero's next ARRIVAL at a place of that land
+        // (SET_LOCATION) — the seed needs the hero there.
+        if (!regionalSeedHasRoom(state.fronts)) {
+            next.session = { ...next.session, deferredRegions: rememberDeferredRegion(state.session?.deferredRegions, region) };
+            return next;
+        }
         next.session = {
             ...next.session,
-            pendingRegionalFronts: {
-                key: `${region.toLowerCase()}|${(state.messages || []).length}`,
-                region,
-                locationName: locations[classifiedIdx].name,
-            },
+            pendingRegionalFronts: mintRegionalSeed(region, locations[classifiedIdx].name, state.messages),
         };
         return next;
     },

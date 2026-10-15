@@ -49,6 +49,7 @@ import {
     validateEnemySaveBonus,
 } from './enemyStats.js';
 import { COMBAT_PHASES, isCompanionActive, isEnemyActive, isLowLevelSolo } from './combatPredicates.js';
+import { reviveHero } from './progression.js';
 import {
     buildSustainedSpell,
     chooseSlotLevel,
@@ -1158,16 +1159,9 @@ function resolveEnemies({ exchange, inventory, enemies, companions, events }, { 
     return { playerHp, playerDamage };
 }
 
-/** Same-exchange projection of a natural-20 revive (the reducer's reviveCharacter shape). */
+/** Same-exchange projection of a natural-20 revive: THE revive at 1 HP. */
 function projectRevivedCharacter(character) {
-    return {
-        ...character,
-        currentHP: 1,
-        dying: false,
-        lowLevelDefeat: false,
-        deathSaves: { successes: 0, failures: 0 },
-        conditions: (character.conditions || []).filter(condition => String(condition).toLowerCase() !== 'unconscious'),
-    };
+    return { ...reviveHero(character), currentHP: 1 };
 }
 
 const FRESH_TALLY = Object.freeze({ successes: 0, failures: 0 });

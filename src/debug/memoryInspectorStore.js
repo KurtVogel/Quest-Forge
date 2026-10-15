@@ -79,6 +79,12 @@ export function captureInjection({ playerMessage, location, retrieved = [], cura
     });
 }
 
+/** Which of the last turn's curated cards LANDED in the DM's reply (WOW 2026-10-14): ids, engine-judged or DM-marked. */
+export function captureCallbackPayoff({ landed = [] } = {}) {
+    if (!snapshot.lastInjection) return;
+    publish({ lastInjection: { ...snapshot.lastInjection, landed: (Array.isArray(landed) ? landed : []).filter(id => typeof id === 'string').slice(0, 12) } });
+}
+
 /** Summary of the Scribe's last completed per-turn extraction pass. */
 export function captureScribePass({ facts = [], npcsUpdated = [], cards = [], playerAppearance = false, location = null, lootAudited = false, paymentAudited = false, gearAudited = false } = {}) {
     publish({
@@ -132,9 +138,11 @@ export function captureReflection({ cadenceId = null, npcsUpdated = [], frontAdv
  * each provider, and on OpenAI (1.25x cache WRITES since GPT-5.6) whether the
  * volatile tail is a paid write every turn.
  */
-export function captureUsage({ lane = 'dm', mode = 'standard', provider = null, model = null, promptTokens = null, cachedTokens = null, outputTokens = null, thoughtTokens = null, promptChars = null } = {}) {
+export function captureUsage({ lane = 'dm', mode = 'standard', provider = null, model = null, promptTokens = null, cachedTokens = null, writtenTokens = null, outputTokens = null, thoughtTokens = null, promptChars = null } = {}) {
     const prompt = Number.isFinite(promptTokens) ? promptTokens : null;
     const cached = Number.isFinite(cachedTokens) ? cachedTokens : null;
+    // OpenAI's 1.25× cache WRITE (2026-10-14): the share of the prompt paid as a write.
+    const written = Number.isFinite(writtenTokens) ? writtenTokens : null;
     const row = {
         at: Date.now(),
         lane: clip(lane, 20) || 'dm',
@@ -147,6 +155,8 @@ export function captureUsage({ lane = 'dm', mode = 'standard', provider = null, 
         thoughtTokens: Number.isFinite(thoughtTokens) ? thoughtTokens : null,
         promptChars: Number.isFinite(promptChars) ? promptChars : null,
         cachedShare: prompt && cached !== null ? Number((cached / prompt).toFixed(3)) : null,
+        writtenTokens: written,
+        writtenShare: prompt && written !== null ? Number((written / prompt).toFixed(3)) : null,
     };
     publish({
         lastUsage: row,

@@ -330,10 +330,9 @@ export const handlers = {
         if (isLong) {
             currentConditions = currentConditions.filter(c => !LONG_REST_CLEARS.includes(normalizeConditionName(c)));
         }
-        const clearsEarlyDefeat = state.character.lowLevelDefeat && healed > 0;
-        if (clearsEarlyDefeat) {
-            currentConditions = currentConditions.filter(c => c.toLowerCase() !== 'unconscious');
-        }
+        // A rest that heals clears the early defeat — the Unconscious fold is
+        // the one revive's (reviveCharacter below); the private filter here
+        // threw on a non-string condition (2026-10-14 progression P2).
 
         // Companions rest too (dead ones excepted): full heal on a long rest,
         // 25% of maxHp (min 1) on a short one. Computed before the message so
@@ -398,11 +397,7 @@ export const handlers = {
 
         return {
             ...state,
-            character: healed > 0 ? reviveCharacter({
-                ...restedBase,
-                lowLevelDefeat: clearsEarlyDefeat ? false : state.character.lowLevelDefeat,
-                deathSaves: clearsEarlyDefeat ? { successes: 0, failures: 0 } : state.character.deathSaves,
-            }) : restedBase,
+            character: healed > 0 ? reviveCharacter(restedBase) : restedBase,
             party: finalParty,
             ...(hitDiceRoll && { rollHistory: appendRollHistory(state, hitDiceRoll) }),
             messages: [...state.messages, restMsg],

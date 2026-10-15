@@ -17,6 +17,7 @@
 
 import { rollWithModifier } from './dice.ts';
 import { turnFlags } from '../llm/turnFlags.js';
+import { systemMessage } from './text.js';
 import { computeACFromInventory, formatModifier, getConditionRollEffects, combineRollModifiers, resolvePlayerRollModifier } from './rules.js';
 import { ENEMY_DEFAULT_DAMAGE, validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
 import { applyUncannyDodge, conditionAwareAttackModifiers, getAttackCount, rollD20Kept, rollDamage, stampCriticalRoll } from './combatMath.js';
@@ -114,7 +115,7 @@ export function resolveRolls(requestedRolls, { character, inventory, party, disp
                     if (dodge.applied) {
                         dispatch({
                             type: 'ADD_MESSAGE',
-                            payload: { role: 'system', content: `**Uncanny Dodge** — ${character?.name || 'The rogue'} twists aside and halves the blow: ${dmg.total} → **${dodge.damage}** damage.` },
+                            payload: systemMessage(`**Uncanny Dodge** — ${character?.name || 'The rogue'} twists aside and halves the blow: ${dmg.total} → **${dodge.damage}** damage.`),
                         });
                     }
                     playerHp = Math.max(0, playerHp - dodge.damage);
@@ -143,7 +144,7 @@ export function resolveRolls(requestedRolls, { character, inventory, party, disp
             // Deliberately NOT a result: a lone skill-less roll still lands on
             // that set-aside (no outcome call around a roll that never happened).
             const note = `${roll.description || 'A requested roll'} names no skill or ability and could not be rolled.`;
-            dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: `**Roll skipped:** ${note}` } });
+            dispatch({ type: 'ADD_MESSAGE', payload: systemMessage(`**Roll skipped:** ${note}`) });
         }
     }
 
@@ -359,10 +360,7 @@ export async function handleRequestedRolls(requestedRolls, {
         }
         dispatch({
             type: 'ADD_MESSAGE',
-            payload: {
-                role: 'system',
-                content: 'None of the proposed rolls could be resolved — no dice were rolled and the check is set aside. Describe what you do next.',
-            },
+            payload: systemMessage('None of the proposed rolls could be resolved — no dice were rolled and the check is set aside. Describe what you do next.'),
         });
         return;
     }
@@ -438,10 +436,7 @@ export async function handleRequestedRolls(requestedRolls, {
         console.warn('[RollResolver] Follow-up narration failed:', e);
         dispatch({
             type: 'ADD_MESSAGE',
-            payload: {
-                role: 'system',
-                content: `**Outcome narration failed:** ${e?.message || 'the DM call did not complete'}. Your roll above stands — send any message (even "continue") and the DM will narrate the outcome from it.`,
-            },
+            payload: systemMessage(`**Outcome narration failed:** ${e?.message || 'the DM call did not complete'}. Your roll above stands — send any message (even "continue") and the DM will narrate the outcome from it.`),
         });
     }
 }
@@ -490,7 +485,7 @@ function damageLine({ label, notation, result, crit = false, rerolls = [] }) {
 function rollAndShowDamage(notation, label, dispatch, { crit = false } = {}) {
     const out = rollDamage(notation, label, { critical: crit });
     dispatch({ type: 'ADD_ROLL', payload: out.roll });
-    dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', content: damageLine({ label, notation: out.notation, result: out.roll, crit }) } });
+    dispatch({ type: 'ADD_MESSAGE', payload: systemMessage(damageLine({ label, notation: out.notation, result: out.roll, crit })) });
     return { total: out.total };
 }
 
@@ -563,13 +558,7 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetCo
     const label = roll.attacker ? `${roll.attacker}${isSave ? ' save' : "'s attack"}` : (isSave ? 'NPC save' : 'NPC attack');
     dispatch({
         type: 'ADD_MESSAGE',
-        payload: {
-            role: 'system',
-            content: d20OutcomeLine({
-                label: roll.description || label, result, dc, isAttack: !isSave, critical: result.isCritical, success,
-                advantage: effAdvantage, disadvantage: effDisadvantage, versus: true, note: condNote,
-            }),
-        },
+        payload: systemMessage(d20OutcomeLine({ label: roll.description || label, result, dc, isAttack: !isSave, critical: result.isCritical, success, advantage: effAdvantage, disadvantage: effDisadvantage, versus: true, note: condNote, })),
     });
 
     return {
@@ -595,7 +584,7 @@ function resolveDamageRoll(roll, character, dispatch, inventory = []) {
         dispatch({ type: 'ADD_ROLL', payload: out.roll });
         dispatch({
             type: 'ADD_MESSAGE',
-            payload: { role: 'system', content: damageLine({ label: out.roll.description, notation: roll.notation, result: out.roll, rerolls: out.rerolls }) },
+            payload: systemMessage(damageLine({ label: out.roll.description, notation: roll.notation, result: out.roll, rerolls: out.rerolls })),
         });
 
         return {
@@ -661,7 +650,7 @@ function resolveDeathSave(character, dispatch, party = []) {
     // The line is computed from `judged`, never from reducer state.
     dispatch({
         type: 'ADD_MESSAGE',
-        payload: { role: 'system', content: deathSaveLine(judged, character.name) },
+        payload: systemMessage(deathSaveLine(judged, character.name)),
     });
 
     dispatch({ type: 'DEATH_SAVE_RESULT', payload: { die } });
@@ -681,10 +670,7 @@ function resolveSinglePlayerAttackRoll(roll, character, dispatch, mod, label) {
     const success = critical || result.total >= dc;
     dispatch({
         type: 'ADD_MESSAGE',
-        payload: {
-            role: 'system',
-            content: d20OutcomeLine({ label, result, dc, isAttack: true, critical, success, advantage: roll.advantage, disadvantage: roll.disadvantage }),
-        },
+        payload: systemMessage(d20OutcomeLine({ label, result, dc, isAttack: true, critical, success, advantage: roll.advantage, disadvantage: roll.disadvantage })),
     });
 
     return {
@@ -719,7 +705,7 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     if (key === 'initiative') {
         dispatch({
             type: 'ADD_MESSAGE',
-            payload: { role: 'system', content: 'Initiative is rolled automatically by the engine when combat starts — the requested roll is skipped.' },
+            payload: systemMessage('Initiative is rolled automatically by the engine when combat starts — the requested roll is skipped.'),
         });
         return [];
     }
@@ -752,10 +738,7 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     const success = critical || result.isCritical || result.total >= dc;
     dispatch({
         type: 'ADD_MESSAGE',
-        payload: {
-            role: 'system',
-            content: d20OutcomeLine({ label, result, dc, isAttack, critical, success, advantage: effRoll.advantage, disadvantage: effRoll.disadvantage }),
-        },
+        payload: systemMessage(d20OutcomeLine({ label, result, dc, isAttack, critical, success, advantage: effRoll.advantage, disadvantage: effRoll.disadvantage })),
     });
 
     return [{

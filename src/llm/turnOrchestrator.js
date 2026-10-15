@@ -24,7 +24,8 @@
  * - resetRoleplayChallengeUi(): clear the challenge textarea state.
  */
 
-import { buildSystemPrompt } from './promptBuilder.js';
+import { isRecordEntry } from '../engine/journalEntry.js';
+import { buildSystemPrompt, buildSystemPromptSplit } from './promptBuilder.js';
 import { parseResponse, detectPreNarratedOutcome, normalizeEvents, detectSemanticTextRolls } from './responseParser.js';
 import { applyEvents } from '../state/applyEvents.js';
 import { gameReducer } from '../state/gameReducer.js';
@@ -37,10 +38,10 @@ import { factMemoryItem, flushMemoryQueue, journalMemoryItem, queueMemoryItem, r
 import { findSubjectsInText } from '../engine/textMatch.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
 import { describeMemoryUnavailable, dmCallConfig, getMachineryGeminiKey } from './machinery.js';
-import { curateStoryMemory } from '../engine/storyMemory.js';
+import { curateStoryMemory, detectCallbackPayoff } from '../engine/storyMemory.js';
 import { planWorldFactAdditions } from '../engine/worldFacts.js';
 import { markTurn, turnFlags } from './turnFlags.js';
-import { captureInjection, captureProviderNote, captureUsage } from '../debug/memoryInspectorStore.js';
+import { captureCallbackPayoff, captureInjection, captureProviderNote, captureUsage } from '../debug/memoryInspectorStore.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from '../components/Chat/turnVisibility.js';
 import { buildNudgePrompt, detectMissingEventsCue, extractNudgeEventFields } from '../components/Chat/missingEventsNudge.js';
 import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, pruneRecentRulings } from '../engine/roleplayCheck.js';
@@ -235,7 +236,7 @@ export function createTurnRunner({
             // A `fallback` entry ("Auto-summary was unavailable…") is honest
             // bookkeeping, not memory: never embed it (2026-09-06 P2 — the
             // mount seed skips it the same way).
-            if (result.journalEntry && !result.journalEntry.fallback && getMachineryGeminiKey(cadenceState.settings)) {
+            if (isRecordEntry(result.journalEntry) && getMachineryGeminiKey(cadenceState.settings)) {
                 // Bare summary, location as metadata — the EXACT text the mount
                 // seed builds. The old "[Location: X] summary" prefix never
                 // matched the seed's bare text, so every journal entry was
@@ -263,8 +264,8 @@ export function createTurnRunner({
     /**
      * Build the system prompt from current state, with optional RAG memories injected.
      */
-    const buildCurrentSystemPrompt = (s, retrievedMemories = [], storyMemory = [], recallRecord = '', projection = {}) => {
-        return buildSystemPrompt({
+    /** The builder's options from the live state — one composer for the string and the split. */
+    const currentPromptOptions = (s, retrievedMemories = [], storyMemory = [], recallRecord = '', projection = {}) => ({
             // The lane's projection and response mode (`narrationOnly` /
             // `intentOnly` / `nudgeOnly` / `mode`) — the builder's own options.
             ...projection,
@@ -307,7 +308,13 @@ export function createTurnRunner({
                 location: s.currentLocation,
             }),
         });
-    };
+
+    /**
+     * Build the system prompt from current state, with optional RAG memories injected.
+     */
+    const buildCurrentSystemPrompt = (...args) => buildSystemPrompt(currentPromptOptions(...args));
+    /** The same prompt split at the prefix boundary (memory-research M1, 2026-10-14). */
+    const buildCurrentSystemPromptSplit = (...args) => buildSystemPromptSplit(currentPromptOptions(...args));
 
     /**
      * Build the sliding-window message history for the LLM.
@@ -458,11 +465,12 @@ export function createTurnRunner({
         // never break character on their own; the ending card's epilogue (the
         // last chapter, 2026-09-30) rides the table-talk lane with its own mode.
         const mode = lane.mode === 'tableTalk' && isEpilogueRequest(originalPlayerMessage) ? 'epilogue' : lane.mode;
-        const systemPrompt = buildCurrentSystemPrompt(promptState, retrievedMemories, dramaticMemories, recallRecord, {
+        const promptSplit = buildCurrentSystemPromptSplit(promptState, retrievedMemories, dramaticMemories, recallRecord, {
             narrationOnly: lane.projection === 'narrationOnly',
             intentOnly: lane.projection === 'intentOnly',
             mode,
         });
+        const systemPrompt = promptSplit.text;
         // The player's own row never rides the window beside `userMessage`
         // (the challenge lane names the row its prompt restates).
         const messageHistory = buildMessageHistory(promptState, pendingUserRow || userMessage);
@@ -476,6 +484,12 @@ export function createTurnRunner({
         const fullResponse = await streamMessage({
             ...dmCallConfig(s.settings),
             systemPrompt,
+            // The prefix boundary, told to the provider (memory-research M1,
+            // 2026-10-14): two leading system messages on the OpenAI-compatible
+            // lanes, an explicit breakpoint on OpenAI gpt-5.6+; Gemini sends the
+            // one string. The bytes and their order are untouched.
+            systemPromptParts: { prefix: promptSplit.prefix, dynamic: promptSplit.dynamic },
+            onCacheBreakpointRejected: () => captureProviderNote(`${s.settings.llmProvider} rejected the explicit prompt-cache breakpoint — sent as one system message (implicit caching only).`),
             messageHistory,
             userMessage,
             // Cache telemetry (memory-research M2, 2026-09-30): the provider's
@@ -703,6 +717,19 @@ export function createTurnRunner({
             if (events.location && !combatWasActive) {
                 record({ type: 'SET_LOCATION', payload: events.location });
             }
+        }
+
+        if (commits && !hideSetup && dramaticMemories.length > 0) {
+            // The engine judges the payoff (WOW 2026-10-14): a curated card
+            // whose meaning the reply carries LANDED, marked or not — the DM's
+            // own `used` ids are stamped by applyEvents above and skipped here.
+            const declared = new Set((events?.memoryUpdates || []).filter(u => u?.used && typeof u.id === 'string').map(u => u.id));
+            const landed = detectCallbackPayoff(dramaticMemories, narrative);
+            const unmarked = landed.filter(card => !declared.has(card.id));
+            if (unmarked.length > 0) {
+                record({ type: 'MARK_CALLBACK_PAYOFF', payload: { messageId: msgId, cardIds: unmarked.map(card => card.id) } });
+            }
+            captureCallbackPayoff({ landed: [...new Set([...landed.map(card => card.id), ...declared])] });
         }
 
         if (commits) {

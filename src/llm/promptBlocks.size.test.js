@@ -73,7 +73,7 @@ function maxedState({ messageCount = 400, live = 0, inCombat = false } = {}) {
         party,
         currentLocation: 'Jewelglade',
         locations: [
-            { id: 'jewelglade', name: 'Jewelglade', aliases: ['the glade'], region: 'the Toll Country', signature: fill('signature', 160), lastState: fill('state', 200), visitCount: 4,
+            { id: 'jewelglade', name: 'Jewelglade', aliases: ['the glade'], region: 'the Toll Country', signature: fill('signature', 160), lastState: fill('state', 200), visitCount: 4, theaterFrontIds: ['front-0', 'front-1'],
               links: Array.from({ length: 8 }, (_, k) => ({ id: `loc-${k}`, direction: 'east', travelTime: fill('two days', 40), route: fill('the River Road', 60), atMessage: 2 })) },
             ...Array.from({ length: 8 }, (_, k) => ({ id: `loc-${k}`, name: `Waystation ${k}`, region: 'the Toll Country' })),
         ],
@@ -83,10 +83,13 @@ function maxedState({ messageCount = 400, live = 0, inCombat = false } = {}) {
             turnOrder: [{ type: 'player', name: 'Testa Longname', initiative: 15 }, ...Array.from({ length: 8 }, (_, i) => ({ type: 'enemy', id: `e${i}`, name: `Marsh Reaver ${i}`, initiative: 10 - i }))],
         },
         worldFacts: Array.from({ length: 60 }, (_, i) => ({ id: `f-${i}`, fact: `Canonical truth ${i}: ${fill('the weir wardens answer to the Pike', 300)}`, category: i % 2 ? 'threat' : 'lore', timestamp: i, atMessage: 5 + i, knownBy: ['Notable Person 1'] })),
-        fronts: Array.from({ length: 4 }, (_, i) => ({ id: `front-${i}`, status: 'active', title: fill(`Pressure ${i}`, 100), goal: fill('goal', 300), clock: 3, maxClock: 8, stage: 2, faction: { name: fill(`Faction ${i}`, 100) }, theaters: ['Jewelglade'], grimPortents: [], publicHints: [] })),
+        // Three live fronts and one RESOLVED (the victory echo reads `resolvedAtMessage` off the front; a theater is the LOCATION's `theaterFrontIds`) — 2026-10-15.
+        fronts: Array.from({ length: 4 }, (_, i) => (i === 3
+            ? { id: 'front-3', status: 'resolved', title: fill('Pressure 3', 100), goal: fill('goal', 300), clock: 8, maxClock: 8, stage: 4, faction: { name: fill('Faction 3', 100) }, grimPortents: [], publicHints: [], resolvedAtMessage: messageCount - 20, resolution: fill('resolution', 300) }
+            : { id: `front-${i}`, status: 'active', title: fill(`Pressure ${i}`, 100), goal: fill('goal', 300), clock: 3, maxClock: 8, stage: 2, faction: { name: fill(`Faction ${i}`, 100) }, grimPortents: [], publicHints: Array.from({ length: 3 }, (_, k) => fill(`hint ${k}`, 140)) })),
         worldTempo: {
-            directive: { cadenceId: 'cad-1', frontId: 'front-0', symptom: fill('symptom', 300), where: 'Jewelglade', maxIntensity: 'presence', grantedAtMessage: messageCount - 5, activatesAtMessage: messageCount - 1, expiresAtMessage: messageCount + 6 },
-            recentVictory: { frontId: 'front-3', title: fill('victory', 100), atMessage: messageCount - 20 },
+            directive: { frontId: 'front-0', maxIntensity: 'presence', inTheater: true, where: 'Jewelglade', suggestedSymptom: fill('symptom', 300), rationale: fill('rationale', 200), quietHook: '', grantedAtMessage: messageCount - 5, activationDistance: 2, expiryDistance: 24 },
+            lastCadenceId: 'cad-1',
         },
         recentEncounters: Array.from({ length: 10 }, (_, i) => ({ messageIndex: messageCount - 2 - i, name: fill(`Skirmish ${i}`, 80), outcome: 'victory', foeFamilies: ['reaver'], mark: fill('mark', 160) })),
         recentChecks: Array.from({ length: 4 }, (_, i) => ({ messageIndex: messageCount - 1 - i, dc: 15 })),
@@ -96,8 +99,10 @@ function maxedState({ messageCount = 400, live = 0, inCombat = false } = {}) {
         retrievedMemories: Array.from({ length: 16 }, (_, i) => ({ text: fill(`memory ${i}`, 1000), category: 'journal', score: 0.9 - i * 0.01, location: 'Jewelglade', knownBy: ['Notable Person 1'] })),
         premise: fill('premise', 8000),
         customSystemPrompt: fill('custom dm instructions', 4000),
-        regionalHearsay: { offers: Array.from({ length: 2 }, (_, i) => ({ key: `deed-${i}`, source: 'front', text: fill(`hearsay ${i}`, 300), grade: 'legend', place: 'Jewelglade', atMessage: messageCount - 3 })), atMessage: messageCount - 3, place: 'Jewelglade' },
-        absenceDrift: { place: 'Jewelglade', atMessage: messageCount - 3, developments: Array.from({ length: 2 }, (_, i) => ({ npcName: `Notable Person ${i}`, text: fill(`development ${i}`, 300) })), fact: fill('fact', 300), symptom: { frontId: 'front-0', text: fill('symptom', 300), intensity: 'whispers' } },
+        // Staged under the keys the blocks READ (2026-10-15 living-world test-depth
+        // P2: the old keys rendered '' while the props pretended the windows were staged).
+        regionalHearsay: { locationName: 'Jewelglade', arrivedAtMessage: messageCount - 3, items: Array.from({ length: 2 }, (_, i) => ({ key: `deed-${i}`, source: 'front', text: fill(`hearsay ${i}`, 300), grade: 'legend' })) },
+        absenceDrift: { locationName: 'Jewelglade', arrivedAtMessage: messageCount - 3, awayDistance: 40, developments: Array.from({ length: 2 }, (_, i) => ({ name: `Notable Person ${i}`, visible: fill(`development ${i}`, 300) })), fact: fill('fact', 300), frontSymptom: { frontId: 'front-1', maxIntensity: 'whispers', text: fill('symptom', 240) } },
         relationshipBeat: { npcId: 'n1', npcName: 'Notable Person 1', stage: 'intimate', thread: fill('thread', 200), mintedAtMessage: messageCount - 30, opensAtMessage: messageCount - 10, closesAtMessage: messageCount + 14 },
         wonder: { id: 'w1', hook: { text: fill('wonder hook', 400), register: 'relic', standalone: true }, mintedAtMessage: messageCount - 5, opensAtMessage: messageCount - 2, closesAtMessage: messageCount + 10, residueCardId: 'card-mystery-0' },
         heroTells: Array.from({ length: 24 }, (_, i) => ({ id: `tell-${i}`, text: fill(`tell ${i}`, 200), kind: i % 4 ? 'manner' : 'intimate', status: 'active', witnesses: ['Companion 0', 'Notable Person 4'], sightings: [10, 60, 120], lastSeenMessage: 380, voicedCount: 1, voicedBy: ['Companion 0'], public: true })),
@@ -135,12 +140,17 @@ const DYNAMIC_CEILINGS = {
     recentRolls: 1000,     // 744
     recentRulings: 1000,   // 876
     worldFacts: 6500,      // 5,631 — 15 lines
-    journalAndNpcs: 38000, // 34,225 — SESSION HISTORY 3 × (2,000 + 3 × 150) + 8 maxed KNOWN NPCs lines
+    place: 1500,           // the place card + 6 known ways
+    sessionHistory: 8500,  // 3 × (2,000 + 3 × 150) + headers
+    transitionHistory: 900, // two referenced entries or two clamped 300-char summaries
+    knownNpcs: 28000,      // 8 maxed KNOWN NPCs lines + the header (2026-10-14: four parts, four ceilings)
     heroTells: 3000,       // 2,344 — HERO_TELLS_BLOCK_CHAR_CEILING is the block's own belt
-    storyMemory: 5500,     // 4,865 — 5 cards
+    storyMemory: 6000,     // 5,501 — 5 cards with their age and speakers (2026-10-14)
     retrievedMemories: 9500, // 8,378 — RETRIEVED_MEMORIES_CHAR_CEILING 8,000 + header
     worldTempo: 6000,      // pinned at 5,200 by worldTempo's own test; 1,638 here
     relationshipBeat: 1500, // 862
+    regionalHearsay: 1500, // the block's own pin (regionalHearsay.test)
+    absenceDrift: 2200,    // 2 developments × 300 + a 300-char fact + a 240-char symptom (yields under a tempo window — staged closed here)
     // The one-shot private blocks (wonder, hearsay, absence drift, the tell
     // beat, DM REMINDERS) are pinned by their feature tests; this fixture
     // does not stage their windows.
@@ -205,9 +215,11 @@ describe('prompt blocks — per-block ceilings, prefix stability, per-call-type 
         expect(intent).toBeLessThan(narration);
         // Ceilings for the two combat calls (measured 2026-09-30, ~10 % headroom;
         // the intent call re-measured 2026-10-13 at 12,370 once its party line
-        // went mechanics-only — 8.5k of bond prose off every round).
-        expect(intent).toBeLessThan(14000);
-        expect(narration).toBeLessThan(45000);
+        // went mechanics-only — 8.5k of bond prose off every round, and
+        // 2026-10-15 at 16,263 once the fixture staged the tempo state under
+        // its real keys: three fronts' shown-symptom ledgers and a victory echo).
+        expect(intent).toBeLessThan(18000);
+        expect(narration).toBeLessThan(52000); // 47,192 on the 2026-10-15 fixture
     });
 
     // 2026-10-13 chat-orchestration P2: the missing-events nudge used to build

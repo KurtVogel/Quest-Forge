@@ -30,6 +30,19 @@ const DEFAULT_CARD_LIMIT = 5;
  */
 export const CALLBACK_COOLDOWN_MESSAGES = 8;
 const RECENCY_DECAY_MESSAGES = 20;
+/**
+ * A callback is what the window FORGOT (WOW 2026-10-14, memory-callbacks):
+ * a card seen inside the DM's own message window is already on the page, so
+ * the block offers only cards at least this many conversational messages old
+ * — the DM window's row count (turnOrchestrator MESSAGE_WINDOW, pinned equal
+ * in the tests) — and the old "recency bonus" is inverted into an AGE bonus
+ * past it. On the 09-30 proof run a fresh card was paid the largest term
+ * after presence and the block rendered on 6 of 7 return turns with nothing
+ * the DM could not already see.
+ */
+export const CALLBACK_MIN_AGE = 20;
+/** The landed-callback judge: this share of a curated card's meaning tokens in the DM's reply. */
+export const CALLBACK_PAYOFF_CONTAINMENT = 0.5;
 const LEGACY_CALLBACK_COOLDOWN_MS = 1000 * 60 * 8;
 const LEGACY_RECENCY_DECAY_HOURS = 24;
 /**
@@ -179,7 +192,7 @@ export function formatSecrecyTag(knownBy) {
  * passing them through normalizeStoryMemoryCard as before.
  */
 export const STORY_MEMORY_ENGINE_STAMPS = Object.freeze([
-    'firstSeenMessage', 'lastSeenMessage', 'lastUsedMessage',
+    'firstSeenMessage', 'lastSeenMessage', 'lastUsedMessage', 'usedCount',
     'firstSeenAt', 'first_seen_at', 'lastSeenAt', 'last_seen_at', 'lastUsedAt', 'last_used_at',
     // Source-stamped retraction (2026-09-30): the reducer stamps the DM
     // message a card was read from and the message count it was retracted at.
@@ -244,6 +257,7 @@ export function normalizeStoryMemoryCard(card = {}, existing = null, { maxMessag
         ? card.sourceMessage.slice(0, 80)
         : (typeof base?.sourceMessage === 'string' && base.sourceMessage ? base.sourceMessage.slice(0, 80) : null);
     const retractedAtMessage = messageStamp(card.retractedAtMessage, messageStamp(base?.retractedAtMessage, undefined, maxMessageCount), maxMessageCount);
+    const usedCount = Math.max(0, Math.trunc(Number(card.usedCount ?? base?.usedCount) || 0));
 
     return {
         ...(knownBy.length > 0 && { knownBy }),
@@ -253,6 +267,9 @@ export function normalizeStoryMemoryCard(card = {}, existing = null, { maxMessag
         ...(Number.isFinite(firstSeenMessage) && { firstSeenMessage }),
         ...(Number.isFinite(lastSeenMessage) && { lastSeenMessage }),
         ...(Number.isFinite(lastUsedMessage) && { lastUsedMessage }),
+        // How many times a callback LANDED (WOW 2026-10-14): the DM's own
+        // `used` and the engine's payoff judge both count; engine-owned.
+        ...(usedCount > 0 && { usedCount }),
         id: cleanText(card.id, base?.id || `mem-${now}-${Math.random().toString(36).slice(2, 7)}`).slice(0, MAX_SUBJECT_LENGTH),
         type,
         text,
@@ -402,7 +419,10 @@ export function scoreStoryMemory(card, { query = '', location = '', npcs = [], m
 
     const seenAge = conversationalAgeSince(card.lastSeenMessage, { messages, messageCount });
     if (seenAge !== null) {
-        score += Math.max(0, 3 - seenAge / RECENCY_DECAY_MESSAGES);
+        // Inside the window the DM already has it; past the window the older
+        // the better, up to +3 (the inverted recency term, 2026-10-14).
+        if (seenAge < CALLBACK_MIN_AGE) return 0;
+        score += Math.min(3, (seenAge - CALLBACK_MIN_AGE) / RECENCY_DECAY_MESSAGES);
     } else if (card.lastSeenAt) {
         const ageHours = Math.max(0, (now - card.lastSeenAt) / (1000 * 60 * 60));
         score += Math.max(0, 3 - ageHours / LEGACY_RECENCY_DECAY_HOURS);
@@ -489,14 +509,52 @@ export function applyStoryMemoryDormancy(cards = [], journal = []) {
     return changed ? next : list;
 }
 
+/**
+ * The curated cards for the block, each carrying its curation `score`, its
+ * `ageTurns` (how long since the record last touched it, in turns) and its
+ * `speakers` — the card's linked people who are IN the scene, the ones who
+ * could say it (WOW 2026-10-14).
+ */
 export function curateStoryMemory({ memories = [], query = '', location = '', npcs = [], messages = null, messageCount, now = Date.now(), limit = DEFAULT_CARD_LIMIT } = {}) {
+    const present = new Set((npcs || []).map(n => String(n?.name || '').toLowerCase()).filter(Boolean));
     return (memories || [])
         .map(card => ({ card, score: scoreStoryMemory(card, { query, location, npcs, messages, messageCount, now }) }))
         .filter(item => item.score > 0)
         .sort((a, b) => b.score - a.score)
         .slice(0, limit)
-        .map(item => ({ ...item.card, score: item.score }));
+        .map(item => {
+            const seenAge = conversationalAgeSince(item.card.lastSeenMessage, { messages, messageCount });
+            const speakers = (Array.isArray(item.card.linkedNpcNames) ? item.card.linkedNpcNames : [])
+                .filter(name => present.has(String(name).toLowerCase()));
+            return {
+                ...item.card,
+                score: item.score,
+                ageTurns: seenAge === null ? null : Math.ceil(seenAge / 2),
+                speakers,
+            };
+        });
 }
+
+/**
+ * Did the DM's reply pay off a curated card? Meaning-token containment of the
+ * card's text in the narrative at CALLBACK_PAYOFF_CONTAINMENT (WOW 2026-10-14):
+ * the engine judges the landing beside the DM's own `memory_updates`, so a
+ * callback the DM wove in without marking still rests and still shows.
+ */
+export function detectCallbackPayoff(curated = [], narrative = '') {
+    const reply = meaningTokens(typeof narrative === 'string' ? narrative : '');
+    if (reply.size === 0) return [];
+    return (Array.isArray(curated) ? curated : []).filter(card => {
+        if (!card || typeof card.id !== 'string') return false;
+        const tokens = meaningTokens(card.text);
+        if (tokens.size < 3) return false;
+        let found = 0;
+        for (const token of tokens) if (reply.has(token)) found += 1;
+        return found / tokens.size >= CALLBACK_PAYOFF_CONTAINMENT;
+    });
+}
+
+const describeAge = (ageTurns) => (Number.isFinite(ageTurns) ? (ageTurns <= 0 ? 'just now' : `${ageTurns} turn${ageTurns === 1 ? '' : 's'} ago`) : 'long ago');
 
 export function buildStoryMemoryPromptBlock(memories = []) {
     if (!memories.length) return '';
@@ -509,10 +567,13 @@ export function buildStoryMemoryPromptBlock(memories = []) {
         // card by `{ "id": … }` and the block used to print none, so the
         // documented update was a silent no-op.
         const id = m.id ? ` | id: ${m.id}` : '';
-        return `- ${formatSecrecyTag(m.knownBy)}(${m.type}; salience ${m.salience}/5${id}${subject}${npcs}${loc}) ${m.text}`;
+        // The age and the voice (WOW 2026-10-14): how long ago, and who in
+        // the scene could say it — else the hero's own passing thought.
+        const speakers = Array.isArray(m.speakers) && m.speakers.length ? m.speakers.join(', ') : 'the hero (a passing thought)';
+        return `- ${formatSecrecyTag(m.knownBy)}(${m.type}; salience ${m.salience}/5${id}${subject}${npcs}${loc}) ${m.text} — ${describeAge(m.ageTurns)} · could say it: ${speakers}`;
     }).join('\n');
 
     return `## DRAMATIC CALLBACK OPPORTUNITIES
-These are compact story memories that may matter now. Use at most ONE naturally if it improves the scene. Do not force a callback, do not explain this memory system, and do not slow the turn down just to prove you remember something. If you visibly pay off or resolve one, mark it with memory_updates in the JSON, using the id shown on its line. A memory tagged SECRET is known ONLY to the people listed — no other character may reference or act on it.
+Older story memories the scene may have forgotten. Use at most ONE naturally, and only as a character present SAYS it — in their own words, with its particular (the thing, the place, the line) and how long ago it was — or as the hero's own passing thought; never as narrator exposition recalling what is already on the page. Do not force a callback, do not explain this memory system, and do not slow the turn down just to prove you remember something. If you visibly pay off or resolve one, mark it with memory_updates in the JSON, using the id shown on its line. A memory tagged SECRET is known ONLY to the people listed — no other character may reference or act on it.
 ${lines}`;
 }

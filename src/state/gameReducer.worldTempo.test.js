@@ -64,7 +64,6 @@ describe('END_COMBAT encounter ledger', () => {
             combat: {
                 ...initialGameState.combat,
                 active: true,
-                xpAwarded: true,
                 enemies: [{ name: 'Ghoul 1', hp: 0 }, { name: 'Ghoul 2', hp: 0 }],
             },
         };

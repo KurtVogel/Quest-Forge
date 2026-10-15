@@ -422,7 +422,7 @@ describe('rest slot recovery and sustained lifecycle', () => {
                 turnOrder: [{ type: 'player', name: 'Maren' }],
             },
         };
-        const next = gameReducer(state, { type: 'END_COMBAT', payload: { llmAwardedXp: true } });
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
         expect(next.character.sustainedSpell).toBeNull();
         expect(next.party[0].spellAcBonus).toBeUndefined();
         // The fade is ANNOUNCED (live playtest #7): a silent clear left the DM

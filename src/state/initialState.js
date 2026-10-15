@@ -43,7 +43,6 @@ export const initialGameState = {
         turnOrder: [],
         currentTurn: 0,
         round: 1,
-        xpAwarded: false, // true once any XP is earned during a fight (gates the End-Combat fallback)
         bonusActionUsed: false,
         phase: null,
         openingActorIds: [],

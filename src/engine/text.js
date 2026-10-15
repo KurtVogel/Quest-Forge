@@ -58,3 +58,21 @@ export function clampNumber(value, min, max, fallback) {
     if (!Number.isFinite(n)) return fallback;
     return Math.max(min, Math.min(max, Math.round(n)));
 }
+
+/**
+ * An engine system row for the transcript (2026-10-14 progression Lap-4 P2):
+ * ONE composer for every reducer handler, the progression receipts and the
+ * out-of-combat resolver — it lived in handlers/shared.js with a second copy
+ * in progression.js (the import cycle progression ⇄ handlers/shared) and
+ * eleven inline `{ role: 'system', content }` literals in rollResolver.js.
+ * `extra` carries the row flags (`dmVisible`, `kind`, `narrationCue`, …).
+ */
+export function systemMessage(content, extra = {}) {
+    return {
+        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        timestamp: Date.now(),
+        role: 'system',
+        content,
+        ...extra,
+    };
+}

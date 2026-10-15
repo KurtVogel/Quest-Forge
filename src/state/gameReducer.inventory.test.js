@@ -77,7 +77,6 @@ function withCombat(state, overrides = {}) {
             turnOrder: [{ type: 'player', name: 'Testo', initiative: 12 }],
             currentTurn: 0,
             round: 1,
-            xpAwarded: false,
             bonusActionUsed: false,
             ...overrides,
         },
@@ -401,7 +400,7 @@ describe('END_COMBAT downed-companion messaging', () => {
             ...makeState(),
             party: [{ id: 'tor', name: 'Torvald Ironhand', hp: 0, maxHp: 18, ac: 14, status: 'downed', level: 2, affinity: 60 }],
         }, { enemies: [{ id: 'enemy-1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' }] });
-        const next = gameReducer(state, { type: 'END_COMBAT', payload: { llmAwardedXp: true } });
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
 
         expect(next.combat.active).toBe(false);
         expect(next.messages.some(m => m.content.includes('down but stable'))).toBe(true);
@@ -412,7 +411,7 @@ describe('END_COMBAT downed-companion messaging', () => {
             ...makeState(),
             party: [{ id: 'tor', name: 'Torvald Ironhand', hp: 12, maxHp: 18, ac: 14, status: 'healthy', level: 2, affinity: 60 }],
         }, { enemies: [{ id: 'enemy-1', name: 'Goblin', hp: 0, maxHp: 7, ac: 13, condition: 'dead' }] });
-        const next = gameReducer(state, { type: 'END_COMBAT', payload: { llmAwardedXp: true } });
+        const next = gameReducer(state, { type: 'END_COMBAT', payload: {} });
 
         expect(next.messages.some(m => m.content.includes('down but stable'))).toBe(false);
     });

@@ -49,7 +49,7 @@ import {
     normalizeFightingStyle,
     normalizeMartialArchetype,
 } from '../engine/characterUtils.js';
-import { awardExperience, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
+import { foldExperience, isHeroDown, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
 import { normalizeEquippedSlots, shouldAutoEquip } from '../engine/equipment.js';
 import { createInitialFronts } from '../engine/fronts.js';
 import { isSpellcaster, sanitizeSpellSlots, sanitizeSustainedSpell } from '../engine/spellcasting.js';
@@ -428,12 +428,12 @@ function healCharacterCoreFields(save) {
  */
 function replayPendingLevelUps(save) {
     if (!save.character) return save;
-    const result = awardExperience(save.character, 0);
-    return {
-        ...save,
-        character: result.character,
-        messages: [...(save.messages || []), ...result.messages],
-    };
+    // The one award with no downed judgement until 2026-10-14 (progression
+    // P2, measured): a DYING hero with banked XP past the threshold stood up
+    // on Continue at full HP with the death-save clock wiped — and this runs
+    // BEFORE healStrandedDyingSolo. The sheet grows; the hero stays where the
+    // save left them.
+    return foldExperience(save, 0, { keepDowned: isHeroDown(save.character) });
 }
 
 /**

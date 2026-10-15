@@ -176,9 +176,17 @@ export function normalizeFrontProposal(proposal, { existing = [], id = '', maxHi
 
     const titleLower = title.toLowerCase();
     const factionLower = faction.name.toLowerCase();
+    // A title is the engine's identity label and stays unique across the
+    // whole web, history included. The FACTION rule reads the LIVE web only
+    // (2026-10-15 hidden-fronts P2, measured): the emergent / aftermath /
+    // regional installers pass the whole web including RESOLVED fronts, and
+    // the aftermath prompt invites the resolved front's "survivors,
+    // lieutenants" — "The Saltmarsh Reavers" resolved → a successor driven by
+    // the Saltmarsh Reavers installed nothing, silently.
     const duplicate = (Array.isArray(existing) ? existing : []).some(front =>
         (typeof front?.title === 'string' && front.title.toLowerCase() === titleLower)
-        || (!allowSharedFaction && typeof front?.faction?.name === 'string' && front.faction.name.toLowerCase() === factionLower));
+        || (!allowSharedFaction && (front?.status || 'active') !== 'resolved'
+            && typeof front?.faction?.name === 'string' && front.faction.name.toLowerCase() === factionLower));
     if (duplicate) return null;
 
     return normalizeFront({
@@ -274,11 +282,19 @@ export function buildFrontResolutionFact(front, note = '') {
     return (detail ? `${base} ${detail}` : base).slice(0, 400);
 }
 
+/**
+ * The DM's `front_updates` entry, typed. By id only: the DM sees ids and
+ * factions, never a title, so an emitted `title` is invention — and it used
+ * to be WRITTEN (2026-10-15 hidden-fronts P2, measured: the 09-01 "by id
+ * only" rule closed title MATCHING, not the replace through normalizeFront;
+ * `{ id, title: 'A Name The DM Invented' }` renamed the private front and the
+ * resolution fact, the 🕰️ line and hearsay carried it to the player). An
+ * update never changes a title.
+ */
 export function normalizeFrontUpdate(update = {}) {
     if (!update || typeof update !== 'object' || Array.isArray(update)) return null;
     const id = cleanText(update.id || update.frontId || update.front_id).slice(0, FRONT_ID_MAX);
-    const title = cleanText(update.title || update.name).slice(0, FRONT_TITLE_MAX);
-    if (!id && !title) return null;
+    if (!id) return null;
 
     // JUNK MEANS OMIT (2026-09-08 P1/P2): a non-numeric clock/stage, an
     // unknown status ("ongoing", "escalating", null — which used to normalize
@@ -294,8 +310,7 @@ export function normalizeFrontUpdate(update = {}) {
     const notes = cleanText(update.notes).slice(0, FRONT_NOTES_MAX);
 
     const normalized = {
-        ...(id && { id }),
-        ...(title && { title }),
+        id,
         ...(clock !== undefined && { clock: clampInt(clock, 0, 12, 0) }),
         ...(stage !== undefined && { stage: clampInt(stage, 0, 12, 0) }),
         ...(publicHints.length > 0 && { publicHints }),
@@ -327,6 +342,11 @@ function normalizeAdvance(advance = {}) {
  * immediately previous cadence sits this one out. Softening (-1) and pure
  * symptom/notes updates are never throttled — player interference always lands.
  */
+/** THE cadence id the reflection and the advance batch share: one composer (2026-10-15). */
+export function cadenceIdFor(sessionId, journalEnd) {
+    return `journal-${sessionId || 'campaign'}-${journalEnd}`;
+}
+
 export function applyFrontAdvanceBatch(fronts = [], batch = {}) {
     const cadenceId = cleanText(batch.cadenceId || batch.cadence_id).slice(0, 160);
     const previousCadenceId = cleanText(batch.previousCadenceId || batch.previous_cadence_id) || null;

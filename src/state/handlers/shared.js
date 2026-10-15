@@ -7,7 +7,7 @@ import { conversationalDistance } from '../../engine/replayLedger.js';
 import { itemIdentityMatches } from '../../engine/textMatch.js';
 import { isArmorItem, isShieldItem, isWeaponItem } from '../../engine/equipment.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName, MAX_ITEM_QUANTITY } from '../../data/items.js';
-import { MAX_CHARACTER_LEVEL } from '../../engine/progression.js';
+import { MAX_CHARACTER_LEVEL, reviveHero } from '../../engine/progression.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
 import { CHRONICLE_CHAPTER_TEXT_MAX, CHRONICLE_TITLE_MAX, NPC_DOSSIER_FIELD_MAX, ROLL_HISTORY_CAP } from '../../config/contentLimits.js';
 import { COMBAT_PHASES, isLowLevelSolo } from '../../engine/combatPredicates.js';
@@ -30,7 +30,7 @@ import {
     sanitizeNpcLanePayload,
 } from '../../engine/npcRoster.js';
 import { NPC_OPEN_THREAD_MAX } from '../../engine/relationshipArc.js';
-import { clampNumber } from '../../engine/text.js';
+import { clampNumber, systemMessage } from '../../engine/text.js';
 
 // Re-exported for the ledger's importers; the constant itself lives in
 // config/contentLimits.js so persistence.js reads the same one.
@@ -128,15 +128,10 @@ export function describeFaces(roll) {
     return modifier ? `${faces} (${modifier > 0 ? '+' : ''}${modifier})` : faces;
 }
 
-export function systemMessage(content, extra = {}) {
-    return {
-        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        timestamp: Date.now(),
-        role: 'system',
-        content,
-        ...extra,
-    };
-}
+// The system row composer lives on the engine text shelf since 2026-10-14
+// (progression Lap-4 P2): the progression receipts and the out-of-combat
+// resolver compose the same row; re-exported here for the handlers' import.
+export { systemMessage };
 
 /**
  * Heal the hero by an engine-rolled amount: clamp to max HP, revive from 0.
@@ -151,7 +146,7 @@ export function healHero(character, amount) {
     return {
         healed,
         gained: healed - priorHp,
-        character: healed > 0 ? reviveCharacter(healedCharacter) : healedCharacter,
+        character: healed > 0 ? reviveHero(healedCharacter) : healedCharacter,
     };
 }
 
@@ -249,15 +244,12 @@ export function isStaleCampaignAction(state, action) {
     return meta.loadNonce !== undefined && meta.loadNonce !== live.loadNonce;
 }
 
-export function reviveCharacter(character) {
-    return {
-        ...character,
-        dying: false,
-        lowLevelDefeat: false,
-        deathSaves: { successes: 0, failures: 0 },
-        conditions: (character.conditions || []).filter(c => normalizeConditionName(c) !== 'unconscious'),
-    };
-}
+// THE revive is `reviveHero` beside `isHeroDown` in engine/progression.js
+// since 2026-10-14 (progression Lap-4 P2): the level-up's inline block, the
+// exchange's natural-20 projection and the long rest's early-defeat filter
+// each carried their own spelling of the Unconscious fold (one threw on a
+// non-string condition). The handlers keep the old name.
+export { reviveHero as reviveCharacter };
 
 /**
  * Return a new state with inventory updated and AC recalculated if needed.

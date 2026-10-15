@@ -96,6 +96,12 @@ export const STREAM_START_MAX_RETRIES = 2;
  *   that route by conversation (xAI `x-grok-conv-id`); ignored elsewhere.
  * @param {function} [options.onHeaderRejected] - Called with the header names
  *   when a provider's edge refused the affinity header's preflight.
+ * @param {{ prefix: string, dynamic: string }} [options.systemPromptParts] - The
+ *   system prompt split at the cache-prefix boundary (memory-research M1,
+ *   2026-10-14): OpenAI-compatible providers send two leading system messages
+ *   (and an explicit breakpoint on OpenAI gpt-5.6+); Gemini ignores it.
+ * @param {function} [options.onCacheBreakpointRejected] - Called once when the
+ *   provider 400s the explicit breakpoint fields; the call is re-sent without.
  * @param {string} [options.fallbackModel] - Same provider, another model: ONE
  *   extra attempt once the retry budget is spent on a capacity refusal
  *   (429 / 5xx — never a stall, a 4xx, or a cancel). Grand playtest
@@ -104,7 +110,7 @@ export const STREAM_START_MAX_RETRIES = 2;
  *   answered every call.
  * @returns {Promise<string>} LLM response text
  */
-export async function sendMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, timeoutMs = DEFAULT_SEND_TIMEOUT_MS, maxRetries = DEFAULT_SEND_MAX_RETRIES, signal, onUsage, conversationId, onHeaderRejected, fallbackModel }) {
+export async function sendMessage({ provider, apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, timeoutMs = DEFAULT_SEND_TIMEOUT_MS, maxRetries = DEFAULT_SEND_MAX_RETRIES, signal, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected, fallbackModel }) {
     const p = providers[provider];
     if (!p) throw new Error(`Unknown LLM provider: "${provider}"`);
     if (!apiKey) throw new Error('API key is required. Please set it in Settings.');
@@ -124,7 +130,7 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, messa
         signal?.addEventListener('abort', onExternalAbort, { once: true });
         const stallTimer = setTimeout(() => controller.abort(), timeoutMs);
         try {
-            return await p.send({ apiKey, model: activeModel, systemPrompt, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, signal: controller.signal, onUsage, conversationId, onHeaderRejected });
+            return await p.send({ apiKey, model: activeModel, systemPrompt, systemPromptParts, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, signal: controller.signal, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected });
         } catch (error) {
             const stalled = error?.name === 'AbortError' && !signal?.aborted;
             if (signal?.aborted) throw error; // caller cancelled — never retry
@@ -175,7 +181,7 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, messa
  * @param {function} [options.onHeaderRejected] - As sendMessage
  * @returns {Promise<string>} Complete response text
  */
-export async function streamMessage({ provider, apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS, onUsage, conversationId, onHeaderRejected }) {
+export async function streamMessage({ provider, apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk, signal, temperature, idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected }) {
     const p = providers[provider];
     if (!p) throw new Error(`Unknown LLM provider: "${provider}"`);
     if (!apiKey) throw new Error('API key is required. Please set it in Settings.');
@@ -203,7 +209,7 @@ export async function streamMessage({ provider, apiKey, model, systemPrompt, mes
         let result;
         for (let attempt = 0; ; attempt++) {
             try {
-                result = await p.stream({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk: (chunk) => { streamed = true; guardedOnChunk(chunk); }, signal: controller.signal, temperature, onUsage, conversationId, onHeaderRejected });
+                result = await p.stream({ apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk: (chunk) => { streamed = true; guardedOnChunk(chunk); }, signal: controller.signal, temperature, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected });
                 break;
             } catch (error) {
                 // A transient refusal BEFORE the first byte is safe to retry —

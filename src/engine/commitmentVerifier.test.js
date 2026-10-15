@@ -34,7 +34,7 @@ describe('snapshotCommitments / diffCommitments', () => {
         expect([...snap.facts.keys()]).toEqual(['f2']);
         expect([...snap.threads.keys()]).toEqual(['n1']);
         expect([...snap.promises.keys()]).toEqual(['c1']);
-        expect(snapshotCommitments({})).toEqual({ quests: new Map(), facts: new Map(), threads: new Map(), promises: new Map(), promiseTexts: new Map(), carriers: [], resolvedThreads: new Map(), messageCount: 0 });
+        expect(snapshotCommitments({})).toEqual({ quests: new Map(), facts: new Map(), threads: new Map(), promises: new Map(), promiseTexts: new Map(), carriers: [], resolvedThreads: new Map(), closedQuests: new Map(), settledFacts: new Map(), messageCount: 0 });
     });
 
     it('reports what vanished: a quest gone, a pinned fact superseded, a thread cleared, a promise resolved — a REPLACED thread is not a loss', () => {

@@ -70,8 +70,8 @@ describe('recent heat', () => {
             combat: { active: true },
             character: { currentHP: 5, maxHP: 20 },
             recentEncounters: [
-                { enemies: 'ghoul', messageIndex: 22 },
-                { enemies: 'wolves', messageIndex: 27 },
+                { enemies: 'ghoul', messageIndex: 22, outcome: 'victory' },
+                { enemies: 'wolves', messageIndex: 27, outcome: 'victory' },
             ],
         });
         expect(heat.level).toBe('high');
@@ -83,7 +83,7 @@ describe('recent heat', () => {
     it('ignores fights outside the window', () => {
         const heat = computeRecentHeat({
             ...baseState,
-            recentEncounters: [{ enemies: 'ghoul', messageIndex: 2 }],
+            recentEncounters: [{ enemies: 'ghoul', messageIndex: 2, outcome: 'victory' }],
         });
         expect(heat.score).toBe(0);
     });
@@ -100,7 +100,7 @@ describe('recent heat', () => {
         const heat = computeRecentHeat({
             ...baseState,
             messages,
-            recentEncounters: [{ enemies: 'ghoul', messageIndex: 10 }],
+            recentEncounters: [{ enemies: 'ghoul', messageIndex: 10, outcome: 'victory' }],
         });
         expect(heat.score).toBeGreaterThanOrEqual(3);
         expect(heat.reasons.join(' ')).toMatch(/fight/);

@@ -7,6 +7,7 @@
  * at least RETURN_CARD_MIN_GAP_MS since the campaign was last played; a gap of
  * RETURN_CARD_LONG_GAP_MS or more widens "Last time" to three journal entries.
  */
+import { isRecordEntry } from '../../engine/journalEntry.js';
 import { findLatestNarration } from '../../llm/narrativeMessages.js';
 
 export const RETURN_CARD_MIN_GAP_MS = 6 * 60 * 60 * 1000;
@@ -73,7 +74,7 @@ export function buildReturnCard(state, { now = Date.now() } = {}) {
     const journal = Array.isArray(state.journal) ? state.journal : [];
     const entryCount = gapMs >= RETURN_CARD_LONG_GAP_MS ? 3 : 2;
     const lastTime = journal
-        .filter(entry => entry && typeof entry === 'object' && entry.fallback !== true && text(entry.summary, SUMMARY_MAX))
+        .filter(entry => isRecordEntry(entry) && text(entry.summary, SUMMARY_MAX))
         .slice(-entryCount)
         .map(entry => ({
             summary: text(entry.summary, SUMMARY_MAX),

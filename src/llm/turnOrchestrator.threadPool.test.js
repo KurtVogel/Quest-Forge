@@ -19,10 +19,11 @@ const ABILITY_SCORES = { strength: 15, dexterity: 12, constitution: 14, intellig
 const PROMISE = 'The hero swore to Oren they would carry his letter to the widow at Saltmere before the ice.';
 
 function createHarness({ promiseExtras = {} } = {}) {
-    const messages = [
-        { id: 'u0', role: 'user', content: 'I sit down across from Bram.' },
-        { id: 'a0', role: 'assistant', content: 'Bram sets down his tankard and studies you. Oren waits by the door.' },
-    ];
+    // Thirty rows: the cards (seen at 0 / 1) are OLDER than the DM window, so
+    // the callbacks block offers them (CALLBACK_MIN_AGE, WOW 2026-10-14).
+    const messages = Array.from({ length: 30 }, (_, i) => (i % 2 === 0
+        ? { id: `u${i}`, role: 'user', content: 'I sit down across from Bram.' }
+        : { id: `a${i}`, role: 'assistant', content: 'Bram sets down his tankard and studies you. Oren waits by the door.' }));
     // Twelve loud mysteries about the present Bram (salience 5, charged, here)
     // beside one quiet salience-3 promise linked to the companion Oren.
     const mysteries = Array.from({ length: 12 }, (_, i) => ({
@@ -88,8 +89,8 @@ describe('turn runner — the open thread is a lookup over the pool, the callbac
         expect(party).toContain(`Between you now: ${PROMISE}`);
     });
 
-    it('keeps the thread while the promise is on its callback cooldown (paid off 0 messages ago → curation score 0)', async () => {
-        const { runner, streamMessage } = createHarness({ promiseExtras: { lastUsedMessage: 1 } });
+    it('keeps the thread while the promise is on its callback cooldown (paid off 1 message ago → curation score 0)', async () => {
+        const { runner, streamMessage } = createHarness({ promiseExtras: { lastUsedMessage: 29 } });
         await runner.sendToLLM('I ask Bram about the lantern.', 'I ask Bram about the lantern.');
         const prompt = streamMessage.mock.calls[0][0].systemPrompt;
         expect(sectionOf(prompt, '## DRAMATIC CALLBACK OPPORTUNITIES')).not.toContain('widow at Saltmere');

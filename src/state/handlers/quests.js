@@ -11,7 +11,7 @@
  * bare-string completion is bookkeeping only — the panel's + then ✓ was an
  * unbounded self-service XP mine (8 click-cycles = a level at any level).
  */
-import { awardExperience, getQuestCompletionXp, QUEST_INSTANT_XP } from '../../engine/progression.js';
+import { foldExperience, getQuestCompletionXp, QUEST_INSTANT_XP } from '../../engine/progression.js';
 import { containment, tokenSet } from '../../engine/textMatch.js';
 import { cleanText } from '../../engine/text.js';
 import { normalizeRefToken, systemMessage } from './shared.js';
@@ -81,16 +81,26 @@ export function sanitizeQuestRecord(raw, { maxMessageCount = Infinity } = {}) {
     const rawStatus = typeof raw.status === 'string' ? raw.status.trim().toLowerCase() : '';
     const source = typeof raw.source === 'string' ? raw.source.trim().slice(0, 40) : '';
     const addedAt = Number(raw.addedAt);
-    const opened = Number(raw.openedAtMessage);
     const ceiling = Number.isFinite(maxMessageCount) ? Math.max(0, Math.trunc(maxMessageCount)) : Infinity;
+    const stamp = (value) => {
+        const n = Number(value);
+        return Number.isFinite(n) ? Math.min(ceiling, Math.max(0, Math.trunc(n))) : undefined;
+    };
+    const status = QUEST_STATUSES.has(rawStatus) ? rawStatus : 'active';
+    const openedAtMessage = stamp(raw.openedAtMessage);
+    // The close is stamped like the open (2026-10-14 memory-journal P1): the
+    // post-journal verifier reads it to tell a completion that landed AFTER
+    // its snapshot from a lost quest. Only a terminal row carries it.
+    const closedAtMessage = status === 'active' ? undefined : stamp(raw.closedAtMessage);
     return {
         id,
         name,
         description: cleanText(raw.description, QUEST_DESCRIPTION_MAX_LENGTH),
         ...(source && { source }),
-        status: QUEST_STATUSES.has(rawStatus) ? rawStatus : 'active',
+        status,
         addedAt: Number.isFinite(addedAt) ? addedAt : Date.now(),
-        ...(Number.isFinite(opened) && { openedAtMessage: Math.min(ceiling, Math.max(0, Math.trunc(opened))) }),
+        ...(openedAtMessage !== undefined && { openedAtMessage }),
+        ...(closedAtMessage !== undefined && { closedAtMessage }),
     };
 }
 
@@ -222,9 +232,12 @@ export const handlers = {
         }
         const matched = state.quests.some(isMatch);
         if (matched) {
+            const closedAtMessage = (state.messages || []).length;
             let next = {
                 ...state,
-                quests: state.quests.map(q => isMatch(q) ? { ...q, status: terminalStatus } : q),
+                quests: state.quests.map(q => isMatch(q)
+                    ? { ...q, status: terminalStatus, ...(q.status !== terminalStatus && { closedAtMessage }) }
+                    : q),
             };
             // Engine-owned completion XP. Only genuine completions pay (FAIL_QUEST
             // aliases this handler — failure pays 0, always, killing the
@@ -256,14 +269,7 @@ export const handlers = {
                     ? (instantAlreadyPaid ? 0 : QUEST_INSTANT_XP)
                     : getQuestCompletionXp(state.character.level);
                 if (xp > 0) {
-                    const result = awardExperience(next.character, xp, {
-                        reason: `quest completed: ${paying.name || 'quest'}`,
-                    });
-                    next = {
-                        ...next,
-                        character: result.character,
-                        messages: [...next.messages, ...result.messages],
-                    };
+                    next = foldExperience(next, xp, { reason: `quest completed: ${paying.name || 'quest'}` });
                 } else {
                     next = {
                         ...next,
@@ -295,6 +301,7 @@ export const handlers = {
             description: ref.description,
             status: terminalStatus,
             openedAtMessage: (state.messages || []).length,
+            closedAtMessage: (state.messages || []).length,
         });
         if (!row) return state;
         if (state.quests.some(quest => quest.id === row.id)) row.id = mintQuestId();

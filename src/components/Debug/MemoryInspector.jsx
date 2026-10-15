@@ -9,6 +9,7 @@
  *
  * Visibility: Settings → Game → Memory Inspector toggle, or ?debugMemory=1.
  */
+import { isRecordEntry } from '../../engine/journalEntry.js';
 import { useSyncExternalStore } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { getInspectorSnapshot, subscribeInspector } from '../../debug/memoryInspectorStore.js';
@@ -29,10 +30,10 @@ function ScoreTag({ value }) {
     return <span className="mi-score">{value}</span>;
 }
 
-function CardRow({ card }) {
+function CardRow({ card, landed = false }) {
     return (
         <li className="mi-row">
-            <span className="mi-type">{card.type}</span>
+            <span className="mi-type">{landed ? '↺ ' : ''}{card.type}</span>
             {card.subject && <span className="mi-subject">{card.subject}</span>}
             <span className="mi-text">{card.text}</span>
             <span className="mi-meta">
@@ -73,14 +74,14 @@ export default function MemoryInspector({ isOpen, onClose }) {
         return acc;
     }, {});
     const formatTokens = (value) => (Number.isFinite(value) ? value.toLocaleString() : '—');
-    const describeUsage = (row) => `${row.mode} · ${row.provider || '?'}${row.model ? ` ${row.model}` : ''}: prompt ${formatTokens(row.promptTokens)} tokens, cached ${formatTokens(row.cachedTokens)}${row.cachedShare !== null ? ` (${Math.round(row.cachedShare * 100)}%)` : ''}, output ${formatTokens(row.outputTokens)}${Number.isFinite(row.thoughtTokens) ? ` (+${formatTokens(row.thoughtTokens)} thinking)` : ''}`;
+    const describeUsage = (row) => `${row.mode} · ${row.provider || '?'}${row.model ? ` ${row.model}` : ''}: prompt ${formatTokens(row.promptTokens)} tokens, cached ${formatTokens(row.cachedTokens)}${row.cachedShare !== null ? ` (${Math.round(row.cachedShare * 100)}%)` : ''}${Number.isFinite(row.writtenTokens) ? `, written ${formatTokens(row.writtenTokens)}${row.writtenShare !== null ? ` (${Math.round(row.writtenShare * 100)}%)` : ''}` : ''}, output ${formatTokens(row.outputTokens)}${Number.isFinite(row.thoughtTokens) ? ` (+${formatTokens(row.thoughtTokens)} thinking)` : ''}`;
     const fronts = state.fronts || [];
     const journal = state.journal || [];
     // The journal's weight (2026-10-01): entries are never pruned (the record
     // lane reads every one) and each real entry is a DURABLE RAG row the
     // cache never evicts — the count and bytes are how growth becomes visible.
     const journalBytes = journal.reduce((sum, entry) => sum + JSON.stringify(entry ?? null).length, 0);
-    const journalRagRows = journal.filter(entry => entry && !entry.fallback).length;
+    const journalRagRows = journal.filter(isRecordEntry).length;
 
     return (
         <div className="journal-overlay" onClick={onClose}>
@@ -116,10 +117,10 @@ export default function MemoryInspector({ isOpen, onClose }) {
                                         ) : <p className="mi-empty">Nothing on record — the DM was told not to invent.</p>}
                                     </>
                                 )}
-                                <h4>Curated callback cards ({lastInjection.curated.length})</h4>
+                                <h4>Curated callback cards ({lastInjection.curated.length} offered · {(lastInjection.landed || []).length} landed)</h4>
                                 {lastInjection.curated.length > 0 ? (
                                     <ul className="mi-list">
-                                        {lastInjection.curated.map((card, i) => <CardRow key={card.id || i} card={card} />)}
+                                        {lastInjection.curated.map((card, i) => <CardRow key={card.id || i} card={card} landed={(lastInjection.landed || []).includes(card.id)} />)}
                                     </ul>
                                 ) : <p className="mi-empty">None passed curation this turn.</p>}
                                 <h4>RAG retrievals ({lastInjection.retrieved.length})</h4>

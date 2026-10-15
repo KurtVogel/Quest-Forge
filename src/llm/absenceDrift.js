@@ -145,10 +145,18 @@ export async function generateAbsenceDrift(state) {
         anchor: 'developments',
         label: 'absence-drift',
     });
-    return sanitizeAbsenceDrift(parsed, {
+    const drift = sanitizeAbsenceDrift(parsed, {
         npcs: state.npcs || [],
         locationName: state.session?.pendingAbsenceDrift?.locationName || '',
     });
+    // The symptom was written for the ONE front the context offered; the
+    // installer binds it to that id or drops it (2026-10-15 living-world nit:
+    // both sides read "the first active theater front", so a resolution
+    // between the call and the install re-bound the symptom to another front).
+    const locations = state.locations || [];
+    const idx = findLocationRecord(locations, state.session?.pendingAbsenceDrift?.locationName);
+    const offered = findDriftTheaterFront(state.fronts, idx === -1 ? null : locations[idx]);
+    return { ...drift, frontId: offered?.id || '' };
 }
 
 /**
@@ -158,7 +166,7 @@ export async function generateAbsenceDrift(state) {
  * canon (NPC records, world fact) persists regardless — the block is just the
  * DM's cue to surface it.
  */
-export function buildWhileYouWereAwayBlock(absenceDrift, { currentLocation, locations = [], messages = null, messageCount = 0, fronts = null, npcs = null } = {}) {
+export function buildWhileYouWereAwayBlock(absenceDrift, { currentLocation, locations = [], messages = null, messageCount = 0, fronts = null, npcs = null, tempoWindowActive = false } = {}) {
     if (!absenceDrift || typeof absenceDrift !== 'object') return '';
     if (!Number.isFinite(absenceDrift.arrivedAtMessage)) return '';
     if (!isStillAtPlace(locations, cleanText(absenceDrift.locationName), cleanText(currentLocation))) return '';
@@ -187,7 +195,11 @@ export function buildWhileYouWereAwayBlock(absenceDrift, { currentLocation, loca
     const symptomText = cleanText(storedSymptom?.text, 240);
     // Without a fronts list (unit callers) the label is still whitelisted.
     const storedBand = INTENSITY_LEVELS.includes(storedSymptom?.maxIntensity) ? storedSymptom.maxIntensity : 'whispers';
-    const symptom = storedSymptom && symptomText && (liveFront || !Array.isArray(fronts))
+    // ONE symptom per scene, one permission (2026-10-15 living-world nit): while
+    // a tempo window is open the WORLD TEMPO block holds the scene's permission
+    // and this block's symptom yields — two blocks used to carry two
+    // permissions and two caps that never named each other.
+    const symptom = storedSymptom && symptomText && !tempoWindowActive && (liveFront || !Array.isArray(fronts))
         ? {
             text: symptomText,
             maxIntensity: clampIntensity(storedBand, liveFront ? getFrontIntensityBand(liveFront) : storedBand),

@@ -1,5 +1,6 @@
 import { CLASSES } from '../data/classes.js';
-import { getModifier, perLevelHpGain } from './rules.js';
+import { getModifier, normalizeConditionName, perLevelHpGain } from './rules.js';
+import { systemMessage } from './text.js';
 import { buildClassResources, getFeaturesForLevel, normalizeAbilityScoreImprovementState, normalizeMartialArchetype } from './characterUtils.js';
 import { buildSpellSlots, isSpellcaster } from './spellcasting.js';
 
@@ -80,30 +81,45 @@ export function getQuestCompletionXp(level) {
 // appeared, it was not granted", and a plain system row never reaches the DM's
 // window — the 08-26 double-award's structural cause, the fix the coin lanes
 // got on 08-31. `dmVisible` rides buildMessageWindow, where a run of receipts
-// folds into ONE row. (Kept local: importing systemMessage from
-// handlers/shared would cycle progression ⇄ handlers/shared.)
-function createSystemMessage(kind, content) {
-    return {
-        id: `msg-${Date.now()}-${kind}-${Math.random().toString(36).slice(2, 7)}`,
-        timestamp: Date.now(),
-        role: 'system',
-        content,
-        dmVisible: true,
-    };
-}
+// folds into ONE row. The row itself is the engine text shelf's composer
+// (2026-10-14: a private copy lived here to dodge the handlers/shared cycle).
+const receipt = (content) => systemMessage(content, { dmVisible: true });
 
 /** Is this (living) hero down — 0 HP, dying, defeated, or unconscious? */
 export function isHeroDown(character) {
     return !!character.dying
         || !!character.lowLevelDefeat
         || (Number(character.currentHP) || 0) <= 0
-        || (character.conditions || []).some(c => String(c).toLowerCase() === 'unconscious');
+        || (character.conditions || []).some(c => normalizeConditionName(c) === 'unconscious');
 }
 
-function applySingleLevelUp(character, { milestone = false, keepDowned = false } = {}) {
+/**
+ * THE revive (2026-10-14 progression Lap-4 P2): a dying, defeated or
+ * stabilized hero stands back up — the death-save clock resets, the defeat
+ * flag clears, Unconscious comes off (judged in the canonical condition form;
+ * a legacy-cased or junk row never throws). `currentHP` is the caller's: the
+ * heal lanes clamp it, the natural-20 projection sets 1, the level-up the new
+ * maximum. Four copies used to spell this (handlers/shared, the level-up's
+ * inline block, combatExchange's projection, the long rest's filter).
+ */
+export function reviveHero(character) {
+    return {
+        ...character,
+        dying: false,
+        lowLevelDefeat: false,
+        deathSaves: { successes: 0, failures: 0 },
+        conditions: (Array.isArray(character.conditions) ? character.conditions : [])
+            .filter(c => normalizeConditionName(c) !== 'unconscious'),
+    };
+}
+
+function applySingleLevelUp(character, { keepDowned = false } = {}) {
     const classData = CLASSES[character.class];
     const hitDie = classData?.hitDie || 8;
     const conMod = getModifier(character.abilityScores?.constitution || 10);
+    // The average die alone is the receipt's "Average HP" figure; the gain
+    // adds CON (floored at 1) — computed once each (2026-10-14 nit).
+    const averageHp = perLevelHpGain(hitDie, 0);
     const hpGain = perLevelHpGain(hitDie, conMod);
     const newLevel = (Number(character.level) || 1) + 1;
     const newMaxHP = character.maxHP + hpGain;
@@ -113,9 +129,7 @@ function applySingleLevelUp(character, { milestone = false, keepDowned = false }
     // grows the sheet but must never write currentHP — no "Fully healed!" on a
     // corpse. And the full heal has REVIVE semantics ("heals revive dying"): a
     // hero who levels while dying or defeated stands back up — death saves
-    // cannot continue at full HP. Mirrors reviveCharacter in
-    // state/handlers/shared.js (kept inline: importing it here would cycle
-    // progression ⇄ handlers/shared).
+    // cannot continue at full HP. The revive is reviveHero above (2026-10-14).
     //
     // `revived` is judged on the DOWNED state, not just the dying flags
     // (2026-09-07 audit P1): a hero who STABILIZED (3 successes → dying false,
@@ -147,16 +161,10 @@ function applySingleLevelUp(character, { milestone = false, keepDowned = false }
     };
 
     const updatedCharacterBase = {
-        ...character,
+        ...(revived ? reviveHero(character) : character),
         level: newLevel,
         maxHP: newMaxHP,
         currentHP: (isDead || staysDown) ? character.currentHP : newMaxHP,
-        ...(revived && {
-            dying: false,
-            lowLevelDefeat: false,
-            deathSaves: { successes: 0, failures: 0 },
-            conditions: (character.conditions || []).filter(c => String(c).toLowerCase() !== 'unconscious'),
-        }),
         features: updatedFeatures,
         // Spent uses carry over — newly unlocked resources start fresh, but a
         // level-up mid-day never hands back the day's spent abilities.
@@ -181,7 +189,6 @@ function applySingleLevelUp(character, { milestone = false, keepDowned = false }
     const featureMsg = newFeatures.length > 0
         ? `\nNew features: **${newFeatures.join('**, **')}**`
         : '';
-    const milestoneMsg = milestone ? ' Milestone level-up.' : '';
     const healMsg = isDead
         ? ''
         : staysDown
@@ -190,9 +197,8 @@ function applySingleLevelUp(character, { milestone = false, keepDowned = false }
 
     return {
         character: updatedCharacter,
-        message: createSystemMessage(
-            'lvl',
-            `**Level Up!** You are now **Level ${newLevel}**!${milestoneMsg} Average HP **${perLevelHpGain(hitDie, 0)}** from d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${character.maxHP} → ${newMaxHP}).${healMsg}${featureMsg}`
+        message: receipt(
+            `**Level Up!** You are now **Level ${newLevel}**! Average HP **${averageHp}** from d${hitDie} + ${conMod} CON = **+${hpGain} HP** (${character.maxHP} → ${newMaxHP}).${healMsg}${featureMsg}`
         ),
     };
 }
@@ -227,10 +233,15 @@ export function getDmBonusXpCap(level) {
  * @param {number} [options.cappedFrom] - the DM's requested amount when the
  *   engine capped it; the XP line itself says so (`+38 XP (capped from 50)`)
  *   — one receipt row, not an award line plus a separate note.
- * @param {boolean} [options.milestoneLevelUp] - engine/legacy whole-level grant.
  * @param {boolean} [options.keepDowned] - a level crossed while the hero is
  *   down (0 HP / dying / defeated / Unconscious) grows the sheet but never
- *   heals or revives — END_COMBAT passes it on a lost or escaped fight.
+ *   heals or revives — END_COMBAT passes it on a lost or escaped fight, the
+ *   DM lanes and the load replay pass it whenever the hero is down.
+ *
+ * The whole-level `milestoneLevelUp` grant is gone (2026-10-14 progression
+ * Lap-4 P2): no production dispatcher reached it after the 09-07 ruling
+ * bounded the DM's milestone to the front tier, and four tests pinned a lane
+ * nothing ran. XP crosses levels; nothing else does.
  */
 export function awardExperience(character, amount = 0, options = {}) {
     if (!character) return { character, messages: [] };
@@ -252,18 +263,10 @@ export function awardExperience(character, amount = 0, options = {}) {
         const progress = isMaxLevel(updatedCharacter.level)
             ? `${updatedCharacter.exp} XP. Max level reached.`
             : `${updatedCharacter.exp} / ${getExperienceThreshold(updatedCharacter.level)} XP.`;
-        messages.push(createSystemMessage(
-            'xp',
-            `**Experience gained:** +${xpAwarded} XP${reason}. Progress: ${progress}`
-        ));
+        messages.push(receipt(`**Experience gained:** +${xpAwarded} XP${reason}. Progress: ${progress}`));
     }
 
     const keepDowned = !!options.keepDowned;
-    if (options.milestoneLevelUp && !isMaxLevel(updatedCharacter.level)) {
-        const leveled = applySingleLevelUp(updatedCharacter, { milestone: true, keepDowned });
-        updatedCharacter = leveled.character;
-        messages.push(leveled.message);
-    }
 
     while (!isMaxLevel(updatedCharacter.level) && updatedCharacter.exp >= getExperienceThreshold(updatedCharacter.level)) {
         const threshold = getExperienceThreshold(updatedCharacter.level);
@@ -277,6 +280,16 @@ export function awardExperience(character, amount = 0, options = {}) {
     }
 
     return { character: updatedCharacter, messages };
+}
+
+/**
+ * The award folded into a STATE (2026-10-14 progression Lap-4 nit): the
+ * character replaced, the receipts appended. Five sites hand-wrote the fold
+ * (quest completion, front resolution, both DM lanes, the load replay).
+ */
+export function foldExperience(state, amount, options = {}) {
+    const result = awardExperience(state.character, amount, options);
+    return { ...state, character: result.character, messages: [...(state.messages || []), ...result.messages] };
 }
 
 // A boss flag only pays boss XP when the statline was already going to max out

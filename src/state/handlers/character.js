@@ -5,10 +5,11 @@
 import { computeACFromInventory, getModifier, normalizeConditionName, CONDITION_LIST_CAP } from '../../engine/rules.js';
 import { judgeDeathSave } from '../../engine/deathSaves.js';
 import { ABILITY_NAMES, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../../engine/characterUtils.js';
-import { awardExperience, getDmBonusXpCap, getStoryMilestoneXp, isHeroDown, isMaxLevel } from '../../engine/progression.js';
+import { foldExperience, getDmBonusXpCap, getStoryMilestoneXp, isHeroDown, isMaxLevel } from '../../engine/progression.js';
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 import { mergeNpcAppearance } from '../../engine/npcRoster.js';
 import { CHARACTER_APPEARANCE_MAX, cleanTextField } from '../../config/contentLimits.js';
+import { isRecord } from '../../engine/text.js';
 import {
     applyDeath,
     applyEarlyDefeat,
@@ -344,12 +345,19 @@ export const handlers = {
         };
     },
 
+    /**
+     * THE DM's `exp_awarded` lane — ONE lane since 2026-10-14 (progression
+     * Lap-4 P2): the payload is `{ amount, _meta }` from applyEvents. Engine
+     * awards (combat, quests, fronts, the load replay) never dispatch here —
+     * they fold `awardExperience` directly, unbounded and unledgered by
+     * construction. The old bare-number "engine/legacy" branch had no
+     * production dispatcher and four tests pinned it as a contract; a
+     * payload that is not a record is a no-op now.
+     */
     ADD_EXP(state, action) {
-        // DM-path dispatches arrive as { amount, _meta }; engine/legacy callers
-        // pass a bare number and bypass the ledger entirely.
-        const isDmPath = action.payload && typeof action.payload === 'object';
-        const requested = Math.max(0, Math.floor(Number(isDmPath ? action.payload.amount : action.payload) || 0));
-        const meta = isDmPath ? (action.payload._meta || {}) : null;
+        if (!isRecord(action.payload)) return state;
+        const requested = Math.max(0, Math.floor(Number(action.payload.amount) || 0));
+        const meta = isRecord(action.payload._meta) ? action.payload._meta : {};
         // DM lane bound (2026-09-07 audit P1): a freeform bonus pays at most the
         // quest tier for the hero's level — the prompt promises "tens to low
         // hundreds" and one 10000-XP emission used to take a hero L1→L5. The
@@ -357,10 +365,9 @@ export const handlers = {
         // matches its own echo signature.
         // The cap is said ON the XP line (`+38 XP (capped from 50)`, 2026-10-02):
         // one DM-visible receipt, not an award row plus a note the DM never saw.
-        const bonusCap = meta ? getDmBonusXpCap(state.character?.level) : Infinity;
-        const amount = Math.min(requested, bonusCap);
+        const amount = Math.min(requested, getDmBonusXpCap(state.character?.level));
         let recentExpAwards = state.recentExpAwards || [];
-        if (meta && amount > 0) {
+        if (amount > 0) {
             const guarded = guardExpAwardLedger(recentExpAwards, amount, meta, currentMessageIndex(state), state.messages);
             recentExpAwards = guarded.recentExpAwards;
             if (guarded.suppressed) {
@@ -375,23 +382,18 @@ export const handlers = {
                 };
             }
         }
-        const result = awardExperience(state.character, amount, {
-            reason: action.reason,
+        return foldExperience({ ...state, recentExpAwards }, amount, {
             cappedFrom: amount < requested ? requested : undefined,
-            // No DM channel ends a death-save clock (2026-09-19 ruling, the
-            // 09-04 "gasped prayer" class through the XP door): a DM award
-            // that crosses a level while the hero is DYING grows the sheet and
-            // leaves the clock running. Engine-computed XP keeps the revive.
-            keepDowned: !!meta && !!state.character?.dying,
+            // No DM channel stands a DOWN hero up (2026-09-19 ruling, the
+            // 09-04 "gasped prayer" class through the XP door; widened
+            // 2026-10-14 progression P2 from `dying` alone to isHeroDown —
+            // a STABILIZED hero at 0 HP, Unconscious, took the full heal from
+            // a 30-XP award and stood up "Fully healed!"): a DM award that
+            // crosses a level while the hero is down grows the sheet and leaves
+            // the hero where the fiction left them. Engine-computed XP keeps
+            // the revive.
+            keepDowned: isHeroDown(state.character || {}),
         });
-        return {
-            ...state,
-            character: result.character,
-            recentExpAwards,
-            messages: [...state.messages, ...result.messages],
-            // Remember XP was earned mid-fight so the manual End-Combat fallback won't re-award.
-            combat: state.combat.active ? { ...state.combat, xpAwarded: true } : state.combat,
-        };
     },
 
     // Both take the canonical form (normalizeConditionName) and match
@@ -420,9 +422,17 @@ export const handlers = {
         };
     },
 
+    /**
+     * THE DM's `level_up: true` lane — ONE lane since 2026-10-14 (progression
+     * Lap-4 P2): `{ bonusExp, _meta }` from applyEvents, paying the front
+     * tier plus a bounded bonus. The meta-less "engine/legacy" branch handed
+     * out a WHOLE level — the lane the 09-07 ruling closed — and nothing in
+     * production dispatched it; a payload that is not a record is a no-op.
+     */
     LEVEL_UP(state, action) {
-        const meta = action.payload?._meta;
-        let bonusExp = Math.max(0, Math.floor(Number(action.payload?.bonusExp) || 0));
+        if (!isRecord(action.payload)) return state;
+        const meta = isRecord(action.payload._meta) ? action.payload._meta : {};
+        let bonusExp = Math.max(0, Math.floor(Number(action.payload.bonusExp) || 0));
         let recentExpAwards = state.recentExpAwards || [];
         const extraMessages = [];
         // DM-path milestone level-ups ride the same ledger: a level_up re-emitted
@@ -431,7 +441,7 @@ export const handlers = {
         // pattern at maximum stakes). The signature is constant — value-keying on
         // the reached level would never match, since the first echo already
         // raised it. No player-phrasing escape: milestones are DM initiative.
-        if (meta) {
+        {
             const sourceId = String(meta.sourceId || '').slice(0, 160);
             const messageIndex = currentMessageIndex(state);
             const levelUpMarker = {
@@ -483,30 +493,11 @@ export const handlers = {
             const bonusNote = bonusExp > 0 && bonusExp < requestedBonus
                 ? ` + bonus ${bonusExp}, capped from ${requestedBonus}`
                 : '';
-            const result = awardExperience(state.character, milestoneXp + bonusExp, {
+            return foldExperience({ ...state, recentExpAwards, messages: [...state.messages, ...extraMessages] }, milestoneXp + bonusExp, {
                 reason: `${atCap ? 'story milestone — max level reached, no level gained' : 'story milestone'}${bonusNote}`,
-                // A DM-declared milestone never ends a death-save clock (see ADD_EXP).
-                keepDowned: !!state.character?.dying,
+                // A DM-declared milestone never stands a down hero up (see ADD_EXP).
+                keepDowned: isHeroDown(state.character || {}),
             });
-            return {
-                ...state,
-                character: result.character,
-                recentExpAwards,
-                messages: [...state.messages, ...extraMessages, ...result.messages],
-                combat: state.combat.active ? { ...state.combat, xpAwarded: true } : state.combat,
-            };
         }
-        // Engine/legacy path (no _meta): the whole-level milestone grant.
-        const result = awardExperience(state.character, bonusExp, {
-            milestoneLevelUp: true,
-            reason: action.payload?.reason || 'milestone',
-        });
-        return {
-            ...state,
-            character: result.character,
-            recentExpAwards,
-            messages: [...state.messages, ...extraMessages, ...result.messages],
-            combat: state.combat.active ? { ...state.combat, xpAwarded: true } : state.combat,
-        };
     },
 };

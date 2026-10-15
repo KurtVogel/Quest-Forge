@@ -4,6 +4,7 @@
  * the prompt text the painter receives and the "current situation" picker
  * are unit-testable without React.
  */
+import { isRecordEntry } from '../../engine/journalEntry.js';
 import { classDisplayName, raceDisplayName } from '../../engine/characterUtils.js';
 import { findLatestNarration } from '../../llm/narrativeMessages.js';
 import { IDENTITY_LOCK_REMINDER } from '../../engine/appearanceIdentity.js';
@@ -103,7 +104,7 @@ export function pickSceneSituation({ messages = [], journal = [], location = '' 
     const lastJournal = (Array.isArray(journal) ? journal : [])
         .slice()
         .reverse()
-        .find(entry => entry && typeof entry === 'object' && !entry.fallback && typeof entry.summary === 'string' && entry.summary.trim())
+        .find(isRecordEntry)
         ?.summary || '';
     const narrationText = typeof narration?.content === 'string' ? narration.content : '';
     const situation = (narrationText || lastJournal || `The scene at ${location}.`).trim();
