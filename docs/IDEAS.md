@@ -3543,3 +3543,23 @@ front's survivors and forbids only an active front's faction — an installer's 
 contract with its prompt. Payoff: front titles stay private, the theater gate means what it says,
 one drift per homecoming whatever the director said, and new lands get their natives once the web
 has room (or an honest comment).
+
+### [strengthening] Two tiers serving one call are two request contracts; a guard for "every minutes-long write" is grepped by its awaits; a claim read outside the commit that names it is a lease without a lock; a cancel is observed where the code throws — status: `idea` (2026-10-16)
+Four rules from the scene-art + cloud-sync Lap-1 pass (2026-10-16), three reproduced with a
+throwaway test. **(1)** The image chain's Gemini tier is told `imageConfig.aspectRatio` and the xAI
+tier — the primary — is told nothing about shape or resolution, though DECISIONS 2026-06-15 says
+portraits render "at 3:4 / `1k`" there; the one aspect test pins the tier that is told, so a test
+on one copy documented the other's drift as a feature. When a chain has N tiers, diff their request
+bodies key by key and pin the keys the decision names on EVERY tier. **(2)** Three portrait writes
+carry `campaignStamp` and the sheet's hero write — the same `await requestPortrait`, one panel over —
+does not, so a save loaded during the render lands hero A's look and face on hero B. A guard named
+by a class of writes is a list; grep the await, not the handler list. **(3)** The cloud save reads
+every slot's blob claims in one listing before its own transaction and skips a blob another slot
+claims, while another device's delete sweeps what nobody claims after its own commit — two devices
+can strand a picture a local slot still has. Whatever a commit will name, write it yourself
+(idempotent) or read it inside the commit; a sweep spares what was written moments ago. **(4)**
+`tryProvider` sees a cancel only in its catch; after the last throwing await the downscale, the
+cache re-encode and the paint finish for a player who pressed Cancel. After the last await that can
+throw, read the signal once more before the side effect. Payoff: xAI portraits in the frame they are
+drawn in, a hero who never wears another hero's face, cloud pictures that survive a two-device day,
+and a Cancel that cancels.
