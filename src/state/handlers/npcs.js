@@ -54,7 +54,7 @@ import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, findDriftTheaterFront, getFrontIntensityBand, isAbsenceDriftLocalNpc, isDriftTheaterFront } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
 import { isStaleCampaignAction, systemMessage, upsertNpc } from './shared.js';
-import { cleanTextField, LOCATION_NAME_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
+import { cleanTextField, HERO_TEXT_LIMITS, LOCATION_NAME_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../../config/contentLimits.js';
 
 /**
  * Attach a generated portrait to an NPC by id. Shared by the SET_NPC_PORTRAIT
@@ -74,7 +74,8 @@ export function applyNpcPortrait(npcs = [], payload = {}) {
             ? normalizeNpcRecord({
                 ...npc,
                 portraitUrl,
-                portraitProvider: String(payload.portraitProvider || '').slice(0, 40),
+                // String-or-empty, never String(object) (the 09-18 rule).
+                portraitProvider: cleanTextField(payload.portraitProvider, HERO_TEXT_LIMITS.portraitProvider),
                 portraitUpdatedAt: Date.now(),
             })
             : npc

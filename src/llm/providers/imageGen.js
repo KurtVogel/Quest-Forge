@@ -16,6 +16,7 @@
 
 import { normalizeXaiApiKey } from './xaiKey.js';
 import { getMachineryGeminiKey } from '../machinery.js';
+import { MAX_PORTRAIT_URL_LENGTH, sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 
 const IMAGE_CACHE = new Map();
 const IMAGE_CACHE_MAX = 10;
@@ -39,6 +40,13 @@ const SCENE_CACHE_REENCODE_OVER_CHARS = 1_200_000;
 const XAI_IMAGE_ENDPOINT = 'https://api.x.ai/v1/images/generations';
 // Recommended model as of 2026 (grok-imagine-image-pro is deprecated May 2026).
 const XAI_IMAGE_MODEL = 'grok-imagine-image-quality';
+// xAI renders at `1k` or `2k` (DECISIONS.md 2026-06-15): every render is
+// downscaled to 480×640 / 256×341 / a 1280-px cache copy, so `2k` is waste.
+// Both are SENT (2026-10-16 audit P1): the body carried neither, so the
+// primary tier rendered at its own defaults — `auto` for the shape, which the
+// prompt words usually carried, and a scene without a framing word came back
+// square into a 16:9 frame. Gemini was the one tier told the aspect.
+const XAI_IMAGE_RESOLUTION = '1k';
 
 const GEMINI_IMAGE_MODEL = 'gemini-3-pro-image';
 const GEMINI_IMAGE_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent`;
@@ -107,6 +115,17 @@ function cacheSet(key, value) {
         IMAGE_CACHE.delete(IMAGE_CACHE.keys().next().value);
     }
     IMAGE_CACHE.set(key, value);
+}
+
+/**
+ * A cache HIT refreshes the LRU order (2026-10-16 audit nit): only writes
+ * did, so the scene the player kept re-viewing was the first one evicted.
+ */
+function cacheGet(key) {
+    if (!IMAGE_CACHE.has(key)) return null;
+    const value = IMAGE_CACHE.get(key);
+    cacheSet(key, value);
+    return value;
 }
 
 /**
@@ -234,7 +253,7 @@ export function isXaiFilteredFallback(fallbackReason) {
  */
 const TIERS = {
     xai: {
-        request: (prompt, apiKey) => ({
+        request: (prompt, apiKey, { aspectRatio }) => ({
             url: XAI_IMAGE_ENDPOINT,
             init: {
                 method: 'POST',
@@ -242,10 +261,14 @@ const TIERS = {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${apiKey}`,
                 },
+                // `aspect_ratio` / `resolution` per xAI's image-generation
+                // reference (both default otherwise: `auto`, `1k`).
                 body: JSON.stringify({
                     model: XAI_IMAGE_MODEL,
                     prompt,
                     n: 1,
+                    aspect_ratio: aspectRatio,
+                    resolution: XAI_IMAGE_RESOLUTION,
                     response_format: 'b64_json',
                 }),
             },
@@ -283,6 +306,13 @@ const TIERS = {
  * Ask one provider. Resolves `{ result }` on an image, `{ reason }` on any
  * provider failure (which falls through the chain), and THROWS only for the
  * caller's own cancel — a deliberate cancel is never a provider failure.
+ *
+ * The cancel is observed where the PLAYER pressed it, not only where the code
+ * throws (2026-10-16 audit P2): once `fetch` and the JSON read had resolved,
+ * the downscale, the scene cache's re-encode and the result all completed for
+ * a player who had left, and the picture painted after the spinner was gone.
+ * The signal is re-read after the last throwing await and again after the
+ * cache write, so nothing past a cancel reaches the caller or the cache.
  */
 async function tryProvider(tier, apiKey, prompt, options, { cacheKey, priorReason }) {
     const guard = requestSignal(options.signal);
@@ -294,7 +324,19 @@ async function tryProvider(tier, apiKey, prompt, options, { cacheKey, priorReaso
             console.warn(`[ImageGen] ${tier} image request failed (Status ${response.status}). ${body}`);
             return { reason: reason.http(tier, response.status, body) };
         }
-        const data = await response.json();
+        let data;
+        try {
+            data = await response.json();
+        } catch (e) {
+            // A stall or a cancel mid-body is the outer catch's (network / cancel).
+            if (guard.signal.aborted) throw e;
+            // A 200 whose body is not JSON (a captive portal, a proxy page) is
+            // an OK reply with no image — a refusal, not a network failure
+            // (2026-10-16 audit nit: it was reported as `<tier>-network`).
+            console.warn(`[ImageGen] ${tier} answered OK with an unreadable body:`, e.message);
+            return { reason: reason.empty(tier, 'unreadable reply') };
+        }
+        rethrowIfCancelled(options);
         const dataUrl = TIERS[tier].extract(data);
         if (!dataUrl) {
             // OK status but no image — most likely filtered by content moderation.
@@ -307,8 +349,10 @@ async function tryProvider(tier, apiKey, prompt, options, { cacheKey, priorReaso
             maxHeight: options.maxHeight,
             quality: options.quality,
         });
+        rethrowIfCancelled(options);
         const result = { url: finalUrl, provider: tier, fallbackReason: priorReason };
         await cacheRender(`${tier}|${cacheKey}`, result, options);
+        rethrowIfCancelled(options);
         return { result };
     } catch (e) {
         rethrowIfCancelled(options);
@@ -356,8 +400,9 @@ async function generateImageResult(prompt, imageApiKey, options = {}) {
     const preferredCacheKey = `${preferredProvider(imageApiKey, keys.gemini)}|${baseCacheKey}`;
     // bypassCache is the reroll affordance: generation is the point of the
     // feature, so "Visualize again" must be able to produce a NEW image.
-    if (!options.bypassCache && IMAGE_CACHE.has(preferredCacheKey)) {
-        return IMAGE_CACHE.get(preferredCacheKey);
+    if (!options.bypassCache) {
+        const cached = cacheGet(preferredCacheKey);
+        if (cached) return cached;
     }
 
     // xAI first; then Gemini on the mandatory machinery key — every player has
@@ -414,7 +459,7 @@ export async function generatePortraitImageDetailed(prompt, imageApiKey, extraOp
  */
 export function peekCachedImage(cacheKey, { imageApiKey, geminiApiKey, sessionScope } = {}) {
     if (!cacheKey) return null;
-    return IMAGE_CACHE.get(`${preferredProvider(imageApiKey, geminiApiKey)}|${sessionScope || ''}|${cacheKey}`) || null;
+    return cacheGet(`${preferredProvider(imageApiKey, geminiApiKey)}|${sessionScope || ''}|${cacheKey}`);
 }
 
 /**
@@ -439,6 +484,12 @@ export function imageRequestOptions(settings, { sessionScope = '', bypassCache =
  * a second click returned the identical picture (2026-08-20 audit P1). `size`
  * stores the portrait at the size it renders (NPC_PORTRAIT_SIZE for a card).
  * Resolves the render or throws — a caller shows `error.message`.
+ *
+ * The render is judged against the reducer's own portrait allowlist HERE
+ * (2026-10-16 audit nit): a tier fallback whose downscale failed returned a
+ * full-resolution Gemini PNG (1.5–3 MB of base64, over `MAX_PORTRAIT_URL_LENGTH`
+ * 300k) that UPDATE_CHARACTER / applyNpcPortrait dropped SILENTLY — the player
+ * paid a render for no picture and no message. The one error names the size.
  */
 export async function requestPortrait(prompt, settings, { existingUrl = '', sessionScope = '', size = null, signal } = {}) {
     const result = await generatePortraitImageDetailed(prompt, settings?.imageApiKey, {
@@ -446,6 +497,12 @@ export async function requestPortrait(prompt, settings, { existingUrl = '', sess
         ...(size || {}),
     });
     if (!result?.url) throw new Error('No portrait returned.');
+    if (!sanitizePortraitUrl(result.url)) {
+        const kb = (chars) => Math.round(chars / 1024);
+        throw new Error(result.url.length > MAX_PORTRAIT_URL_LENGTH
+            ? `The portrait came back too large to keep (${kb(result.url.length)} KB; the limit is ${kb(MAX_PORTRAIT_URL_LENGTH)} KB) — try again.`
+            : 'The portrait came back in a form the game cannot store — try again.');
+    }
     return result;
 }
 

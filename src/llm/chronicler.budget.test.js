@@ -117,4 +117,23 @@ describe('campaign identity on async writes (P1)', () => {
         });
         expect(fresh.npcs[0].portraitUrl).toBe('data:image/jpeg;base64,abc123==');
     });
+
+    it('the hero portrait (UPDATE_CHARACTER with a stamp) gets the same guard — a render that lands after a load never writes another hero\'s look or picture (2026-10-16 P2)', () => {
+        const astra = { ...campaignA, character: { ...initialGameState.character, name: 'Astra', appearance: 'Tall, scarred.' } };
+        const bram = { ...campaignB, character: { ...initialGameState.character, name: 'Bram', appearance: 'Short, bearded.' } };
+        // The sheet captured Astra's campaign, awaited the render, and Settings loaded Bram meanwhile.
+        const meta = campaignStamp(astra);
+        const payload = { appearance: 'Tall, scarred.', portraitUrl: 'data:image/jpeg;base64,abc123==', portraitProvider: 'xai' };
+        const stale = gameReducer(bram, { type: 'UPDATE_CHARACTER', payload, meta });
+        expect(stale).toBe(bram);
+        expect(stale.character).toMatchObject({ name: 'Bram', appearance: 'Short, bearded.' });
+        expect(stale.character.portraitUrl).toBeUndefined();
+        // The same-campaign reload (new nonce) is stale too; a matching stamp or no stamp writes as before.
+        const reloaded = { ...astra, session: { ...astra.session, loadNonce: 9 } };
+        expect(gameReducer(reloaded, { type: 'UPDATE_CHARACTER', payload, meta })).toBe(reloaded);
+        const fresh = gameReducer(astra, { type: 'UPDATE_CHARACTER', payload, meta: campaignStamp(astra) });
+        expect(fresh.character).toMatchObject({ name: 'Astra', portraitUrl: 'data:image/jpeg;base64,abc123==', portraitProvider: 'xai' });
+        const bare = gameReducer(astra, { type: 'UPDATE_CHARACTER', payload: { appearance: 'A new scar.' } });
+        expect(bare.character.appearance).toBe('A new scar.');
+    });
 });

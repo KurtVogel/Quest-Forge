@@ -21,6 +21,7 @@ import {
     requestPortrait,
 } from './imageGen.js';
 import { fallbackNotice } from '../../components/SceneArt/sceneArtHelpers.js';
+import { MAX_PORTRAIT_URL_LENGTH, sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 
 const xaiOk = (b64 = 'dGVzdA==') => ({ ok: true, json: async () => ({ data: [{ b64_json: b64 }] }) });
 const xaiEmpty = () => ({ ok: true, json: async () => ({ data: [] }) });
@@ -131,6 +132,19 @@ describe('one portrait request', () => {
         expect(imageRequestOptions(settings, { sessionScope: { x: 1 }, bypassCache: 1, signal: controller.signal }))
             .toEqual({ geminiApiKey: 'machinery-key', sessionScope: '', bypassCache: true, signal: controller.signal });
         expect(imageRequestOptions(null).geminiApiKey).toBe('');
+    });
+
+    it('the render is judged against the reducer\'s own portrait allowlist: a kept portrait always lands, an over-ceiling one throws the one error naming the size (2026-10-16 nit — it used to be dropped silently)', async () => {
+        chain(xaiOk('a'.repeat(4000)));
+        const kept = await requestPortrait('Portrait of Astra', settings, { sessionScope: 'campaign-1' });
+        expect(sanitizePortraitUrl(kept.url)).toBe(kept.url);
+        clearImageCache();
+        // A tier result whose downscale failed (no canvas here, as on a decode
+        // failure) comes back full-size: 1.5–3 MB of base64 is over the 300k
+        // ceiling that UPDATE_CHARACTER / applyNpcPortrait enforce.
+        chain(xaiOk('a'.repeat(MAX_PORTRAIT_URL_LENGTH + 4)));
+        await expect(requestPortrait('Portrait of Astra', settings, { sessionScope: 'campaign-2' }))
+            .rejects.toThrow(/too large to keep \(\d+ KB; the limit is 293 KB\)/);
     });
 
     it('a first request is cached per campaign; an existing picture makes the next one a reroll', async () => {

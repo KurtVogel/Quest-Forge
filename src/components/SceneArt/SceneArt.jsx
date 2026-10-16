@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useGame } from '../../state/GameContext.jsx';
 import { generatePortraitImageDetailed, generateSceneImageDetailed, imageRequestOptions, peekCachedImage } from '../../llm/providers/imageGen.js';
-import { resolveCompanionLook } from '../../engine/npcRoster.js';
 import { isSameLocation } from '../../engine/locationRegistry.js';
 import { composeScenePrompt } from '../../llm/sceneDirector.js';
 import {
@@ -11,6 +10,7 @@ import {
     buildFocusedPrompt,
     equippedSummary,
     fallbackNotice,
+    listVisualTargets,
     pickSceneSituation,
 } from './sceneArtHelpers.js';
 import './SceneArt.css';
@@ -35,37 +35,13 @@ export default function SceneArt() {
     const abortRef = useRef(null);
 
     const gear = useMemo(() => equippedSummary(state.inventory), [state.inventory]);
-    const visualTargets = useMemo(() => [
-        state.character && {
-            id: 'player',
-            type: 'player',
-            label: state.character.name || 'Player character',
-            entity: state.character,
-            gear,
-        },
-        // A companion's species/gender/appearance live on their linked roster
-        // record (DECISIONS.md 2026-07-23, one system owns all bonds) — and the
-        // roster record WINS (2026-09-12): the party record is the recruitment
-        // note, the roster record is the Scribe-merged living look.
-        ...(state.party || []).map(c => ({
-            id: `companion:${c.id || c.name}`,
-            type: 'companion',
-            label: c.name,
-            entity: { ...c, ...resolveCompanionLook(c, state.npcs || []) },
-        })),
-        ...(state.npcs || []).filter(n => n.name).map(n => ({
-            id: `npc:${n.id || n.name}`,
-            type: 'npc',
-            label: n.name,
-            entity: n,
-        })),
-        ...(state.combat?.enemies || []).filter(e => e.name).map(e => ({
-            id: `enemy:${e.id || e.name}`,
-            type: 'enemy',
-            label: e.name,
-            entity: e,
-        })),
-    ].filter(Boolean), [gear, state.character, state.party, state.npcs, state.combat?.enemies]);
+    // The dropdown's figures — the pure list in sceneArtHelpers.js (the
+    // roster's characters only; archived creatures and descriptive labels stay
+    // out, as on the Journal tab).
+    const visualTargets = useMemo(
+        () => listVisualTargets({ character: state.character, party: state.party, npcs: state.npcs, combat: state.combat }, gear),
+        [gear, state.character, state.party, state.npcs, state.combat],
+    );
 
     const selectedTarget = visualTargets.find(t => t.id === targetId) || visualTargets[0] || null;
 
@@ -94,7 +70,9 @@ export default function SceneArt() {
         const imageApiKey = state.settings.imageApiKey;
         // One way a finished render reaches the screen, whatever the mode.
         const show = (result, caption, shape) => {
-            if (!result) return;
+            // The one signal check before the paint: imageGen rethrows a cancel
+            // on its own lanes, this covers the cached and the free ones.
+            if (!result || controller.signal.aborted) return;
             setIsHidden(false);
             setCurrentImage({ url: result.url, caption, shape });
             setGenerationNotice(fallbackNotice(result));

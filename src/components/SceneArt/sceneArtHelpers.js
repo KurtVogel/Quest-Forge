@@ -9,6 +9,7 @@ import { classDisplayName, raceDisplayName } from '../../engine/characterUtils.j
 import { findLatestNarration } from '../../llm/narrativeMessages.js';
 import { IDENTITY_LOCK_REMINDER } from '../../engine/appearanceIdentity.js';
 import { castLookOrContext, castNameTag, describeCastMember } from '../../engine/castMember.js';
+import { isPromptRosterNpc, resolveCompanionLook } from '../../engine/npcRoster.js';
 import { PORTRAIT_STYLE } from '../CharacterSheet/portraitPrompt.js';
 import { isMissingKeyFallback, isXaiFilteredFallback } from '../../llm/providers/imageGen.js';
 
@@ -20,6 +21,47 @@ export function equippedSummary(inventory = []) {
         .join(', ');
 }
 
+/**
+ * The figures the focus-mode Character dropdown offers: the hero, the party
+ * (painted from the linked roster record — the Scribe-merged living look,
+ * DECISIONS.md 2026-07-23 / 2026-09-12), the roster's CHARACTERS, and the
+ * fight's enemies. Archived creatures and the load-archived descriptive
+ * labels ("A guard sharpening a spear") are the rows the Journal tab hides and
+ * the director skips — the select used to list every named roster row, dozens
+ * of "Guard" rows in a long campaign (2026-10-16 audit nit). Pure, so the
+ * list is testable without React.
+ */
+export function listVisualTargets(state, gear = '') {
+    const npcs = Array.isArray(state?.npcs) ? state.npcs : [];
+    return [
+        state?.character && {
+            id: 'player',
+            type: 'player',
+            label: state.character.name || 'Player character',
+            entity: state.character,
+            gear,
+        },
+        ...(Array.isArray(state?.party) ? state.party : []).map(c => ({
+            id: `companion:${c.id || c.name}`,
+            type: 'companion',
+            label: c.name,
+            entity: { ...c, ...resolveCompanionLook(c, npcs) },
+        })),
+        ...npcs.filter(n => n?.name && isPromptRosterNpc(n)).map(n => ({
+            id: `npc:${n.id || n.name}`,
+            type: 'npc',
+            label: n.name,
+            entity: n,
+        })),
+        ...(Array.isArray(state?.combat?.enemies) ? state.combat.enemies : []).filter(e => e?.name).map(e => ({
+            id: `enemy:${e.id || e.name}`,
+            type: 'enemy',
+            label: e.name,
+            entity: e,
+        })),
+    ].filter(Boolean);
+}
+
 /** The focus target as the shelf's cast member — one read for the description and the lock. */
 function castMemberOf(target) {
     return describeCastMember(target.type, target.entity, { gear: target.gear });
@@ -28,7 +70,11 @@ function castMemberOf(target) {
 export function describeEntity(target) {
     if (!target) return '';
     if (!['player', 'companion', 'npc', 'enemy'].includes(target.type)) return target.label || '';
-    const member = castMemberOf(target);
+    return describeMember(target, castMemberOf(target));
+}
+
+/** `describeEntity` over a cast member already composed (the focused prompt reads the lock from the same one). */
+function describeMember(target, member) {
     // The registered species + gender ride right beside the name — the art
     // director's inviolable-identity rule keys on this "(goblin woman)" tag.
     const head = `${castNameTag(member)}, ${member.role}`;
@@ -51,9 +97,11 @@ export function describeEntity(target) {
 }
 
 export function buildFocusedPrompt(target, location) {
-    const description = describeEntity(target);
+    // ONE cast member for the description and the lock (it was composed twice).
+    const member = target && ['player', 'companion', 'npc', 'enemy'].includes(target.type) ? castMemberOf(target) : null;
+    const description = member ? describeMember(target, member) : describeEntity(target);
     // Identity lock leads (2026-09-12) — see engine/appearanceIdentity.js.
-    const lock = target ? castMemberOf(target).lock : '';
+    const lock = member?.lock || '';
     return [
         lock,
         `Focused waist-up portrait of ${target.label}.`,

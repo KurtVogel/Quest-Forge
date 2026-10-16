@@ -21,11 +21,24 @@ vi.mock('firebase/firestore', () => {
             throw error;
         }
     };
+    // Interleaving hooks (2026-10-16 audit, test depth): a hook runs ONCE,
+    // before the named read, with the path being read — a test schedules a
+    // second writer (another device's delete / save) inside the first writer's
+    // window. Cleared before it runs, so the second writer's own reads never
+    // re-enter it.
+    const __hooks = { onGetDoc: null, onGetDocs: null };
+    const runHook = async (name, path) => {
+        const hook = __hooks[name];
+        if (!hook) return;
+        __hooks[name] = null;
+        await hook(path);
+    };
     const collection = (db, path) => ({ path });
     const doc = (parent, id) => ({ path: `${parent.path}/${id}` });
     const setDoc = async (ref, data) => { maybeFail('setDoc'); store.set(ref.path, JSON.parse(JSON.stringify(data))); };
     const getDoc = async (ref) => {
         maybeFail('getDoc');
+        await runHook('onGetDoc', ref.path);
         return {
             exists: () => store.has(ref.path),
             data: () => store.get(ref.path),
@@ -33,6 +46,7 @@ vi.mock('firebase/firestore', () => {
     };
     const getDocs = async (col) => {
         maybeFail('getDocs');
+        await runHook('onGetDocs', col.path);
         const prefix = `${col.path}/`;
         const docs = [...store.entries()]
             .filter(([path]) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
@@ -66,11 +80,18 @@ vi.mock('firebase/firestore', () => {
         ops.forEach(op => op());
         return result;
     };
-    return { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, runTransaction, __store: store, __fail };
+    return { collection, doc, setDoc, getDoc, getDocs, deleteDoc, writeBatch, runTransaction, __store: store, __fail, __hooks };
 });
 
 const firestore = await import('firebase/firestore');
-const { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud, CLOUD_SAVE_BYTE_LIMIT } = await import('./cloudSync.js');
+const { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud, CLOUD_SAVE_BYTE_LIMIT, BLOB_SWEEP_GRACE_MS } = await import('./cloudSync.js');
+/** Every stored blob doc's `createdAt` moved past the sweep's grace window — what a real orphan looks like. */
+const OLD_STAMP = new Date(Date.now() - BLOB_SWEEP_GRACE_MS - 60_000).toISOString();
+function ageBlobs() {
+    for (const [path, data] of firestore.__store) {
+        if (path.includes('/portraits/') || path.includes('/chronicleChapters/')) data.createdAt = OLD_STAMP;
+    }
+}
 const loadState = async (...args) => {
     const loaded = await loadGameFromCloud(...args);
     return loaded.ok ? loaded.state : null;
@@ -113,6 +134,8 @@ const chunkPaths = () => [...firestore.__store.keys()].filter(p => p.includes('/
 
 beforeEach(() => {
     firestore.__store.clear();
+    firestore.__hooks.onGetDoc = null;
+    firestore.__hooks.onGetDocs = null;
 });
 
 describe('saveGameToCloud / loadGameFromCloud', () => {
@@ -394,6 +417,42 @@ describe('guards and failure surfacing', () => {
     });
 });
 
+describe('chunk docs the writer did not name (2026-10-16 audit, test depth)', () => {
+    it('a stray chunk doc — a negative, huge, fractional or borrowed index — is ignored by the loader, never read as a chunk', async () => {
+        await saveGameToCloud('u1', 'slot-1', makeGameState());
+        const chunks = 'users/u1/saves/slot-1/chunks';
+        firestore.__store.set(`${chunks}/neg`, { index: -1, data: '{"junk":' });
+        firestore.__store.set(`${chunks}/huge`, { index: 2 ** 32, data: 'junk' });
+        firestore.__store.set(`${chunks}/half`, { index: 0.5, data: 'junk' });
+        firestore.__store.set(`${chunks}/text`, { index: '0', data: 'junk' });
+        // A doc that CLAIMS index 0 under another id cannot replace the real chunk 0.
+        firestore.__store.set(`${chunks}/impostor`, { index: 0, data: '{"character":{"name":"Impostor"}}' });
+        const loaded = await loadState('u1', 'slot-1');
+        expect(loaded.character.name).toBe('Astra');
+        expect(loaded.messages).toHaveLength(2);
+    });
+
+    it('a delete removes every chunk doc the subcollection LISTS, not only the stored count\'s range', async () => {
+        await saveGameToCloud('u1', 'slot-big', makeHugeGameState());
+        expect(chunkPaths().length).toBeGreaterThan(1);
+        // A lowered count (a hostile or corrupt edit) used to leave the docs past it behind.
+        firestore.__store.get('users/u1/saves/slot-big').payloadChunks = 1;
+        firestore.__store.set('users/u1/saves/slot-big/chunks/stray', { index: 99, data: 'x' });
+        expect((await deleteGameFromCloud('u1', 'slot-big')).ok).toBe(true);
+        expect(chunkPaths()).toHaveLength(0);
+        expect(firestore.__store.size).toBe(0);
+    });
+
+    it('the list sorts by a TYPED stamp: a junk savedAt sorts last, never as NaN', async () => {
+        firestore.__store.set('users/u1/saves/junk', { slotId: 'junk', name: 'Junk', payloadChunks: 0, payload: null, savedAt: 'not a date' });
+        firestore.__store.set('users/u1/saves/old', { slotId: 'old', name: 'Old', payloadChunks: 0, payload: null, savedAt: '2026-01-01T00:00:00.000Z' });
+        firestore.__store.set('users/u1/saves/new', { slotId: 'new', name: 'New', payloadChunks: 0, payload: null, savedAt: '2026-10-01T00:00:00.000Z' });
+        firestore.__store.set('users/u1/saves/num', { slotId: 'num', name: 'Num', payloadChunks: 0, payload: null, savedAt: Date.parse('2026-06-01T00:00:00.000Z') });
+        const { saves } = await listCloudSaves('u1');
+        expect(saves.map(s => s.slotId)).toEqual(['new', 'num', 'old', 'junk']);
+    });
+});
+
 describe('hostile metadata docs (2026-09-10 audit)', () => {
     it('a junk payloadChunks on the existing doc never queues an unbounded sweep — save and delete both complete', async () => {
         for (const payloadChunks of [200000, Infinity, '12', -5, NaN]) {
@@ -475,17 +534,23 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         }
     });
 
-    it('a steady-state re-save (same slot or a new one) writes ZERO portrait docs and re-uploads zero portrait bytes', async () => {
+    it('a steady-state re-save of a slot writes ZERO portrait docs; a NEW slot of the same campaign re-writes them once, idempotently (2026-10-16: the claim is written, never leased)', async () => {
         await saveGameToCloud('u1', 'slot-a', gallery(12));
         const again = await recordWrites(() => saveGameToCloud('u1', 'slot-a', gallery(12)));
         expect(again.result).toEqual({ ok: true, uploaded: { portrait: 0, chapter: 0 } });
         expect(again.writes.filter(w => w.key.includes('/portraits/'))).toHaveLength(0);
         expect(again.writes.reduce((n, w) => n + w.chars, 0)).toBeLessThan(40_000);
-        // A second slot of the same campaign shares the blobs by content key.
+        // A second slot of the same campaign writes what ITS previous metadata
+        // did not list — the same 13 content keys, one doc each, no duplicates
+        // (the old "some slot claims it" skip was the lease without a lock).
         const other = await recordWrites(() => saveGameToCloud('u1', 'slot-b', gallery(12)));
-        expect(other.result.uploaded.portrait).toBe(0);
-        expect(other.writes.filter(w => w.key.includes('/portraits/'))).toHaveLength(0);
+        expect(other.result.uploaded.portrait).toBe(13);
+        expect(other.writes.filter(w => w.key.includes('/portraits/'))).toHaveLength(13);
         expect(portraitPaths()).toHaveLength(13);
+        // And slot-b's own re-save is steady state again.
+        const steady = await recordWrites(() => saveGameToCloud('u1', 'slot-b', gallery(12)));
+        expect(steady.result.uploaded.portrait).toBe(0);
+        expect(steady.writes.filter(w => w.key.includes('/portraits/'))).toHaveLength(0);
         // Only the NEW picture is uploaded when one NPC gets a portrait.
         const third = await recordWrites(() => saveGameToCloud('u1', 'slot-a', gallery(13)));
         expect(third.result.uploaded.portrait).toBe(1);
@@ -525,12 +590,14 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         await saveGameToCloud('u1', 'slot-a', gallery(2)); // hero + npc-0 + npc-1
         await saveGameToCloud('u1', 'slot-b', gallery(1)); // hero + npc-0
         expect(portraitPaths()).toHaveLength(3);
+        ageBlobs();
         expect((await deleteGameFromCloud('u1', 'slot-a')).ok).toBe(true);
         expect(portraitPaths()).toHaveLength(2);
         const bRefs = firestore.__store.get('users/u1/saves/slot-b').portraitRefs;
         expect(portraitPaths().map(p => p.split('/portraits/')[1]).sort()).toEqual([...bRefs].sort());
         // slot-b still loads whole.
         expect((await loadState('u1', 'slot-b')).npcs[0].portraitUrl).toBe(portrait(0));
+        ageBlobs();
         expect((await deleteGameFromCloud('u1', 'slot-b')).ok).toBe(true);
         expect(firestore.__store.size).toBe(0);
     });
@@ -538,6 +605,7 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
     it('an overwrite that releases a ref (a rerolled portrait) sweeps the old blob unless another slot claims it', async () => {
         await saveGameToCloud('u1', 'slot-a', gallery(1));
         const oldRefs = firestore.__store.get('users/u1/saves/slot-a').portraitRefs;
+        ageBlobs();
         // Reroll: new pictures for the hero and the NPC.
         const rerolled = await saveGameToCloud('u1', 'slot-a', gallery(1, { seedOffset: 50 }));
         expect(rerolled.uploaded.portrait).toBe(2);
@@ -546,6 +614,7 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         // With another slot still showing the old pictures, they stay.
         await saveGameToCloud('u1', 'slot-b', gallery(1));
         await saveGameToCloud('u1', 'slot-a', gallery(1));
+        ageBlobs();
         await saveGameToCloud('u1', 'slot-a', gallery(1, { seedOffset: 50 }));
         expect(portraitPaths()).toHaveLength(4);
         expect((await loadState('u1', 'slot-b')).npcs[0].portraitUrl).toBe(portrait(0));
@@ -615,16 +684,68 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
 
     it('a failed portrait sweep never fails the save or the delete that released the ref', async () => {
         await saveGameToCloud('u1', 'slot-a', gallery(1));
+        ageBlobs();
         // Overwriting with a portrait-less state releases both refs; the only
         // getDocs that save makes is the sweep's claimed-refs read.
         firestore.__fail.getDocs = new Error('unavailable');
         expect(await saveGameToCloud('u1', 'slot-a', makeGameState())).toEqual({ ok: true, uploaded: { portrait: 0, chapter: 0 } });
         expect(portraitPaths()).toHaveLength(2); // orphans left behind, harmless
         await saveGameToCloud('u1', 'slot-b', gallery(1, { seedOffset: 50 }));
+        ageBlobs();
+        // The delete lists its chunk docs first (best-effort) and then reads the
+        // claims for the sweep: either read failing never fails the delete.
         firestore.__fail.getDocs = new Error('unavailable');
+        firestore.__hooks.onGetDocs = async (path) => { if (path === 'users/u1/saves') throw new Error('unavailable'); };
         expect((await deleteGameFromCloud('u1', 'slot-b')).ok).toBe(true);
         expect(firestore.__store.has('users/u1/saves/slot-b')).toBe(false);
         expect(portraitPaths()).toHaveLength(4);
+    });
+
+    // 2026-10-16 audit (Lap 1): the blob claim was a LEASE without a lock —
+    // read in one listing before the save's transaction, deleted by another
+    // device's sweep after ITS commit — so two devices could strand a picture
+    // every later load would miss. Reproduced with the listing hook, then fixed.
+    it('two devices: a delete on B inside A\'s save window no longer strands the picture A names (the claim is WRITTEN, never leased)', async () => {
+        // Slot Y holds portrait P (hero + npc-0), written long ago.
+        await saveGameToCloud('u1', 'slot-y', gallery(1));
+        ageBlobs();
+        const refsOfY = firestore.__store.get('users/u1/saves/slot-y').portraitRefs;
+        // Device A saves X with the same pictures; while A reads its own slot's
+        // previous metadata, device B deletes Y — B's sweep finds P unclaimed
+        // and old, and deletes it.
+        let deletedDuringSave = null;
+        firestore.__hooks.onGetDoc = async (path) => {
+            if (path !== 'users/u1/saves/slot-x') return;
+            deletedDuringSave = await deleteGameFromCloud('u1', 'slot-y');
+        };
+        const saved = await saveGameToCloud('u1', 'slot-x', gallery(1));
+        expect(deletedDuringSave).toEqual({ ok: true });
+        expect(saved).toEqual({ ok: true, uploaded: { portrait: 2, chapter: 0 } });
+        // A wrote P itself (its slot never listed it), so X loads whole on every device.
+        refsOfY.forEach(ref => expect(firestore.__store.has(`users/u1/portraits/${ref}`)).toBe(true));
+        const loaded = await loadState('u1', 'slot-x');
+        expect(loaded.character.portraitUrl).toBe(gallery(1).character.portraitUrl);
+        expect(loaded.npcs[0].portraitUrl).toBe(portrait(0));
+    });
+
+    it('the sweep spares a blob written inside the grace window (another device may be committing its claim) and sweeps an old one', async () => {
+        await saveGameToCloud('u1', 'slot-a', gallery(1)); // set 1
+        const set1 = firestore.__store.get('users/u1/saves/slot-a').portraitRefs;
+        // A reroll re-saved at once: set 1 is released but YOUNG — spared (an orphan, bytes only).
+        await saveGameToCloud('u1', 'slot-a', gallery(1, { seedOffset: 50 })); // set 2
+        const set2 = firestore.__store.get('users/u1/saves/slot-a').portraitRefs;
+        expect(portraitPaths()).toHaveLength(4);
+        // Past the window, a released blob goes.
+        ageBlobs();
+        await saveGameToCloud('u1', 'slot-a', gallery(1, { seedOffset: 90 })); // set 3
+        set2.forEach(ref => expect(firestore.__store.has(`users/u1/portraits/${ref}`)).toBe(false));
+        set1.forEach(ref => expect(firestore.__store.has(`users/u1/portraits/${ref}`)).toBe(true)); // never released again
+        expect(portraitPaths()).toHaveLength(4);
+        // A stamp that does not parse is OLD: a hostile stamp cannot make a blob unsweepable.
+        const set3 = firestore.__store.get('users/u1/saves/slot-a').portraitRefs;
+        set3.forEach(ref => { firestore.__store.get(`users/u1/portraits/${ref}`).createdAt = { not: 'a date' }; });
+        await saveGameToCloud('u1', 'slot-a', makeGameState());
+        set3.forEach(ref => expect(firestore.__store.has(`users/u1/portraits/${ref}`)).toBe(false));
     });
 
     it('the list never carries portraitRefs or blob bytes', async () => {

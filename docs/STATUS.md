@@ -6,7 +6,19 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-16 (every open queue cleared — 19 strengthening findings across progression / memory-journal / hidden-fronts / living-world, the WOW memory-callbacks W1 ×2, the memory-research M1 cache boundary — plus four playtest findings closed; the previous 10-13 entry below)_
+_Last updated: 2026-10-16, evening (the 10-16 strengthening queue cleared — 1 P1 + 7 P2 across scene-art + cloud-sync; the morning's sweep below)_
+
+## 2026-10-16 (evening) — strengthening queue cleared: 1 P1 + 7 P2 across scene-art + cloud-sync (Lap 1) — pushed AND deployed
+
+**Ruling: DECISIONS.md 2026-10-16 (second entry), ten numbered points.** Vesa: implement, push, deploy — the blob-lease call taken on the session's recommendation (write the claim, spare the young, keep the sweep). `npm test` 3,742 / 227 files green (+16 in `imageGen.test.js`, `imageGen.contract.test.js`, `sceneArtHelpers.test.js`, `chronicler.budget.test.js`, `cloudSync.test.js`, `cloudSync.lanes.test.js`), lint clean, production build green, `firebase deploy --only hosting` released.
+
+**What a player can notice:** every xAI render is now asked for its shape (3:4 portraits, 16:9 scenes) at `1k` — the primary tier had been rendering at its own `auto` default, so a scene prompt without a framing word came back square into the 16:9 frame; a hero portrait that finishes after another save was loaded from Settings no longer lands the first hero's look and picture on the second; pressing Cancel after the bytes arrived no longer paints the picture after the spinner is gone; the Character dropdown in scene art lists the roster's characters, not every archived "Guard"; a portrait too large to keep says so instead of silently showing nothing; a cloud save on one device can no longer lose a picture to a delete on another device in the same minute.
+
+**What changed underneath:** `aspect_ratio` / `resolution` on the xAI body, three `rethrowIfCancelled` reads, `xai-empty (unreadable reply)`, `cacheGet`, `requestPortrait`'s allowlist throw (`imageGen.js`); `listVisualTargets` + one cast member in `buildFocusedPrompt` (`sceneArtHelpers.js`); `campaignStamp` on the sheet's portrait write, `UPDATE_CHARACTER` reading `isStaleCampaignAction`, `cleanTextField` at `applyNpcPortrait`; `ensureLaneBlobs` on THIS slot's previous refs, the transactional sweep with `BLOB_SWEEP_GRACE_MS`, the delete's chunk listing, the loader's `String(index)` doc rule, `savedAtMs` (`cloudSync.js`); `isSameConfig` trimmed (`firebase.js`).
+
+**Not exercised live:** the xAI shape fields are the provider's stated contract applied to our body; the next real render on an xAI key is the proof. The strengthening queue is EMPTY again; the WOW W1 (NPC ties, 10-07) and memory M1 (lexical RRF) rows still wait for Vesa's pick.
+
+**Next (unchanged):** the WOW slice's live proof (one NPC driven to trusted, two scenes watched); the next grand run on Sol with the fight staging on (OpenAI prepay is at zero — top up first); the commitment probe's multi-arm run; `eval:death` for the downed-hero bullet.
 
 ## 2026-10-16 — every open queue cleared (19 strengthening + WOW W1 ×2 + memory M1) and four playtest findings closed — pushed AND deployed
 

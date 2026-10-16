@@ -16,6 +16,7 @@ import {
     currentMessageIndex,
     findRecentTransactionDuplicate,
     isLowLevelSolo,
+    isStaleCampaignAction,
     rememberTransaction,
     repeatIntentNearNoun,
     reviveCharacter,
@@ -122,6 +123,14 @@ export const handlers = {
     },
 
     UPDATE_CHARACTER(state, action) {
+        // The sheet's portrait write rides a campaign stamp (2026-10-16 audit
+        // P2) — a render that lands after Settings loaded another save never
+        // writes here; the stamp-less callers (the wizard, applyEvents, the
+        // ASI sheet edits) are untouched.
+        if (isStaleCampaignAction(state, action)) {
+            console.warn('[Character] Dropped a character update that started on a different campaign or load.');
+            return state;
+        }
         const payload = { ...(action.payload || {}) };
         // The hero portrait gets the shared allowlist at the WRITE too
         // (2026-09-09 audit P2): the sheet/wizard dispatch whatever the provider

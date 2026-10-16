@@ -31,11 +31,14 @@ import { BLOB_LANES, collectLaneRefs, restoreLanes } from "./portraitStore.js";
  * on every save (12 NPC portraits = 2.38 MiB per save, 47 % portraits, 9 chunk
  * docs; 100 = over budget and dropped). Now the payload carries `portraitRef`s
  * (`extractPortraits`), the metadata doc lists the slot's `portraitRefs`, a
- * blob doc is written only when NO slot's metadata already claims its key
- * (metadata is what the list reads anyway — a `getDoc` probe would download
- * the blob just to learn it exists), and a load fetches one blob doc per ref
- * (`restorePortraits`). A key released by an overwrite or a delete is swept
- * after the commit when no other slot still claims it. Each blob doc holds one
+ * blob doc is written whenever THIS slot's previous metadata did not list it
+ * (the local path's own rule — content-addressed and idempotent, so a
+ * steady-state re-save of a slot writes zero blob bytes; see `ensureLaneBlobs`
+ * for why "some slot claims it" was not enough), and a load fetches one blob
+ * doc per ref (`restorePortraits`). A key released by an overwrite or a delete
+ * is swept after the commit when no other slot still claims it, inside a
+ * transaction that spares a blob written within `BLOB_SWEEP_GRACE_MS`. Each
+ * blob doc holds one
  * portrait (≤ `MAX_PORTRAIT_URL_LENGTH` 300k ASCII chars), far under the 1 MiB
  * document cap, and blobs ride outside the save transaction so the 9 MiB
  * request ceiling meters the campaign, never its pictures. A missing blob is a
@@ -227,42 +230,103 @@ async function claimedRefsByLane(uid) {
 }
 
 /**
- * Write the blobs no slot's metadata claims yet. Runs BEFORE the save
- * transaction so the metadata never names a blob that is not there; a blob
- * left behind by a failed commit is content-addressed and simply reused.
- * Returns the number of blob docs written.
+ * Write the blobs THIS slot's previous metadata did not list. Runs BEFORE the
+ * save transaction so the metadata never names a blob that is not there; a
+ * blob left behind by a failed commit is content-addressed and simply reused,
+ * and a re-write of an existing blob is the same bytes with a fresh
+ * `createdAt`. Returns the number of blob docs written.
+ *
+ * The skip used to read EVERY slot's claims in one listing (2026-10-16 audit
+ * P2, measured): a claim read outside the transaction that commits it is a
+ * lease without a lock — slot Y held portrait P; device A saved X with P and,
+ * seeing Y's claim, wrote nothing; device B deleted Y in that window and its
+ * sweep found P unclaimed and deleted it; A committed X naming P, and X loaded
+ * without the picture on every device. What a commit will NAME is either
+ * written by the committer (this rule — idempotent, one `setDoc` per ref the
+ * slot did not list before) or read inside the commit (a transaction cannot
+ * list). The cost: a second slot of the same campaign re-uploads the pictures
+ * once; a steady-state re-save still writes zero.
  */
-async function ensureLaneBlobs(uid, lane, blobs, claimed) {
+async function ensureLaneBlobs(uid, lane, blobs, previouslyListed) {
     const { setDoc } = firestoreSdk;
-    const missing = [...blobs].filter(([key]) => !claimed.has(key));
+    const missing = [...blobs].filter(([key]) => !previouslyListed.has(key));
     await Promise.all(missing.map(([key, data]) =>
         setDoc(blobDoc(uid, lane, key), { data, chars: data.length, createdAt: new Date().toISOString() })));
     return missing.length;
 }
 
 /**
+ * A blob written this recently is spared by the sweep: its writer's metadata
+ * commit (the claim the listing would show) may not have landed yet — the
+ * mirror of the race above, A releasing P and sweeping while B has written P
+ * and is still committing. A reroll re-saved inside the window leaves its old
+ * picture behind as an orphan (bytes, never a lost picture; the local path's
+ * serialized sweep has no such window).
+ */
+export const BLOB_SWEEP_GRACE_MS = 5 * 60_000;
+
+/** A blob doc's age judgement: a stamp that does not parse is OLD (a hostile stamp must not make a blob unsweepable). */
+function isWithinSweepGrace(createdAt, now = Date.now()) {
+    const stamp = typeof createdAt === 'string' ? Date.parse(createdAt) : NaN;
+    return Number.isFinite(stamp) && now - stamp < BLOB_SWEEP_GRACE_MS;
+}
+
+/**
  * Delete the released blobs no slot claims any more, every lane at once.
  * Best-effort and AFTER the commit that released them: a sweep failure
  * leaves an orphan blob (harmless, reused if the picture / chapter returns),
- * never a failed save or delete. Reads metadata only (one read for all
- * lanes). Returns the number of blob docs removed.
+ * never a failed save or delete. The claims are one metadata read for all
+ * lanes; each orphan is then deleted inside its own transaction that re-reads
+ * the blob — a blob that is gone, or younger than the grace window, is left
+ * alone, and Firestore aborts the delete if the blob was rewritten between the
+ * read and the commit. Returns the number of blob docs removed.
  */
 async function sweepReleasedBlobs(uid, releasedByLane) {
     const pending = BLOB_LANES.filter(lane => (releasedByLane[lane.id] || []).length > 0);
     if (pending.length === 0) return 0;
     try {
+        const { runTransaction } = firestoreSdk;
         const claimed = await claimedRefsByLane(uid);
         let swept = 0;
         for (const lane of pending) {
             const orphans = releasedByLane[lane.id].filter(ref => !claimed[lane.id].has(ref));
-            await Promise.all(orphans.map(ref => firestoreSdk.deleteDoc(blobDoc(uid, lane, ref))));
-            swept += orphans.length;
+            const outcomes = await Promise.all(orphans.map(ref => runTransaction(db, async (transaction) => {
+                const ref_ = blobDoc(uid, lane, ref);
+                const snap = await transaction.get(ref_);
+                if (!snap.exists() || isWithinSweepGrace(snap.data()?.createdAt)) return false;
+                transaction.delete(ref_);
+                return true;
+            })));
+            swept += outcomes.filter(Boolean).length;
         }
         return swept;
     } catch (e) {
         console.warn('Cloud blob sweep skipped:', e);
         return 0;
     }
+}
+
+/**
+ * The stored chunk doc ids under a slot (the writer names every chunk doc by
+ * its index). Best-effort: a listing that fails is an empty list — the delete
+ * still clears the stored count's range and never fails over the listing.
+ */
+async function listChunkDocIds(uid, slotId) {
+    const ids = [];
+    try {
+        const snapshot = await firestoreSdk.getDocs(chunksCollection(uid, slotId));
+        snapshot.forEach((chunkDoc) => ids.push(chunkDoc.id));
+    } catch (e) {
+        console.warn('Cloud chunk listing skipped:', e);
+    }
+    return ids;
+}
+
+/** `savedAt` as milliseconds for the list order — a number as is, an ISO string parsed, anything else 0 (a junk stamp used to sort as NaN). */
+function savedAtMs(savedAt) {
+    if (typeof savedAt === 'number') return Number.isFinite(savedAt) ? savedAt : 0;
+    const parsed = typeof savedAt === 'string' ? Date.parse(savedAt) : NaN;
+    return Number.isFinite(parsed) ? parsed : 0;
 }
 
 /**
@@ -309,15 +373,21 @@ export async function saveGameToCloud(uid, slotId, gameState) {
 
         const chunks = splitPayload(payload);
 
-        // Blobs first, only the ones no slot claims yet (a steady-state save
-        // uploads zero portrait or chapter bytes), so the metadata written
-        // below never names a blob that is not there. One claimed-refs read
-        // serves every lane; a save with nothing to store reads nothing.
+        // Blobs first — the ones THIS slot's previous metadata did not list (a
+        // steady-state re-save uploads zero portrait or chapter bytes), so the
+        // metadata written below never names a blob that is not there. One
+        // metadata-only read of this slot serves every lane; a save with
+        // nothing to store reads nothing. (The listing of every slot's claims
+        // was the lease without a lock — see `ensureLaneBlobs`.)
         const uploaded = {};
-        const claimed = lanes.some(lane => lane.blobs.size > 0) ? await claimedRefsByLane(uid) : null;
+        let previouslyListed = NO_REFS;
+        if (lanes.some(lane => lane.blobs.size > 0)) {
+            const previousSnap = await firestoreSdk.getDoc(saveDocRef);
+            previouslyListed = typedRefsByLane(previousSnap.exists() ? previousSnap.data() : null);
+        }
         for (const lane of lanes) {
             uploaded[lane.label] = lane.blobs.size > 0
-                ? await ensureLaneBlobs(uid, lane, lane.blobs, claimed[lane.id])
+                ? await ensureLaneBlobs(uid, lane, lane.blobs, new Set(previouslyListed[lane.id]))
                 : 0;
         }
 
@@ -417,7 +487,10 @@ export async function loadGameFromCloud(uid, slotId) {
             const chunks = [];
             snapshot.forEach((chunkDoc) => {
                 const chunk = chunkDoc.data();
-                if (Number.isInteger(chunk?.index) && typeof chunk?.data === 'string') {
+                // A chunk is read only from the doc the writer named for it
+                // (`String(index)`): a stray doc carrying someone else's index
+                // can neither replace a real chunk nor crash the read.
+                if (Number.isInteger(chunk?.index) && chunk.index >= 0 && chunkDoc.id === String(chunk.index) && typeof chunk?.data === 'string') {
                     chunks[chunk.index] = chunk.data;
                 }
             });
@@ -474,7 +547,7 @@ export async function listCloudSaves(uid) {
             saves.push(projectSaveMetadata(data, saveSnap.id));
         });
 
-        return { ok: true, saves: saves.sort((a, b) => new Date(b.savedAt || 0) - new Date(a.savedAt || 0)) };
+        return { ok: true, saves: saves.sort((a, b) => savedAtMs(b.savedAt) - savedAtMs(a.savedAt)) };
     } catch (e) {
         return cloudFailure(e, { refused: 'the read', failed: 'Cloud saves could not be listed' });
     }
@@ -492,17 +565,25 @@ export async function deleteGameFromCloud(uid, slotId) {
 
         // Deleting a Firestore document does NOT delete its subcollections —
         // orphaned chunks would silently linger (and could corrupt a future save
-        // that reuses the slot with a smaller chunk count). Remove them explicitly,
-        // reading the chunk count inside the transaction so a concurrent save from
-        // another device cannot leave the sweep working from a stale count.
+        // that reuses the slot with a smaller chunk count). Remove them explicitly:
+        // every chunk doc the subcollection LISTS (a doc whose count was lowered
+        // used to leave chunk docs no path removed — 2026-10-16 audit nit; a
+        // delete is rare and final, so the listing's download is paid here, never
+        // on the save path, where it would download the payload on every save)
+        // plus the stored count's range, read inside the transaction so a
+        // concurrent save from another device cannot leave the sweep working from
+        // a stale count.
+        const listedChunkIds = await listChunkDocIds(uid, slotId);
         let releasedRefs = NO_REFS;
         await runTransaction(db, async (transaction) => {
             const existingSnap = await transaction.get(saveDocRef);
             const existing = existingSnap.exists() ? existingSnap.data() : null;
             const chunkCount = boundedChunkCount(existing?.payloadChunks);
             releasedRefs = typedRefsByLane(existing);
-            for (let i = 0; i < chunkCount; i++) {
-                transaction.delete(doc(chunksCollection(uid, slotId), String(i)));
+            const chunkIds = new Set(listedChunkIds);
+            for (let i = 0; i < chunkCount; i++) chunkIds.add(String(i));
+            for (const id of chunkIds) {
+                transaction.delete(doc(chunksCollection(uid, slotId), id));
             }
             transaction.delete(saveDocRef);
         });

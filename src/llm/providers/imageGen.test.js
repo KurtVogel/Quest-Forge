@@ -199,6 +199,71 @@ describe('xAI degradation branches (2026-07-22 queue P1)', () => {
     });
 });
 
+describe('2026-10-16 Lap-1 pins: two tiers, one request contract', () => {
+    beforeEach(() => {
+        clearImageCache();
+        vi.restoreAllMocks();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+
+    it('BOTH tiers are told the aspect — a portrait 3:4 and a scene 16:9 — and xAI the 1k resolution (P1: the xAI body carried neither)', async () => {
+        for (const [generate, aspect] of [[generatePortraitImageDetailed, '3:4'], [generateSceneImageDetailed, '16:9']]) {
+            clearImageCache();
+            const fetchMock = vi.fn().mockResolvedValueOnce(xaiOk()).mockResolvedValueOnce(geminiOk());
+            vi.stubGlobal('fetch', fetchMock);
+            await generate(`Prompt for ${aspect}`, 'xai-key', { geminiApiKey: 'gem-key' });
+            const xaiBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+            expect(Object.keys(xaiBody).sort()).toEqual(['aspect_ratio', 'model', 'n', 'prompt', 'resolution', 'response_format']);
+            expect(xaiBody).toMatchObject({ aspect_ratio: aspect, resolution: '1k', n: 1, response_format: 'b64_json' });
+            // The same call through the Gemini tier (xAI refused) names the same aspect.
+            clearImageCache();
+            const fallthrough = vi.fn().mockResolvedValueOnce({ ok: false, status: 500, text: async () => 'boom' }).mockResolvedValueOnce(geminiOk());
+            vi.stubGlobal('fetch', fallthrough);
+            const result = await generate(`Prompt for ${aspect}`, 'xai-key', { geminiApiKey: 'gem-key' });
+            expect(result.provider).toBe('gemini');
+            expect(JSON.parse(fallthrough.mock.calls[1][1].body).generationConfig.imageConfig.aspectRatio).toBe(aspect);
+        }
+    });
+
+    it('a Cancel that lands after the bytes arrived never paints or caches (P2): the abort fires between the fetch resolving and the result', async () => {
+        const controller = new AbortController();
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            // The player presses Cancel while the body is being read.
+            json: async () => { controller.abort(); return { data: [{ b64_json: 'dGVzdA==' }] }; },
+        });
+        vi.stubGlobal('fetch', fetchMock);
+        await expect(generateSceneImageDetailed('A cavern', 'xai-key', { geminiApiKey: 'gem-key', cacheKey: 'k', signal: controller.signal }))
+            .rejects.toMatchObject({ name: 'AbortError' });
+        // Never fell through to Gemini, never cached.
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(peekCachedImage('k', { imageApiKey: 'xai-key' })).toBeNull();
+    });
+
+    it('a 200 whose body is not JSON (a captive portal) is an OK reply with no image — `<tier>-empty`, not a network failure, and never read as moderation', async () => {
+        const fetchMock = vi.fn()
+            .mockResolvedValueOnce({ ok: true, json: async () => { throw new SyntaxError('Unexpected token <'); } })
+            .mockResolvedValueOnce(geminiOk());
+        vi.stubGlobal('fetch', fetchMock);
+        const result = await generateSceneImageDetailed('A cavern', 'xai-key', { geminiApiKey: 'gem-key' });
+        expect(result).toMatchObject({ provider: 'gemini', fallbackReason: 'xai-empty (unreadable reply)' });
+        const { isXaiFilteredFallback } = await import('./imageGen.js');
+        expect(isXaiFilteredFallback(result.fallbackReason)).toBe(false);
+    });
+
+    it('a cache HIT refreshes the LRU order: the scene the player keeps re-viewing is not the first evicted', async () => {
+        vi.stubGlobal('fetch', vi.fn());
+        for (let i = 0; i < 10; i++) await generateSceneImageDetailed(`Scene ${i}`, '', { cacheKey: `k${i}` });
+        // Re-view k0 (a probe and a generate call both count as a view)...
+        expect(peekCachedImage('k0', {})).not.toBeNull();
+        await generateSceneImageDetailed('Scene 0', '', { cacheKey: 'k0' });
+        // ...so the 11th entry evicts k1, not k0.
+        await generateSceneImageDetailed('Scene 10', '', { cacheKey: 'k10' });
+        expect(peekCachedImage('k0', {})).not.toBeNull();
+        expect(peekCachedImage('k1', {})).toBeNull();
+    });
+});
+
 describe('Gemini image fallback (DECISIONS.md 2026-07-25)', () => {
     beforeEach(() => {
         clearImageCache();

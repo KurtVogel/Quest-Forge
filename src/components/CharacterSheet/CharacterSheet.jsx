@@ -6,6 +6,7 @@ import { downloadCharacterExport } from './exportFile.js';
 import { saveRosterCharacter } from '../../state/rosterStore.js';
 import { getExperienceThreshold, isMaxLevel } from '../../engine/progression.js';
 import { requestPortrait } from '../../llm/providers/imageGen.js';
+import { campaignStamp } from '../../state/handlers/shared.js';
 import { RACES } from '../../data/races.js';
 import { CLASSES } from '../../data/classes.js';
 import { getKnownSpells, getSpellAttackBonus, getSpellSaveDC, isSpellcaster } from '../../engine/spellcasting.js';
@@ -162,6 +163,12 @@ export default function CharacterSheet() {
         setIsGeneratingPortrait(true);
         setPortraitError('');
         try {
+            // The campaign this portrait is FOR (2026-10-16 audit P2): the sheet
+            // stays mounted while Settings loads another save, and the 10–60 s
+            // render used to land Astra's look and picture on Bram — the
+            // Journal's chapter / Deepen-memory / NPC-portrait rule, one panel
+            // over. UPDATE_CHARACTER drops a stale stamp.
+            const meta = campaignStamp(state);
             const result = await requestPortrait(portraitPrompt, state.settings, {
                 existingUrl: character.portraitUrl,
                 sessionScope: state.session?.id || '',
@@ -170,6 +177,7 @@ export default function CharacterSheet() {
             // like the NPC path's applyNpcPortrait).
             dispatch({
                 type: 'UPDATE_CHARACTER',
+                meta,
                 payload: { appearance, portraitUrl: result.url, portraitProvider: result.provider || '' },
             });
         } catch (e) {

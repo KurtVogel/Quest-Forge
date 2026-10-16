@@ -6,6 +6,7 @@ import {
     describeEntity,
     equippedSummary,
     fallbackNotice,
+    listVisualTargets,
     pickSceneSituation,
 } from './sceneArtHelpers.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
@@ -48,6 +49,51 @@ describe('pickSceneSituation — the moment the art director paints (2026-09-01 
         expect(fromJournal).toEqual({ situation: 'The hero reached the cavern.', narrationId: null });
         expect(pickSceneSituation({ messages: [], journal: [], location: 'Cavern' }))
             .toEqual({ situation: 'The scene at Cavern.', narrationId: null });
+    });
+});
+
+describe('listVisualTargets — the focus dropdown (2026-10-16 audit nit)', () => {
+    const state = {
+        character: { name: 'Astra', race: 'human', class: 'fighter', appearance: 'Tall.' },
+        party: [{ id: 'c1', name: 'Tammo', appearance: 'Party-record note.' }],
+        npcs: [
+            { id: 'n1', name: 'Tammo', appearance: 'Scribe-merged look: a scar over the brow.', gender: 'man', species: 'human' },
+            { id: 'n2', name: 'Saima Aallotar', rosterTier: 'character' },
+            // The rows the Journal tab hides and the director skips.
+            { id: 'n3', name: 'Goblin #4', rosterTier: 'archived_creature' },
+            { id: 'n4', name: 'A guard sharpening a spear', rosterTier: 'archived_creature' },
+            { id: 'n5', name: '' },
+            null,
+        ],
+        combat: { enemies: [{ id: 'e1', name: 'Kraul' }, { name: '' }] },
+    };
+
+    it('offers the hero, the party, the roster\'s CHARACTERS and the fight\'s enemies — never an archived creature or a load-archived descriptive label', () => {
+        const targets = listVisualTargets(state, 'longsword');
+        expect(targets.map(t => t.id)).toEqual(['player', 'companion:c1', 'npc:n1', 'npc:n2', 'enemy:e1']);
+        expect(targets[0]).toMatchObject({ type: 'player', label: 'Astra', gear: 'longsword' });
+        expect(targets.map(t => t.label)).not.toContain('Goblin #4');
+        expect(targets.map(t => t.label)).not.toContain('A guard sharpening a spear');
+    });
+
+    it('a companion is painted from the linked roster record (the Scribe-merged living look), never the party note', () => {
+        const [, companion] = listVisualTargets(state, '');
+        expect(companion.entity.appearance).toBe('Scribe-merged look: a scar over the brow.');
+        expect(companion.entity.gender).toBe('man');
+        expect(buildFocusedPrompt(companion, 'Oakhaven')).toContain('a scar over the brow');
+    });
+
+    it('tolerates a bare state', () => {
+        expect(listVisualTargets({})).toEqual([]);
+        expect(listVisualTargets(null)).toEqual([]);
+        expect(listVisualTargets({ character: { name: 'Astra' }, npcs: 'junk', party: null })).toHaveLength(1);
+    });
+
+    it('the focused prompt composes the cast member ONCE and still carries the same description as describeEntity', () => {
+        const [player, , npc] = listVisualTargets(state, 'longsword');
+        for (const target of [player, npc]) {
+            expect(buildFocusedPrompt(target, 'Oakhaven')).toContain(describeEntity(target));
+        }
     });
 });
 

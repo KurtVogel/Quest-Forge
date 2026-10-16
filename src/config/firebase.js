@@ -80,7 +80,9 @@ export async function initializeFirebase(config) {
         const { initializeApp, getApps, getApp, deleteApp } = sdk.appModule;
         if (getApps().length) {
             const existingApp = getApp();
-            const isSameConfig = REQUIRED_CONFIG.every(([key]) => existingApp.options[key] === config[key]);
+            // Compared as the validator reads them (trimmed): an untrimmed live
+            // edit used to tear the app down and re-initialize (auth state lost).
+            const isSameConfig = REQUIRED_CONFIG.every(([key]) => configText(existingApp.options[key]) === configText(config[key]));
             if (isSameConfig) {
                 setFirebaseServices(existingApp, sdk);
                 return true;
