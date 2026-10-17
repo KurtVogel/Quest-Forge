@@ -147,7 +147,7 @@ describe('death saves 4 / 13 / 1 through the reducer', () => {
         expect(ended.character.exp).toBe(900);
     });
 
-    it('a defeat that is NOT a death posts no death line', () => {
+    it('a stabilization that is NOT a death posts no death line — and with Tammo standing the fight goes on (2026-10-17 P1)', () => {
         rollQueue.push(15);
         const stableState = { ...dyingState() };
         stableState.character = { ...stableState.character, deathSaves: { successes: 2, failures: 0 } };
@@ -157,9 +157,21 @@ describe('death saves 4 / 13 / 1 through the reducer', () => {
         expect(state.character.dying).toBe(false);
         expect(state.character.isDead).toBe(false);
         expect(state.combat.lastExchangeResult.postState.player).toMatchObject({ status: 'stable' });
+        // A battle-ready companion keeps the fight open around the fallen hero
+        // (the terminal used to be `defeat` whatever the party); the hero's
+        // next legal turn is a lone pass, and no ☠ line exists for a stabilization.
+        expect(state.combat.lastExchangeResult.terminal).toBeNull();
         state = gameReducer(state, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: state.combat.lastExchangeResult.exchangeId } });
-        expect(state.combat.active).toBe(false);
+        expect(state.combat.active).toBe(true);
+        expect(state.combat.phase).toBe('awaiting_player');
+        expect(planCombatExchange(state, intent).ok).toBe(false);
+        rollQueue.push(10, 3); // Tammo's default attack (no companion intent given)
+        expect(planCombatExchange(state, normalizeCombatExchange({ player_slots: [{ action: 'pass' }], enemy_intents: [{ enemy_id: 'enemy-goblin', action: 'flee' }] })).ok).toBe(true);
         expect(state.messages.some(m => String(m.content).startsWith('☠'))).toBe(false);
+        // Alone, the same stabilization closes the fight as the defeat it always was.
+        rollQueue.push(15);
+        const solo = { ...stableState, party: [] };
+        expect(planCombatExchange(solo, intent).payload.result.terminal).toBe('defeat');
     });
 
     it('DEATH_SAVE_RESULT judges through the shared judge: the reducer tally matches the engine line at every step', () => {

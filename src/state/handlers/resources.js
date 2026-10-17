@@ -275,7 +275,17 @@ export const handlers = {
                 // actually rolled, not faces + modifier.
                 rolled = roll.rolls.reduce((sum, face) => sum + Math.max(1, face + conMod), 0);
                 newHitDice.remaining -= canSpend;
-                hitDiceRoll = { ...roll, total: rolled };
+                // The row's arithmetic adds up (2026-10-17 audit P2): the faces
+                // as rolled, the modifier as the Constitution total ACTUALLY
+                // applied after each die's floor of 1, the notation to match —
+                // every reader prints faces + modifier = total.
+                const applied = rolled - roll.subtotal;
+                hitDiceRoll = {
+                    ...roll,
+                    modifier: applied,
+                    total: rolled,
+                    notation: `${canSpend}d${hitDice.die}${applied >= 0 ? '+' + applied : applied}`,
+                };
             }
             healAmount = rolled;
         }

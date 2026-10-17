@@ -251,6 +251,23 @@ export const handlers = {
                 character = withCondition(character, 'Unconscious');
                 messages.push(systemMessage(`💔 **${character.name} falls!** You are unconscious at 0 HP and DYING. Each round, a death saving throw decides your fate — three successes stabilize you, three failures end your story.`));
             }
+        } else if (prevHP === 0 && !character.dying && !character.lowLevelDefeat && !character.isDead && action.payload > 0) {
+            // A blow on a STABLE hero (2026-10-17 audit P1): 5e's damage at 0 HP
+            // is a death-save failure and ends the stability — the dying clock
+            // restarts with one failure. It used to be a no-op (the first branch
+            // needs prevHP > 0, the second `dying`), so the out-of-combat
+            // damage_taken wire let "the ogre stamps on the unconscious hero"
+            // cost nothing; the exchange never strikes a fallen hero, so this
+            // is that wire's hole alone.
+            if (earlyDefeatProtected) {
+                character = applyEarlyDefeat(character);
+                messages.push(systemMessage(`**${character.name} is defeated.** The blow on the unconscious hero deepens the setback; low-level solo protection keeps it a defeat, not a death.`));
+            } else {
+                character.dying = true;
+                character.deathSaves = { successes: 0, failures: 1 };
+                character = withCondition(character, 'Unconscious');
+                messages.push(systemMessage(`💔 **Struck while down!** ${character.name} is no longer stable — DYING again, and the blow counts as a death save failure (1/3).`));
+            }
         } else if (prevHP === 0 && character.dying && action.payload > 0) {
             if (earlyDefeatProtected) {
                 character = applyEarlyDefeat(character);

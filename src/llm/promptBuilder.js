@@ -24,7 +24,7 @@ import { buildWorldTempoBlock, computeRecentHeat, isTempoWindowActive } from '..
 import { buildRegionalHearsayBlock } from '../engine/regionalHearsay.js';
 import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
 import { describeSpellbookForPrompt, describeSpellSlotsForPrompt, isSpellcaster } from '../engine/spellcasting.js';
-import { isLowLevelSolo } from '../engine/combatPredicates.js';
+import { describeHeroIncapacity, isLowLevelSolo } from '../engine/combatPredicates.js';
 import { briefNpcFieldForPrompt, findCompanionRecord, resolveCompanionLook } from '../engine/npcRoster.js';
 import { buildRelationshipBeatBlock } from '../engine/relationshipArc.js';
 import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
@@ -995,6 +995,26 @@ export function describeHeroStatus(character, combat = null) {
         return {
             line: `\n- **STATUS: DYING** — unconscious at 0 HP. Death saves: ${tally}. ${channel}`,
             reminder: `THE PLAYER IS DYING — unconscious at 0 HP (death saves: ${tally}). ${reminderChannel} They cannot act, speak, or perceive.`,
+        };
+    }
+    // STABLE and INCAPACITATED (2026-10-17 audit P1 + P2): the DM used to read
+    // 0/20 HP + "Unconscious" with no rule and declare an attack the engine then
+    // rejected — or, before the gate, resolved at full effectiveness.
+    const incapacity = describeHeroIncapacity(character);
+    if (incapacity?.kind === 'stable') {
+        const inCombat = !!combat?.active;
+        return {
+            line: `\n- **STATUS: STABLE** — unconscious at 0 HP, no longer dying (three successful death saves). They cannot act, speak, or perceive until a potion, healing, or whoever finds them wakes them; never request death saves or emit player_death. ${inCombat
+                ? 'In combat their only player slot is { "action": "pass" }: companions act, and foes take their prize or stand down — the engine never lets a foe strike a fallen hero, and with no companion standing the fight closes.'
+                : 'A blow on the fallen hero (damage_taken) restarts the dying clock with one failure; a combat_start with no ally standing opens no fight — narrate what the foes do instead.'}`,
+            reminder: `THE PLAYER IS STABLE — unconscious at 0 HP, not dying. They cannot act, speak, or perceive. ${inCombat ? 'Their only player slot is { "action": "pass" }.' : 'Only a potion, healing, or whoever finds them moves their story.'}`,
+        };
+    }
+    if (incapacity) {
+        const inCombat = !!combat?.active;
+        return {
+            line: `\n- **STATUS: INCAPACITATED (${incapacity.condition})** — they cannot act, cast, or move until the condition ends (conditions_removed when the fiction clears it).${inCombat ? ' In combat their only player slot is { "action": "pass" }; foes may still strike them.' : ''}`,
+            reminder: `THE PLAYER IS ${incapacity.condition.toUpperCase()} and cannot act${inCombat ? ' — their only player slot is { "action": "pass" }' : ''}.`,
         };
     }
     return { line: '', reminder: '' };

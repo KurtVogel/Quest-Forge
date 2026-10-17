@@ -48,7 +48,8 @@ import {
     validateEnemyAttackBonus,
     validateEnemySaveBonus,
 } from './enemyStats.js';
-import { COMBAT_PHASES, isCompanionActive, isEnemyActive, isLowLevelSolo } from './combatPredicates.js';
+import { COMBAT_PHASES, describeHeroIncapacity, isCompanionActive, isEnemyActive, isLowLevelSolo } from './combatPredicates.js';
+import { isWeaponItem } from './equipment.js';
 import { reviveHero } from './progression.js';
 import {
     buildSustainedSpell,
@@ -264,6 +265,19 @@ function castTargetRefs(slot, fallback = []) {
  * text, or null when the turn's shape is legal.
  */
 function validateTurnShape(allSlots, state) {
+    // The hero's own incapacity (2026-10-17 audit P1 + P2): a STABLE hero, or
+    // one paralyzed / stunned / unconscious at HP above 0, cannot act — the
+    // enemy phase skips such a foe and CAST_SPELL refuses such a hero out of
+    // combat, but the exchange let them swing, cast and check at full
+    // effectiveness every round (the unconscious hero no foe may strike, who
+    // ended the fight only by victory). Their one legal turn is a lone `pass`:
+    // the companions act, the foes take their prize or stand down, the
+    // fiction brings a potion. Dying heroes keep their death-save branch below.
+    const incapacity = describeHeroIncapacity(state.character);
+    if (incapacity) {
+        if (allSlots.length === 1 && allSlots[0].action === 'pass') return null;
+        return `${incapacity.text}: the hero cannot act this exchange. Declare { "action": "pass" } as their only player slot — companions still act, and a potion or healing wakes them.`;
+    }
     // Fighter bonus-action lane (Codex 2026-08-09): a player-invoked Second Wind
     // rides beside the normal action without consuming an action slot — the
     // fighter parallel of the Cleric bonus-cast lane below.
@@ -385,8 +399,13 @@ function validateChannelSlot(slot, state, living) {
 }
 
 function validateAttackSlot(slot, state, living) {
-    if (slot.weaponId && !findByRef(state.inventory || [], slot.weaponId)) {
-        return `Attack weapon "${slot.weaponId}" is not in the player's inventory.`;
+    if (slot.weaponId) {
+        const named = findByRef(state.inventory || [], slot.weaponId);
+        if (!named) return `Attack weapon "${slot.weaponId}" is not in the player's inventory.`;
+        // A torch named as the weapon used to disarm the hero silently
+        // (2026-10-17 audit P2): the remap un-equipped every weapon and the
+        // strike fell back to unarmed dice with no note.
+        if (!isWeaponItem(named)) return `Attack weapon "${slot.weaponId}" is not a weapon in the player's inventory — name a weapon or omit weapon_id.`;
     }
     if (!slot.strikes?.length) return 'Every combat Attack needs a living target.';
     const strikeLimit = getAttackCount(state.character);
@@ -487,9 +506,11 @@ function resolveEnemySpell({ character, enemies, events, rolls }, { spell, slotL
             damageRoll = rollDamage(notation, `${spell.name} damage`, {});
             rolls.push(damageRoll.roll);
         }
+        // A foe's save is the FOE's die: it rides the `save` event line, never
+        // `rolls` (the hero's ledger — 2026-10-17 audit P2: a Fireball's three
+        // saves filled RECENT DICE ROLLS and evicted hero rows).
         for (const enemy of targets) {
             const save = rollEnemySave(enemy, `${enemy.name} saves vs ${spell.name}`);
-            rolls.push(save.roll);
             const success = save.roll.total >= dc;
             events.push({
                 type: 'save', actor: enemy.name, description: `save vs ${spell.name}`,
@@ -763,7 +784,7 @@ function resolveCastSlot(ctx, turn, slot) {
 }
 
 /** Channel Divinity — Turn Undead (and Destroy Undead from level 5). */
-function resolveChannelSlot({ character, enemies, events, rolls }, turn) {
+function resolveChannelSlot({ character, enemies, events }, turn) {
     const channel = character.classResources?.channelDivinity;
     if (!channel || channel.used >= channel.max) {
         events.push({ type: 'note', text: 'Channel Divinity is already spent; nothing happens.' });
@@ -778,7 +799,6 @@ function resolveChannelSlot({ character, enemies, events, rolls }, turn) {
     for (const enemy of enemies) {
         if (!isEnemyActive(enemy) || !enemy.isUndead) continue;
         const save = rollEnemySave(enemy, `${enemy.name} saves vs Turn Undead`);
-        rolls.push(save.roll);
         const success = save.roll.total >= dc;
         events.push({
             type: 'save', actor: enemy.name, description: 'save vs Turn Undead',
@@ -831,10 +851,9 @@ function resolveCheckSlot({ character, inventory, enemies, events, rolls }, turn
 /** The weapon the slot names counts as the equipped one for this Attack action. */
 function attackInventoryFor(inventory, weaponId) {
     if (!weaponId) return inventory;
-    const isWeapon = item => item.type === 'weapon' || item.category?.toLowerCase().includes('melee') || item.category?.toLowerCase().includes('ranged');
     return inventory.map(item => ({
         ...item,
-        equipped: isWeapon(item)
+        equipped: isWeaponItem(item)
             ? item.id === weaponId || item.name?.toLowerCase() === weaponId.toLowerCase()
             : item.equipped,
     }));
@@ -881,7 +900,7 @@ function resolveAttackSlot({ state, character, inventory, enemies, events, rolls
             rolled: outcome.attack.roll.total, natural: outcome.natural, dc: enemy.ac,
             mode: rollModeLabel(outcome.attack, modifiers, appliedRuling),
             hit: outcome.hit, critical: outcome.critical, damage: outcome.damage,
-            remainingHp: enemy.hp, maxHp: enemy.maxHp,
+            remainingHp: enemy.hp, maxHp: enemy.maxHp, targetType: 'enemy',
             sneakAttackDetail: outcome.damageRoll?.sneakAttackDetail ?? null,
         });
     }
@@ -972,7 +991,7 @@ function resolveCompanionAttack({ companion, target, events, situationalRuling =
         type: 'attack', actor: companion.name, target: target.name, rolled: outcome.attack.roll.total,
         natural: outcome.natural, dc: target.ac, mode: rollModeLabel(outcome.attack, modifiers, effectiveRuling),
         hit: outcome.hit, critical: outcome.critical, damage: outcome.damage,
-        remainingHp: target.hp, maxHp: target.maxHp,
+        remainingHp: target.hp, maxHp: target.maxHp, targetType: 'enemy',
     });
 }
 
@@ -1084,6 +1103,9 @@ function resolveEnemyAttack({ enemy, targetRef, character, playerAc, companions,
         hit: outcome.hit, critical: outcome.critical, damage,
         remainingHp: targetType === 'player' ? playerHp : target.hp,
         maxHp: targetType === 'player' ? character.maxHP : target.maxHp,
+        // Who the blow landed on, by ROLE (2026-10-17 audit P2): the tally
+        // used to tell the hero from a companion by NAME alone.
+        targetType,
         uncannyDodgeApplied,
         ...(intercepted && { intercepted: true }),
     });
@@ -1210,6 +1232,12 @@ function projectPlayerSnapshot({
         return { status: 'dying', deathSaves: saves };
     }
     if (hp > 0) return { status: 'active', deathSaves: { ...FRESH_TALLY } };
+    // Already at 0 and not dying when the exchange OPENED: the hero is STABLE
+    // (three successful saves) — they passed, no foe struck them (the enemy
+    // phase never attacks a fallen hero), nothing happened to judge. Told from
+    // a fresh drop by the entry HP: the reducer sees no damage and commits
+    // nothing, so the snapshot must not say `dying` beside it (2026-10-17 P1).
+    if ((Number(character.currentHP) || 0) <= 0) return { status: 'stable', deathSaves: held };
     return isLowLevelSolo(character, partyAfter)
         ? { status: 'defeated', deathSaves: { ...FRESH_TALLY } }
         : { status: 'dying', deathSaves: { ...FRESH_TALLY } };
@@ -1220,7 +1248,10 @@ const TERMINAL_BY_PLAYER_STATUS = Object.freeze({
     active: null,
     revived: null,
     dying: 'dying',
-    // Stable is unconscious at 0 HP with foes still standing: the fight is lost.
+    // Stable is unconscious at 0 HP with foes still standing: the fight is lost
+    // — unless a battle-ready companion still stands (2026-10-17 audit P1):
+    // then the fight goes on around the fallen hero, who passes each round
+    // (`terminalState` asks the party). `stable` here is the no-companion row.
     stable: 'defeat',
     defeated: 'defeat',
     dead: 'defeat',
@@ -1232,8 +1263,9 @@ const TERMINAL_BY_PLAYER_STATUS = Object.freeze({
  * until 2026-10-05 this function re-derived the dying / defeat / revive
  * branches beside a snapshot whose doc promised to "mirror" it.
  */
-function terminalState(enemies, playerStatus) {
+function terminalState(enemies, playerStatus, companions = []) {
     if (activeEnemies(enemies).length === 0) return 'victory';
+    if (playerStatus === 'stable' && (companions || []).some(isCompanionActive)) return null;
     return TERMINAL_BY_PLAYER_STATUS[playerStatus] ?? null;
 }
 
@@ -1379,7 +1411,7 @@ function sealExchange(ctx, {
         partyAtSave: state.party || [],
         partyAfter: companions,
     });
-    const terminal = forcedTerminal || terminalState(enemies, snapshot.status);
+    const terminal = forcedTerminal || terminalState(enemies, snapshot.status, companions);
     const result = makeResult(kind, exchangeId, state.combat.round, events, terminal, {
         enemies,
         companions,

@@ -13,7 +13,8 @@ import {
     healthWord,
     typeEnemyFields,
 } from '../../engine/enemyStats.js';
-import { COMBAT_PHASES } from '../../engine/combatPredicates.js';
+import { COMBAT_PHASES, describeHeroIncapacity, isCompanionActive } from '../../engine/combatPredicates.js';
+import { findCompanionRecord } from '../../engine/npcRoster.js';
 import { reconcileStartingCombatExchange } from '../../engine/combatWire.js';
 import { exchangeEventLines, mergeCharacterUpdates } from '../../engine/combatExchange.js';
 import { describeFightCost, recordExchangeCost, rememberFight, startFightTally } from '../../engine/fightTally.js';
@@ -140,7 +141,13 @@ function leaveFightMark(next, { woundCard, memories }) {
         state = withMessages(state, systemMessage(`**The fight leaves a mark** — ${woundCard.text}`));
     }
     for (const { name, moment } of memories) {
-        state = gameReducer(state, { type: 'UPDATE_NPC', payload: { name, kind: 'character', bondMoment: moment } });
+        // The witness's OWN record first (2026-10-17 audit P2): a short name two
+        // roster records share resolves to NOBODY at UPDATE_NPC (M0) and the
+        // fight memory was lost — the party's exact-first lookup settles it, as
+        // the party line's does.
+        const record = findCompanionRecord(state.npcs, name);
+        const ref = record?.id ? { id: record.id, name: record.name } : { name };
+        state = gameReducer(state, { type: 'UPDATE_NPC', payload: { ...ref, kind: 'character', bondMoment: moment } });
     }
     return state;
 }
@@ -184,6 +191,17 @@ export const handlers = {
         const enemies = (Array.isArray(action.payload?.enemies) ? action.payload.enemies : [])
             .map((enemy, index) => normalizeCombatEnemy(enemy, index, usedEnemyIds));
         if (enemies.length === 0) return state;
+        // Nobody on the hero's side can act (2026-10-17 audit P1): a STABLE
+        // hero (unconscious at 0 HP, not dying) with no battle-ready companion
+        // has no fight to open — the exchange would be a lone `pass` against
+        // foes the engine never lets strike a fallen hero, closing as a defeat
+        // after one round of nothing. The DM narrates what the foes do; a
+        // potion, healing, or whoever finds the hero moves the story. With a
+        // companion standing the fight opens and the hero's phase is the pass.
+        const incapacity = describeHeroIncapacity(state.character);
+        if (incapacity?.kind === 'stable' && !(state.party || []).some(isCompanionActive)) {
+            return withMessages(state, systemMessage(`**No fight opens** — ${incapacity.text} and no ally stands. The foes do as they will: narrate it (a blow on the fallen hero is damage_taken; it restarts the dying clock).`, { dmVisible: true }));
+        }
         const dexMod = state.character?.abilityScores
             ? getModifier(state.character.abilityScores.dexterity)
             : 0;

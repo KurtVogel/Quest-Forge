@@ -6,6 +6,7 @@
  * these few lines.
  */
 import { enemyOutcome } from './enemyStats.js';
+import { getIncapacitatingCondition } from './rules.js';
 
 export const COMBAT_PHASES = Object.freeze({
     OPENING: 'opening',
@@ -39,4 +40,26 @@ export function isCompanionActive(companion) {
  */
 export function isLowLevelSolo(character, party = []) {
     return !!character && (character.level ?? 1) <= 2 && !(party || []).some(isCompanionActive);
+}
+
+/**
+ * The hero's OWN incapacity (2026-10-17 audit P1 + P2): a STABLE hero — 0 HP,
+ * not dying (three successful death saves), not the low-level defeat — or one
+ * carrying a stunned / paralyzed / unconscious condition at HP above 0 cannot
+ * act. It is the predicate the enemy phase asks of every foe and CAST_SPELL
+ * asks of the hero out of combat; the exchange validator, START_COMBAT and the
+ * prompt's STATUS line read it here. Dead / defeated / dying heroes have their
+ * own branches (the death save is a dying hero's one legal slot) and read
+ * null. Returns `{ kind: 'stable' | 'condition', condition, text }` or null.
+ */
+export function describeHeroIncapacity(character) {
+    if (!character || typeof character !== 'object') return null;
+    if (character.isDead || character.lowLevelDefeat || character.dying) return null;
+    const name = typeof character.name === 'string' && character.name.trim() ? character.name.trim() : 'The hero';
+    if (Number.isFinite(character.currentHP) && character.currentHP <= 0) {
+        return { kind: 'stable', condition: 'unconscious', text: `${name} is unconscious at 0 HP (stable, not dying)` };
+    }
+    const condition = getIncapacitatingCondition(character.conditions);
+    if (condition) return { kind: 'condition', condition, text: `${name} is ${condition}` };
+    return null;
 }

@@ -16,7 +16,7 @@
  * mocks queue per-die values against exactly those entry points.
  */
 
-import { rollDice, rollWithModifier, parseNotation } from './dice.ts';
+import { rollWithModifier, parseNotation } from './dice.ts';
 import { fightingStyleEffects, getEquippedWeapon, getSneakAttackDice, getConditionRollEffects, combineRollModifiers } from './rules.js';
 
 /**
@@ -156,25 +156,29 @@ export function rollDamage(notation, description, {
         roll.subtotal = roll.rolls.reduce((sum, value) => sum + value, 0);
         roll.total = roll.subtotal + parsed.modifier;
     }
-    // Rogue Sneak Attack
+    // Rogue Sneak Attack — its dice are their OWN roll record (2026-10-17 audit
+    // P2): folding their sum into the weapon row's total made every ledger
+    // reader print arithmetic that did not add up ("**14** (1 +3)"). The weapon
+    // row keeps faces + modifier, the attack's damage is the two rows' sum, and
+    // attack callers ledger `sneakAttackRoll` beside the weapon roll.
     let sneakAttackDetail = null;
+    let sneakAttackRoll = null;
     if (includeSneakAttack && character && character.class === 'rogue') {
         const weapon = getEquippedWeapon(inventory);
         const sneakAttackDice = getSneakAttackDice(character, weapon, advantage, disadvantage, hasAlly);
         if (sneakAttackDice > 0) {
             const saDiceCount = critical ? sneakAttackDice * 2 : sneakAttackDice;
-            const saRolls = rollDice(saDiceCount, 6);
-            const saTotal = saRolls.reduce((sum, r) => sum + r, 0);
-            roll.total += saTotal;
+            sneakAttackRoll = rollWithModifier(saDiceCount, 6, 0, `${description} — Sneak Attack`);
             sneakAttackDetail = {
                 diceCount: saDiceCount,
-                rolls: saRolls,
-                total: saTotal,
+                rolls: sneakAttackRoll.rolls,
+                total: sneakAttackRoll.total,
             };
         }
     }
 
-    return { roll, total: Math.max(0, roll.total), notation, rerolls, sneakAttackDetail };
+    const total = Math.max(0, roll.total + (sneakAttackDetail?.total ?? 0));
+    return { roll, total, notation, rerolls, sneakAttackDetail, sneakAttackRoll };
 }
 
 /**
@@ -200,7 +204,10 @@ export function resolveAttackRoll({ attacker = null, attackBonus, description, m
     let damageRoll = null;
     if (hit && damage) {
         damageRoll = rollDamage(damage.notation, damage.description, { ...(damage.options || {}), critical });
-        if (rolls) rolls.push(damageRoll.roll);
+        if (rolls) {
+            rolls.push(damageRoll.roll);
+            if (damageRoll.sneakAttackRoll) rolls.push(damageRoll.sneakAttackRoll);
+        }
         damageTotal = damageRoll.total;
     }
     return { attack, natural: attack.natural, critical, hit, damage: damageTotal, damageRoll };

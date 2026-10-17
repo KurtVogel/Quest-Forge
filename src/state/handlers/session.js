@@ -129,6 +129,8 @@ const EXCHANGE_TEXT_MAX = 1200;
 const EXCHANGE_NAME_MAX = 100;
 const EXCHANGE_EVENT_TYPES = new Set(['attack', 'check', 'save', 'death_save', 'note']);
 const EXCHANGE_EVENT_TEXT_FIELDS = ['text', 'actor', 'target', 'description', 'mode', 'spellName'];
+// Who an attack landed on, by role (fightTally reads it; the name is the fallback).
+const EXCHANGE_TARGET_TYPES = new Set(['player', 'companion', 'enemy']);
 const EXCHANGE_EVENT_NUMBER_FIELDS = ['rolled', 'natural', 'dc', 'damage', 'remainingHp', 'maxHp'];
 const EXCHANGE_EVENT_FLAG_FIELDS = ['hit', 'critical', 'success', 'intercepted', 'uncannyDodgeApplied'];
 const SNAPSHOT_STATUSES = new Set(['active', 'defeated', 'fled', 'surrendered']);
@@ -155,6 +157,7 @@ function sanitizeStoredExchangeEvent(event) {
     for (const field of EXCHANGE_EVENT_FLAG_FIELDS) {
         if (event[field] !== undefined) typed[field] = strictFlag(event[field]);
     }
+    if (EXCHANGE_TARGET_TYPES.has(event.targetType)) typed.targetType = event.targetType;
     const sa = event.sneakAttackDetail;
     if (sa && typeof sa === 'object' && !Array.isArray(sa) && Number.isFinite(Number(sa.total))) {
         typed.sneakAttackDetail = {

@@ -237,8 +237,11 @@ export function recordExchangeCost(tally, { result, heroName, hpBefore, hpAfter,
         const target = tallyName(event.target);
         const actor = tallyName(event.actor);
         const remaining = finiteInt(event.remainingHp, NaN);
-        const onHero = target === hero;
-        const onCompanion = companionNames.has(target);
+        // By ROLE where the event says it (2026-10-17 audit P2: a hero sharing
+        // a companion's name was both, a nameless hero matched a foe named
+        // "Player"); a stored result from before the stamp falls back to the name.
+        const onHero = event.targetType ? event.targetType === 'player' : target === hero;
+        const onCompanion = event.targetType ? event.targetType === 'companion' : companionNames.has(target);
         if (!onHero && !onCompanion) {
             // A blow on a FOE: the hero's own killing crit, or a companion's
             // kill while the hero lay at 0 — the fight memories (2026-09-28).

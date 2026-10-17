@@ -6,7 +6,20 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-16, evening (the 10-16 strengthening queue cleared — 1 P1 + 7 P2 across scene-art + cloud-sync; the morning's sweep below)_
+_Last updated: 2026-10-17 (the 10-17 strengthening queue cleared — 1 P1 + 7 P2 across dice-engine + combat-exchange; the 10-16 sweeps below)_
+
+## 2026-10-17 — strengthening queue cleared: 1 P1 + 7 P2 across dice-engine + combat-exchange (Lap 1) — pushed AND deployed
+
+**Ruling: DECISIONS.md 2026-10-17, ten numbered points.** Vesa: check the strengthening queue, evaluate, implement, push, deploy. Every row of the 10-17 audit is built and pinned; two settled rules moved and are recorded: a stable hero's fight stays OPEN while a companion stands (the 09-30 "stable = defeat" now holds only alone), and START_COMBAT opens no fight for a stable hero with no ally. `npm test` 3,768 / 229 files green (+26 in `combatExchange.queue1017.test.js`, `gameReducer.queue1017.test.js`; the deathCount stabilization fixture re-pinned party-aware), lint clean, production build green, `firebase deploy --only hosting` released from the hosted session on the stored token.
+
+**What a player can notice:** an unconscious hero at 0 HP (stabilized, not dying) no longer swings a sword every round while no foe can touch them — the DM is told STATUS: STABLE, the only legal slot is a pass, companions fight on over the body, and with nobody standing the fight closes (or never opens: a `combat_start` over a lone stable hero posts one line and the DM narrates what the foes do); a paralyzed or stunned hero cannot act in a fight any more than a paralyzed foe can; a blow on the fallen hero out of combat restarts the dying clock with one failure instead of costing nothing; the Dice Log and RECENT DICE ROLLS no longer fill with the foes' saving throws after a Fireball or Turn Undead; a rogue's Sneak Attack dice are their own ledger row so every row's arithmetic adds up (the Short Rest row too); a DM naming the hero's torch as the weapon is refused instead of silently halving the damage; a fight memory for a companion whose short name two roster records share lands on their record instead of a grey "could be" line.
+
+**What changed underneath:** `describeHeroIncapacity` (`combatPredicates.js`) read by `validateTurnShape`, START_COMBAT and `describeHeroStatus`; `projectPlayerSnapshot`'s entry-HP `stable`; `terminalState(…, companions)`; TAKE_DAMAGE's stable branch; `isWeaponItem` at the attack validator + remap; the two save loops push nothing; `rollDamage` → `sneakAttackRoll` ledgered by `resolveAttackRoll`; the Short Rest row's applied modifier; `targetType` on attack events (typed at load, read by `recordExchangeCost`); `leaveFightMark` through `findCompanionRecord`; `loadedNumber` + `MAX_DIE_SIDES` + the per-load id epoch in `sanitizeRollHistoryEntry`. CLAUDE / AGENTS twins amended.
+
+**Not exercised live:** everything is pinned by vitest; the STATUS: STABLE / INCAPACITATED lines are dynamic-block text whose DM uptake (a `pass` on the first ask) is unmeasured — `eval:death` remains the owed proof for the downed-hero family. The strengthening queue is EMPTY; the WOW W1 (NPC ties, 10-07) and memory M1 (lexical RRF) rows still wait for Vesa's pick.
+
+**Next (unchanged):** the WOW slice's live proof (one NPC driven to trusted, two scenes watched); the next grand run on Sol with the fight staging on (OpenAI prepay is at zero — top up first); the commitment probe's multi-arm run; `eval:death` for the downed-hero bullet and now the stable-hero pass.
+
 
 ## 2026-10-16 (evening) — strengthening queue cleared: 1 P1 + 7 P2 across scene-art + cloud-sync (Lap 1) — pushed AND deployed (by Vesa, locally)
 

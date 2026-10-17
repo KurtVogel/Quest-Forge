@@ -8,6 +8,7 @@ import { itemIdentityMatches } from '../../engine/textMatch.js';
 import { isArmorItem, isShieldItem, isWeaponItem } from '../../engine/equipment.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName, MAX_ITEM_QUANTITY } from '../../data/items.js';
 import { MAX_CHARACTER_LEVEL, reviveHero } from '../../engine/progression.js';
+import { MAX_DIE_SIDES } from '../../engine/dice.ts';
 import { appendKeepsakes } from '../../engine/companionGear.js';
 import { CHRONICLE_CHAPTER_TEXT_MAX, CHRONICLE_TITLE_MAX, NPC_DOSSIER_FIELD_MAX, ROLL_HISTORY_CAP } from '../../config/contentLimits.js';
 import { COMBAT_PHASES, isLowLevelSolo } from '../../engine/combatPredicates.js';
@@ -60,7 +61,26 @@ export function appendRollHistory(state, rolls) {
 }
 
 const ROLL_HISTORY_TEXT_MAX = 120;
+// A minted id is unique ACROSS loads (2026-10-17 audit P2): a persisted
+// `roll-loaded-1` and a later load's first mint shared one Dice Log key.
+const LOADED_ROLL_ID_EPOCH = Date.now().toString(36);
 let loadedRollIdCounter = 0;
+
+/**
+ * A loaded die face or total: a finite number, or a numeric string (saves
+ * hand-edited to `"12"` load). `null` / a boolean / '' are NOT 0 / 1 / 0 —
+ * `Number` read them so, and `[null]` loaded as a one-face roll of 0
+ * (2026-10-17 audit P2). Faces are bounded by the largest die the engine
+ * rolls; a 1e9 face used to render.
+ */
+function loadedNumber(value) {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string' && value.trim() !== '') {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    }
+    return null;
+}
 
 /**
  * Type one loaded rollHistory entry (2026-09-09 audit P2): the old guard was
@@ -82,20 +102,21 @@ let loadedRollIdCounter = 0;
 export function sanitizeRollHistoryEntry(entry, { maxMessageCount = null } = {}) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
     if (!Array.isArray(entry.rolls)) return null;
-    const rolls = entry.rolls.map(Number).filter(Number.isFinite);
+    const rolls = entry.rolls.map(loadedNumber)
+        .filter(value => value !== null)
+        .map(value => Math.max(0, Math.min(MAX_DIE_SIDES, Math.trunc(value))));
     if (rolls.length === 0) return null;
-    const modifier = Number.isFinite(Number(entry.modifier)) && typeof entry.modifier !== 'boolean'
-        ? Math.trunc(Number(entry.modifier))
-        : 0;
+    const storedModifier = loadedNumber(entry.modifier);
+    const modifier = storedModifier === null ? 0 : Math.trunc(storedModifier);
     const subtotal = rolls.reduce((sum, value) => sum + value, 0);
-    const storedTotal = Number(entry.total);
-    const total = Number.isFinite(storedTotal) && typeof entry.total !== 'boolean' ? storedTotal : subtotal + modifier;
+    const storedTotal = loadedNumber(entry.total);
+    const total = storedTotal === null ? subtotal + modifier : storedTotal;
     const text = value => (typeof value === 'string' ? value.trim().slice(0, ROLL_HISTORY_TEXT_MAX) : '');
     const id = typeof entry.id === 'string' && entry.id
         ? entry.id.slice(0, 80)
         : typeof entry.id === 'number' && Number.isFinite(entry.id)
             ? String(entry.id)
-            : `roll-loaded-${++loadedRollIdCounter}`;
+            : `roll-loaded-${LOADED_ROLL_ID_EPOCH}-${++loadedRollIdCounter}`;
     const stamp = typeof entry.atMessage === 'number' && Number.isFinite(entry.atMessage)
         ? Math.max(0, Math.floor(entry.atMessage))
         : null;
