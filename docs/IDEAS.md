@@ -3563,3 +3563,26 @@ cache re-encode and the paint finish for a player who pressed Cancel. After the 
 throw, read the signal once more before the side effect. Payoff: xAI portraits in the frame they are
 drawn in, a hero who never wears another hero's face, cloud pictures that survive a two-device day,
 and a Cancel that cancels.
+
+### [strengthening] A membership rule lives at every push site; a state the panel names and the engine does not is a state the engine will misjudge; a predicate asked of every other actor is asked of the hero too; a ref lookup takes the lane's KIND — status: `idea` (2026-10-17)
+Four rules from the dice-engine + combat-exchange Lap-1 pass (2026-10-17), all four reproduced with
+a throwaway test over the real planner and reducer. **(1)** `openExchange` documents the exchange's
+roll list as "the HERO's own dice only" and two `rolls.push` sites in the same file push each FOE's
+saving throw against a hero spell — a Turn Undead over three undead ledgers three rows, none the
+hero's, into the Dice Log, RECENT DICE ROLLS and the recall dossier. When a shelf states a
+membership rule, grep every writer of the collection the same day. **(2)** The Combat panel knows
+"Stable at 0 HP"; the exchange validator derives the hero's state from three booleans and reads a
+stable hero as a fighter (an unconscious hero who attacks every round and cannot be hit), the
+snapshot from two and reads them as freshly dying (terminal `dying` beside a reducer that commits
+`dying: false`), and the DM's STATUS line has no stable word at all. For every status WORD a surface
+renders, make the predicate each judge reads one function — `isHeroDown` already exists. **(3)**
+`getIncapacitatingCondition` gates foes and guardians in the fight and the hero out of it
+(CAST_SPELL); the hero in the fight is the one actor never asked, so a paralyzed hero attacks at
+full effectiveness while the prompt promises the same condition costs a foe its action. List the
+actors a prompt rule names and grep the predicate per actor on the engine side. **(4)** `weapon_id`
+resolves against the whole pack, so a torch named as the weapon un-equips the sword and the strike
+rolls `1d4`; the lane meant a weapon — filter by `isWeaponItem` first. Companion: a roll row whose
+`total` includes dice its faces do not show (Sneak Attack, a Short Rest's per-die floor) is right
+for the mechanics and wrong on every display — give added dice a row or a field, never only a
+bigger total. Payoff: a stable hero who stays down until healed, a fight that cannot be fought
+from unconsciousness, a Dice Log that is the hero's, and arithmetic a DM can check.
