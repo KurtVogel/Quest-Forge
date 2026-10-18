@@ -52,6 +52,12 @@ export function sanitizePendingRoleplayCheck(value) {
         // Change Approach can reveal it instead of erasing it. Reload-safe by design.
         setupNarrative: text(value.setupNarrative, 4000),
         setupMessageId: text(value.setupMessageId, 160) || null,
+        // The challenge hop's OWN withheld row (2026-10-18 P2): an UPHOLD /
+        // REVISE that carried prose commits hidden under its own id while the
+        // proposal keeps pointing at the ORIGINAL setup — so this names the
+        // second row the reveal paths restore. One challenge per proposal, so
+        // one slot; its prose is already appended to `setupNarrative`.
+        rulingMessageId: text(value.rulingMessageId, 160) || null,
         loot: value.loot ? {
             goldFound: Number.isFinite(value.loot.goldFound) ? Math.max(0, value.loot.goldFound) : 0,
             silverFound: Number.isFinite(value.loot.silverFound) ? Math.max(0, value.loot.silverFound) : 0,
@@ -73,8 +79,24 @@ export function sanitizePendingRoleplayCheck(value) {
     };
 }
 
-export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null, supersedesId = null } = {}) {
-    return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, setupNarrative, setupMessageId, supersedesId });
+export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null, rulingMessageId = null, supersedesId = null } = {}) {
+    return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, setupNarrative, setupMessageId, rulingMessageId, supersedesId });
+}
+
+/**
+ * The withheld rows a proposal owns that a set-aside RESTORES (2026-10-18 P2):
+ * the setup and, after a challenge, the hop's own ruling row — each only while
+ * it is still hidden with text, and never when the setup pre-narrated an
+ * outcome that never happened. Read by Change approach and the resolver's
+ * resolved-to-nothing path, which used to reveal the setup alone.
+ */
+export function listRevealableSetupIds(proposal, messages = []) {
+    if (!proposal || proposal.preNarrated) return [];
+    return [proposal.setupMessageId, proposal.rulingMessageId].filter(id => {
+        if (typeof id !== 'string' || !id) return false;
+        const row = (messages || []).find(m => m?.id === id);
+        return !!(row?.hidden && typeof row.content === 'string' && row.content.trim());
+    });
 }
 
 // --- Recent-checks ledger (heat input) ---------------------------------------

@@ -21,9 +21,11 @@ import { systemMessage } from './text.js';
 import { computeACFromInventory, formatModifier, getConditionRollEffects, combineRollModifiers, resolvePlayerRollModifier } from './rules.js';
 import { ENEMY_DEFAULT_DAMAGE, validateEnemyAttackBonus, sanitizeEnemyDamage } from './enemyStats.js';
 import { applyUncannyDodge, conditionAwareAttackModifiers, getAttackCount, rollD20Kept, rollDamage, stampCriticalRoll } from './combatMath.js';
-import { isCompanionActive, isLowLevelSolo } from './combatPredicates.js';
+import { describeHeroCannotAct, isCompanionActive, isLowLevelSolo } from './combatPredicates.js';
+import { companionAttackBonus } from './companionGear.js';
 import { deathSaveLine, judgeDeathSave } from './deathSaves.js';
 import { describePendingLoot } from './roleplayCheck.js';
+import { DEFAULT_ROLL_DC } from '../config/contentLimits.js';
 
 /**
  * Resolve a batch of requested rolls.
@@ -83,12 +85,19 @@ export function resolveRolls(requestedRolls, { character, inventory, party, disp
             // has no dice/stat authority here any more than in the exchange machine.
             // A DM modifier is only a fallback for a stat-less companion, and even
             // then it passes the enemy-stat band check (a +40 is a hallucination).
-            // To-hit only: there is no tracked foe outside a fight to take damage.
+            // The to-hit is THE companion composer the exchange rolls with
+            // (`companionAttackBonus`: stat + magic-weapon bonus — 2026-10-18 P2;
+            // this lane read `attackBonus` alone, so a +2 blade counted in a
+            // fight and not at a rope). To-hit only: there is no tracked foe
+            // outside a fight to take damage.
             const result = resolveNpcRoll({
                 ...roll,
                 attacker: companion.name,
-                modifier: companion.attackBonus ?? validateEnemyAttackBonus(roll.modifier) ?? 0,
-            }, character, dispatch, inventory, roll.dc ?? 10);
+                modifier: companionAttackBonus(companion, validateEnemyAttackBonus(roll.modifier) ?? 0),
+                // The engine's own number — never re-judged against the DM
+                // band (a +15 stat with a +3 blade is 18, not a hallucination).
+                engineModifier: true,
+            }, character, dispatch, inventory, roll.dc ?? DEFAULT_ROLL_DC);
             if (result) results.push(result);
         } else if (roll.type === 'npc_attack' || roll.type === 'npc_save') {
             // Resolve the to-hit vs the correct target's AC (companion AC if targeting
@@ -313,11 +322,16 @@ function buildRollOutcomePrompt({ summary, preNarrated = false, setupNarrative =
  * @param {string} [options.setupMessageId] - id of the withheld setup message, so a
  *   proposal whose every roll resolves to nothing can reveal it (never re-established
  *   otherwise — 2026-09-02 audit).
+ * @param {string} [options.rulingMessageId] - id of the challenge hop's own withheld
+ *   row (an UPHOLD / REVISE that carried prose — 2026-10-18 P2), revealed beside the
+ *   setup under the same rule; it used to stay hidden forever.
  * @param {function} [options.onFollowUpRejected] - called when the roll arbiter
  *   rejected every check the outcome chained (`{ attackAsCheck }`); the caller owns
  *   the correction response, exactly like the first hop's routing.
- * @returns {Promise<void>} — nothing: the one caller awaits it, and "did dice
- *   land" is read off the roll ledger, never off a return value.
+ * @returns {Promise<{ revealedIds: string[] }|undefined>} — `revealedIds` ONLY when
+ *   every roll resolved to nothing and the withheld rows were revealed (the caller
+ *   extracts the fiction that just became canon); "did dice land" is still read off
+ *   the roll ledger, never off a return value.
  */
 export async function handleRequestedRolls(requestedRolls, {
     getState,
@@ -330,6 +344,7 @@ export async function handleRequestedRolls(requestedRolls, {
     pendingLoot = null,
     setupNarrative = '',
     setupMessageId = null,
+    rulingMessageId = null,
 }) {
     const state = getState();
     const character = state.character;
@@ -355,14 +370,13 @@ export async function handleRequestedRolls(requestedRolls, {
     // never be revealed or re-established (the Change-approach REVEAL pattern;
     // a pre-narrated setup stays hidden for the same reason it does there).
     if (rollResults.length === 0) {
-        if (setupMessageId && !preNarrated) {
-            dispatch({ type: 'REVEAL_MESSAGE', payload: { id: setupMessageId } });
-        }
+        const revealedIds = preNarrated ? [] : [setupMessageId, rulingMessageId].filter(id => typeof id === 'string' && id);
+        for (const id of revealedIds) dispatch({ type: 'REVEAL_MESSAGE', payload: { id } });
         dispatch({
             type: 'ADD_MESSAGE',
             payload: systemMessage('None of the proposed rolls could be resolved — no dice were rolled and the check is set aside. Describe what you do next.'),
         });
-        return;
+        return { revealedIds };
     }
 
     // Auto follow-up: send roll results back to DM and get outcome narration.
@@ -512,7 +526,11 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetCo
     // Same trust boundary as the exchange machine (enemyStats.js): an out-of-band
     // modifier is a hallucination and is REJECTED to the conservative default —
     // this path was the one entry point where a DM "+40" reached the dice raw.
-    const npcMod = validateEnemyAttackBonus(roll.modifier) ?? 0;
+    // A companion's modifier is the ENGINE's (`engineModifier`, composed by
+    // `companionAttackBonus`) and rides unjudged.
+    const npcMod = roll.engineModifier && Number.isFinite(roll.modifier)
+        ? roll.modifier
+        : (validateEnemyAttackBonus(roll.modifier) ?? 0);
 
     // Attacks against the player (targetAC == null means the player is the target)
     // respect the player's conditions: prone/restrained/blinded etc. grant the
@@ -540,14 +558,17 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetCo
 
     // Determine the DC to beat. Saves use the spell/ability DC; attacks use the target's AC.
     // For attacks on the PLAYER, always compute AC live from inventory — never trust the DM.
+    // The parser stamps `dc` on every wire roll (DEFAULT_ROLL_DC when none); the
+    // `??` is the belt for a roll built by hand, and it restates the SAME default
+    // (2026-10-18 P2: this site said 12 while every roll already carried 10).
     let dc;
     if (roll.type === 'npc_save') {
-        dc = roll.dc ?? 12;
+        dc = roll.dc ?? DEFAULT_ROLL_DC;
     } else if (typeof targetAC === 'number') {
         dc = targetAC;
     } else {
         const liveAC = (character && inventory) ? computeACFromInventory(inventory, character) : null;
-        dc = liveAC ?? character?.armorClass ?? roll.dc ?? 12;
+        dc = liveAC ?? character?.armorClass ?? roll.dc ?? DEFAULT_ROLL_DC;
         if (roll.dc && roll.dc !== dc) {
             console.warn(`[RollResolver] DM sent dc=${roll.dc} but real player AC is ${dc} — using real AC`);
         }
@@ -573,29 +594,41 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetCo
 }
 
 function resolveDamageRoll(roll, character, dispatch, inventory = []) {
+    const label = roll.description || 'Damage Roll';
+    const notation = typeof roll.notation === 'string' ? roll.notation.trim() : '';
+    // A roll without dice is no roll (2026-10-18 P2): the parser types a missing
+    // notation `null`, and `roll.notation || '1d4'` rolled a 1d4 under the very
+    // comment that promised the drop, printing "(null)" on the chat line and
+    // the DM's summary. Dropped visibly, like the skill-less check — a lone
+    // damage roll still lands the proposal on the set-aside.
+    if (!notation) {
+        dispatch({ type: 'ADD_MESSAGE', payload: systemMessage(`**Roll skipped:** ${label} names no damage dice and could not be rolled.`) });
+        return null;
+    }
     try {
         // Generic damage rolls never include Sneak Attack — that is an attack
         // rider. A Great Weapon fighter's rerolls still apply (the hero's dice).
         // `onInvalid: 'throw'`: this lane's error path IS the contract — an
         // unparseable notation drops the roll instead of inventing a 1d4.
-        const out = rollDamage(roll.notation || '1d4', roll.description || 'Damage Roll', {
+        const out = rollDamage(notation, label, {
             character, inventory, onInvalid: 'throw', includeSneakAttack: false,
         });
         dispatch({ type: 'ADD_ROLL', payload: out.roll });
         dispatch({
             type: 'ADD_MESSAGE',
-            payload: systemMessage(damageLine({ label: out.roll.description, notation: roll.notation, result: out.roll, rerolls: out.rerolls })),
+            payload: systemMessage(damageLine({ label: out.roll.description, notation, result: out.roll, rerolls: out.rerolls })),
         });
 
         return {
             type: 'damage_roll',
-            notation: roll.notation,
+            notation,
             rolled: out.roll.total,
             description: out.roll.description,
             success: true,
         };
     } catch (e) {
         console.error('[RollResolver] Error parsing damage roll notation:', e);
+        dispatch({ type: 'ADD_MESSAGE', payload: systemMessage(`**Roll skipped:** ${label} — the damage dice "${notation}" could not be read.`) });
         return null;
     }
 }
@@ -664,9 +697,9 @@ function resolveSinglePlayerAttackRoll(roll, character, dispatch, mod, label) {
     const critical = applyPlayerAttackCritical(character, result);
     dispatch({ type: 'ADD_ROLL', payload: result });
 
-    // The parser's deliberate default is DC 10 (never 15 — the solo-play ladder's
-    // own rule); ?? keeps an explicit dc of 0 instead of silently re-pricing it.
-    const dc = roll.dc ?? 10;
+    // The parser's deliberate default (never 15 — the solo-play ladder's own
+    // rule); ?? keeps an explicit dc of 0 instead of silently re-pricing it.
+    const dc = roll.dc ?? DEFAULT_ROLL_DC;
     const success = critical || result.total >= dc;
     dispatch({
         type: 'ADD_MESSAGE',
@@ -711,6 +744,24 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     }
     if (source === 'untrained') console.warn('[RollResolver] Unknown skill/ability:', key, '— rolling plain d20');
 
+    // The hero's own actor gate (2026-10-18 P2 — the third site of the 10-17
+    // rule, after CAST_SPELL and the exchange validator): a dying, stable,
+    // defeated or paralyzed hero makes no check and swings no weapon, whatever
+    // the DM asked for. A saving throw still rolls (a CON save against poison
+    // while dying is legitimate; 5e's auto-fail of STR / DEX saves while
+    // unconscious is deliberately NOT modelled — a new rule with no prompt
+    // counterpart); a dead hero rolls nothing. Visible like the initiative
+    // skip; a lone gated roll lands the proposal on the set-aside, which
+    // reveals the setup.
+    const cannotAct = describeHeroCannotAct(character);
+    if (cannotAct && (kind !== 'save' || cannotAct.kind === 'dead')) {
+        dispatch({
+            type: 'ADD_MESSAGE',
+            payload: systemMessage(`**Roll skipped:** ${cannotAct.text} — ${roll.description || defaultLabel} is not rolled. A hero who cannot act makes no checks or attacks${cannotAct.kind === 'dead' ? '' : ' (saving throws still roll)'}.`),
+        });
+        return [];
+    }
+
     // An `attack_roll` (or the `attack` key) resolves on the attack lane: the
     // weapon crit rule, attack condition effects, Extra Attack.
     const isAttack = kind === 'attack';
@@ -732,9 +783,9 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     const critical = isAttack ? applyPlayerAttackCritical(character, result) : result.isCritical;
     dispatch({ type: 'ADD_ROLL', payload: result });
 
-    // roll.dc ?? 10 matches the parser's deliberate default (never 15); an
+    // `?? DEFAULT_ROLL_DC` restates the parser's deliberate default (never 15); an
     // explicit dc of 0 stays 0 instead of silently becoming 15 (2026-08-27 audit).
-    const dc = roll.dc ?? 10;
+    const dc = roll.dc ?? DEFAULT_ROLL_DC;
     const success = critical || result.isCritical || result.total >= dc;
     dispatch({
         type: 'ADD_MESSAGE',

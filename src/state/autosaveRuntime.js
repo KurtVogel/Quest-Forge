@@ -9,9 +9,8 @@
  *  - noteStateChange(prev, state): the debounced any-persisted-field trigger.
  *    A change touching only user/ui/settings neither schedules a save nor
  *    resets a pending debounce timer.
- *  - flush({ action }): the explicit flush. Cancels the debounce it supersedes
- *    (the snapshot replays the just-dispatched action through the pure
- *    reducer, so a timer scheduled by earlier changes is fully covered).
+ *  - flush({ action }): the explicit flush after a panel's dispatch. Cancels
+ *    the debounce it supersedes and writes the action's LIVE result (below).
  *  - flushOnHide(): the visibilitychange/pagehide flush — dirty-gated so
  *    backgrounding an idle tab doesn't rewrite an unchanged multi-MB
  *    snapshot; a failed write restores the dirty flag.
@@ -19,20 +18,40 @@
  * The dirty flag only goes clean when a save LANDS and the live state hasn't
  * moved while the write was in flight.
  *
- * Flush coverage (2026-09-02 audit, write amplification): an action flush
- * replays `action` from the caller's pre-render state, so the action's OWN
- * re-render used to arrive at noteStateChange as a fresh change — dirty again,
- * a new 2s timer, and a second full-snapshot write of state the flush had
- * just persisted. The flush now records the state it replayed from and the
- * top-level fields the replay changed; the first change after that base
- * whose changed fields are all among them IS the action's re-render and is
- * treated as covered by the flushed write. Once that write lands (and the
- * state hasn't moved past the re-render) the flag goes clean; if it fails,
- * the skipped re-render gets the ordinary dirty + debounce it would have had.
+ * The action flush writes the re-render, not a replay (2026-10-18 persistence
+ * P2, revising 2026-09-02's "flush coverage"): the caller's state ref predates
+ * the re-render, so the flush used to REPLAY the action through the pure
+ * reducer and persist that — and then recognise the action's own re-render as
+ * "covered" so it was not written again. A replay is a contract with the
+ * reducer's determinism, and UPDATE_NPC rolls a crypto die (the bond-turn
+ * beat's delay), mints ids and reads the clock: measured, half the replays of
+ * one Deepen-memory action scheduled THE BOND HAS TURNED a scene apart from
+ * the live state, and that divergent snapshot was what sat on disk. Now the
+ * flush waits for the first gameplay change after the dispatch — the action's
+ * re-render, by construction (React applies queued actions in order; whatever
+ * was batched with it rides the same write) — up to `FLUSH_RENDER_GRACE_MS`,
+ * and writes THAT state: one write, the live bytes. The replay remains the
+ * fallback for an action whose re-render never comes (a reducer no-op, e.g. a
+ * stale-campaign drop), where it equals the live state anyway. A newer action
+ * flush supersedes a waiting one (its write carries both actions); a
+ * re-render that arrives after the grace is an ordinary dirty change and gets
+ * its own debounced write (an extra write in the slow case, never a stale
+ * snapshot).
  */
-import { AUTOSAVE_IGNORED_FIELDS, buildAutosaveSnapshot, hasGameplayChange, isAutosavableState, isBackgroundOnlyChange } from './autosavePolicy.js';
+import { buildAutosaveSnapshot, hasGameplayChange, isAutosavableState, isBackgroundOnlyChange } from './autosavePolicy.js';
 
 export const AUTOSAVE_DEBOUNCE_MS = 2000;
+
+/**
+ * How long an action flush waits for the action's own re-render before it
+ * falls back to the replay. React commits a dispatch from an async handler in
+ * a later task (tens of milliseconds at most on a busy phone); the fallback
+ * makes a missed grace cost a possibly-divergent snapshot, never a hang.
+ */
+export const FLUSH_RENDER_GRACE_MS = 250;
+
+/** The settle value of a waiting flush that a newer action flush took over. */
+const SUPERSEDED = Symbol('superseded');
 
 /**
  * Two-tier debounce (2026-09-23 audit P2): a turn is five phases seconds apart
@@ -48,33 +67,6 @@ export const AUTOSAVE_DEBOUNCE_MS = 2000;
  */
 export const AUTOSAVE_BACKGROUND_DEBOUNCE_MS = 15000;
 
-/**
- * Top-level persisted fields that differ between two states (by reference —
- * the reducer returns new objects for exactly the fields an action touched).
- * `session` is compared field-by-field minus `updatedAt`, which the snapshot
- * stamp always changes.
- */
-function changedPersistedKeys(prev, next) {
-    const keys = new Set();
-    for (const key of new Set([...Object.keys(prev), ...Object.keys(next)])) {
-        if (AUTOSAVE_IGNORED_FIELDS.has(key)) continue;
-        if (key === 'session') {
-            if (sessionChanged(prev.session, next.session)) keys.add(key);
-            continue;
-        }
-        if (prev[key] !== next[key]) keys.add(key);
-    }
-    return keys;
-}
-
-function sessionChanged(prev = {}, next = {}) {
-    for (const key of new Set([...Object.keys(prev || {}), ...Object.keys(next || {})])) {
-        if (key === 'updatedAt') continue;
-        if (prev?.[key] !== next?.[key]) return true;
-    }
-    return false;
-}
-
 export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
     let timer = null;
     // Which lane the pending timer serves: a foreground timer (2 s) is never
@@ -82,9 +74,11 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
     // by another background change and superseded by a foreground one.
     let timerBackground = false;
     let dirty = false;
-    // The most recent action flush: the state it replayed from, the fields the
-    // replay changed, and — once its re-render is recognized — that state.
-    let cover = null;
+    // The action flush still WAITING for its re-render: `{ resolve }`, settled
+    // by the first gameplay change (the live result), by a newer action flush
+    // (superseded — the newer write carries it), or by the grace timer (no
+    // re-render came: the replay is written).
+    let waiting = null;
 
     const clearTimer = () => {
         if (timer) {
@@ -119,33 +113,57 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
         }, background ? AUTOSAVE_BACKGROUND_DEBOUNCE_MS : AUTOSAVE_DEBOUNCE_MS);
     };
 
+    /**
+     * Wait for the flushed action's own re-render — the LIVE result — up to
+     * the grace. Resolves with that state, with `SUPERSEDED` when a newer
+     * action flush took over, or with null when no re-render came.
+     */
+    const awaitRender = () => new Promise(resolve => {
+        const entry = { resolve: null };
+        const graceTimer = setTimeout(() => entry.resolve(null), FLUSH_RENDER_GRACE_MS);
+        entry.resolve = (value) => {
+            clearTimeout(graceTimer);
+            if (waiting === entry) waiting = null;
+            resolve(value);
+        };
+        waiting?.resolve(SUPERSEDED);
+        waiting = entry;
+    });
+
     const flush = async ({ action = null } = {}) => {
         const source = getState();
-        const snapshot = buildAutosaveSnapshot(source, { action });
-        if (!snapshot) return;
+        const replay = buildAutosaveSnapshot(source, { action });
+        if (!replay) return;
         clearTimer();
-        const thisCover = action
-            ? { source, keys: changedPersistedKeys(source, snapshot), coveredState: null, saved: null }
-            : null;
-        cover = thisCover;
-        const saved = await autoSave(snapshot);
-        if (thisCover) {
-            thisCover.saved = saved;
-            if (thisCover.coveredState) {
-                // The action's re-render already arrived and was treated as covered.
-                if (saved) {
-                    if (getState() === thisCover.coveredState) dirty = false;
-                } else {
-                    // Nothing persisted it — give it the debounce it would have had.
-                    dirty = true;
-                    scheduleDebounce();
-                }
-            }
-            // Without a re-render yet, the live state is still the pre-action
-            // one: only the (skipped) re-render can prove it clean.
-        } else if (saved && getState() === source) {
-            dirty = false;
+        if (!action) {
+            const saved = await autoSave(replay);
+            if (saved && getState() === source) dirty = false;
+            showSaveToast(saved ? 'local' : 'save-error');
+            return;
         }
+        // The action flush writes the LIVE result (2026-10-18 persistence P2):
+        // the replay is only the fallback for an action whose re-render never
+        // comes (a reducer no-op). A newer action flush supersedes this one —
+        // its write carries this action too, so writing here would race it
+        // with a stale snapshot.
+        const live = await awaitRender();
+        if (live === SUPERSEDED) return;
+        const snapshot = live ? buildAutosaveSnapshot(live) : replay;
+        const saved = await autoSave(snapshot);
+        if (live) {
+            if (saved) {
+                // The live result is on disk; a change that arrived while the
+                // write was in flight has its own debounce already.
+                if (getState() === live) { dirty = false; clearTimer(); }
+            } else {
+                // Nothing persisted it — give it the debounce it would have had.
+                dirty = true;
+                scheduleDebounce();
+            }
+        }
+        // No re-render came and the replay was written: the live state is
+        // still the pre-action one, so nothing here can prove it clean — only
+        // the (late) re-render can, and it takes the ordinary path.
         showSaveToast(saved ? 'local' : 'save-error');
     };
 
@@ -163,41 +181,20 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
         autoSave(snapshot).then(saved => { if (!saved) dirty = true; });
     };
 
-    /** Is this change the flushed action's own re-render — already written by the flush? */
-    const isCoveredByFlush = (prev, state) => {
-        if (!cover || cover.coveredState || prev !== cover.source) return false;
-        for (const key of changedPersistedKeys(prev, state)) {
-            if (!cover.keys.has(key)) return false;
-        }
-        return true;
-    };
-
     const noteStateChange = (prev, state) => {
         // The policy's own predicate (a null `session` used to throw here).
         if (!isAutosavableState(state)) return;
-        if (prev && !hasGameplayChange(prev, state)) {
-            // A settings/user/ui-only change between the flush and its
-            // re-render must not break the lineage.
-            if (cover && !cover.coveredState && prev === cover.source) cover.source = state;
+        // A settings/user/ui-only change between the flush and its re-render
+        // neither schedules a save nor settles the waiting flush.
+        if (prev && !hasGameplayChange(prev, state)) return;
+        if (waiting) {
+            // The first gameplay change after an action flush IS that action's
+            // re-render (the dispatch preceded the flush; React applies queued
+            // actions in order) — whatever else was batched into it rides the
+            // same write. The flush writes this state and settles the flag.
+            waiting.resolve(state);
             return;
         }
-        if (prev && isCoveredByFlush(prev, state)) {
-            cover.coveredState = state;
-            if (cover.saved === true) {
-                // The write landed before the re-render: this state is on disk.
-                dirty = false;
-            } else if (cover.saved === false) {
-                // The write already failed: fall through to the ordinary path.
-                cover = null;
-                dirty = true;
-                scheduleDebounce();
-            }
-            // Still in flight: flush() settles the flag when the write lands.
-            return;
-        }
-        // Any other change moves past the flushed lineage (an in-flight flush
-        // keeps its own reference and settles the flag against the live state).
-        cover = null;
         dirty = true;
         scheduleDebounce({ background: isBackgroundOnlyChange(prev, state) });
     };
@@ -206,7 +203,7 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
         flush,
         flushOnHide,
         noteStateChange,
-        dispose: clearTimer,
+        dispose: () => { clearTimer(); waiting?.resolve(SUPERSEDED); },
         isDirty: () => dirty,
         hasPendingDebounce: () => timer !== null,
         /** Is the pending debounce (if any) the slow background lane? */

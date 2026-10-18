@@ -5,7 +5,7 @@
  * and the visibilitychange/pagehide flush.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { AUTOSAVE_BACKGROUND_DEBOUNCE_MS, AUTOSAVE_DEBOUNCE_MS, createAutosaveRuntime } from './autosaveRuntime.js';
+import { AUTOSAVE_BACKGROUND_DEBOUNCE_MS, AUTOSAVE_DEBOUNCE_MS, FLUSH_RENDER_GRACE_MS, createAutosaveRuntime } from './autosaveRuntime.js';
 import { gameReducer } from './gameReducer.js';
 
 function liveState(overrides = {}) {
@@ -121,14 +121,18 @@ describe('flush (explicit)', () => {
         expect(autoSave).toHaveBeenCalledTimes(1); // the debounce never double-fires
     });
 
-    it('a flush with an action replay never cleans the dirty flag', async () => {
+    it('an action flush whose re-render never comes writes the replay after the grace and never cleans the dirty flag', async () => {
         const { ctx, autoSave, runtime } = makeHarness();
         runtime.noteStateChange(null, ctx.state);
-        await runtime.flush({ action: { type: '__TEST_NOOP__' } });
+        const flushed = runtime.flush({ action: { type: '__TEST_NOOP__' } });
+        expect(autoSave).not.toHaveBeenCalled(); // waiting for the re-render
+        await vi.advanceTimersByTimeAsync(FLUSH_RENDER_GRACE_MS);
+        await flushed;
         expect(autoSave).toHaveBeenCalledTimes(1);
-        // The action's own re-render marks dirty again anyway — the flush must
-        // not prematurely declare the live state clean.
+        // A replay proves nothing about the live state — only a re-render can,
+        // and it takes the ordinary path.
         expect(runtime.isDirty()).toBe(true);
+        expect(runtime.hasPendingDebounce()).toBe(false);
     });
 
     it('does nothing without a live campaign', async () => {
@@ -146,45 +150,69 @@ describe('flush (explicit)', () => {
     });
 });
 
-describe('flush coverage — the flushed action\'s own re-render (2026-09-02 write amplification)', () => {
+describe('the action flush writes the action\'s own re-render — the LIVE result, one write (2026-10-18 persistence P2, revising 2026-09-02 flush coverage)', () => {
     const action = { type: 'ADD_MESSAGE', payload: { role: 'user', content: 'I open the door.' } };
 
-    it('produces exactly one write when the re-render lands while the flush is in flight', async () => {
+    it('writes the re-rendered state itself when it lands while the flush waits — one write, clean', async () => {
         const { ctx, autoSave, showSaveToast, runtime } = makeHarness();
         runtime.noteStateChange(null, ctx.state); // dirty + a pending debounce
         const base = ctx.state;
-        const flushed = runtime.flush({ action }); // write in flight
+        const flushed = runtime.flush({ action }); // waiting for the re-render
+        expect(runtime.hasPendingDebounce()).toBe(false); // the flush superseded the timer
+        expect(autoSave).not.toHaveBeenCalled();
         // React's re-render for the same dispatch: a fresh object from the same
-        // reducer, arriving before the write settles.
+        // reducer. ADD_MESSAGE mints its row id from the clock and Math.random,
+        // so a REPLAY would carry a different id than the live store.
         const rendered = gameReducer(base, action);
         ctx.state = rendered;
         runtime.noteStateChange(base, rendered);
         expect(runtime.hasPendingDebounce()).toBe(false); // no second timer
         await flushed;
         expect(autoSave).toHaveBeenCalledTimes(1);
-        expect(autoSave.mock.calls[0][0].messages).toHaveLength(1);
-        expect(runtime.isDirty()).toBe(false); // the landed write covers the live state
+        expect(autoSave.mock.calls[0][0].messages).toBe(rendered.messages); // the live bytes, not a replay
+        expect(runtime.isDirty()).toBe(false);
         expect(showSaveToast).toHaveBeenCalledWith('local');
         await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS * 2);
         expect(autoSave).toHaveBeenCalledTimes(1);
     });
 
-    it('produces exactly one write when the re-render lands after the flush already settled', async () => {
+    it('the replay pin: a reducer that rolls a die or mints an id persists its LIVE result, never a second draw', async () => {
+        // The 10-18 measurement: UPDATE_NPC mints a turn beat with a crypto die
+        // and a message row with a clock id; forty replays of one action gave
+        // two different snapshots. The written snapshot must be the store's.
+        const { ctx, autoSave, runtime } = makeHarness();
+        const base = ctx.state;
+        const flushed = runtime.flush({ action });
+        const rendered = gameReducer(base, action);
+        ctx.state = rendered;
+        runtime.noteStateChange(base, rendered);
+        await flushed;
+        const written = autoSave.mock.calls[0][0];
+        expect(written.messages[0].id).toBe(rendered.messages[0].id);
+        expect(gameReducer(base, action).messages[0].id).not.toBe(rendered.messages[0].id); // the replay would differ
+    });
+
+    it('a re-render that lands AFTER the grace is an ordinary change: the replay was written, the live result gets its own write', async () => {
         const { ctx, autoSave, runtime } = makeHarness();
         runtime.noteStateChange(null, ctx.state);
         const base = ctx.state;
-        await runtime.flush({ action });
+        const flushed = runtime.flush({ action });
+        await vi.advanceTimersByTimeAsync(FLUSH_RENDER_GRACE_MS);
+        await flushed;
+        expect(autoSave).toHaveBeenCalledTimes(1); // the replay fallback
         expect(runtime.isDirty()).toBe(true); // pre-render: only the re-render can prove it clean
         const rendered = gameReducer(base, action);
         ctx.state = rendered;
         runtime.noteStateChange(base, rendered);
+        expect(runtime.isDirty()).toBe(true);
+        expect(runtime.hasPendingDebounce()).toBe(true);
+        await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
+        expect(autoSave).toHaveBeenCalledTimes(2);
+        expect(autoSave.mock.calls[1][0].messages).toBe(rendered.messages);
         expect(runtime.isDirty()).toBe(false);
-        expect(runtime.hasPendingDebounce()).toBe(false);
-        await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS * 2);
-        expect(autoSave).toHaveBeenCalledTimes(1);
     });
 
-    it('a failed flush still gives the skipped re-render its ordinary debounce', async () => {
+    it('a failed live write keeps the state dirty and schedules the ordinary debounce', async () => {
         const { ctx, autoSave, runtime } = makeHarness({ saveResult: false });
         const base = ctx.state;
         const flushed = runtime.flush({ action });
@@ -198,10 +226,12 @@ describe('flush coverage — the flushed action\'s own re-render (2026-09-02 wri
         expect(autoSave).toHaveBeenCalledTimes(2);
     });
 
-    it('a failed flush that settled before the re-render marks it dirty and schedules the debounce', async () => {
+    it('a failed replay write (no re-render within the grace) leaves the later re-render its ordinary debounce', async () => {
         const { ctx, autoSave, runtime } = makeHarness({ saveResult: false });
         const base = ctx.state;
-        await runtime.flush({ action });
+        const flushed = runtime.flush({ action });
+        await vi.advanceTimersByTimeAsync(FLUSH_RENDER_GRACE_MS);
+        await flushed;
         const rendered = gameReducer(base, action);
         ctx.state = rendered;
         runtime.noteStateChange(base, rendered);
@@ -211,7 +241,7 @@ describe('flush coverage — the flushed action\'s own re-render (2026-09-02 wri
         expect(autoSave).toHaveBeenCalledTimes(2);
     });
 
-    it('a change touching fields the replay did not is NOT treated as covered', async () => {
+    it('another dispatch batched into the same render rides the one write', async () => {
         const { ctx, autoSave, runtime } = makeHarness();
         const base = ctx.state;
         const flushed = runtime.flush({ action });
@@ -220,14 +250,13 @@ describe('flush coverage — the flushed action\'s own re-render (2026-09-02 wri
         ctx.state = rendered;
         runtime.noteStateChange(base, rendered);
         await flushed;
-        expect(runtime.isDirty()).toBe(true);
-        expect(runtime.hasPendingDebounce()).toBe(true);
-        await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
-        expect(autoSave).toHaveBeenCalledTimes(2);
-        expect(autoSave.mock.calls[1][0].currentLocation).toBe('The Old Mill');
+        expect(autoSave).toHaveBeenCalledTimes(1);
+        expect(autoSave.mock.calls[0][0].currentLocation).toBe('The Old Mill');
+        expect(runtime.isDirty()).toBe(false);
+        expect(runtime.hasPendingDebounce()).toBe(false);
     });
 
-    it('a state that moved past the covered re-render before the write landed stays dirty', async () => {
+    it('a state that moved past the written re-render before the write landed stays dirty', async () => {
         const { ctx, autoSave, runtime } = makeHarness();
         const base = ctx.state;
         let settle;
@@ -236,6 +265,8 @@ describe('flush coverage — the flushed action\'s own re-render (2026-09-02 wri
         const rendered = gameReducer(base, action);
         ctx.state = rendered;
         runtime.noteStateChange(base, rendered);
+        await vi.advanceTimersByTimeAsync(0); // the flush picks up the re-render and starts its write
+        expect(typeof settle).toBe('function');
         // A later, unrelated change while the flush write is still in flight.
         const later = { ...rendered, currentLocation: 'Riverbank' };
         ctx.state = later;
@@ -246,19 +277,36 @@ describe('flush coverage — the flushed action\'s own re-render (2026-09-02 wri
         expect(runtime.hasPendingDebounce()).toBe(true);
     });
 
-    it('a settings-only change between the flush and its re-render does not break the lineage', async () => {
+    it('a settings-only change between the flush and its re-render neither settles the wait nor schedules a save', async () => {
         const { ctx, autoSave, runtime } = makeHarness();
         const base = ctx.state;
         const flushed = runtime.flush({ action });
         const settingsOnly = { ...base, settings: { paceDial: 'slow-burn' } };
         runtime.noteStateChange(base, settingsOnly);
+        expect(autoSave).not.toHaveBeenCalled(); // still waiting for the gameplay re-render
         const rendered = { ...gameReducer(base, action), settings: settingsOnly.settings };
         ctx.state = rendered;
         runtime.noteStateChange(settingsOnly, rendered);
         await flushed;
+        expect(autoSave).toHaveBeenCalledTimes(1);
         expect(runtime.isDirty()).toBe(false);
         await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS);
         expect(autoSave).toHaveBeenCalledTimes(1);
+    });
+
+    it('a second action flush supersedes a waiting one: the newer write carries both actions, the older writes nothing', async () => {
+        const { ctx, autoSave, runtime } = makeHarness();
+        const base = ctx.state;
+        const second = { type: 'ADD_MESSAGE', payload: { role: 'user', content: 'And the window.' } };
+        const first = runtime.flush({ action });
+        const next = runtime.flush({ action: second });
+        const rendered = gameReducer(gameReducer(base, action), second);
+        ctx.state = rendered;
+        runtime.noteStateChange(base, rendered);
+        await Promise.all([first, next]);
+        expect(autoSave).toHaveBeenCalledTimes(1);
+        expect(autoSave.mock.calls[0][0].messages).toBe(rendered.messages);
+        expect(runtime.isDirty()).toBe(false);
     });
 });
 

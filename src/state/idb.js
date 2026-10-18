@@ -58,17 +58,28 @@ function openDB() {
         // `blocked` instead of resolving — without this, every save/load (autosave
         // included) awaits forever with no error to surface. Fail loudly instead.
         let blockedTimer = null;
+        let gaveUp = false;
         const clearBlocked = () => { if (blockedTimer) { clearTimeout(blockedTimer); blockedTimer = null; } };
         request.onblocked = () => {
             console.error('[Persistence] IndexedDB open is blocked by another tab holding an older connection. Close other Quest Forge tabs.');
             if (!blockedTimer) {
                 blockedTimer = setTimeout(() => {
+                    gaveUp = true;
                     reject(new Error('Save storage is blocked by another open tab. Close other Quest Forge tabs and try again.'));
                 }, OPEN_BLOCKED_TIMEOUT_MS);
             }
         };
         request.onerror = () => { clearBlocked(); reject(request.error); };
-        request.onsuccess = () => { clearBlocked(); resolve(request.result); };
+        request.onsuccess = () => {
+            clearBlocked();
+            // A success that lands AFTER the blocked timeout rejected (the other
+            // tab closed late) resolves nothing — and the connection it opened
+            // would otherwise be held open with no `onversionchange`, exactly
+            // the leaked connection that blocks the NEXT version bump
+            // (2026-10-18 persistence P2). Close it; the caller already failed.
+            if (gaveUp) { request.result?.close?.(); return; }
+            resolve(request.result);
+        };
         request.onupgradeneeded = (event) => {
             const db = event.target.result;
             if (!db.objectStoreNames.contains(STORE_NAME)) {

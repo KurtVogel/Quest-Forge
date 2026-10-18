@@ -637,7 +637,9 @@ describe('a proposal whose every roll resolves to nothing (2026-09-02 audit)', (
             getState: state, dispatch, sendToLLM, playerAction: 'I draw steel.', setupMessageId: 'msg-setup-9',
         });
 
-        expect(outcome).toBeUndefined();
+        // The revealed rows ride back to the caller, which extracts the fiction
+        // that just became canon (2026-10-18 P2).
+        expect(outcome).toEqual({ revealedIds: ['msg-setup-9'] });
         expect(sendToLLM).not.toHaveBeenCalled();
         expect(dispatch).toHaveBeenCalledWith({ type: 'REVEAL_MESSAGE', payload: { id: 'msg-setup-9' } });
         expect(messagesFrom(dispatch)).toContain('no dice were rolled and the check is set aside');

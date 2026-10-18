@@ -44,7 +44,7 @@ import { markTurn, turnFlags } from './turnFlags.js';
 import { captureCallbackPayoff, captureInjection, captureProviderNote, captureUsage } from '../debug/memoryInspectorStore.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from '../components/Chat/turnVisibility.js';
 import { buildNudgePrompt, detectMissingEventsCue, extractNudgeEventFields } from '../components/Chat/missingEventsNudge.js';
-import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, pruneRecentRulings } from '../engine/roleplayCheck.js';
+import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, listRevealableSetupIds, pruneRecentRulings } from '../engine/roleplayCheck.js';
 import { detectRecallIntent } from './recallIntent.js';
 import { buildRecallDossier, buildRecallRecordBlock, describeRecallReceipt } from '../engine/recallDossier.js';
 
@@ -851,10 +851,19 @@ export function createTurnRunner({
      *   loot rides until a roll-free outcome lands; the lineage id keeps the
      *   heat ledger from counting one moment twice).
      */
-    const stageRoleplayCheck = (rolls, playerAction, { events = null, narrative = '', loot = null, setupFrom = null, supersedesId = null, challengeUsed = false } = {}) => {
+    const stageRoleplayCheck = (rolls, playerAction, { events = null, narrative = '', loot = null, setupFrom = null, ruling = null, supersedesId = null, challengeUsed = false } = {}) => {
         const flags = turnFlags(events);
+        // A challenge's re-ruling keeps the ORIGINAL setup — and houses the hop's
+        // own withheld row (2026-10-18 P2): its prose joins the re-woven setup and
+        // its id rides as `rulingMessageId`, so the reveal paths restore both. It
+        // used to stay hidden forever, with no row naming it.
+        const rulingText = ruling?.hidden && typeof ruling.content === 'string' ? ruling.content.trim() : '';
         const setup = setupFrom
-            ? { setupNarrative: setupFrom.setupNarrative || '', setupMessageId: setupFrom.setupMessageId || null }
+            ? {
+                setupNarrative: [setupFrom.setupNarrative || '', rulingText].filter(Boolean).join('\n\n'),
+                setupMessageId: setupFrom.setupMessageId || null,
+                rulingMessageId: rulingText ? (ruling.id || null) : (setupFrom.rulingMessageId || null),
+            }
             : { setupNarrative: flags.setupHidden ? narrative : '', setupMessageId: flags.setupHidden ? (flags.setupMessageId || null) : null };
         const proposal = buildRoleplayCheckProposal(rolls, playerAction, {
             challengeUsed,
@@ -884,13 +893,21 @@ export function createTurnRunner({
      * setup) extracts nothing; callers own the turn-shape gating (pending
      * resolution, table talk).
      *
+     * `narration` (2026-10-18 P2) names a REVEALED setup instead of the
+     * committed record: a set-aside makes the withheld fiction player-visible
+     * and DM-window canon, and the committed record's `hidden: true` snapshot
+     * predates the reveal — so an arrival or a discovery the setup narrated
+     * reached the journal cadence only, never the Scribe's facts / NPC updates
+     * nor the RAG scene row. A revealed setup runs the Scribe and the embed
+     * with NO loot audit: its declared loot was never granted by design (dice
+     * could have denied it), and the DM's next turn owns the economy.
+     *
      * @returns {boolean} true when a final narration existed and was extracted.
      */
-    const runPostTurnExtraction = (playerMessage, { auditCasts = true } = {}) => {
+    const runPostTurnExtraction = (playerMessage, { auditCasts = true, narration = null } = {}) => {
         const committed = getLastCommittedTurn();
-        const finalNarration = committed && !committed.hidden && committed.content?.trim()
-            ? committed
-            : null;
+        const finalNarration = narration
+            || (committed && !committed.hidden && committed.content?.trim() ? committed : null);
         if (!finalNarration) return false;
         // The state the turn LEFT (2026-10-13 P2): the turn record's replayed
         // projection, never a same-task ref read — that read is PRE-TURN by
@@ -935,7 +952,7 @@ export function createTurnRunner({
             // retries/reloads cannot double-grant. The narrated-cast backstop
             // rides these ordinary turns only — the victory-narration audit
             // (ChatPanel) recaps in-fight casts without the flag.
-            lootAudit: (!latest.combat?.active && finalNarration.id && !recallTurn) ? {
+            lootAudit: (!latest.combat?.active && finalNarration.id && !recallTurn && !narration) ? {
                 sourceId: `${finalNarration.id}:scribe-loot`,
                 appliedEvents: finalNarration.events || null,
                 getState,
@@ -961,6 +978,25 @@ export function createTurnRunner({
         }
         flushMemoryQueue().catch(() => {});
         return true;
+    };
+
+    /**
+     * A set-aside's revealed rows are canon now (2026-10-18 P2): the setup
+     * (and a challenge's ruling row) just became player-visible, so the Scribe
+     * and the scene embed read them once, stamped with the setup row's id —
+     * ✕ on it retracts what this pass minted. The rows' text is read from the
+     * store (the reveal flips a flag; the content was always there).
+     */
+    const extractRevealedSetup = (playerAction, revealedIds = []) => {
+        const messages = getState().messages || [];
+        const rows = revealedIds
+            .map(id => messages.find(m => m?.id === id))
+            .filter(m => m && typeof m.content === 'string' && m.content.trim());
+        if (rows.length === 0) return false;
+        return runPostTurnExtraction(playerAction, {
+            auditCasts: false,
+            narration: { id: rows[0].id, content: rows.map(m => m.content.trim()).join('\n\n') },
+        });
     };
 
     const finalizeRoleplayTurn = (playerAction) => {
@@ -1000,7 +1036,7 @@ export function createTurnRunner({
         // length probe read "no dice" forever.
         const newestRollBefore = newestRollMarker(getState().rollHistory);
         try {
-            await handleRequestedRolls(proposal.rolls, {
+            const outcome = await handleRequestedRolls(proposal.rolls, {
                 getState,
                 dispatch,
                 sendToLLM,
@@ -1008,6 +1044,7 @@ export function createTurnRunner({
                 preNarrated: proposal.preNarrated,
                 setupNarrative: proposal.setupNarrative,
                 setupMessageId: proposal.setupMessageId,
+                rulingMessageId: proposal.rulingMessageId,
                 onFollowUpRolls: (rolls, meta) => {
                     // The follow-up response's own events and narration: a
                     // withheld follow-up is the re-staged proposal's setup
@@ -1026,6 +1063,10 @@ export function createTurnRunner({
                 onFollowUpRejected: ({ attackAsCheck }) => sendRollCorrection({ attackAsCheck, playerAction: proposal.playerAction }),
                 pendingLoot: proposal.loot,
             });
+            // Every roll resolved to nothing and the withheld rows were revealed:
+            // the fiction is canon, extract it (the committed record is still
+            // marked hidden, so finalizeRoleplayTurn's pass would skip it).
+            if (outcome?.revealedIds?.length) extractRevealedSetup(proposal.playerAction, outcome.revealedIds);
             if (!stagedFollowUp) finalizeRoleplayTurn(proposal.playerAction);
         } catch (error) {
             // Two questions, asked once each. Did dice land? That decides what
@@ -1073,13 +1114,17 @@ export function createTurnRunner({
                 { pendingUserRow: challengeRow },
             );
             if (events?.requestedRolls?.length > 0) {
-                // Upheld/revised rulings are JSON-only responses; the original withheld
-                // setup is still the scene the player never saw, so it carries forward
-                // (`setupFrom`), and the same moment re-adjudicated is one heat entry.
+                // Upheld/revised rulings are JSON-only responses by contract; the
+                // original withheld setup is still the scene the player never saw,
+                // so it carries forward (`setupFrom`), and the same moment
+                // re-adjudicated is one heat entry. The hop's OWN committed row
+                // (hidden whenever it carries rolls) rides as `ruling` so any
+                // prose the DM did write is housed, not lost (2026-10-18 P2).
                 stageRoleplayCheck(events.requestedRolls, proposal.playerAction, {
                     events,
                     loot: proposal.loot,
                     setupFrom: proposal,
+                    ruling: getLastCommittedTurn(),
                     supersedesId: proposal.id,
                     challengeUsed: true,
                 });
@@ -1122,11 +1167,13 @@ export function createTurnRunner({
         // that never happened.
         const current = getState();
         const proposal = current.pendingRoleplayCheck;
-        const setupMessage = proposal?.setupMessageId
-            ? (current.messages || []).find(m => m.id === proposal.setupMessageId)
-            : null;
-        const revealSetup = !!(setupMessage?.hidden && setupMessage.content?.trim() && !proposal.preNarrated);
-        if (revealSetup) dispatch({ type: 'REVEAL_MESSAGE', payload: { id: proposal.setupMessageId } });
+        // The setup AND a challenge's ruling row (2026-10-18 P2), each while
+        // still hidden with text — then the revealed fiction is extracted
+        // (it is canon now; the committed record's hidden flag would skip it).
+        const revealedIds = listRevealableSetupIds(proposal, current.messages);
+        const revealSetup = revealedIds.length > 0;
+        for (const id of revealedIds) dispatch({ type: 'REVEAL_MESSAGE', payload: { id } });
+        if (revealSetup) extractRevealedSetup(proposal.playerAction, revealedIds);
         if (proposal) {
             // A set-aside ruling still binds the DM: an ordinary proposal must return
             // unchanged on a retry, and an upheld final ruling stays final.

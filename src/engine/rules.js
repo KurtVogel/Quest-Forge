@@ -4,7 +4,7 @@
  */
 import { CLASSES, FIGHTING_STYLE_EFFECTS } from '../data/classes.js';
 import { MAGIC_BONUS_MAX, MAX_ARMOR_BASE_AC, MAX_SHIELD_AC } from '../data/items.js';
-import { MAX_ROLL_DC } from '../config/contentLimits.js';
+import { DEFAULT_ROLL_DC, MAX_ROLL_DC } from '../config/contentLimits.js';
 import { isShieldItem, isWeaponItem, isWornArmor } from './equipment.js';
 
 /**
@@ -542,9 +542,9 @@ export function canonicalRollKey(value) {
  * resolver grants (`result.isCritical`). A natural 1 is NOT an auto-failure
  * outside attacks (the resolver compares the total) — matched here.
  */
-/** The one DC clamp behind the odds: a finite DC inside 0..MAX_ROLL_DC, else the standard 10. */
+/** The one DC clamp behind the odds: a finite DC inside 0..MAX_ROLL_DC, else the standard `DEFAULT_ROLL_DC`. */
 function clampRollDc(dc) {
-    return Number.isFinite(dc) ? Math.min(MAX_ROLL_DC, Math.max(0, dc)) : 10;
+    return Number.isFinite(dc) ? Math.min(MAX_ROLL_DC, Math.max(0, dc)) : DEFAULT_ROLL_DC;
 }
 
 export function d20SuccessChance(modifier, dc, { advantage = false, disadvantage = false } = {}) {

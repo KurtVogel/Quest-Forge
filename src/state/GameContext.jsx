@@ -63,26 +63,35 @@ export function GameProvider({ children }) {
 
     // The dirty-flag + debounce choreography lives in autosaveRuntime.js
     // (extracted 2026-08-27 so it is testable without a DOM); this component
-    // only wires its three entry points to React's lifecycle. Created in an
-    // effect (never during render — react-hooks/refs) and held in a ref; every
-    // consumer below runs post-mount, after this first effect has populated it.
+    // only wires its three entry points to React's lifecycle. Held in a ref
+    // and created ON DEMAND (never during render — react-hooks/refs): the
+    // provider's own effect runs AFTER its children's, so a panel flushing in
+    // a mount effect used to find no runtime and the flush was a silent no-op
+    // (2026-10-18 persistence nit; every live caller flushes on a user action,
+    // so it was dormant). The getter is the one creation site for the effect
+    // and the flush alike.
     const autosaveRuntimeRef = useRef(null);
+    const getAutosaveRuntime = useCallback(() => {
+        if (!autosaveRuntimeRef.current) {
+            autosaveRuntimeRef.current = createAutosaveRuntime({
+                getState: () => stateRef.current,
+                autoSave,
+                showSaveToast,
+            });
+        }
+        return autosaveRuntimeRef.current;
+    }, [showSaveToast]);
     useEffect(() => {
-        const runtime = createAutosaveRuntime({
-            getState: () => stateRef.current,
-            autoSave,
-            showSaveToast,
-        });
-        autosaveRuntimeRef.current = runtime;
+        const runtime = getAutosaveRuntime();
         return () => {
             runtime.dispose();
-            autosaveRuntimeRef.current = null;
+            if (autosaveRuntimeRef.current === runtime) autosaveRuntimeRef.current = null;
         };
-    }, [showSaveToast]);
+    }, [getAutosaveRuntime]);
 
     const flushAutoSave = useCallback(
-        async (options) => autosaveRuntimeRef.current?.flush(options),
-        []
+        async (options) => getAutosaveRuntime().flush(options),
+        [getAutosaveRuntime]
     );
 
     // Auto-save settings when they change. Settings carries the LLM API key —

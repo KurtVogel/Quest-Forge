@@ -55,11 +55,32 @@ export function isLowLevelSolo(character, party = []) {
 export function describeHeroIncapacity(character) {
     if (!character || typeof character !== 'object') return null;
     if (character.isDead || character.lowLevelDefeat || character.dying) return null;
-    const name = typeof character.name === 'string' && character.name.trim() ? character.name.trim() : 'The hero';
+    const name = heroName(character);
     if (Number.isFinite(character.currentHP) && character.currentHP <= 0) {
         return { kind: 'stable', condition: 'unconscious', text: `${name} is unconscious at 0 HP (stable, not dying)` };
     }
     const condition = getIncapacitatingCondition(character.conditions);
     if (condition) return { kind: 'condition', condition, text: `${name} is ${condition}` };
     return null;
+}
+
+const heroName = (character) => (typeof character.name === 'string' && character.name.trim() ? character.name.trim() : 'The hero');
+
+/**
+ * Every state in which the hero cannot ACT (2026-10-18 roll-resolution P2):
+ * dead, the low-level defeat, dying, and `describeHeroIncapacity`'s stable /
+ * condition cases. The out-of-combat check lane reads it — a DYING hero asked
+ * for an Athletics check used to roll `1d20+6` at full modifier, a stable or
+ * paralyzed hero both Extra Attack strikes — the third actor site of the 10-17
+ * rule (CAST_SPELL, the exchange validator, now the resolver). Saving throws
+ * are NOT gated by it (a CON save against poison while dying is legitimate);
+ * death saves have their own lane. Returns `{ kind, text }` or null.
+ */
+export function describeHeroCannotAct(character) {
+    if (!character || typeof character !== 'object') return null;
+    const name = heroName(character);
+    if (character.isDead) return { kind: 'dead', text: `${name} is dead` };
+    if (character.lowLevelDefeat) return { kind: 'defeated', text: `${name} is down at 0 HP (defeated)` };
+    if (character.dying) return { kind: 'dying', text: `${name} is dying at 0 HP` };
+    return describeHeroIncapacity(character);
 }

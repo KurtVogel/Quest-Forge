@@ -92,6 +92,10 @@ export function isAutosavableState(state) {
  * state ref predates the re-render, so a bare flush would persist stale state.
  * Replay works for ANY action, unlike the old named-hint chain where an
  * unknown hint was a silent no-op (DECISIONS.md 2026-07-26 → 2026-07-30).
+ * Since 2026-10-18 the replay is the flush's FALLBACK only (the runtime writes
+ * the action's own re-render — a reducer that rolls a die or mints an id does
+ * not replay to the live result); it still tells the runtime there is
+ * something to save.
  */
 export function buildAutosaveSnapshot(state, { action = null, reduce = gameReducer } = {}) {
     if (!isAutosavableState(state)) return null;

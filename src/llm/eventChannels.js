@@ -20,7 +20,7 @@
 import { canonicalEnemyId, validateEnemyAttackBonus, clampEnemyAC, clampEnemyHP, isDeclaredDowned, typeEnemyFields } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatWire.js';
 import { dedupeCastTargets } from '../engine/spellcasting.js';
-import { LOCATION_NAME_MAX, MAX_COIN_EVENT, MAX_ROLL_DC } from '../config/contentLimits.js';
+import { DEFAULT_ROLL_DC, LOCATION_NAME_MAX, MAX_COIN_EVENT, MAX_ROLL_DC } from '../config/contentLimits.js';
 import { toFiniteNumber } from '../data/items.js';
 import { toFlag } from '../engine/text.js';
 import { normalizeConditionName, findSkillInText, CONDITION_LIST_CAP } from '../engine/rules.js';
@@ -163,7 +163,7 @@ export function normalizeRequestedRoll(r) {
         // already used 10 for exactly that reason. One default, both paths.
         // Coerced ("15" → 15) and clamped 0..30 like sanitizeProposalRoll —
         // an unclamped `-40` auto-succeeded and `1e9` auto-failed (2026-09-05).
-        dc: Math.round(clamp(r.dc, 0, MAX_ROLL_DC, 10)),
+        dc: Math.round(clamp(r.dc, 0, MAX_ROLL_DC, DEFAULT_ROLL_DC)),
         description,
         // The public adjudication: string-or-empty (2026-10-05). `String(r.reason
         // || '')` persisted an object as "[object Object]" on the proposal, the

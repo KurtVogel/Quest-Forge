@@ -876,6 +876,54 @@ describe('failure surfacing', () => {
             vi.useRealTimers();
         }
     });
+
+    it('closes a connection whose open succeeds AFTER the blocked timeout gave up (2026-10-18 persistence P2)', async () => {
+        const { vi } = await import('vitest');
+        vi.useFakeTimers();
+        try {
+            let req = null;
+            globalThis.indexedDB = {
+                open: () => {
+                    req = {};
+                    queueMicrotask(() => req.onblocked?.());
+                    return req;
+                },
+            };
+            const guarded = expect(loadGame('slot-1')).rejects.toThrow(/blocked by another open tab/);
+            await vi.advanceTimersByTimeAsync(9000);
+            await guarded;
+            // The other tab closes late and the open succeeds into a promise
+            // that already rejected: the connection must be closed, not leaked
+            // (a leaked one blocks the NEXT version bump for 8 s).
+            const db = { close: vi.fn(), transaction: vi.fn() };
+            req.result = db;
+            req.onsuccess();
+            expect(db.close).toHaveBeenCalledTimes(1);
+            expect(db.transaction).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});
+
+describe('ensureLaneBlobs — a failed blob put aborts the save (2026-10-18 persistence nit, the contract pinned)', () => {
+    it('saveGame rejects and commits NO record when a portrait put fails', async () => {
+        const portrait = `data:image/jpeg;base64,${'Q'.repeat(3000)}`;
+        const state = makeGameState({ character: { ...makeGameState().character, portraitUrl: portrait } });
+        const originalPut = IDBObjectStore.prototype.put;
+        IDBObjectStore.prototype.put = function patchedPut(value, key) {
+            if (this.name === 'portraits') throw new Error('disk full');
+            return originalPut.call(this, value, key);
+        };
+        try {
+            await expect(saveGame('slot-blob', state)).rejects.toThrow();
+        } finally {
+            IDBObjectStore.prototype.put = originalPut;
+        }
+        // Loud failure, nothing half-committed: no metadata record, no payload.
+        expect((await listSaves()).map(s => s.slotId)).toEqual([]);
+        await expect(loadGame('slot-blob')).resolves.toBeNull();
+    });
 });
 
 describe('projectSaveMetadata — the ONE typed list row (2026-09-10 audit P1)', () => {

@@ -50,6 +50,7 @@ import {
 } from './enemyStats.js';
 import { COMBAT_PHASES, describeHeroIncapacity, isCompanionActive, isEnemyActive, isLowLevelSolo } from './combatPredicates.js';
 import { isWeaponItem } from './equipment.js';
+import { companionAttackBonus, companionWeaponBonus } from './companionGear.js';
 import { reviveHero } from './progression.js';
 import {
     buildSustainedSpell,
@@ -944,15 +945,6 @@ function resolvePlayerSlots(ctx) {
     };
 }
 
-// Companion magic-weapon bonus (COMPANION_GEAR_SPEC.md D4): a flat additive field set by
-// the reducer when a gifted weapon carries +1..+3, consumed here at roll time — the
-// spellAcBonus pattern. Absent on pre-gear saves ⇒ 0.
-function companionWeaponBonus(companion) {
-    const n = Number(companion?.weaponBonus);
-    if (!Number.isFinite(n) || n <= 0) return 0;
-    return Math.min(3, Math.trunc(n));
-}
-
 // Fold the magic bonus into the damage notation so the dice log shows the true roll
 // ('1d8+2' with a +1 weapon rolls as '1d8+3').
 function companionDamageNotation(companion) {
@@ -975,12 +967,10 @@ function resolveCompanionAttack({ companion, target, events, situationalRuling =
         ? { mode: 'advantage', reason: 'flanking' }
         : situationalRuling;
     const modifiers = conditionAwareAttackModifiers(companion.conditions, target.conditions, ruling.advantage || companionFlanking, ruling.disadvantage || !!target.defending);
-    // Numeric belt (2026-09-09 audit P1): a string attackBonus from a pre-fix
-    // save concatenated ("+4" + 0 → "+40") and threw out of EVERY exchange —
-    // a deadlock, since rests and companion removal are refused mid-fight.
-    const baseAttackBonus = Number(companion.attackBonus);
+    // The one companion to-hit composer (engine/companionGear.js) — the
+    // out-of-combat `companion_attack` lane reads the same number.
     const outcome = resolveAttackRoll({
-        attackBonus: (Number.isFinite(baseAttackBonus) ? baseAttackBonus : 2) + companionWeaponBonus(companion),
+        attackBonus: companionAttackBonus(companion),
         description: `${companion.name} attacks ${target.name}`,
         modifiers,
         targetAc: target.ac,

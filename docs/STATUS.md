@@ -6,7 +6,19 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-17 (the 10-17 strengthening queue cleared — 1 P1 + 7 P2 across dice-engine + combat-exchange; the 10-16 sweeps below)_
+_Last updated: 2026-10-18 (the 10-18 strengthening queue cleared — 7 P2 across roll-resolution + persistence; the 10-17 and 10-16 sweeps below)_
+
+## 2026-10-18 — strengthening queue cleared: 7 P2 across roll-resolution + persistence (Lap 1) — pushed AND deployed
+
+**Ruling: DECISIONS.md 2026-10-18, seven numbered points.** Vesa: look at the latest on the strengthening queue, implement, push, deploy. Every row of the 10-18 audit is built and pinned; two settled behaviors moved and are recorded: the out-of-combat check lane gates the hero like CAST_SPELL and the exchange do (saves still roll), and the autosave action flush writes the action's own re-render instead of a reducer replay (revising 2026-09-02's flush coverage). \`npm test\` 3,804 / 231 files green (+36 in \`rollResolver.queue1018.test.js\`, \`turnOrchestrator.queue1018.test.js\`, the rewritten flush block in \`autosaveRuntime.test.js\`, two persistence pins), lint clean, production build green, \`firebase deploy --only hosting\` released from this machine.
+
+**What a player can notice:** a dying, stabilized, defeated or paralyzed hero no longer rolls an Athletics check or two sword strikes at full modifier when the DM asks — one "Roll skipped" line says why, the check is set aside and the withheld scene is shown; a companion with a magic blade hits as hard at a rope as in a fight; a damage roll the DM forgot the dice for is skipped with a line instead of a 1d4 labelled "(null)"; after "Change approach" (or a proposal the engine could not roll) the revealed scene now reaches the Scribe and the memory store, not only the journal — and if the DM wrote a paragraph when upholding a challenged ruling, that paragraph is shown too instead of staying hidden forever; a Deepen memory or a look edit now saves exactly what is on screen (the saved bond-turn beat could open a scene apart from the live one).
+
+**What changed underneath:** \`describeHeroCannotAct\` (combatPredicates) read by \`resolvePlayerRoll\`; \`companionAttackBonus\` / \`companionWeaponBonus\` on \`engine/companionGear.js\`, both lanes, \`engineModifier\`; \`DEFAULT_ROLL_DC\` (contentLimits) at the parser, the odds clamp and the resolver belts; the visible damage-roll drop; \`rulingMessageId\` + \`listRevealableSetupIds\` (roleplayCheck), \`stageRoleplayCheck({ ruling })\`, \`extractRevealedSetup\` / \`runPostTurnExtraction({ narration })\`, \`handleRequestedRolls\` → \`{ revealedIds }\`; the autosave flush's \`awaitRender\` + \`FLUSH_RENDER_GRACE_MS\` with the covered-lineage code deleted; \`getAutosaveRuntime\` in GameContext; \`openDB\`'s late-success close. CLAUDE / AGENTS twins amended.
+
+**Not exercised live:** everything is pinned by vitest; the "Roll skipped" line and the revealed-setup extraction are the player-facing pieces and wait for a real dying-hero check / set-aside (the next grand run covers both). The strengthening queue is EMPTY; the WOW W1 (NPC ties, 10-07) and memory M1 (lexical RRF) rows still wait for Vesa's pick.
+
+**Next (unchanged):** the WOW slice's live proof (one NPC driven to trusted, two scenes watched); the next grand run on Sol with the fight staging on (OpenAI prepay is at zero — top up first); the commitment probe's multi-arm run; \`eval:death\` for the downed-hero bullet and the stable-hero pass.
 
 ## 2026-10-17 — strengthening queue cleared: 1 P1 + 7 P2 across dice-engine + combat-exchange (Lap 1) — pushed AND deployed (by Vesa, locally, at `2361f94`)
 

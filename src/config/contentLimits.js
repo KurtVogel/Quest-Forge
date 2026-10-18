@@ -95,6 +95,16 @@ export const ROLL_HISTORY_CAP = 50;
 export const MAX_ROLL_DC = 30;
 
 /**
+ * THE DC default (2026-10-18 roll-resolution P2): the solo-play standard
+ * obstacle — never 15, the prompt's own ladder says so. The parser stamps it
+ * on every roll that names none; the resolver's and the odds line's `??`
+ * belts (a roll built by hand in a test, a legacy stored proposal) restate it
+ * from here. Three sites spelled it 10 and one 12, so an `npc_save` without a
+ * DC read 10 while its code said 12.
+ */
+export const DEFAULT_ROLL_DC = 10;
+
+/**
  * THE hero identity clamp table (2026-10-06 character-vault P2): the creation
  * wizard (`createCharacter`), the vault import (`sanitizeCharacter`) and the
  * LOAD_GAME heal (`healLoadedCharacter`) each wrote these six numbers by hand
