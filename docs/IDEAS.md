@@ -3586,3 +3586,28 @@ rolls `1d4`; the lane meant a weapon — filter by `isWeaponItem` first. Compani
 for the mechanics and wrong on every display — give added dice a row or a field, never only a
 bigger total. Payoff: a stable hero who stays down until healed, a fight that cannot be fought
 from unconsciousness, a Dice Log that is the hero's, and arithmetic a DM can check.
+
+### [strengthening] A lane gated for every other actor is gated for the hero at every lane; a replay is a contract with the reducer's determinism; a comment that states a drop rule is a test; a hop that keeps the original setup must house the reply it hid — status: `idea` (2026-10-18)
+Four rules from the roll-resolution + persistence Lap-1 pass (2026-10-18), all four reproduced or
+traced with a throwaway test over the real resolver, parser, reducer and autosave policy. **(1)** The
+10-17 hero gate closed the exchange (`describeHeroIncapacity`) and CAST_SPELL had closed the
+out-of-combat cast lane in September — the out-of-combat CHECK lane was never asked: a dying hero at
+0 HP, Unconscious, rolls Athletics at full modifier and the chat cheers the natural 20; a paralyzed
+hero rolls both Extra Attack strikes. When a hero gate lands on one lane, grep every lane that rolls
+the hero's dice the same day. **(2)** The autosave flush replays the panel's action through the pure
+reducer because the caller's ref predates the re-render — a contract that holds only while nothing
+inside the replayed reducer rolls a die, mints an id or reads a clock. `UPDATE_NPC` does all three:
+a Deepen-memory rescue moment turned a bond, the live beat opened at message 46, forty replays gave
+46 or 40, and the runtime marked the divergent snapshot clean. The die and the clock a reducer needs
+come IN on the action (`rollRelationshipBeat({ roll })` already injects its die); grep `rollDie` /
+`Date.now` / `Math.random` under every flushed handler. **(3)** "An unparseable notation drops the
+roll instead of inventing a 1d4" sits over `roll.notation || '1d4'`, so a MISSING notation rolls
+the invented die and prints `(null)`. Every "never" / "instead of" in a comment names an input —
+run it. **(4)** The challenge hop withholds the DM's uphold prose under its own message id and then
+points the re-staged proposal at the ORIGINAL setup; the hidden row has no reveal path and the
+revealed setup (either reveal path) is never Scribe-extracted or embedded. Every `hidden: true`
+commit names the id that will reveal or re-weave it, or it is lost by construction. Companion: a
+DECISIONS promise about an actor's number ("the weapon bonus is applied to hit AND damage at roll
+time") is held against every lane that rolls that actor — the resolver's companion attack rolls
+without it. Payoff: a downed hero who cannot roll their way up, a save that is the state the player
+left, a dice line that never prints `null`, and a DM's ruling that is never silently thrown away.
