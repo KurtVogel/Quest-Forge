@@ -330,7 +330,7 @@ describe('hero tells — queue sweep 2026-09-24 (scene window, id claim, witness
         // speaker and the party all saw nothing — it passes through on its voice.
         const remark = prepareHeroTellReports([{ text: 'the pipe', kind: 'habit', witnesses: ['Tammo'], voiced: true, voicedBy: 'Maren' }], { partyNames: ['Osma'] });
         expect(remark).toHaveLength(1);
-        expect(remark[0]).toMatchObject({ witnesses: [], voiced: true, voicedBy: 'Maren' });
+        expect(remark[0]).toMatchObject({ witnesses: [], voiced: true, voicedBy: ['Maren'] });
         expect(prepareHeroTellReports([null, 'x', [], { text: 'y', kind: 'habit', witnesses: ['Maren'] }], {})).toHaveLength(1);
     });
 

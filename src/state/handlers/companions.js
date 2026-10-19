@@ -19,13 +19,13 @@ const MAX_PARTY_SIZE = 4;
  * (`findCompanionRecord`): a shared first name never lands the moment on the
  * wrong person. A companion without a roster record gets no moment.
  */
-function stampPartyMoment(npcs, companion, { kind, text, stamp, messageCount }) {
+function stampPartyMoment(npcs, companion, { kind, text, stamp, messageCount, messages = null }) {
     const record = findCompanionRecord(npcs, companion?.name);
     if (!record) return npcs;
     const moment = { text, kind, salience: 4, at: Date.now(), ...(Number.isFinite(messageCount) && { atMessage: messageCount }) };
     const next = normalizeNpcRecord({
         ...record,
-        bondMoments: appendBondMoments(record.bondMoments, [moment], { messageCount }),
+        bondMoments: appendBondMoments(record.bondMoments, [moment], { messageCount, messages }),
         ...(Number.isFinite(messageCount) && { [stamp]: messageCount }),
     });
     return npcs.map(npc => (npc === record ? next : npc));
@@ -55,6 +55,7 @@ export const handlers = {
                 text: `${added.name} joined the hero's party${added.role ? ` as ${added.role}` : ''}.`,
                 stamp: 'joinedPartyMessage',
                 messageCount: (state.messages || []).length,
+                messages: state.messages,
             }),
         };
     },
@@ -133,6 +134,7 @@ export const handlers = {
                 text: `${target.name} left the hero's party.`,
                 stamp: 'leftPartyMessage',
                 messageCount: (state.messages || []).length,
+                messages: state.messages,
             }),
             messages: [...state.messages, systemMessage(`👤 ${target.name} is no longer travelling with the party.`)],
         };

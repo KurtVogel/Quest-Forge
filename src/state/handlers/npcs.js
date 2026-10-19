@@ -141,6 +141,7 @@ export const handlers = {
         let ambiguous = null;
         let nextNpcs = upsertNpc(state.npcs, action.payload, {
             messageCount,
+            messages: state.messages,
             presenceText,
             onAmbiguous: (candidates) => { ambiguous = candidates; },
         });
@@ -199,8 +200,8 @@ export const handlers = {
             // current count, and a second update of the same person in the
             // same scene (the DM lane and the Scribe lane both touching her)
             // used to eat it before the DM ever rendered it (2026-10-07).
-            const pendingBeat = session?.relationshipBeat ? sanitizeRelationshipBeat(session.relationshipBeat) : null;
             const rows = (state.messages || []).length;
+            const pendingBeat = session?.relationshipBeat ? sanitizeRelationshipBeat(session.relationshipBeat, { maxMessageCount: rows }) : null;
             if (pendingBeat && beatTargets(pendingBeat, touched) && rows >= pendingBeat.opensAtMessage
                 && !(Number.isFinite(pendingBeat.mintedAtMessage) && rows <= pendingBeat.mintedAtMessage)) {
                 session = { ...session, relationshipBeat: null };
@@ -217,7 +218,7 @@ export const handlers = {
             const turn = (!touched.rosterTier || touched.rosterTier === 'character') ? detectBondTurn(before, touched) : null;
             if (turn) {
                 const count = (state.messages || []).length;
-                const pending = sanitizeRelationshipBeat(session?.relationshipBeat);
+                const pending = sanitizeRelationshipBeat(session?.relationshipBeat, { maxMessageCount: count });
                 const sameTurn = pending && pending.mode === 'turn' && beatTargets(pending, touched) && !isRelationshipBeatExpired(pending, count);
                 const beat = sameTurn
                     ? { ...pending, stage: turn.stage, since: turn.since }

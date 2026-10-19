@@ -231,6 +231,10 @@ export const BEAT_WINDOW_MESSAGES = 24;
 export const BEAT_COOLDOWN_MESSAGES = 40;
 /** The engine-rolled timing die: 0–4 scenes of delay. */
 export const BEAT_TIMING_DIE_SIDES = 5;
+/** The longest delay any beat die can put between a window's mint and its
+ * opening (the load clamp's rule, 2026-10-19: a window opening further from
+ * its mint than this could not have been minted by the engine). */
+export const MAX_BEAT_DELAY_MESSAGES = (BEAT_TIMING_DIE_SIDES - 1) * BEAT_SCENE_MESSAGES;
 /**
  * The two reasons a beat is minted (2026-10-07, wow npc-relationships):
  * `absence` — the cadence's reach-out after a long time apart (above);
@@ -324,8 +328,14 @@ export function mintTurnBeat(npc, turn, { messageCount, delayScenes = 0 } = {}) 
     };
 }
 
-/** Load-boundary twin (the livingWorldSession pattern): complete-or-null. */
-export function sanitizeRelationshipBeat(raw) {
+/**
+ * Load-boundary twin (the livingWorldSession pattern): complete-or-null.
+ * With `maxMessageCount` a window that could not have been minted is junk
+ * (2026-10-19, the hero-tell beat's rule): a mint past the transcript, or an
+ * opening more than the longest die delay after its mint — a future window
+ * used to survive LOAD_GAME and sit "pending" over every cadence mint.
+ */
+export function sanitizeRelationshipBeat(raw, { maxMessageCount } = {}) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     const npcName = text(raw.npcName);
     const opens = Number(raw.opensAtMessage);
@@ -334,6 +344,10 @@ export function sanitizeRelationshipBeat(raw) {
     const stage = RELATIONSHIP_STAGES.includes(raw.stage) ? raw.stage : null;
     if (!stage) return null;
     const minted = Number(raw.mintedAtMessage);
+    if (Number.isFinite(maxMessageCount)) {
+        const mintedAt = Number.isFinite(minted) ? minted : opens;
+        if (mintedAt > Math.max(0, Math.floor(maxMessageCount)) || opens - mintedAt > MAX_BEAT_DELAY_MESSAGES) return null;
+    }
     const mode = RELATIONSHIP_BEAT_MODES.has(raw.mode) ? raw.mode : 'absence';
     const since = text(raw.since).slice(0, NPC_BOND_MOMENT_MAX) || null;
     // A turn beat without the moment that earned it is junk: the block

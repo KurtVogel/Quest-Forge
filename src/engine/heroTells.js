@@ -23,9 +23,9 @@
  * Lives in engine/ (not llm/) so reducer handlers never import from llm/.
  */
 import { containment, tokenSet } from './textMatch.js';
-import { clampMessageStamp, conversationalAgeSince } from './replayLedger.js';
+import { clampMessageStamp, conversationalAgeSince, conversationalGap } from './replayLedger.js';
 import { BOND_SCENE_WINDOW_MESSAGES, namesMatch } from './npcRoster.js';
-import { BEAT_COOLDOWN_MESSAGES, BEAT_SCENE_MESSAGES, BEAT_WINDOW_MESSAGES } from './relationshipArc.js';
+import { BEAT_COOLDOWN_MESSAGES, BEAT_SCENE_MESSAGES, BEAT_WINDOW_MESSAGES, MAX_BEAT_DELAY_MESSAGES } from './relationshipArc.js';
 
 export const HERO_TELL_KINDS = new Set(['manner', 'habit', 'principle', 'intimate']);
 export const HERO_TELL_TEXT_MAX = 160;
@@ -34,7 +34,9 @@ export const HERO_TELL_NAME_MAX = 80;
 export const MAX_HERO_TELLS = 24;
 export const MAX_HERO_TELL_WITNESSES = 8;
 export const MAX_HERO_TELL_SIGHTINGS = 8;
-/** Sightings closer than this (raw rows) are the same scene: one sighting. */
+/** Sightings closer than this (CONVERSATIONAL rows since 2026-10-19 — the
+ * bond family's one scene clock, `conversationalGap`) are the same scene:
+ * one sighting. */
 export const HERO_TELL_SCENE_MESSAGES = BOND_SCENE_WINDOW_MESSAGES;
 /** Sightings in DIFFERENT scenes before a tell is a pattern anyone may voice. */
 export const HERO_TELL_ESTABLISH_SCENES = 3;
@@ -236,13 +238,15 @@ export function findHeroTellMatch(tells = [], candidate = {}) {
 /**
  * Merge one Scribe pass's reports into the record. A report that matches a
  * held tell adds a SIGHTING only when it comes from a different scene (more
- * than HERO_TELL_SCENE_MESSAGES rows since the last one — the same scene
- * restated three times is still one sighting), unions the witnesses, and
- * keeps the richer text (a fragment never clobbers a fuller wording). A new
- * pattern joins with its first sighting. Reports are capped per pass, and
- * the store evicts the least-established, least-seen tell past the cap.
+ * than HERO_TELL_SCENE_MESSAGES conversational rows since the last one,
+ * judged on the transcript when the caller passes `messages`, the raw gap
+ * otherwise — the same scene restated three times is still one sighting),
+ * unions the witnesses, and keeps the richer text (a fragment never clobbers
+ * a fuller wording). A new pattern joins with its first sighting. Reports are
+ * capped per pass, and the store evicts the least-established, least-seen
+ * tell past the cap.
  */
-export function recordHeroTells(existing = [], reports = [], { messageCount } = {}) {
+export function recordHeroTells(existing = [], reports = [], { messageCount, messages = null } = {}) {
     const now = Number.isFinite(messageCount) ? Math.max(0, Math.floor(messageCount)) : 0;
     let tells = Array.isArray(existing) ? existing.filter(Boolean) : [];
     const accepted = (Array.isArray(reports) ? reports : [])
@@ -300,8 +304,8 @@ export function recordHeroTells(existing = [], reports = [], { messageCount } = 
         // Scribe re-reports every turn never left scene one. The sibling
         // rule (`appendBondMoments`) measures from the held moment the same way.
         const heldSightings = Array.isArray(held.sightings) ? held.sightings : [];
-        const lastSighting = heldSightings.length > 0 ? heldSightings[heldSightings.length - 1] : -Infinity;
-        const newScene = sighted && now - lastSighting > HERO_TELL_SCENE_MESSAGES;
+        const lastSighting = heldSightings.length > 0 ? heldSightings[heldSightings.length - 1] : null;
+        const newScene = sighted && (lastSighting === null || conversationalGap(lastSighting, now, { messages }) > HERO_TELL_SCENE_MESSAGES);
         // A remark is not a sighting (2026-09-29 playtest): a dockhand who had
         // only HEARD of the habit voiced it, the Scribe listed him, and the
         // record gained a witness who never saw the hero do it. Witnesses are
@@ -314,7 +318,12 @@ export function recordHeroTells(existing = [], reports = [], { messageCount } = 
             ...held,
             text: richer,
             witnesses,
-            public: held.public || report.public,
+            // A remark alone never makes a held private tell PUBLIC
+            // (2026-10-19 hero-tells P2 — the 10-07 rule gated the mint
+            // only): `public` is a property of the SIGHTING ("before
+            // bystanders"), and a dockhand repeating a thing he heard is
+            // exactly the case the voiced-only lane exists for.
+            public: held.public || (sighted && report.public),
             sightings: newScene ? normalizeSightings([...(held.sightings || []), now]) : held.sightings,
             lastSeenMessage: sighted ? Math.max(lastSeen === -Infinity ? now : lastSeen, now) : held.lastSeenMessage,
         };
@@ -353,25 +362,41 @@ export function recordHeroTells(existing = [], reports = [], { messageCount } = 
  * only spent a slot. A remark ALONE (`voiced` without `sighted`) is not a
  * sighting (2026-09-29 playtest, 2026-10-07 P2): nobody saw anything, so it
  * carries no witnesses at all and passes through on its voice.
+ *
+ * The hero is never a witness of themself (2026-10-19 hero-tells P2): the
+ * Scribe is told "exactly who was present" and the hero is always present,
+ * so three solo sightings `witnesses: ['Astra']` established a tell nobody
+ * on record had watched form — rendered as HEARSAY in a stranger scene and
+ * offered on arrival as "the hero's known manner". `heroName` is stripped
+ * from `witnesses` and `voicedBy`; a sighting left with nobody is dropped
+ * whatever its `public` flag (today's rule: a reputation needs someone who
+ * saw it), and a remark the hero alone made about themself is nothing.
  */
-export function prepareHeroTellReports(reports = [], { partyNames = [] } = {}) {
+export function prepareHeroTellReports(reports = [], { partyNames = [], heroName = '' } = {}) {
     const party = normalizeWitnesses(partyNames);
+    const hero = text(heroName, HERO_TELL_NAME_MAX);
+    const notHero = (names) => normalizeWitnesses(names)
+        .filter(name => !hero || !(name.toLowerCase() === hero.toLowerCase() || namesMatch(name, hero)));
     const out = [];
     for (const report of (Array.isArray(reports) ? reports : [])) {
         if (!report || typeof report !== 'object' || Array.isArray(report)) continue;
+        const namedVoices = normalizeWitnesses(report.voicedBy);
+        const voicedBy = notHero(namedVoices);
         const voicedOnly = report.voiced === true && report.sighted !== true;
         if (voicedOnly) {
-            out.push({ ...report, witnesses: [] });
+            // The speaker named was the hero and nobody else: no remark.
+            if (namedVoices.length > 0 && voicedBy.length === 0) continue;
+            out.push({ ...report, witnesses: [], voicedBy });
             continue;
         }
         const intimate = normalizeHeroTellKind(report.kind) === 'intimate';
-        const witnesses = normalizeWitnesses([
+        const witnesses = notHero([
             ...(Array.isArray(report.witnesses) ? report.witnesses : (typeof report.witnesses === 'string' ? [report.witnesses] : [])),
-            ...(report.voiced === true ? normalizeWitnesses(report.voicedBy) : []),
+            ...(report.voiced === true ? voicedBy : []),
             ...(intimate ? [] : party),
         ]);
         if (witnesses.length === 0) continue;
-        out.push({ ...report, witnesses });
+        out.push({ ...report, witnesses, voicedBy });
     }
     return out;
 }
@@ -558,14 +583,23 @@ export function mintHeroTellBeat(candidate, { messageCount, delayScenes = 0 } = 
     };
 }
 
-/** Load-boundary twin: complete-or-null. */
-export function sanitizeHeroTellBeat(raw) {
+/**
+ * Load-boundary twin: complete-or-null. With `maxMessageCount` (the load
+ * twin's transcript length, the cadence's live count) a window that could
+ * not have been minted is junk (2026-10-19 hero-tells P2): a mint past the
+ * transcript, or an opening more than the die's longest delay after its
+ * mint — `{ opensAtMessage: 9999 }` at a 60-row save used to survive LOAD_GAME
+ * and block every cadence mint as "pending". A legitimately delayed window
+ * (minted now, opening up to four scenes on) is kept.
+ */
+export function sanitizeHeroTellBeat(raw, { maxMessageCount } = {}) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     const tellId = text(raw.tellId, 80);
     const opens = Number(raw.opensAtMessage);
     const closes = Number(raw.closesAtMessage);
     if (!tellId || !Number.isFinite(opens) || !Number.isFinite(closes) || closes < opens) return null;
     const minted = Number(raw.mintedAtMessage);
+    if (!isBeatMintable({ minted: Number.isFinite(minted) ? minted : opens, opens, maxMessageCount })) return null;
     return {
         tellId,
         mode: HERO_TELL_BEAT_MODES.has(raw.mode) ? raw.mode : 'remark',
@@ -574,6 +608,12 @@ export function sanitizeHeroTellBeat(raw) {
         opensAtMessage: Math.max(0, Math.floor(opens)),
         closesAtMessage: Math.max(0, Math.floor(closes)),
     };
+}
+
+/** A window is junk when its mint lies past the transcript or its opening more than the longest delay after its mint. */
+function isBeatMintable({ minted, opens, maxMessageCount }) {
+    if (!Number.isFinite(maxMessageCount)) return true;
+    return minted <= Math.max(0, Math.floor(maxMessageCount)) && opens - minted <= MAX_BEAT_DELAY_MESSAGES;
 }
 
 export function isHeroTellBeatOpen(beat, messageCount) {

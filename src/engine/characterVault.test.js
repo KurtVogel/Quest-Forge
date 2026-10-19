@@ -242,24 +242,16 @@ describe('sanitizeCharacter clamps and rebuilds', () => {
         expect(modern.currentHP).toBe(49);
     });
 
-    it('keeps the legacy rolled-HP band for pre-decision heroes', () => {
+    it('the legacy rolled-HP band is retired (2026-10-19): a pre-decision stamp, or none, recomputes the fixed average too', () => {
         const { character } = makeFighter();
-        // Created before fixed-average HP: rolled level-ups made 65 genuinely reachable.
-        const legacy = sanitizeCharacter({
-            ...character,
-            level: 5,
-            maxHP: 65,
-            createdAt: Date.UTC(2026, 0, 10),
-        });
-        expect(legacy.maxHP).toBe(65);
-        // Values beyond the band still clamp.
-        const inflated = sanitizeCharacter({
-            ...character,
-            level: 5,
-            maxHP: 999,
-            createdAt: Date.UTC(2026, 0, 10),
-        });
-        expect(inflated.maxHP).toBe(65);
+        // The band held for ONE pass only (the template stamps createdAt, and the
+        // import path templates twice), so a rolled 65 landed at 49 on the roster
+        // anyway — now it says 49 everywhere, and a deleted stamp buys nothing.
+        const legacy = sanitizeCharacter({ ...character, level: 5, maxHP: 65, createdAt: Date.UTC(2026, 0, 10) });
+        expect(legacy.maxHP).toBe(49);
+        const { createdAt: _c, ...unstamped } = { ...character, level: 5, maxHP: 65 };
+        expect(sanitizeCharacter(unstamped).maxHP).toBe(49);
+        expect(sanitizeCharacter({ ...character, level: 5, maxHP: 999, createdAt: Date.UTC(2026, 0, 10) }).maxHP).toBe(49);
     });
 
     it('rejects a correctly-shaped export whose character key is null', () => {
@@ -454,8 +446,9 @@ describe('2026-09-03 audit: vault test depth', () => {
 
     it('drops a junk portraitUpdatedAt instead of keeping it', () => {
         const { character } = makeFighter();
-        expect(sanitizeCharacter({ ...character, portraitUpdatedAt: 'yesterday' }).portraitUpdatedAt).toBeNull();
-        expect(sanitizeCharacter({ ...character, portraitUpdatedAt: 1700000000000 }).portraitUpdatedAt).toBe(1700000000000);
+        const portraitUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+        expect(sanitizeCharacter({ ...character, portraitUrl, portraitUpdatedAt: 'yesterday' }).portraitUpdatedAt).toBeNull();
+        expect(sanitizeCharacter({ ...character, portraitUrl, portraitUpdatedAt: 1700000000000 }).portraitUpdatedAt).toBe(1700000000000);
     });
 
     it('import → export → import is stable, and begin-from-roster keeps the roster id by construction', () => {
@@ -574,9 +567,10 @@ describe('portrait provider rides the hero file like portraitUpdatedAt (2026-09-
 
     it('types the label like the load heal: string-or-empty, 40 chars', () => {
         const { character } = makeFighter();
-        expect(sanitizeCharacter({ ...character, portraitProvider: { name: 'gemini' } }).portraitProvider).toBe('');
-        expect(sanitizeCharacter({ ...character }).portraitProvider).toBe('');
-        expect(sanitizeCharacter({ ...character, portraitProvider: '  p'.repeat(40) }).portraitProvider).toHaveLength(40);
+        const portraitUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+        expect(sanitizeCharacter({ ...character, portraitUrl, portraitProvider: { name: 'gemini' } }).portraitProvider).toBe('');
+        expect(sanitizeCharacter({ ...character, portraitUrl }).portraitProvider).toBe('');
+        expect(sanitizeCharacter({ ...character, portraitUrl, portraitProvider: '  p'.repeat(40) }).portraitProvider).toHaveLength(40);
     });
 });
 

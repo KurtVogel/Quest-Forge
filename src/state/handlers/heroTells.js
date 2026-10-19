@@ -35,7 +35,9 @@ export function rollHeroTellBeat(state, { roll = () => rollDie(BEAT_TIMING_DIE_S
     let heroTells = Array.isArray(state.heroTells) ? state.heroTells : [];
     const messages = state.messages || [];
     const messageCount = messages.length;
-    const current = sanitizeHeroTellBeat(session.heroTellBeat);
+    // Typed against the live count too: a window that could not have been
+    // minted (a future opening) is the malformed case below, never "pending".
+    const current = sanitizeHeroTellBeat(session.heroTellBeat, { maxMessageCount: messageCount });
     if (current && !isHeroTellBeatExpired(current, messageCount)) return { session, heroTells };
     if (current) {
         heroTells = stampTellVoiced(heroTells, current);
@@ -61,15 +63,19 @@ export const handlers = {
      * The Scribe's sightings for this turn (capped and merged by the engine).
      * Party companions witness every non-intimate sighting — present by the
      * game's own rule, the same one that makes them "always present" for
-     * voicing — and a report with no witness at all is dropped.
+     * voicing — the hero is never their own witness (this is the one site
+     * that knows their name, 2026-10-19), and a report with no witness at
+     * all is dropped. The scene clock reads the transcript (conversational).
      */
     ADD_HERO_TELLS(state, action) {
         const partyNames = (Array.isArray(state.party) ? state.party : []).map(c => c?.name).filter(Boolean);
-        const reports = prepareHeroTellReports(Array.isArray(action.payload) ? action.payload : [], { partyNames });
+        const heroName = typeof state.character?.name === 'string' ? state.character.name : '';
+        const reports = prepareHeroTellReports(Array.isArray(action.payload) ? action.payload : [], { partyNames, heroName });
         if (reports.length === 0) return state;
         const existing = Array.isArray(state.heroTells) ? state.heroTells : [];
-        const messageCount = (state.messages || []).length;
-        const heroTells = recordHeroTells(existing, reports, { messageCount });
+        const messages = Array.isArray(state.messages) ? state.messages : [];
+        const messageCount = messages.length;
+        const heroTells = recordHeroTells(existing, reports, { messageCount, messages });
         if (heroTells === existing) return state;
         // Voiced by the fiction (slice 3): a character said the open beat's
         // tell aloud — the window is spent, the exact turn is stamped, and

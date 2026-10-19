@@ -45,6 +45,7 @@ import {
     getAllFeaturesUpToLevel,
     isKnownClass,
     isKnownRace,
+    mintHeroId,
     normalizeAbilityScoreImprovementState,
     normalizeFightingStyle,
     normalizeMartialArchetype,
@@ -337,6 +338,12 @@ function healLoadedCharacter(character) {
     const { portraitPrompt: _portraitPrompt, ...kept } = character;
     const healed = {
         ...kept,
+        // The hero id is the roster's own key and is typed like every other
+        // identity field (2026-10-19 character-vault P2): string-or-mint. A
+        // non-string id (`42`, `{}`) rode the spread, `toHeroTemplate` kept a
+        // string id only, and the sheet's adoption guard (`!character.id`)
+        // was false for it — every Save to Roster minted a fresh row.
+        id: typeof character.id === 'string' && character.id.trim() ? character.id : mintHeroId(),
         name,
         gender: cleanTextField(character.gender, HERO_TEXT_LIMITS.gender),
         appearance: cleanTextField(character.appearance, HERO_TEXT_LIMITS.appearance),

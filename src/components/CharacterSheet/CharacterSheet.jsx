@@ -102,9 +102,11 @@ export default function CharacterSheet() {
         setRosterError('');
         try {
             const entry = await saveRosterCharacter(character, state.inventory);
-            // A legacy hero without an id gets one minted by the roster store —
-            // adopt it so re-saving updates that entry instead of duplicating it.
-            if (!character.id && entry?.id) {
+            // A hero without a usable id gets one minted by the roster store —
+            // adopt it so re-saving updates that entry instead of duplicating it
+            // (adopted whenever it differs, 2026-10-19: the load heal types the
+            // id, so a non-string id reaches here only from a stamp-less path).
+            if (entry?.id && entry.id !== character.id) {
                 dispatch({ type: 'UPDATE_CHARACTER', payload: { id: entry.id } });
             }
             dispatch({

@@ -13,6 +13,7 @@
 import { isRecordEntry } from '../engine/journalEntry.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
+import { conversationalGap } from '../engine/replayLedger.js';
 import { BOND_SCENE_WINDOW_MESSAGES, bondKindLabel, curateNpcsForPrompt, dispatchClassifiedNpcUpdate, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
 import { isLocationEvidencedInText, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
 import { tryParseDirectorJson } from './directorUtils.js';
@@ -257,7 +258,7 @@ export function buildKnownStances({ npcs = [], messages = null } = {}, ...texts)
     // in THIS scene is asked for the join-turn thread — what they want from
     // travelling with the hero — whether or not they have a stance yet.
     const justJoined = (npc) => Number.isFinite(messageCount) && Number.isFinite(npc?.joinedPartyMessage)
-        && messageCount - npc.joinedPartyMessage <= BOND_SCENE_WINDOW_MESSAGES
+        && conversationalGap(npc.joinedPartyMessage, messageCount, { messages }) <= BOND_SCENE_WINDOW_MESSAGES
         && !(typeof npc?.openThread === 'string' && npc.openThread.trim());
     const entries = [];
     const rulesUsed = new Set();

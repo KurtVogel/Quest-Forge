@@ -6,7 +6,7 @@
 
 import { LOCATION_NAME_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../config/contentLimits.js';
 import { sanitizePortraitUrl } from './portraitUrl.js';
-import { conversationalAgeSince } from './replayLedger.js';
+import { conversationalAgeSince, conversationalGap } from './replayLedger.js';
 import { compareCardRecency } from './storyMemory.js';
 import { coverage, identifyingNameTokens, textWordSet, tokenSet } from './textMatch.js';
 import { cleanText } from './text.js';
@@ -193,9 +193,13 @@ export const BOND_MOMENT_KINDS = new Set([
 export const BOND_SALIENCE_DEFAULT = 3;
 /** A moment at or above this salience is a KEY moment of the bond. */
 export const BOND_KEY_SALIENCE = 4;
-/** Same-kind moments this close (raw message rows — a dice turn burns ~5)
- * are one scene's beat; the same window separates "observed again in a
- * LATER scene" from "restated in the same scene" for impressions. */
+/** Same-kind moments this close are one scene's beat; the same window
+ * separates "observed again in a LATER scene" from "restated in the same
+ * scene" for impressions, the hero tells' sightings, and the "seen inside
+ * the scene" resolution of a shared name. CONVERSATIONAL rows since
+ * 2026-10-19 (`conversationalGap`, judged on the transcript wherever a
+ * caller passes `messages`, the raw gap otherwise): 16 = 8 turns whatever
+ * the dice burned — it was raw rows, so a scene was 3 dice turns or 8 plain. */
 export const BOND_SCENE_WINDOW_MESSAGES = 16;
 /** How many key moments a card and the DM prompt lead with. */
 export const MAX_KEY_BOND_MOMENTS = 5;
@@ -265,12 +269,12 @@ function trimBondMoments(list, cap = MAX_NPC_BOND_MOMENTS) {
     return list.filter((_, index) => !dropped.has(index));
 }
 
-function findSameSceneMoment(list, addition) {
+function findSameSceneMoment(list, addition, messages = null) {
     const kind = addition.kind;
     if (!kind || kind === 'other' || !Number.isFinite(addition.atMessage)) return -1;
     return list.findIndex(moment => moment.kind === kind
         && Number.isFinite(moment.atMessage)
-        && Math.abs(addition.atMessage - moment.atMessage) <= BOND_SCENE_WINDOW_MESSAGES);
+        && conversationalGap(addition.atMessage, moment.atMessage, { messages }) <= BOND_SCENE_WINDOW_MESSAGES);
 }
 
 /**
@@ -281,16 +285,17 @@ function findSameSceneMoment(list, addition) {
  * so it is dropped (or, if graded MORE salient, its text replaces the held
  * one at the held moment's time) — a night together is one moment however
  * many turns it spans; (2) SALIENCE EVICTION (trimBondMoments). Additions
- * without `atMessage` are stamped with `messageCount` when given.
+ * without `atMessage` are stamped with `messageCount` when given; the scene
+ * is judged on `messages` (conversational) when given.
  */
-export function appendBondMoments(existing = [], additions = [], { messageCount } = {}) {
+export function appendBondMoments(existing = [], additions = [], { messageCount, messages = null } = {}) {
     let next = normalizeBondMoments(existing);
     for (const raw of normalizeBondMoments(additions)) {
         const addition = (raw.atMessage === undefined && Number.isFinite(messageCount))
             ? { ...raw, atMessage: Math.max(0, Math.floor(messageCount)) }
             : raw;
         if (next.some(moment => isNearDuplicateText(addition.text, moment.text))) continue;
-        const sceneIdx = findSameSceneMoment(next, addition);
+        const sceneIdx = findSameSceneMoment(next, addition, messages);
         if (sceneIdx !== -1) {
             const held = next[sceneIdx];
             if (bondSalience(addition) > bondSalience(held)) {
@@ -550,7 +555,7 @@ function clauseTokensMatch(aTokens, bTokens) {
  *   mergeNpcDossierText; a first-time clause becomes an impression; a
  *   same-scene restatement stays pending (already recorded).
  */
-export function mergeNpcCoreText(existingText, incomingText, impressions = [], { field, messageCount, max = NPC_DOSSIER_FIELD_MAX } = {}) {
+export function mergeNpcCoreText(existingText, incomingText, impressions = [], { field, messageCount, messages = null, max = NPC_DOSSIER_FIELD_MAX } = {}) {
     const prev = clampNpcDossierField(existingText, max);
     const next = clampNpcDossierField(incomingText, max);
     const pending = normalizeImpressions(impressions, { messageCount });
@@ -579,7 +584,7 @@ export function mergeNpcCoreText(existingText, incomingText, impressions = [], {
         if (idx !== -1) {
             const impression = remaining[idx];
             const laterScene = !Number.isFinite(messageCount) || !Number.isFinite(impression.atMessage)
-                || (messageCount - impression.atMessage) > BOND_SCENE_WINDOW_MESSAGES;
+                || conversationalGap(impression.atMessage, messageCount, { messages }) > BOND_SCENE_WINDOW_MESSAGES;
             if (laterScene) {
                 confirmed.push(/[.!?…]["')\]]*$/.test(clause) ? clause : `${clause}.`);
                 remaining = remaining.filter((_, i) => i !== idx);
@@ -1503,7 +1508,7 @@ export function namesMatch(name1, name2) {
  * moment to the smith by ROSTER ORDER.
  * @returns {{ npc: object|null, index: number, ambiguous: object[] }}
  */
-export function resolveNpcRef(npcs, payload = {}, { presenceText = '', messageCount } = {}) {
+export function resolveNpcRef(npcs, payload = {}, { presenceText = '', messageCount, messages = null } = {}) {
     const roster = Array.isArray(npcs) ? npcs : [];
     const none = { npc: null, index: -1, ambiguous: [] };
     const id = typeof payload?.id === 'string' ? payload.id : '';
@@ -1539,7 +1544,7 @@ export function resolveNpcRef(npcs, payload = {}, { presenceText = '', messageCo
     }
     if (Number.isFinite(messageCount)) {
         const recent = candidates.filter(({ n }) => Number.isFinite(n?.lastSeenMessage)
-            && messageCount - n.lastSeenMessage <= BOND_SCENE_WINDOW_MESSAGES);
+            && conversationalGap(n.lastSeenMessage, messageCount, { messages }) <= BOND_SCENE_WINDOW_MESSAGES);
         if (recent.length === 1) return { npc: recent[0].n, index: recent[0].index, ambiguous: [] };
     }
     return { npc: null, index: -1, ambiguous: candidates.map(({ n }) => n) };

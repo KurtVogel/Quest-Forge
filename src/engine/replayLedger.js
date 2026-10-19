@@ -55,6 +55,24 @@ export function conversationalAgeSince(stamp, { messages = null, messageCount } 
 }
 
 /**
+ * Conversational rows between two "message count at the time" stamps, in
+ * either order; the raw gap without a transcript; null for a non-finite stamp.
+ * THE scene clock since 2026-10-19 (hero-tells Lap-1 P2): the bond family's
+ * same-scene window (`BOND_SCENE_WINDOW_MESSAGES`) was judged on raw rows
+ * beside a record whose fade, beat pull and hearsay age were conversational
+ * — a habit reported every turn established after 9 dice turns (5 rows each)
+ * against 19 plain turns. Measured here, a scene is the same length whatever
+ * the dice burned.
+ */
+export function conversationalGap(a, b, { messages = null } = {}) {
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
+    if (!Array.isArray(messages)) return hi - lo;
+    return conversationalDistance(messages, lo - 1, hi - 1);
+}
+
+/**
  * A finite, floored, non-negative message stamp, clamped to the transcript when
  * the caller knows its length; null for junk. THE stamp typer for the load
  * boundaries of the living-world markers and the hero tells (2026-10-12).

@@ -6,7 +6,19 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-18 (the 10-18 strengthening queue cleared — 7 P2 across roll-resolution + persistence; the 10-17 and 10-16 sweeps below)_
+_Last updated: 2026-10-19 (the 10-19 strengthening queue cleared — 8 P2 across character-vault + hero-tells; the 10-18 and 10-17 sweeps below)_
+
+## 2026-10-19 — strengthening queue cleared: 8 P2 across character-vault + hero-tells (Lap 1) — pushed AND deployed
+
+**Ruling: DECISIONS.md 2026-10-19, seven numbered points.** Vesa: check the strengthening queue, implement, push, deploy, report. Every row of the 10-19 audit is built and pinned; three settled behaviors moved and are recorded: the vault's legacy rolled-HP band is retired (one fixed-average maxHP through every template pass), the hero is never their own witness (a sighting nobody saw drops, public or not), and a SCENE is conversational for the whole bond family (hero-tell sightings, the same-scene fold, the impression graduation, the shared-name resolution). `npm test` 3,823 / 234 files green (+19 in `characterVault.queue1019.test.js`, `heroTells.queue1019.test.js`, `gameReducer.queue1019.test.js`), lint clean, production build green, `firebase deploy --only hosting` released from this machine.
+
+**What a player can notice:** a habit the world keeps seeing becomes a pattern after the same number of TURNS whether the stretch was dice-heavy or not (it used to be 9 dice turns against 19 plain); a hero cannot become their own witness, so no stranger ever repeats "the hero's known manner" that nobody on record watched; a dockhand repeating a private habit he only heard of no longer makes it public hearsay; a hero file or roster row says one max HP wherever it is read (the sheet, the roster and begin-from-roster used to disagree on a legacy hero); a hero whose save carried a junk id no longer gains a new roster row on every Save to Roster; a corrupt saved beat window can no longer silence every "someone has the hero's number" cue forever.
+
+**What changed underneath:** `conversationalGap` (replayLedger) read by `recordHeroTells`, `appendBondMoments`, `mergeNpcCoreText`, `resolveNpcRef` and the Scribe's join window, with `messages` threaded through `upsertNpc` / the party-moment stamps / `ADD_HERO_TELLS`; `prepareHeroTellReports({ heroName })`; the held branch's `public` gate; `sanitizeHeroTellBeat` / `sanitizeRelationshipBeat` `{ maxMessageCount }` + `MAX_BEAT_DELAY_MESSAGES`; the vault's band removed with `createdAt` kept idempotent, the portrait stamps gated on the url; `healLoadedCharacter` types `id`; the sheet's adoption and the roster begin wording. CLAUDE / AGENTS twins amended.
+
+**Not exercised live:** everything is pinned by vitest; the scene clock is the player-facing piece and waits for the next grand run's hero-tells column. The strengthening queue is EMPTY; the WOW W1 (NPC ties, 10-07) and memory M1 (lexical RRF) rows still wait for Vesa's pick.
+
+**Next (unchanged):** the WOW slice's live proof (one NPC driven to trusted, two scenes watched); the next grand run on Sol with the fight staging on (OpenAI prepay is at zero — top up first); the commitment probe's multi-arm run; `eval:death` for the downed-hero bullet and the stable-hero pass.
 
 ## 2026-10-18 — strengthening queue cleared: 7 P2 across roll-resolution + persistence (Lap 1) — pushed AND deployed
 

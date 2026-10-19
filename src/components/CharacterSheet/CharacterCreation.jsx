@@ -302,6 +302,12 @@ export default function CharacterCreation() {
 
     const handleBeginFromRoster = () => {
         if (!selectedHero) return;
+        // The vault's message names a FILE; a roster row with no character
+        // data is a storage fault, said in the roster's own words (2026-10-19).
+        if (!selectedHero.character || typeof selectedHero.character !== 'object') {
+            setRosterError(`This roster entry has no character data — remove ${selectedHero.name || 'it'} and import the hero again.`);
+            return;
+        }
         try {
             // Re-sanitize on the way out of the roster: rests the hero (full HP,
             // fresh resources) and refreshes derived fields against current data.

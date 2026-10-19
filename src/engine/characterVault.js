@@ -20,12 +20,17 @@ import { sanitizePortraitUrl } from './portraitUrl.js';
 export const EXPORT_FORMAT = 'quest-forge-character';
 export const EXPORT_VERSION = 1;
 
-// DECISIONS.md 2026-06-15: level-up HP became fixed-average (deterministic). Heroes
-// created after that boundary have exactly ONE legitimate maxHP for their class/CON/
-// level — the wide legacy clamp band exists only for pre-decision heroes whose
-// level-ups genuinely rolled HP. Applying the band to modern heroes reopened a
-// hand-edit exploit (e.g. +16 free max HP on an L5 fighter).
-const FIXED_AVERAGE_HP_SINCE = Date.UTC(2026, 5, 15);
+// DECISIONS.md 2026-06-15: level-up HP is fixed-average (deterministic), so a
+// hero has exactly ONE legitimate maxHP for their class / CON / level and the
+// template recomputes it, ignoring whatever the hand-editable file claims. The
+// wide "legacy rolled-HP band" for files without a creation stamp is RETIRED
+// (DECISIONS.md 2026-10-19, character-vault Lap-1 P2): the template stamps
+// `createdAt` on a file without one, and the import path templates TWICE
+// (`parseCharacterExport` → `saveRosterCharacter` → `toHeroTemplate`), so the
+// band held for exactly one pass — an L5 fighter's rolled 58 landed on the
+// roster at the fixed 44 anyway, while the sheet's own template of the same
+// legacy hero said 60. One number through every pass, and the hand-edit hole
+// (delete `createdAt`, get the band) is closed for good.
 const MAX_INVENTORY_ITEMS = 200;
 // Creation grants a rogue exactly two Expertise skills and nothing later adds
 // more (CharacterCreation.jsx) — the import allowance mirrors that.
@@ -99,8 +104,8 @@ export function characterExportFilename(character) {
  * adventure. Throws an Error with a player-readable message when the data
  * can't be salvaged.
  *
- * Trusted-with-clamps: name, level, exp, ability scores, coin, maxHP (old
- * exports may include rolled HP, so it is range-checked). Rebuilt outright: proficiency,
+ * Trusted-with-clamps: name, level, exp, ability scores, coin. Rebuilt
+ * outright: maxHP (fixed-average, never read from the file), proficiency,
  * saves, speed, traits, features, class resources, hit dice.
  */
 export function sanitizeCharacter(raw) {
@@ -132,21 +137,12 @@ export function sanitizeCharacter(raw) {
     const level = clampInt(raw.level, 1, MAX_CHARACTER_LEVEL, 1);
     const exp = clampInt(raw.exp, 0, getExperienceThreshold(level) - 1, 0);
 
-    // Heroes created since the fixed-average-HP decision have exactly one correct
-    // maxHP — recompute it and ignore whatever the (hand-editable) file claims.
-    // Only pre-decision heroes (or files without a creation timestamp) keep the
-    // broad legacy clamp band, because their level-ups genuinely rolled HP.
+    // One correct maxHP per class / CON / level (fixed-average level-ups,
+    // DECISIONS.md 2026-06-15) — recomputed, never read from the file. The
+    // template is idempotent by construction: nothing here depends on a
+    // field the template itself stamps (see the module comment).
     const conMod = getModifier(abilityScores.constitution);
-    const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : null;
-    let maxHP;
-    if (createdAt && createdAt >= FIXED_AVERAGE_HP_SINCE) {
-        maxHP = Math.max(1, getMaxHitPoints(raw.class, level, conMod, charClass));
-    } else {
-        const perLevelMax = Math.max(1, charClass.hitDie + conMod);
-        const minPossibleHP = perLevelMax + (level - 1);
-        const maxPossibleHP = perLevelMax * level;
-        maxHP = clampInt(raw.maxHP, minPossibleHP, maxPossibleHP, minPossibleHP);
-    }
+    const maxHP = Math.max(1, getMaxHitPoints(raw.class, level, conMod, charClass));
 
     // Skills: racial grants always, then the class allowance of chosen skills —
     // the first N the file lists, in its order (2026-09-03 P2: an 18-skill
@@ -168,6 +164,7 @@ export function sanitizeCharacter(raw) {
             .filter(s => skillProficiencies.includes(s)))].slice(0, ROGUE_EXPERTISE_ALLOWANCE)
         : [];
 
+    const portraitUrl = sanitizePortraitUrl(raw.portraitUrl);
     const rebuilt = {
         id: mintHeroId(),
         name,
@@ -200,12 +197,14 @@ export function sanitizeCharacter(raw) {
         gender: cleanTextField(raw.gender, HERO_TEXT_LIMITS.gender),
         background: cleanTextField(raw.background, HERO_TEXT_LIMITS.background),
         appearance: cleanTextField(raw.appearance, HERO_TEXT_LIMITS.appearance),
-        portraitUrl: sanitizePortraitUrl(raw.portraitUrl),
+        portraitUrl,
         // The provider label rides with the picture like portraitUpdatedAt
         // (2026-09-24 Lap-1 spill): dropping it lost the "Rendered by Gemini"
-        // fallback note on every roster or imported hero.
-        portraitProvider: cleanTextField(raw.portraitProvider, HERO_TEXT_LIMITS.portraitProvider),
-        portraitUpdatedAt: Number.isFinite(raw.portraitUpdatedAt) ? raw.portraitUpdatedAt : null,
+        // fallback note on every roster or imported hero. Both stamps ride
+        // ONLY with a picture that landed (2026-10-19, the vault twin of
+        // DECISIONS 2026-09-09's "a rejected URL never stamps the pair").
+        portraitProvider: portraitUrl ? cleanTextField(raw.portraitProvider, HERO_TEXT_LIMITS.portraitProvider) : '',
+        portraitUpdatedAt: portraitUrl && Number.isFinite(raw.portraitUpdatedAt) ? raw.portraitUpdatedAt : null,
         notes: cleanTextField(raw.notes, HERO_TEXT_LIMITS.notes),
         createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),
     };

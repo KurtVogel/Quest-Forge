@@ -798,10 +798,12 @@ export function mergeNpcUpdate(npcs, payload) {
  *   NOT a sighting (the journal cadence re-mentioning past events, an
  *   absence-drift install for someone the hero never met) so neither
  *   `lastSeen` nor `lastSeenMessage` is stamped (2026-09-06 audit).
- * @param {{ messageCount?: number }} [options] - transcript length for the
- *   conversational `lastSeenMessage` stamp the prompt curation's recency reads.
+ * @param {{ messageCount?: number, messages?: object[] }} [options] - transcript
+ *   length for the conversational `lastSeenMessage` stamp the prompt curation's
+ *   recency reads, and the transcript itself for the scene clock (the same-scene
+ *   fold, the impression graduation, the shared-name resolution — 2026-10-19).
  */
-export function upsertNpc(npcs, rawPayload, { messageCount, presenceText = '', onAmbiguous = null } = {}) {
+export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, presenceText = '', onAmbiguous = null } = {}) {
     // The lane trust boundary (2026-09-16 P1): known keys only, text fields
     // string-or-drop at their clamps, disposition whitelisted — see
     // sanitizeNpcLanePayload. Engine-owned keys (relationshipHistory,
@@ -887,7 +889,7 @@ export function upsertNpc(npcs, rawPayload, { messageCount, presenceText = '', o
     // one seen inside the scene window — and an AMBIGUOUS reference lands on
     // nobody: nothing minted, nothing merged, the caller told who it could
     // have been. It used to be `findIndex` — roster order chose the person.
-    const resolved = resolveNpcRef(npcs, payload, { presenceText, messageCount });
+    const resolved = resolveNpcRef(npcs, payload, { presenceText, messageCount, messages });
     if (resolved.ambiguous.length > 1) {
         onAmbiguous?.(resolved.ambiguous, payload);
         return npcs;
@@ -909,7 +911,7 @@ export function upsertNpc(npcs, rawPayload, { messageCount, presenceText = '', o
         // stampNpcRelationshipArcs records a transition on the journal cadence,
         // only for shifts that actually held.
         if (bondAdditions.length > 0) {
-            update.bondMoments = appendBondMoments(existing.bondMoments, bondAdditions, { messageCount });
+            update.bondMoments = appendBondMoments(existing.bondMoments, bondAdditions, { messageCount, messages });
         }
         // Durable dossier prose accumulates: a per-turn fragment appends to the
         // record, a restatement is dropped, and only a complete rewrite that carries
@@ -922,7 +924,7 @@ export function upsertNpc(npcs, rawPayload, { messageCount, presenceText = '', o
         for (const field of NPC_DURABLE_TEXT_FIELDS) {
             if (!update[field]) continue;
             if (NPC_CORE_TEXT_FIELDS.includes(field)) {
-                const merged = mergeNpcCoreText(existing[field], update[field], impressions, { field, messageCount });
+                const merged = mergeNpcCoreText(existing[field], update[field], impressions, { field, messageCount, messages });
                 update[field] = merged.text;
                 impressions = merged.impressions;
             } else {
@@ -958,7 +960,7 @@ export function upsertNpc(npcs, rawPayload, { messageCount, presenceText = '', o
     // No match — only create roster-worthy characters.
     if (!payload.name || !classified.allowRoster) return npcs;
     if (bondAdditions.length > 0) {
-        update.bondMoments = appendBondMoments([], bondAdditions, { messageCount });
+        update.bondMoments = appendBondMoments([], bondAdditions, { messageCount, messages });
     }
     if (update.callbackHooks) {
         update.callbackHooks = appendCallbackHooks([], update.callbackHooks);
