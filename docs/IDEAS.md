@@ -3611,3 +3611,29 @@ DECISIONS promise about an actor's number ("the weapon bonus is applied to hit A
 time") is held against every lane that rolls that actor — the resolver's companion attack rolls
 without it. Payoff: a downed hero who cannot roll their way up, a save that is the state the player
 left, a dice line that never prints `null`, and a DM's ruling that is never silently thrown away.
+
+### [strengthening] A sanitizer that stamps a default is not idempotent, and a template store runs it twice; a rule landed on one merge branch is grepped on its sibling; "the hero is always present" is a fact every presence list must include or strip; a raw-row clock beside conversational clocks is a decision until written — status: `idea` (2026-10-19)
+Four rules from the character-vault + hero-tells Lap-1 pass (2026-10-19), each reproduced with a
+throwaway test over the real vault, reducer, prompt builder and hearsay selector. **(1)**
+`sanitizeCharacter` stamps `createdAt: Date.now()` on a file without one, and since the 10-06
+"template at the write" the import path sanitizes TWICE (`parseCharacterExport` →
+`saveRosterCharacter` → `toHeroTemplate`): pass one keeps an L5 fighter's rolled 58 under the
+DECISIONS 2026-06-15 legacy band, pass two sees a modern timestamp and recomputes 44. The round-trip
+pin strips `createdAt` before comparing — the one field that broke idempotency. For every write
+path that sanitizes at the boundary and again at the store, pin `f(f(x)) ≡ f(x)` with every field
+kept; a stripped field in a stability test is the finding. **(2)** The 10-07 voiced-only rule
+("a remark is not a sighting — no witness, never public") landed on the NEW-tell branch of
+`recordHeroTells`; the HELD branch still ORs the report's `public` in, so a dockhand repeating a
+private habit flips it public and the next stranger scene prints it as HEARSAY. A lane fix names
+both branches of a merge or says why one is exempt. **(3)** The Scribe names "exactly who was
+present", the prompt's presence list is roster names, the reducer's party list is companions —
+nobody owns the hero's own name, so `witnesses: ['Astra']` on three solo scenes establishes a
+PUBLIC tell nobody watched, offered as regional hearsay, while the same report with no witness is
+dropped. Every witness / presence lane states what it does with the hero. **(4)** The scene window
+is 16 RAW rows (`BOND_SCENE_WINDOW_MESSAGES` against `messages.length`) while the fade, the beat
+pull and the hearsay age are conversational: a habit reported every turn establishes after 9 dice
+turns and after 19 plain ones. DECISIONS 2026-10-05 says the conversational rule has no exception
+left; the bond family's scene clock is one — decide it and write it, or convert it like
+`recentRulings`. Payoff: a roster that returns the hero you saved, a private habit that stays
+private until someone SAW it, a reputation only bystanders can start, and a "three scenes" bar
+that means the same thing on a dice-heavy evening.
