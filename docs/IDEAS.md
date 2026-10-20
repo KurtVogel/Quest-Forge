@@ -3637,3 +3637,26 @@ left; the bond family's scene clock is one — decide it and write it, or conver
 `recentRulings`. Payoff: a roster that returns the hero you saved, a private habit that stays
 private until someone SAW it, a reputation only bystanders can start, and a "three scenes" bar
 that means the same thing on a dice-heavy evening.
+
+### [strengthening] A replay ledger names every axis two honest events can differ in; a load heal that re-decides a player-writable flag is a reducer the player cannot see; a unification names its members; a silent early return is a receipt never written — status: `idea` (2026-10-20)
+Four rules from the spellcasting + inventory-economy Lap-1 pass (2026-10-20), each reproduced with
+a throwaway test over the real reducer, the exchange planner, `applyEvents` and the save → load
+round trip. **(1)** `recentSpellCasts` keys on `spell.key` alone inside a 4-row window, so Cure
+Wounds on Jorun followed next turn by Cure Wounds on Mika ("Now heal Mika too, she is bleeding") is
+"the same cast": no slot, no heal, no line — the recast bypass wants the spell named or a `cast`
+clause, the Scribe audit stands down because the cast WAS emitted, and the DM narrates a heal that
+never landed. The coin ledgers learned this twice (value not denomination, 07-22; one purse not
+four channels, 08-25). A ledger's signature names every axis along which two legitimate events can
+differ inside its window — for a cast, the recipient. **(2)** `healEquippedSlots` runs ADD_ITEM's
+auto-equip over every row on every load; it cannot tell a row never placed from one the player took
+off, so "I take off my armor to sleep" is undone by Continue, AC 14 → 17, silently. For every load
+heal, name the live writers of the field it touches; when a player action is among them the heal
+must distinguish "never written" from "written false" — the key's presence is the cheapest witness
+(`mintOwnedItem` always writes `equipped`). **(3)** The 10-07 "ONE auto-equip" covered ADD_ITEM and
+the heal and left PURCHASE_ITEM: a bought shield protects nobody until the next reload, a found one
+at once. When a rule is made one, grep every site that mints the same record and list them in the
+entry. **(4)** CAST_SPELL's two replay exits `return state`; every coin exit posts a `dmVisible`
+line. Every early return in a DM-fed handler is a receipt, or a comment saying why silence is right.
+Payoff: a second heal that lands on the second patient, armor that stays off when the hero took it
+off, a bought shield that counts the turn it is bought, and a DM that is told when the engine
+refused.
