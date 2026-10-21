@@ -3660,3 +3660,26 @@ line. Every early return in a DM-fed handler is a receipt, or a comment saying w
 Payoff: a second heal that lands on the second patient, armor that stays off when the hero took it
 off, a bought shield that counts the turn it is bought, and a DM that is told when the engine
 refused.
+
+### [strengthening] A catalog field with no engine reader is a promise the dice never keep; a lane excluded from MEMORY is asked separately about the RECORD; a recovery writes one vocabulary on every actor — status: `idea` (2026-10-21)
+Three rules from the chronicler + rules-math Lap-1 pass (2026-10-21), each reproduced with a
+throwaway test over the real rules engine, the attack kernel, the eligibility walk and the reducer.
+**(1)** Six catalog weapons carry `damageVersatile` / `versatile`; `normalizeItem` keeps both on every
+row and the starting-items lane carries them, and NOTHING in `engine/` reads either — a level-5 Great
+Weapon Fighting fighter with a longsword and no shield swings `1d8+3` with zero rerolls, the greatsword
+beside it rerolls. The grip is a read the equipment normalizer already makes (no shield with a
+two-handed weapon), so versatile + no equipped shield IS two hands: the versatile die and the GWF
+reroll, while a shield or Dueling keeps the one-handed die (companions were settled on the one-handed
+die 2026-07-19; the hero is the balance master's call). Rule: for every field a catalog or a
+normalizer WRITES, grep its READER in `engine/`; none → wire it or delete it the same day, never
+leave it as documentation. **(2)** `collectNarrativeEntries` answers "is this story?" for four
+consumers; the epilogue is table talk to three of them (events null, out of RAG and the Scribe —
+DECISIONS 2026-09-30) and the saga's last page to the fourth, the player-facing Chronicle — which
+never reads it, so a finished campaign's export stops at the epitaph. Rule: a lane excluded from
+MEMORY is asked separately whether it belongs in the RECORD the player keeps (the recall receipt went
+the other way on 09-21: out of the chat, into the inspector). The fix is one named exception at the
+gate, or the epilogue verbatim as the last chapter's coda. **(3)** TAKE_REST clears `LONG_REST_CLEARS`
+off the hero (`prone` and `frightened` survive the night) and EVERYTHING off a companion. Rule: when a
+handler touches the same field on two actor kinds, both writes read one constant. Payoff: a longsword
+that hits like a longsword in two hands, a saga whose last page is the ending the player asked for,
+and a hero who stands up in the morning.
