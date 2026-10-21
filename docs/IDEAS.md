@@ -416,6 +416,8 @@ Journal view noisier. Idea: an age-out pass on the journal cadence — salience-
 unseen and unused for N journal cycles decay to `dormant` (still in saves, skipped by
 curation/UI by default), with wounds auto-dormant once healed and promise/playerCanon types
 exempt. Revisit after the memory debug inspector exists to observe the pool live first.
+
+### Hidden campaign fronts — "the world is up to something" — status: v1 → v2 + resolution `shipped` (2026-06-17 → 2026-08-05); the payoff at either end of a clock is the [wow] 2026-10-21 entry (heading restored 2026-10-21 — the paragraph had been running on from the entry above)
 The flagship feature. Instead of generic LLM "three acts": 2–3 **fronts** (threats that
 *want* something — à la Dungeon World fronts / Blades in the Dark faction clocks), each
 with escalation steps and a "grim portent" (what happens if nobody interferes).
@@ -701,7 +703,47 @@ total so a diceless arc can reach "lively" but never reads as post-battle "high"
 Reload-safe (sanitized on LOAD_GAME). Remaining thought: failure-stakes keyword weighting was
 considered and skipped — density × DC proved enough signal, keywords would add brittleness.
 
-### DM invents cross-faction relations that contradict hidden front designs — status: `idea` (playtest 2026-07-14)
+### [wow] Hidden fronts: the clock has a doom, and the reveal shows the clockwork — status: `idea` (wow audit 2026-10-21, W1 ×2; `docs/SCHEDULED_WOW.md` 2026-10-21)
+The "that was building all along" moment, held against Apocalypse World / Dungeon World fronts
+(when the countdown fills the impending doom COMES TO PASS; each grim portent is a change in the
+world when it ticks), Blades in the Dark (a completed clock happens; the crew sees the clock it
+broke), Citizen Sleeper (clocks tick whether you are there or not; a thread's end reads the signs
+back), King of Dragon Pass (the saga says which omens came true) and Wildermyth (the chapter card
+says what the enemy was up to). What we ship is genre-strong at PACING — the band, the timing die,
+the theater, one gain per cadence, the QUIET rule (DECISIONS 2026-07-14) — and has no payoff of its
+own at either end of a clock. (1) A full clock does two things: the band becomes `confrontation`
+(a ceiling on what a granted window may show) and the wonder die is blocked; `applyFrontAdvanceBatch`
+parks the front at cap, the DM sees id + faction and nothing more, and a confrontation scene still
+needs the reflection to grant it and the die to land. The 3–5 authored portents and the derived
+stage reach the cadence reflection alone, never the DM prompt or the world. Vesa met the parked
+front live (DECISIONS 2026-08-03: "stayed active at clock cap in the confrontation band forever")
+and the fix was the RESOLVE lever; the mirror — the pressure WINS when nobody interferes, the
+`stakes` field's own sentence — was never built. (2) The resolution reveals ONE word, the title:
+the 🕰️ line is the same sentence for every front, the fact is title + epitaph, the Chronicle nudge
+the title, while the record holds the faction's goal, the symptoms actually placed (`publicHints`)
+and the steps that were next (`grimPortents[stage..]`) — read at the end only by the aftermath
+director. Unobservable in any harness: a clock needs ≥ 11 cadences to fill through the reflection
+and the longest keyed run is 44 turns.
+**Slice A — a full clock is a doom, not a permission (W1):** a stage crossing is an EVENT — the
+engine stamps `portentsFired` and the permission card carries "already come to pass off-screen"
+/ "next, unless stopped" so the DM's symptom is the authored step; a FULL clock mints an
+engine-owned `doom` directive (confrontation, the alternation guard bypassed, the die 0–1 scenes,
+in person at the theater and as news elsewhere: the final portent + the stakes), the DM's wires
+unchanged so the hero may still end it; a doom window that closes unresolved resolves the front
+`outcome: 'prevailed'` through the existing ceremony with the sign flipped (the stakes as the
+pinned fact, a 🕰️ loss line, NO milestone XP, the echo says what it cost, the aftermath told the
+pressure won). Zero calls; `resolved` stays terminal and the reflection still ends nothing — but
+the ENGINE ends a storyline by a clock, an extension of DECISIONS 2026-08-03 point 1 that is Vesa's
+ruling. **Slice B — the reveal shows the clockwork you stopped (W1):** `describeFrontReveal` (what
+it wanted / what you saw of it / what was coming next) on the 🕰️ line, "what was averted" on the
+RECENT VICTORY echo so NPCs can say it, and the reveal handed to the chronicler at the chapter
+close so the symptoms are retold as foreshadowing — never the DM beyond the echo, never RAG, never
+the Scribe. Zero calls per turn. Absorbs the 2026-07-14 "cross-faction relations" guard below: the
+faction GOAL it asked for rides the permission and doom cards (where the DM is about to narrate
+that faction), not the every-turn stub line — hiding beats instructing, and no grand run has yet
+recorded contradictory faction lore.
+
+### DM invents cross-faction relations that contradict hidden front designs — status: `merged` into the [wow] entry above (2026-10-21: the goal line rides the permission and doom cards; the stub-line variant declined under hiding-beats-instructing) — was `idea` (playtest 2026-07-14)
 With the fronts dossier hidden (correctly), the DM sees only front stubs (id + faction name).
 In the playtest an NPC asserted "the Syndicate let the fen-runners off the leash" — but the
 private front design has the Fen-Runners as the Syndicate's *rivals* who raid their barges.
