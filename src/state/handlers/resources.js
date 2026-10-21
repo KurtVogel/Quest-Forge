@@ -355,7 +355,11 @@ export const handlers = {
                 : Math.min(maxHp, (companion.hp || 0) + Math.max(1, Math.ceil(maxHp * 0.25)));
             return normalizeCompanion({
                 hp: companionHp,
-                conditions: isLong ? [] : companion.conditions,
+                // The hero's own list, judged in canonical form — one rest, one
+                // vocabulary on every actor (2026-10-21 rules-math P2).
+                conditions: isLong
+                    ? (companion.conditions || []).filter(c => !LONG_REST_CLEARS.includes(normalizeConditionName(c)))
+                    : companion.conditions,
                 status: companionStatus(companionHp, maxHp),
             }, companion);
         });

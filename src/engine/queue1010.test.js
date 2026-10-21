@@ -83,7 +83,8 @@ describe('one key per condition, and the long rest reads the table (rules-math P
     it('every table key the long rest clears exists, and the rest list carries the check-only affliction', () => {
         expect(LONG_REST_CLEARS).toContain('exhausted');
         const tableKeys = LONG_REST_CLEARS.filter(name => CONDITION_EFFECTS[name]);
-        expect(tableKeys).toEqual(['exhausted', 'poisoned', 'blinded']);
+        // prone (a posture) and frightened joined the list 2026-10-21 (rules-math P2).
+        expect(tableKeys).toEqual(['exhausted', 'poisoned', 'blinded', 'prone', 'frightened']);
         // `deafened` is prose-only by design (no table row) — stated, not accidental.
         expect(LONG_REST_CLEARS.filter(name => !CONDITION_EFFECTS[name])).toEqual(['deafened']);
     });

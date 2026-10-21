@@ -9,8 +9,7 @@ import { describeLastHere, describeTravelLink, groupPlacesByRegion, listVisitedP
 import { NPC_PORTRAIT_SIZE, requestPortrait } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
 import LookEditor from './LookEditor.jsx';
-import { writeChronicleChapters, chronicleToMarkdown, planChroniclePassages, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNKS_PER_CHAPTER } from '../../llm/chronicler.js';
-import { collectNarrativeEntries } from '../../llm/narrativeMessages.js';
+import { writeChronicleChapters, chronicleToMarkdown, collectChronicleEntries, planChroniclePassages, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNKS_PER_CHAPTER } from '../../llm/chronicler.js';
 import { CHRONICLE_TITLE_MAX } from '../../config/contentLimits.js';
 import { campaignStamp } from '../../state/handlers/shared.js';
 import './Journal.css';
@@ -385,7 +384,7 @@ function ChronicleTab({ chapters, messages, heroName, chapterTitle, onChapterTit
     // (2026-09-26 chronicler nit): they used to re-run on every keystroke of
     // the title input and every progress tick of a write.
     const { pendingCount, estPassages } = useMemo(() => {
-        const entries = collectNarrativeEntries(messages, lastChronicled + 1);
+        const entries = collectChronicleEntries(messages, lastChronicled + 1);
         return { pendingCount: entries.length, estPassages: planChroniclePassages(entries, heroName).length };
     }, [messages, lastChronicled, heroName]);
     const canWrite = pendingCount >= CHRONICLE_MIN_MESSAGES;

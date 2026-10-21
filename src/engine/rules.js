@@ -192,7 +192,9 @@ export function fightingStyleEffects(character) {
 
 export function computeACFromInventory(inventory, character) {
     if (!character?.abilityScores) return 10;
-    const dexMod = getModifier(character.abilityScores.dexterity);
+    // `?? 10` like every sibling read (2026-10-21 rules-math P2: a missing
+    // score made the AC NaN past the load heal).
+    const dexMod = getModifier(character.abilityScores.dexterity ?? 10);
     // A corrupted/stale save can carry a non-array inventory; LOAD_GAME does not
     // run the vault sanitizer, so guard here rather than crash the AC recompute.
     const items = Array.isArray(inventory) ? inventory : [];
@@ -282,21 +284,49 @@ export function getWeaponAttackBonus(character, inventory = []) {
         + styleBonus;
 }
 
+/**
+ * THE grip (2026-10-21 rules-math P2, DECISIONS.md 2026-10-21): is this melee
+ * weapon in TWO hands right now? A two-handed weapon always; a VERSATILE one
+ * (longsword, battleaxe, warhammer, spear, trident, quarterstaff) when no
+ * shield is worn and the hero's style is not Dueling — the equipment
+ * normalizer already forbids a shield beside a two-handed weapon, so a free
+ * off-hand IS the two-handed grip (5e: "a versatile weapon wielded with two
+ * hands"), and a Dueling fighter fights one-handed by definition (the two reads
+ * exclude each other). Read by the damage die (the versatile die), the Great
+ * Weapon Fighting reroll, and the Dueling bonus. Companions stay on the
+ * one-handed die by DECISIONS 2026-07-19.
+ */
+export function isWieldedTwoHanded(character, weapon, inventory = []) {
+    if (!weapon || weapon.ranged) return false;
+    if (weapon.twoHanded) return true;
+    if (!weapon.versatile) return false;
+    if (Array.isArray(inventory) && inventory.some(row => row?.equipped && isShieldItem(row))) return false;
+    return !fightingStyleEffects(character)?.damageBonus;
+}
+
+const DAMAGE_NOTATION_RE = /^(\d+d\d+)\s*(?:([+-])\s*(\d+))?$/i;
+
 export function getWeaponDamageNotation(character, inventory = [], fallback = '1d4') {
     const weapon = getEquippedWeapon(inventory);
     const abilityMod = getWeaponAbilityModifier(character, weapon);
     const itemBonus = clampItemBonus(weapon?.damageBonus) || clampItemBonus(weapon?.magicBonus);
+    const twoHanded = isWieldedTwoHanded(character, weapon, inventory);
     // Dueling: +N damage with a one-handed melee weapon.
-    const styleBonus = weapon && !weapon.ranged && !weapon.twoHanded
+    const styleBonus = weapon && !weapon.ranged && !twoHanded
         ? (fightingStyleEffects(character)?.damageBonus || 0)
         : 0;
+    // A versatile weapon in two hands rolls its versatile die (1d8 → 1d10);
+    // junk in that field falls back to the one-handed die, never to fists.
+    const versatileDie = twoHanded && weapon?.versatile && DAMAGE_NOTATION_RE.test(String(weapon.damageVersatile || '').trim())
+        ? String(weapon.damageVersatile).trim()
+        : null;
 
     // Full-shape validation, not a prefix check (2026-08-28 audit): "1d8
     // slashing" used to pass the old prefix test, produce "1d8 slashing+3",
     // throw in parseNotation, and land on rollDamage's flat modifier-less 1d4
     // fallback — softer than a bare fist. An embedded modifier ("1d6+2") is
     // folded into ours so the appended total stays parseable.
-    const match = String(weapon?.damage || fallback).trim().match(/^(\d+d\d+)\s*(?:([+-])\s*(\d+))?$/i);
+    const match = String(versatileDie || weapon?.damage || fallback).trim().match(DAMAGE_NOTATION_RE);
     // Junk damage notation falls back to fists, but keeps the wielder's
     // modifier — a broken weapon should not hit softer than a bare hand.
     const dice = match ? match[1] : fallback;
@@ -353,8 +383,8 @@ export function getSkillModifier(character, skill) {
     const profBonus = getProficiencyBonus(character?.level);
     // Belt on the read side: only an ARRAY can grant proficiency (a string's
     // substring `.includes` was a free +prof — 2026-09-14 audit P1).
-    const isProficient = hasListEntry(character.skillProficiencies, skill);
-    const hasExpertise = hasListEntry(character.expertiseSkills, skill);
+    const isProficient = hasListEntry(character?.skillProficiencies, skill);
+    const hasExpertise = hasListEntry(character?.expertiseSkills, skill);
 
     const profMultiplier = hasExpertise ? 2 : (isProficient ? 1 : 0);
     return abilityMod + (profBonus * profMultiplier);
@@ -425,12 +455,16 @@ export const CONDITION_EFFECTS = {
 export const INCAPACITATING_CONDITIONS = ['stunned', 'paralyzed', 'unconscious'];
 
 /**
- * What a Long Rest clears off the hero (read by TAKE_REST): the table's
- * minor afflictions plus `deafened`, which no table models (prose-only, kept
- * because a night's rest plausibly ends it). Lives beside the table so a
- * renamed key cannot leave a condition no rest ever clears.
+ * What a Long Rest clears off the hero AND every companion (read by TAKE_REST
+ * — ONE list for both actors since 2026-10-21, rules-math P2: the hero kept
+ * everything outside it while a companion woke with an empty list): the
+ * table's minor afflictions plus `deafened`, which no table models (prose-only,
+ * kept because a night's rest plausibly ends it), `prone` (a posture, not an
+ * affliction — nobody wakes still knocked down) and `frightened` (its source
+ * is gone by morning). Lives beside the table so a renamed key cannot leave a
+ * condition no rest ever clears.
  */
-export const LONG_REST_CLEARS = ['exhausted', 'poisoned', 'blinded', 'deafened'];
+export const LONG_REST_CLEARS = ['exhausted', 'poisoned', 'blinded', 'deafened', 'prone', 'frightened'];
 
 /** Spellings the fiction uses for one table key. */
 const CONDITION_ALIASES = { exhaustion: 'exhausted' };
@@ -547,12 +581,28 @@ function clampRollDc(dc) {
     return Number.isFinite(dc) ? Math.min(MAX_ROLL_DC, Math.max(0, dc)) : DEFAULT_ROLL_DC;
 }
 
-export function d20SuccessChance(modifier, dc, { advantage = false, disadvantage = false } = {}) {
+/**
+ * The natural die at or above which THIS character crits: 20 for everyone,
+ * 19 for a Champion Fighter (Martial Archetype, level 3+). The single source
+ * of the crit rule — lives beside the ladder (2026-10-21 rules-math P2) so the
+ * odds card reads the same rule the die does; combatMath re-exports it for
+ * the kernel's stamp. `isCriticalNatural` is its per-die form.
+ */
+export function criticalThreshold(character) {
+    return character?.class === 'fighter' && (character.level || 1) >= 3 && character.martialArchetype === 'champion' ? 19 : 20;
+}
+
+export function isCriticalNatural(character, natural) {
+    return Number.isFinite(natural) && natural >= criticalThreshold(character);
+}
+
+export function d20SuccessChance(modifier, dc, { advantage = false, disadvantage = false, critThreshold = 20 } = {}) {
     const mod = Number.isFinite(modifier) ? modifier : 0;
     const target = clampRollDc(dc);
+    const autoSuccessAt = Number.isFinite(critThreshold) ? critThreshold : 20;
     let faces = 0;
     for (let face = 1; face <= 20; face += 1) {
-        if (face === 20 || face + mod >= target) faces += 1;
+        if (face >= autoSuccessAt || face + mod >= target) faces += 1;
     }
     const p = faces / 20;
     if (advantage && !disadvantage) return 1 - (1 - p) * (1 - p);
@@ -641,6 +691,7 @@ export function describeCheckOdds(character, inventory, roll) {
     const conditionEffects = getConditionRollEffects(character.conditions, kind);
     const eff = combineRollModifiers(roll.advantage, roll.disadvantage, conditionEffects);
     const dc = clampRollDc(roll.dc);
+    const critThreshold = kind === 'attack' ? criticalThreshold(character) : 20;
     return {
         key,
         kind,
@@ -648,8 +699,10 @@ export function describeCheckOdds(character, inventory, roll) {
         modifier,
         source,
         dc,
-        flatChance: d20SuccessChance(modifier, dc),
-        chance: d20SuccessChance(modifier, dc, eff),
+        // An attack succeeds on the hero's own crit rule (a Champion's 19), a
+        // check or save on the natural 20 alone — the resolver's two branches.
+        flatChance: d20SuccessChance(modifier, dc, { critThreshold }),
+        chance: d20SuccessChance(modifier, dc, { ...eff, critThreshold }),
         advantage: eff.advantage,
         disadvantage: eff.disadvantage,
         conditionSources: conditionEffects.sources.slice(),
@@ -691,16 +744,19 @@ export function getSneakAttackDice(character, weapon, advantage, disadvantage, h
  * the formula independently, kept in sync only by mirror comments.
  */
 export function perLevelHpGain(hitDie, conMod) {
-    return Math.max(1, Math.floor(hitDie / 2) + 1 + conMod);
+    // A non-finite CON modifier is +0, never NaN HP (2026-10-21 rules-math P2 belt).
+    const con = Number.isFinite(conMod) ? conMod : 0;
+    return Math.max(1, Math.floor(hitDie / 2) + 1 + con);
 }
 
 export function getMaxHitPoints(className, level, conMod, classData) {
-    if (!classData || !Number.isFinite(classData.hitDie)) return 10 + conMod;
+    const con = Number.isFinite(conMod) ? conMod : 0;
+    if (!classData || !Number.isFinite(classData.hitDie)) return 10 + con;
 
     // Level 1: max hit die + CON mod (floored at 1, like the per-level term).
     const hitDie = classData.hitDie;
-    const firstLevel = Math.max(1, hitDie + conMod);
-    return firstLevel + perLevelHpGain(hitDie, conMod) * (level - 1);
+    const firstLevel = Math.max(1, hitDie + con);
+    return firstLevel + perLevelHpGain(hitDie, con) * (level - 1);
 }
 
 // NOTE (2026-07-31 dead-code sweep): the classic 5/10/15/20/25/30 DC_TABLE was

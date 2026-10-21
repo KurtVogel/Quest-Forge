@@ -2,12 +2,14 @@
  * Out-of-combat spellcasting (DM-emitted spell_cast): validation, slot
  * spending, engine-rolled effects, and the spell replay guard.
  */
-import { computeACFromInventory, getIncapacitatingCondition } from '../../engine/rules.js';
+import { computeACFromInventory } from '../../engine/rules.js';
+import { describeHeroCannotAct } from '../../engine/combatPredicates.js';
 import { rollNotation } from '../../engine/dice.ts';
 import {
     buildSustainedSpell,
     chooseSlotLevel,
     describeRecipientClamp,
+    describeSlotChoice,
     resolveSpellForCharacter,
     resolveSpellRecipients,
     spellHealingNotation,
@@ -57,18 +59,26 @@ function playerMessageRecastsSpell(spell, playerMessage) {
 }
 
 /**
- * Why the CASTER cannot act right now, or null. The combat lane structurally
- * cannot cast from a dying hero (the exchange slot is death_save only), but a
- * DM narrating a "gasped prayer" and emitting spell_cast out of combat used to
- * be accepted whole: a hero at 0 HP with 2/3 death-save failures self-cast
- * Cure Wounds, revived, and erased the clock (2026-09-04 audit P1). The
- * out-of-combat rescue is a companion-administered potion (USE_ITEM).
+ * The identity of a cast's RECIPIENTS for the replay ledger (2026-10-20
+ * spellcasting P1): the ledger used to key on the spell alone, so "Cure
+ * Wounds → Jorun" on one turn made "Cure Wounds → Mika" on the next a replay —
+ * dropped silently, no slot spent, Mika still bleeding. A second cast may
+ * legitimately differ in WHO it lands on, so the recipient set is part of the
+ * key; the same spell re-emitted on the same people inside the window is still
+ * the DM narrating the aftermath. `|` is the ledger's own separator and is
+ * stripped from a name; recipients sort so the order the DM named them in
+ * never makes two keys of one cast.
  */
-function casterIncapacity(character) {
-    if (character.isDead) return 'is dead';
-    if (character.dying || (Number(character.currentHP) || 0) <= 0) return 'is at 0 HP and dying';
-    const condition = getIncapacitatingCondition(character.conditions);
-    return condition ? `is ${condition}` : null;
+function recipientIdentity(recipients) {
+    return recipients.map(r => r.type === 'companion'
+        ? `c:${r.companion.id}`
+        : (r.type === 'other' ? `o:${String(r.name || '').toLowerCase().replace(/\|/g, '')}` : 'self'))
+        .sort()
+        .join('+');
+}
+
+function describeRecipients(recipients, character) {
+    return recipients.map(r => r.type === 'companion' ? r.companion.name : (r.type === 'other' ? r.name : (character.name || 'the hero'))).join(', ');
 }
 
 // Every line CAST_SPELL posts is a receipt the DM must see (2026-09-25
@@ -102,39 +112,16 @@ export const handlers = {
         if (!spell.outOfCombatAvailable) {
             return { ...state, messages: [...state.messages, spellLine(`${spell.name} only has a combat effect; outside battle no slot was spent.`)] };
         }
-        const incapacity = casterIncapacity(character);
+        // The caster's own state is gated (2026-09-04 audit P1): a DM narrating
+        // a "gasped prayer" and emitting spell_cast out of combat used to
+        // self-revive a dying cleric and erase the death-save clock. THE actor
+        // gate is the 10-18 shelf shared with the check lane and the exchange
+        // (2026-10-20 P2: a private copy here called a STABLE or DEFEATED hero
+        // "at 0 HP and dying"). The out-of-combat rescue is a companion-
+        // administered potion (USE_ITEM).
+        const incapacity = describeHeroCannotAct(character);
         if (incapacity) {
-            return { ...state, messages: [...state.messages, spellLine(`${character.name || 'The hero'} ${incapacity} and cannot cast ${spell.name} — an unconscious caster has no voice for it. Nothing was spent; a companion's healing potion is the rescue outside combat.`)] };
-        }
-        const meta = payload._meta || {};
-        const sourceId = String(meta.sourceId || '').slice(0, 160);
-        const castKey = sourceId ? `${sourceId}|${spell.key}` : null;
-        const recentCasts = state.recentSpellCasts || [];
-        if (findExactSourceReplay(recentCasts, castKey)) return state;
-        // Cross-message replay: the DM re-emitting the same spell on a later turn
-        // (narrating the aftermath of a cast it already declared) must not spend a
-        // second slot. A nearby same-spell cast only counts as new when the player's
-        // own message casts it again by name (or an explicit "again"-style repeat).
-        // Windows measure conversational distance, not raw index: a dice turn
-        // burns ~5 raw messages and silently expired the raw-index coin windows
-        // (proven live 2026-07-22) — the same hole existed here until 2026-07-30.
-        const castMessageIndex = currentMessageIndex(state);
-        const nearbyReplay = findNearbyReplay(recentCasts, {
-            key: spell.key,
-            messages: state.messages,
-            currentIndex: castMessageIndex,
-            window: RECENT_SPELL_CAST_MESSAGE_WINDOW,
-        });
-        if (nearbyReplay && !playerMessageRecastsSpell(spell, meta.playerMessage)) return state;
-
-        let spellSlots = character.spellSlots || null;
-        let slotLevel = 0;
-        if (spell.level > 0) {
-            slotLevel = chooseSlotLevel(spellSlots, spell, payload.slotLevel ?? payload.slot_level);
-            if (slotLevel === null) {
-                return { ...state, messages: [...state.messages, spellLine(`${spell.name} fails — no level ${spell.level}+ spell slot remains. Rest to recover slots.`)] };
-            }
-            spellSlots = spendSpellSlot(spellSlots, slotLevel);
+            return { ...state, messages: [...state.messages, spellLine(`${incapacity.text} and cannot cast ${spell.name} — an unconscious caster has no voice for it. Nothing was spent; a companion's healing potion is the rescue outside combat.`)] };
         }
 
         // Recipients: the hero by default, or named living companions. upTo3
@@ -144,7 +131,8 @@ export const handlers = {
         // mechanically impossible outside a fight (2026-08-29 audit P1). THE
         // ladder is the exchange's own since 2026-10-08 (resolveSpellRecipients):
         // a self-only spell lands on the caster whatever was named, a dead
-        // companion is never a recipient, dedupe then the spell's cap.
+        // companion is never a recipient, dedupe then the spell's cap. Resolved
+        // BEFORE the ledger since 2026-10-20: the recipients are part of the key.
         const targetRefs = Array.isArray(payload.targets) && payload.targets.length > 0
             ? payload.targets
             : [payload.target];
@@ -153,6 +141,48 @@ export const handlers = {
             return { ...state, messages: [...state.messages, spellLine(`${spell.name} has no valid recipient "${invalidRefs.join('", "')}" — nothing was spent or applied.`)] };
         }
         const clampNote = describeRecipientClamp(spell, { overflow, redirected });
+
+        const meta = payload._meta || {};
+        const sourceId = String(meta.sourceId || '').slice(0, 160);
+        const ledgerKey = `${spell.key}@${recipientIdentity(recipients)}`;
+        const castKey = sourceId ? `${sourceId}|${ledgerKey}` : null;
+        const recentCasts = state.recentSpellCasts || [];
+        const recipientNames = describeRecipients(recipients, character);
+        // Both replay exits are RECEIPTS (2026-10-20 P1): the DM's window
+        // carried nothing from a suppressed cast, so it narrated a heal that
+        // never landed and no lane could tell it the slot was not spent.
+        if (findExactSourceReplay(recentCasts, castKey)) {
+            return { ...state, messages: [...state.messages, spellLine(`${spell.name} on ${recipientNames} was already applied from this same response — not cast again, no second slot spent.`)] };
+        }
+        // Cross-message replay: the DM re-emitting the same spell on the same
+        // recipients on a later turn (narrating the aftermath of a cast it
+        // already declared) must not spend a second slot. A nearby same-cast
+        // only counts as new when the player's own message casts it again by
+        // name (or an explicit "again"-style repeat). Windows measure
+        // conversational distance, not raw index: a dice turn burns ~5 raw
+        // messages and silently expired the raw-index coin windows (proven
+        // live 2026-07-22) — the same hole existed here until 2026-07-30.
+        const castMessageIndex = currentMessageIndex(state);
+        const nearbyReplay = findNearbyReplay(recentCasts, {
+            key: ledgerKey,
+            messages: state.messages,
+            currentIndex: castMessageIndex,
+            window: RECENT_SPELL_CAST_MESSAGE_WINDOW,
+        });
+        if (nearbyReplay && !playerMessageRecastsSpell(spell, meta.playerMessage)) {
+            return { ...state, messages: [...state.messages, spellLine(`${spell.name} on ${recipientNames} was NOT cast again — the engine read this as the cast from a few turns ago re-emitted; no slot spent, no effect applied. If the hero truly casts it again, the player's own words must say so ("again", or the spell by name).`)] };
+        }
+
+        let spellSlots = character.spellSlots || null;
+        let slotLevel = 0;
+        const requestedLevel = payload.slotLevel ?? payload.slot_level;
+        if (spell.level > 0) {
+            slotLevel = chooseSlotLevel(spellSlots, spell, requestedLevel);
+            if (slotLevel === null) {
+                return { ...state, messages: [...state.messages, spellLine(`${spell.name} fails — no level ${spell.level}+ spell slot remains. Rest to recover slots.`)] };
+            }
+            spellSlots = spendSpellSlot(spellSlots, slotLevel);
+        }
         // The dead-hero heal guard that lived here (2026-08-29) is subsumed by
         // casterIncapacity above: a dead or dying hero never reaches this point,
         // so a self-heal can never mint a currentHP>0 corpse state.
@@ -165,7 +195,7 @@ export const handlers = {
         // An out-of-combat heal rolls hero dice — they enter the ledger like a
         // potion's (the membership rule in appendRollHistory, 2026-10-04).
         const healingRolls = [];
-        const lines = [`**${character.name || 'The hero'} casts ${spell.name}**${slotLevel > spell.level ? ` using a level ${slotLevel} slot` : ''}${spell.level > 0 ? ` (slots left: ${summarizeSpellSlots(spellSlots)})` : ''}.`];
+        const lines = [`**${character.name || 'The hero'} casts ${spell.name}**${describeSlotChoice(spell, slotLevel, requestedLevel)}${spell.level > 0 ? ` (slots left: ${summarizeSpellSlots(spellSlots)})` : ''}.`];
         if (clampNote) lines.push(clampNote);
 
         if (spell.healing) {
@@ -243,7 +273,7 @@ export const handlers = {
             ...(castKey && {
                 recentSpellCasts: rememberLedgerEntry(recentCasts, {
                     sourceId,
-                    key: spell.key,
+                    key: ledgerKey,
                     messageIndex: castMessageIndex,
                     cap: RECENT_SPELL_CAST_LIMIT,
                 }),

@@ -679,6 +679,12 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'CAST_SPELL' }));
     });
 
+    it('a loose healing beside a NON-healing spell_cast still lands — only a spell the engine rolls healing for owns it (2026-10-20 P2)', () => {
+        const dispatch = run({ healing: 6, spell_cast: { spell: 'Shield of Faith' } });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'HEAL', payload: 6 }));
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'CAST_SPELL' }));
+    });
+
     it('dispatches CAST_SPELL for a spell_cast event with bounded fields', () => {
         const dispatch = run({ spell_cast: { spell: 'Cure Wounds', slot_level: 99, target: 'Jorun' } });
         expect(dispatch).toHaveBeenCalledWith({

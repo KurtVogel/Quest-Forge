@@ -56,6 +56,7 @@ import {
     buildSustainedSpell,
     chooseSlotLevel,
     describeRecipientClamp,
+    describeSlotChoice,
     dropCondition,
     getSpellAttackBonus,
     getSpellSaveDC,
@@ -304,6 +305,20 @@ function validateTurnShape(allSlots, state) {
         return 'The bonus action is already used this turn; a bonus-action spell must wait for a later turn.';
     }
     const casterBonusTurn = isSpellcaster(state.character?.class) && bonusCastCount === 1;
+    // 5e's own limit on the lever (2026-10-20 spellcasting P2, DECISIONS.md
+    // 2026-10-21): a bonus-action spell leaves the ACTION room for a cantrip
+    // only — Healing Word + Sacred Flame, never Healing Word + Cure Wounds
+    // (two leveled heals a round planned `ok` and spent both slots). An
+    // attack / check / dodge beside the bonus cast stays legal; Action Surge
+    // is its own lane (two arbitrary actions) and is judged before this.
+    if (casterBonusTurn && !surge) {
+        const leveledAction = slots.find(slot => slot.action === 'cast'
+            && !isBonusCastSlot(state.character, slot)
+            && (resolveCastSpell(state.character, slot)?.level || 0) > 0);
+        if (leveledAction) {
+            return `A bonus-action spell leaves room for a cantrip only — ${resolveCastSpell(state.character, leveledAction).name} is a leveled spell. Cast it as the turn's one spell, or pair the bonus spell with a cantrip, an attack, or another action.`;
+        }
+    }
 
     const maxSlots = hasCunningActionFeature || surge || casterBonusTurn ? 2 : 1;
 
@@ -774,7 +789,7 @@ function resolveCastSlot(ctx, turn, slot) {
         turn.characterUpdates.spellSlots = turn.spellSlots;
         events.push({
             type: 'note',
-            text: `**${character.name || 'Player'} casts ${spell.name}**${slotLevel > spell.level ? ` using a level ${slotLevel} slot` : ''} (slots left: ${summarizeSpellSlots(turn.spellSlots)}).`,
+            text: `**${character.name || 'Player'} casts ${spell.name}**${describeSlotChoice(spell, slotLevel, slot.slotLevel)} (slots left: ${summarizeSpellSlots(turn.spellSlots)}).`,
         });
     }
     if (spell.targeting.side === 'enemy') {

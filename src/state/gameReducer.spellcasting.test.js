@@ -47,7 +47,8 @@ describe('CAST_SPELL (out of combat)', () => {
         expect(next.character.spellSlots[1]).toEqual({ used: 1, max: 4 });
         expect(next.messages.at(-1).content).toMatch(/casts Cure Wounds/);
         expect(next.messages.at(-1).content).toMatch(/slots left/);
-        expect(next.recentSpellCasts).toEqual(['msg-1|cureWounds|0']);
+        // The ledger key names the recipients since 2026-10-20 (a cast on Mika is not a replay of a cast on Jorun).
+        expect(next.recentSpellCasts).toEqual(['msg-1|cureWounds@self|0']);
     });
 
     it('ignores an exact replay of the same casting from the same source message', () => {
@@ -60,8 +61,21 @@ describe('CAST_SPELL (out of combat)', () => {
             type: 'CAST_SPELL',
             payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-1' } },
         });
-        expect(twice).toBe(once);
+        // Suppressed, and SAID (2026-10-20 P1: both replay exits are receipts).
+        expect(twice.character).toBe(once.character);
+        expect(twice.messages.length).toBe(once.messages.length + 1);
+        expect(twice.messages.at(-1)).toMatchObject({ dmVisible: true });
+        expect(twice.messages.at(-1).content).toMatch(/Cure Wounds on Maren was already applied from this same response/);
     });
+
+    /** The replay suppression leaves the sheet alone and posts one dmVisible receipt. */
+    const expectSuppressed = (replayed, base) => {
+        expect(replayed.character).toBe(base.character);
+        expect(replayed.party).toBe(base.party);
+        expect(replayed.messages.length).toBe(base.messages.length + 1);
+        expect(replayed.messages.at(-1)).toMatchObject({ dmVisible: true });
+        expect(replayed.messages.at(-1).content).toMatch(/was NOT cast again/);
+    };
 
     it('suppresses a same-spell re-emission on a nearby later message (DM aftermath replay)', () => {
         const state = clericState();
@@ -75,7 +89,7 @@ describe('CAST_SPELL (out of combat)', () => {
             type: 'CAST_SPELL',
             payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage: 'How do my wounds feel now?' } },
         });
-        expect(replayed).toBe(withChatter);
+        expectSuppressed(replayed, withChatter);
 
         // But the player explicitly casting again by name is honored.
         const recast = gameReducer(withChatter, {
@@ -90,7 +104,7 @@ describe('CAST_SPELL (out of combat)', () => {
             type: 'CAST_SPELL',
             payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage: 'Another time, maybe. I let the priest examine it.' } },
         });
-        expect(strayWords).toBe(withChatter);
+        expectSuppressed(strayWords, withChatter);
     });
 
     it('the recast bypass needs the spell as an ordered phrase or a cast-clause repeat — two proven false positives stay suppressed (2026-09-04 P2)', () => {
@@ -104,9 +118,9 @@ describe('CAST_SPELL (out of combat)', () => {
             payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage } },
         });
         // Scattered name words: not the spell.
-        expect(replay('These wounds will not cure themselves; I bind them with cloth')).toBe(withChatter);
+        expectSuppressed(replay('These wounds will not cure themselves; I bind them with cloth'), withChatter);
         // Bare pronoun + again with no cast in the clause: not a recast.
-        expect(replay('I try that again, the lock is stubborn')).toBe(withChatter);
+        expectSuppressed(replay('I try that again, the lock is stubborn'), withChatter);
         // Genuine recasts still spend the second slot.
         expect(replay('I cast it again, louder this time').character.spellSlots[1].used).toBe(2);
         expect(replay('Cure-Wounds on myself once more').character.spellSlots[1].used).toBe(2);
@@ -138,7 +152,7 @@ describe('CAST_SPELL (out of combat)', () => {
             type: 'CAST_SPELL',
             payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage: 'What now?' } },
         });
-        expect(echoed).toBe(noisy); // suppressed — no second slot spent
+        expectSuppressed(echoed, noisy); // suppressed — no second slot spent
     });
 
     it('allows the same spell again once the replay window has passed', () => {
@@ -279,7 +293,7 @@ describe('CAST_SPELL (out of combat)', () => {
         expect(prayer.character.deathSaves).toEqual({ successes: 0, failures: 2 });
         expect(prayer.character.spellSlots[1].used).toBe(0);
         expect(prayer.recentSpellCasts ?? []).toEqual([]);
-        expect(prayer.messages.at(-1).content).toMatch(/Maren is at 0 HP and dying and cannot cast Cure Wounds/);
+        expect(prayer.messages.at(-1).content).toMatch(/Maren is dying at 0 HP and cannot cast Cure Wounds/);
 
         const shield = gameReducer(dying, { type: 'CAST_SPELL', payload: { spell: 'shield of faith' } });
         expect(shield.character.sustainedSpell).toBeNull();

@@ -6,12 +6,13 @@ import { MAX_ITEM_QUANTITY, normalizeItem, normalizeItemKey, toFiniteNumber } fr
 import { addCurrency, characterCurrencyToCopper, formatCurrency, spendCurrency } from '../../engine/currency.js';
 import { MAX_COIN_EVENT } from '../../config/contentLimits.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
+import { shouldAutoEquip } from '../../engine/equipment.js';
 import {
     addOrStackItem,
     consumeItem,
     stackOverflow,
     currentMessageIndex,
-    findInventoryItemByRef,
+    resolveInventoryItemRef,
     findRecentTransactionDuplicate,
     mintOwnedItem,
     normalizeRecentTransactions,
@@ -125,12 +126,37 @@ function clampCoinAmount(value) {
     return Number.isFinite(value) ? Math.max(0, Math.min(MAX_COIN_EVENT, Math.trunc(value))) : 0;
 }
 
-/** The three clamped denominations of a coin payload, and whether they move anything. */
+/** The one ceiling of a coin EVENT, in copper: MAX_COIN_EVENT gold. */
+const MAX_COIN_EVENT_CP = MAX_COIN_EVENT * 100;
+
+/**
+ * The three clamped denominations of a coin payload, and whether they move
+ * anything. The ceiling is on the EVENT, not on each denomination (2026-10-20
+ * inventory-economy P2): three maxed denominations used to pay 11,100 gp
+ * against the documented 10,000. Over the ceiling the event is reduced to
+ * exactly MAX_COIN_EVENT gold — the clamp lands on the gold column, the
+ * smaller coins are dropped with it (the signature is by value anyway).
+ */
 function coinAmounts(payload) {
     const gold = clampCoinAmount(payload?.gold);
     const silver = clampCoinAmount(payload?.silver);
     const copper = clampCoinAmount(payload?.copper);
-    return { gold, silver, copper, totalCp: gold * 100 + silver * 10 + copper };
+    const totalCp = gold * 100 + silver * 10 + copper;
+    if (totalCp > MAX_COIN_EVENT_CP) {
+        return { gold: MAX_COIN_EVENT, silver: 0, copper: 0, totalCp: MAX_COIN_EVENT_CP };
+    }
+    return { gold, silver, copper, totalCp };
+}
+
+/**
+ * A bought shield or armor fills an empty slot like a found one (2026-10-20
+ * inventory-economy P2): ADD_ITEM and the load heal shared the one auto-equip
+ * since 10-07 while PURCHASE_ITEM minted unequipped, so the hero's AC after
+ * buying a shield depended on whether they had reloaded since (11 until the
+ * next Continue, 13 after). Three writers, one rule.
+ */
+function autoEquipped(inventory, newItem) {
+    return shouldAutoEquip(inventory, newItem) ? { ...newItem, equipped: true } : newItem;
 }
 
 const isEmptyCoin = ({ gold, silver, copper }) => gold <= 0 && silver <= 0 && copper <= 0;
@@ -738,10 +764,10 @@ export const handlers = {
             // is status-blind, so a re-emitted purchase is still suppressed.
             const coveredState = suppress(state, 'recentPurchases', transaction, sourceId, messageIndex,
                 `${quantity > 1 ? `${quantity}x ` : ''}${item.name} added — its ${formatCurrency(priceCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`);
-            return withInventoryAndAC(coveredState, addOrStackItem(state.inventory, mintOwnedItem(item, { quantity })));
+            return withInventoryAndAC(coveredState, addOrStackItem(state.inventory, autoEquipped(state.inventory, mintOwnedItem(item, { quantity }))));
         }
 
-        const newItem = mintOwnedItem(item, { quantity });
+        const newItem = autoEquipped(state.inventory, mintOwnedItem(item, { quantity }));
         // The stack ceiling (2026-09-25): a purchase none of which fits is
         // refused before any coin moves; a partial fit is bought (the DM's
         // priceCp is a flat total, not pro-rated) and the discard is visible.
@@ -792,11 +818,17 @@ export const handlers = {
         // Same resolution ladder as equip/remove (2026-08-28 audit): a drifted
         // DM name ("hempen rope" for "Hempen Rope (50 ft)") resolves through
         // catalog keys and descriptor prefixes instead of failing on exact-name.
-        const item = findInventoryItemByRef(state.inventory, payload);
+        // The sale reads the ladder's `ambiguous` like REMOVE_ITEM_BY_NAME does
+        // (2026-10-20 inventory-economy P2): "fire potion" against two fire
+        // potions used to be told "not in your inventory" — a receipt the DM
+        // acts on (another spelling, or a pack narrated as lacking the potion).
+        const { item, ambiguous } = resolveInventoryItemRef(state.inventory, payload);
         if (!item) {
             return {
                 ...state,
-                messages: [...state.messages, coinLine(`Can't sell "${ref}" — it's not in your inventory.`)],
+                messages: [...state.messages, coinLine(ambiguous > 1
+                    ? `Can't sell "${ref}" — it matches ${ambiguous} different stacks; say which one.`
+                    : `Can't sell "${ref}" — it's not in your inventory.`)],
             };
         }
 

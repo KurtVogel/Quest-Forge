@@ -266,6 +266,27 @@ export function chooseSlotLevel(spellSlots, spell, requestedLevel = null) {
     return null;
 }
 
+/**
+ * The clause a cast line carries about the slot it consumed — one wording on
+ * both lanes (2026-10-20 spellcasting P2): " using a level N slot" for an
+ * honored upcast, and when the DM asked for a level whose slots were spent,
+ * "(no level N slot left — cast at level M)" so the DM, which narrated the
+ * bigger die, learns the engine rolled the small one. The silent downgrade
+ * used to be the one slot choice no line named. Empty for a cantrip or a
+ * base-level cast nobody asked to raise.
+ */
+export function describeSlotChoice(spell, slotLevel, requestedLevel = null) {
+    if (!spell || spell.level === 0 || !slotLevel) return '';
+    const requestedNumber = requestedLevel === null || requestedLevel === undefined || requestedLevel === '' ? NaN : Number(requestedLevel);
+    const requested = Number.isFinite(requestedNumber) ? Math.trunc(requestedNumber) : null;
+    if (requested !== null && requested >= spell.level && requested !== slotLevel) {
+        return requested > MAX_SPELL_LEVEL
+            ? ` (a level ${requested} slot is beyond any caster here — cast at level ${slotLevel})`
+            : ` (no level ${requested} slot left — cast at level ${slotLevel})`;
+    }
+    return slotLevel > spell.level ? ` using a level ${slotLevel} slot` : '';
+}
+
 export function spendSpellSlot(spellSlots, slotLevel) {
     if (!slotLevel || !spellSlots?.[slotLevel]) return spellSlots;
     const slot = spellSlots[slotLevel];

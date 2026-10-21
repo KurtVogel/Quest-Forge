@@ -34,16 +34,27 @@
  * 2026-09-06 "engine roll-result lines still ride it" rule is narrowed to
  * them, not reversed.
  */
-import { isTableTalkMessage } from './tableTalk.js';
+import { isEpilogueRequest, isTableTalkMessage } from './tableTalk.js';
 
 /**
  * Narrative-eligible entries of a raw span with their RAW message indexes
  * (salvaged shorter-span chapters need the true toIndex).
- * @returns {Array<{ message: object, index: number }>}
+ *
+ * `keepEpilogue` (2026-10-21 chronicler P2, DECISIONS.md 2026-10-21) is the
+ * CHRONICLER's one exception to the table-talk pairing: the ending card's
+ * epilogue request opens `OOC:`, so the DM's "what became of them" — the one
+ * reply written for the READER — skipped with its request and a finished
+ * campaign's last chapter stopped at the epitaph. The request still skips;
+ * the reply enters flagged `epilogue: true` so the retelling knows it is the
+ * saga's close. Memory's three readers (the cadence, priming, scene art)
+ * never pass it: DECISIONS 2026-09-30 keeps the epilogue out of MEMORY, and
+ * the record the player keeps is a separate question.
+ * @returns {Array<{ message: object, index: number, epilogue?: true }>}
  */
-export function collectNarrativeEntries(messages = [], fromIndex = 0, toIndex = Infinity) {
+export function collectNarrativeEntries(messages = [], fromIndex = 0, toIndex = Infinity, { keepEpilogue = false } = {}) {
     const entries = [];
     let skipNextAssistant = false;
+    let epilogueNext = false;
     (messages || []).forEach((m, index) => {
         if (index > toIndex) return;
         // `kind: 'record'` is an engine receipt about the TABLE (the recall
@@ -54,18 +65,23 @@ export function collectNarrativeEntries(messages = [], fromIndex = 0, toIndex = 
         // not from the span: a journal batch or chapter that opens on the DM's
         // at-the-table reply must still know the OOC line just before it
         // (2026-09-06 — the journal batch adopted this predicate).
+        let epilogue = false;
         if (m.role === 'user') {
             skipNextAssistant = false;
+            epilogueNext = false;
             if (isTableTalkMessage(m.content)) {
                 skipNextAssistant = true;
+                epilogueNext = keepEpilogue && isEpilogueRequest(m.content);
                 return;
             }
         } else if (m.role === 'assistant' && skipNextAssistant) {
             skipNextAssistant = false;
-            return;
+            if (!epilogueNext) return;
+            epilogueNext = false;
+            epilogue = true;
         }
         if (index < fromIndex) return;
-        entries.push({ message: m, index });
+        entries.push(epilogue ? { message: m, index, epilogue: true } : { message: m, index });
     });
     return entries;
 }

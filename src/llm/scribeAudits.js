@@ -79,7 +79,7 @@ export const CAST_AUDIT_RULES = `
 
 ADDITIONAL TASK — NARRATED SPELLCAST AUDIT:
 The engine spends spell slots and applies spell effects ONLY from structured events; a cast the DM narrates without its event mechanically never happened — no slot spent, no ward, no healing (a hero once fought a whole battle at base AC under a lovingly narrated Mage Armor). Pure OBSERVATION again: report the spells THIS DM narrative shows the HERO successfully completing, as one extra top-level field:
-"narrated_casts": [{ "spell": "exact spell name from HERO'S KNOWN SPELLS", "target": "self, or the exact companion name the spell lands on" }]
+"narrated_casts": [{ "spell": "exact spell name from HERO'S KNOWN SPELLS", "target": "self, or the exact companion name the spell lands on", "targets": ["only for a spell that lands on SEVERAL allies at once (Mass Healing Word, Mass Cure Wounds): every exact name it reaches, the hero as self"] }]
 
 Cast rules:
 - Report ONLY casts the DM NARRATIVE completes for the HERO in this scene: the ward settles, the wounds knit, the light blooms. Attempts, intentions, preparations, interrupted or failed magic, and spells cast by ANY other character report nothing.
@@ -539,11 +539,19 @@ function reconcileNarratedCasts(narrated, lootAudit, dispatch) {
         }
         // String-or-drop (2026-09-13 audit P2): an object target rode into a visible line as "[object Object]".
         const target = typeof entry === 'object' && typeof entry?.target === 'string' ? entry.target.trim().slice(0, 60) : '';
+        // A group heal the DM narrated and never evented is recovered on EVERY
+        // ally it reached (2026-10-20 spellcasting P2): the schema carried one
+        // `target`, so a narrated Mass Healing Word came back single-recipient.
+        // String elements only, the wire's own cap; CAST_SPELL's ladder dedupes
+        // and clamps to the spell's real target count.
+        const targets = typeof entry === 'object' && Array.isArray(entry?.targets)
+            ? entry.targets.filter(t => typeof t === 'string' && t.trim()).map(t => t.trim().slice(0, 60)).slice(0, 6)
+            : [];
         dispatch({
             type: 'CAST_SPELL',
             payload: {
                 spell: spell.name,
-                ...(target && { target }),
+                ...(targets.length > 0 ? { targets } : (target && { target })),
                 _meta: { sourceId: `${sourceId}:cast` },
             },
         });

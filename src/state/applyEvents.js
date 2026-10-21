@@ -15,6 +15,7 @@ import { CLASSES } from '../data/classes.js';
 import { normalizeItem, normalizeItemKey } from '../data/items.js';
 import { toFlag } from '../engine/text.js';
 import { isLowLevelSolo } from '../engine/combatPredicates.js';
+import { findSpell } from '../data/spells.js';
 import { itemIdentityMatches } from '../engine/textMatch.js';
 import { normalizeRefToken } from './handlers/shared.js';
 
@@ -225,7 +226,11 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
     // guard below. This holds even when the rest/cast itself gets replay-suppressed:
     // an echoed rest must not sneak its healing in through the loose channel either.
     const restOwnsHealing = (events.restTaken === 'short' || events.restTaken === 'long') && events.healing > 0;
-    const spellOwnsHealing = (events.spellCasts || []).length > 0 && events.healing > 0;
+    // Only a spell the engine ROLLS healing for owns the loose delta (2026-10-20
+    // spellcasting P2): Shield of Faith beside `healing: 6` is a ward and a
+    // bandage, and the bandage used to vanish with one console.warn.
+    const spellOwnsHealing = events.healing > 0 && (events.spellCasts || [])
+        .some(cast => !!findSpell(typeof cast === 'string' ? cast : cast?.spell)?.healing);
     if (restOwnsHealing) {
         console.warn('[applyEvents] Ignored loose healing emitted alongside rest_taken — the rest already owns recovery.');
     } else if (spellOwnsHealing) {

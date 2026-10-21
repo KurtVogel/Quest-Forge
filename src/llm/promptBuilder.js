@@ -13,7 +13,7 @@ import { buildWonderBlock } from '../engine/wonder.js';
 import { buildPresenceText } from './narrativeMessages.js';
 import { buildStoryMemoryPromptBlock, formatSecrecyTag } from '../engine/storyMemory.js';
 import { describeCatalogForPrompt } from '../data/items.js';
-import { isShieldItem, isWornArmor } from '../engine/equipment.js';
+import { isShieldItem, isWeaponItem, isWornArmor } from '../engine/equipment.js';
 import { formatCurrency } from '../engine/currency.js';
 import { CLASSES } from '../data/classes.js';
 import { cleanTextField, normalizeCampaignPremise } from '../config/contentLimits.js';
@@ -1227,10 +1227,10 @@ function buildInventoryBlock(inventory, character) {
                 if (armorAc !== null) desc += ` [AC ${armorAc}, ${i.armorType || 'unknown'} armor]`;
             }
             if (isShieldItem(i)) desc += ` [+${describeShieldAc(i)} AC shield]`;
-            if (i.damage) desc += ` [${i.damage}${i.damageType ? ' ' + i.damageType : ''}${i.attackBonus ? `, +${i.attackBonus} hit` : ''}${i.damageBonus ? `, +${i.damageBonus} dmg` : ''}]`;
+            if (i.damage) desc += ` [${i.damage}${i.versatile && i.damageVersatile ? ` (${i.damageVersatile} in two hands)` : ''}${i.damageType ? ' ' + i.damageType : ''}${i.attackBonus ? `, +${i.attackBonus} hit` : ''}${i.damageBonus ? `, +${i.damageBonus} dmg` : ''}]`;
         }
         if (Number.isFinite(i.valueCp)) desc += ` [value ${formatCurrency(i.valueCp)}]`;
-        if (i.type === 'weapon' && character && !isProficientWithWeapon(character, i)) {
+        if (isWeaponItem(i) && character && !isProficientWithWeapon(character, i)) {
             desc += ` [NOT proficient — attacks lack the proficiency bonus; narrate the unfamiliarity]`;
         }
         return desc;

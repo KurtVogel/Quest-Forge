@@ -154,7 +154,7 @@ export function detectPreNarratedOutcome(narrative) {
  * the fallback for a ```json body that is not an object. A bare fence
  * around prose (a sign, a letter) is never a block.
  */
-function findFencedJsonBlocks(response) {
+export function findFencedJsonBlocks(response) {
     const blocks = [];
     let from = 0;
     while (from < response.length) {

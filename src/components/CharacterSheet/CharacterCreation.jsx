@@ -785,7 +785,7 @@ export default function CharacterCreation() {
                                         <div className="reveal-chip"><span>HP</span><strong>{preview.character.maxHP}</strong></div>
                                         <div className="reveal-chip"><span>AC</span><strong>{computeACFromInventory(preview.inventory, preview.character)}</strong></div>
                                         <div className="reveal-chip"><span>Initiative</span><strong>{formatModifier(getModifier(preview.character.abilityScores.dexterity))}</strong></div>
-                                        <div className="reveal-chip"><span>Proficiency</span><strong>+{getProficiencyBonus(1)}</strong></div>
+                                        <div className="reveal-chip"><span>Proficiency</span><strong>{formatModifier(getProficiencyBonus(1))}</strong></div>
                                         <div className="reveal-chip"><span>Speed</span><strong>{preview.character.speed} ft</strong></div>
                                         <div className="reveal-chip"><span>Hit Die</span><strong>d{CLASSES[charClass]?.hitDie}</strong></div>
                                         {preview.character.spellSlots && (

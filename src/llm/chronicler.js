@@ -19,6 +19,13 @@ import { sendMessage } from './adapter.js';
 import { collectNarrativeEntries } from './narrativeMessages.js';
 import { CHRONICLE_CHAPTER_TEXT_MAX, CHRONICLE_PART_CHAR_BUDGET, CHRONICLE_TITLE_MAX } from '../config/contentLimits.js';
 import { dmCallConfig } from './machinery.js';
+import { findFencedJsonBlocks } from './responseParser.js';
+import { listRevealableSetupIds } from '../engine/roleplayCheck.js';
+
+/** The chronicler's own read of the transcript: the epilogue reply included. */
+export function collectChronicleEntries(messages, fromIndex, toIndex) {
+    return collectNarrativeEntries(messages, fromIndex, toIndex, { keepEpilogue: true });
+}
 
 // Room a multi-part title keeps for its " — Part NN" suffix inside CHRONICLE_TITLE_MAX.
 const PART_SUFFIX_RESERVE = 12;
@@ -83,14 +90,31 @@ export function passageWordAim(transcriptChars) {
     return [low, high];
 }
 
+/**
+ * Every DM event block out of a row, through THE fence grammar
+ * (`findFencedJsonBlocks`, 2026-10-11 — ```` ```JSON ```` and the bare object
+ * fence included; a private ```` ```json ````-only regex here was the one
+ * place the parser's grammar was spelled a second way, 2026-10-21 chronicler
+ * P2). Blocks are removed back to front so each one's index stays valid.
+ */
 function stripEventBlocks(text) {
-    return String(text || '').replace(/```json[\s\S]*?```/g, '').trim();
+    let out = String(text || '');
+    for (const block of findFencedJsonBlocks(out).reverse()) {
+        out = out.slice(0, block.index) + out.slice(block.index + block.full.length);
+    }
+    return out.trim();
 }
 
-function renderTranscriptLine(m, heroName) {
+function renderTranscriptLine(entry, heroName) {
+    const m = entry.message;
     const content = stripEventBlocks(m.content).slice(0, MESSAGE_CLIP);
     if (m.role === 'user') return `PLAYER (${heroName}): ${content}`;
-    if (m.role === 'assistant') return `DM: ${content}`;
+    // The epilogue is the saga's own close (2026-10-21): the chronicler is told
+    // what it is reading so the retelling ends the chapter on it, as an
+    // ending, instead of folding it into the events before the hero fell.
+    if (m.role === 'assistant') return entry.epilogue
+        ? `DM — THE EPILOGUE (what became of everyone after the hero's death; retell it as the saga's close, nothing after it): ${content}`
+        : `DM: ${content}`;
     return `TABLE RECORD: ${content}`;
 }
 
@@ -107,7 +131,7 @@ export function planChroniclePassages(entries = [], heroName = 'the hero') {
     const chunks = [];
     let current = null;
     for (const entry of entries) {
-        const line = renderTranscriptLine(entry.message, heroName);
+        const line = renderTranscriptLine(entry, heroName);
         const added = current ? current.chars + TRANSCRIPT_LINE_GAP + line.length : line.length;
         if (!current || current.entries.length >= CHRONICLE_CHUNK_SIZE || added > CHRONICLE_CHUNK_CHARS) {
             current = { entries: [], lines: [], chars: 0 };
@@ -141,10 +165,19 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
     const chapters = state.chronicle || [];
     const fromIndex = chapters.length > 0 ? (chapters[chapters.length - 1].toIndex ?? -1) + 1 : 0;
     const toIndex = (state.messages || []).length - 1;
-    const eligible = collectNarrativeEntries(state.messages, fromIndex, toIndex);
+    const eligible = collectChronicleEntries(state.messages, fromIndex, toIndex);
     if (eligible.length < CHRONICLE_MIN_MESSAGES) {
         throw new Error('Not enough new play to close a chapter yet — keep adventuring first.');
     }
+    // The final part claims the RAW span end so trailing system rows never stay
+    // pending — but never a withheld check setup the player can still reveal
+    // (2026-10-21 chronicler P2): a close with a proposal card on the table
+    // used to claim the hidden setup row, and "Change approach" then revealed
+    // it inside a closed span no future close retells. The claim stops before
+    // the earliest such row, never short of the last retold message.
+    const revealable = new Set(listRevealableSetupIds(state.pendingRoleplayCheck, state.messages));
+    const firstRevealableIndex = (state.messages || []).findIndex(m => revealable.has(m?.id));
+    const spanEnd = firstRevealableIndex === -1 ? toIndex : Math.min(toIndex, firstRevealableIndex - 1);
 
     const heroName = state.character?.name || 'the hero';
     const premise = String(state.session?.premise || '').slice(0, 1200);
@@ -243,23 +276,25 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
             // The final part of a clean run claims the RAW span end so trailing
             // hidden/system messages never stay "pending"; every earlier
             // boundary lands on the last message its chunk retold.
-            closePart(lastChunkOfRun ? toIndex : lastIndexOf(chunks[i]));
+            closePart(lastChunkOfRun ? Math.max(spanEnd, lastIndexOf(chunks[i])) : lastIndexOf(chunks[i]));
         }
     }
     if (salvaged && passages.length > 0) {
         closePart(lastIndexOf(chunks[completedChunks - 1]));
     }
 
+    // Both warnings ride when both happened (2026-10-21 chronicler P2: the
+    // salvage text used to win and the clipped part sat in the chapters with
+    // no word) — one sentence each, joined.
+    const warnings = [
+        salvaged && 'The chronicler failed partway — the completed passages were kept as a shorter chapter. Close another chapter to retell the rest.',
+        clipped && 'One passage ran past the chapter ceiling and was clipped at its end. Remove the chapter and close again if the cut shows.',
+    ].filter(Boolean);
     return {
         chapters: out,
-        ...(salvaged && {
-            salvaged: true,
-            warning: 'The chronicler failed partway — the completed passages were kept as a shorter chapter. Close another chapter to retell the rest.',
-        }),
-        ...(clipped && !salvaged && {
-            clipped: true,
-            warning: 'One passage ran past the chapter ceiling and was clipped at its end. Remove the chapter and close again if the cut shows.',
-        }),
+        ...(salvaged && { salvaged: true }),
+        ...(clipped && { clipped: true }),
+        ...(warnings.length > 0 && { warning: warnings.join(' ') }),
     };
 }
 

@@ -17,7 +17,11 @@
  */
 
 import { rollWithModifier, parseNotation } from './dice.ts';
-import { fightingStyleEffects, getEquippedWeapon, getSneakAttackDice, getConditionRollEffects, combineRollModifiers } from './rules.js';
+import { fightingStyleEffects, getEquippedWeapon, getSneakAttackDice, getConditionRollEffects, combineRollModifiers, isCriticalNatural, isWieldedTwoHanded } from './rules.js';
+
+// The crit rule lives beside the ladder in rules.js since 2026-10-21 (the odds
+// card reads it there); the kernel's importers keep their name.
+export { isCriticalNatural };
 
 /**
  * Combine base advantage/disadvantage with the condition effects of BOTH sides
@@ -67,27 +71,12 @@ export function rollD20Kept(modifier, description, advantage = false, disadvanta
     };
 }
 
-/** The Great Weapon Fighting reroll threshold when it applies (two-handed melee weapon in hand), else 0. */
+/** The Great Weapon Fighting reroll threshold when it applies (a melee weapon in two hands — THE grip, versatile included since 2026-10-21), else 0. */
 function greatWeaponRerollThreshold(character, inventory = []) {
     const threshold = fightingStyleEffects(character)?.rerollDamageDiceAtOrBelow || 0;
     if (!threshold) return 0;
     const weapon = getEquippedWeapon(inventory);
-    return weapon && !weapon.ranged && weapon.twoHanded ? threshold : 0;
-}
-
-/**
- * Is this natural die a critical hit for this character? 20 always; 19 for a
- * Champion Fighter (Martial Archetype, level 3+). The single source of the
- * crit rule — the exchange machine and rollResolver adapted subtly different
- * copies of this before the kernel.
- */
-export function isCriticalNatural(character, natural) {
-    return natural === 20 || (
-        natural === 19
-        && character?.class === 'fighter'
-        && (character.level || 1) >= 3
-        && character.martialArchetype === 'champion'
-    );
+    return isWieldedTwoHanded(character, weapon, inventory) ? threshold : 0;
 }
 
 /**

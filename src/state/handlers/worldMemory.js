@@ -396,7 +396,10 @@ export const handlers = {
             };
         }
         const chronicle = appendChronicleChapter(state.chronicle, action.payload, { maxMessageCount: (state.messages || []).length });
-        if (chronicle === (state.chronicle || [])) return state;
+        // "Nothing landed" is a LENGTH judgement (2026-10-21 chronicler P2): the
+        // old reference compare matched two fresh arrays over an undefined
+        // chronicle and consumed the ceremony nudge for an all-junk payload.
+        if (chronicle.length === (state.chronicle || []).length) return state;
         // Writing a chapter consumes the front-resolution ceremony nudge.
         const session = state.session?.chapterCloseSuggested
             ? { ...state.session, chapterCloseSuggested: null }

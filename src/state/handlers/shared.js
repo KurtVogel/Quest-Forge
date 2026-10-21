@@ -216,6 +216,19 @@ export function applyEarlyDefeat(character) {
  * coerced to finite integers and clamped to the live transcript; an absent id
  * or createdAt is minted; junk drops.
  */
+/**
+ * A wall-clock stamp inside a sane band, else now (2026-10-21 chronicler P2):
+ * a finite-but-absurd `createdAt` (1e300) passed `Number.isFinite` and the
+ * Journal card and the markdown export both printed "Invalid Date". The band
+ * is the project's own lifetime to a day past the reading clock.
+ */
+const EPOCH_BAND_START_MS = Date.UTC(2025, 0, 1);
+const EPOCH_BAND_SLACK_MS = 24 * 60 * 60 * 1000;
+export function saneEpochMs(value, now = Date.now()) {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= EPOCH_BAND_START_MS && n <= now + EPOCH_BAND_SLACK_MS ? n : now;
+}
+
 export function normalizeChronicleChapter(entry, { maxMessageCount = Infinity } = {}) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
     const text = typeof entry.text === 'string' ? entry.text.trim().slice(0, CHRONICLE_CHAPTER_TEXT_MAX) : '';
@@ -235,7 +248,7 @@ export function normalizeChronicleChapter(entry, { maxMessageCount = Infinity } 
         text,
         fromIndex: index(entry.fromIndex),
         toIndex: index(entry.toIndex),
-        createdAt: Number.isFinite(Number(entry.createdAt)) ? Number(entry.createdAt) : Date.now(),
+        createdAt: saneEpochMs(entry.createdAt),
     };
 }
 

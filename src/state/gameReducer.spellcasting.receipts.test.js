@@ -76,7 +76,7 @@ describe('CAST_SPELL lines are DM receipts (2026-09-25 spellcasting P2)', () => 
 
     it('an incapacitated caster and a missing recipient are receipts', () => {
         const dying = clericState({ character: { currentHP: 0, dying: true, deathSaves: { successes: 0, failures: 2 } } });
-        expectReceipt(cast(dying, { spell: 'Cure Wounds', target: 'self' }), /is at 0 HP and dying and cannot cast Cure Wounds/);
+        expectReceipt(cast(dying, { spell: 'Cure Wounds', target: 'self' }), /is dying at 0 HP and cannot cast Cure Wounds/);
         expectReceipt(cast(clericState(), { spell: 'Healing Word', target: 'Nobody' }), /Healing Word has no valid recipient "Nobody"/);
     });
 

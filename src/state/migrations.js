@@ -177,7 +177,14 @@ function healStackedInventoryRows(save) {
 function healEquippedSlots(save) {
     const inventory = (save.inventory || []).map(item => normalizeItem(item));
     for (const item of inventory) {
-        if (shouldAutoEquip(inventory, item)) item.equipped = true;
+        // Only a row that was NEVER placed is healed (2026-10-20 inventory-
+        // economy P1): every engine-minted row carries `equipped` (mintOwnedItem
+        // writes it), so a stored `false` is a decision — the player's "I take
+        // off my armor" / the DM's `equipment_changes: unequip` — and the heal
+        // used to reverse it on every Continue (shield AC 14 → 17, no line). A
+        // row lacking the key is the legacy / hand-stripped shape this heal
+        // was written for.
+        if (item.equipped === undefined && shouldAutoEquip(inventory, item)) item.equipped = true;
     }
     return { ...save, inventory: normalizeEquippedSlots(inventory) };
 }
