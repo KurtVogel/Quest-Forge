@@ -232,18 +232,23 @@ export const MAX_CAMPAIGN_MEMORIES = 1500;
 const EVICT_FIRST_CATEGORIES = new Set(['player', 'narrative']);
 
 /**
- * Mount-time seed items for these categories are snapshots of CURRENT state
- * (NPC notes, story-card texts) that get reworded/merged as play continues. A
- * cached row whose text no longer appears in the seed is a stale predecessor —
- * without pruning, every rewording stays retrievable forever beside its
- * replacement (the audit's stale-rows finding).
+ * A load is a branch (memory-research M0, 2026-10-21). The seed is built from
+ * the LOADED state, and every row the record composes (facts under their
+ * DM-given category, journal entries, NPC notes, story cards) is in it — the
+ * seed carries the whole record since 2026-08-22 (journal) and 2026-10-11 (one
+ * fact composer). So a cached row of a RECORD category whose text the seed no
+ * longer carries is either a stale predecessor wording (the 2026-08-06 prune)
+ * or a row minted in a future the player abandoned by loading an older slot:
+ * both prune. The one category the seed never carries is the TRANSIENT pair
+ * (`narrative` / `player`, `EVICT_FIRST_CATEGORIES`): a transient row is judged
+ * by its source stamp against the loaded transcript — an id the transcript
+ * does not hold was written after this slot's last message. A stamp-less
+ * legacy row and a legacy `general` row are kept (nothing can judge them).
+ * `world_fact` used to be kept whenever absent from the seed (the "immutable
+ * history" keep): loading an older slot of the same campaign retrieved the
+ * facts and narration of turns that slot never played.
  */
-const isMutableSeedCategory = (category) =>
-    category === 'npc' || category === 'journal' || String(category || '').startsWith('story_');
-// 'journal' joined 2026-08-22: journal entries are append-only in state, so the
-// seed always carries every summary — marking them mutable is a pure heal that
-// prunes the legacy "[Location: X]"-prefixed live rows which never matched the
-// seed's bare text and were duplicated + re-embedded on every reload.
+const isTransientCategory = (category) => EVICT_FIRST_CATEGORIES.has(category) || category === 'general';
 
 /** Campaigns whose durable corpus alone overflowed the cap — warned once each. */
 const durableOverflowWarned = new Set();
@@ -314,7 +319,8 @@ function cleanLabel(value, fallback = '') {
 function typeCachedRow(entry) {
     const location = cleanLabel(entry.location);
     const subjects = normalizeSubjects(entry.subjects);
-    const { location: _location, subjects: _subjects, sourceMessage: _source, ...rest } = entry;
+    const { location: _location, subjects: _subjects, sourceMessage: _source, atMessage: _at, ...rest } = entry;
+    const atMessage = memoryStamp(entry.atMessage);
     return {
         ...rest,
         vector: toStoredVector(entry.vector),
@@ -322,7 +328,20 @@ function typeCachedRow(entry) {
         ...(location && { location }),
         ...(subjects && { subjects }),
         ...(typeof entry.sourceMessage === 'string' && entry.sourceMessage && { sourceMessage: entry.sourceMessage.slice(0, 80) }),
+        ...(atMessage !== null && { atMessage }),
     };
+}
+
+/**
+ * A row's "message count when it was recorded" stamp (memory-research M1,
+ * 2026-10-21): a finite, floored, non-negative integer, else null. The seed
+ * reads it from the record (a fact's `atMessage`, a journal entry's span end,
+ * a card's `firstSeenMessage`, an NPC's `lastSeenMessage`), the live lanes
+ * stamp the count at the write, and the prompt block turns it into
+ * "N turns ago". Never part of the row's text (its identity).
+ */
+function memoryStamp(value) {
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
 }
 
 /**
@@ -407,7 +426,7 @@ export async function addMemories(apiKey, items) {
         }
         const entry = storeMemoryEntry({
             text: item.text, vector: vectors[i], category: item.category || 'general',
-            location: item.location, subjects: item.subjects, sourceMessage: item.sourceMessage,
+            location: item.location, subjects: item.subjects, sourceMessage: item.sourceMessage, atMessage: item.atMessage,
         });
         if (entry) stored.push(entry);
     });
@@ -436,7 +455,14 @@ let pendingBatch = null; // { apiKey, items, timer, promise, resolve }
  * @param {string|null} [location]
  * @param {string[]|null} [subjects]
  */
-export function queueMemory(apiKey, text, category = 'general', location = null, subjects = null, sourceMessage = null, { carry = false } = {}) {
+export function queueMemory(apiKey, text, category = 'general', location = null, subjects = null, sourceMessage = null, options = {}) {
+    return queueMemoryItem(apiKey, { text, category, location, subjects, sourceMessage }, options);
+}
+
+/** Queue one composed row (the composers below) for the next batch — THE queue entry. */
+export function queueMemoryItem(apiKey, item, { carry = false } = {}) {
+    if (!item || typeof item !== 'object') return Promise.resolve();
+    const { text } = item;
     if (!apiKey || typeof text !== 'string' || !text.trim()) return Promise.resolve();
     // A batch is one key: a different key (a Settings change mid-turn)
     // flushes what was queued under the old one first.
@@ -454,14 +480,15 @@ export function queueMemory(apiKey, text, category = 'general', location = null,
     if (!carry && pendingBatch.timer === null) {
         pendingBatch.timer = setTimeout(() => { flushMemoryQueue(); }, MEMORY_BATCH_WINDOW_MS);
     }
-    pendingBatch.items.push({ text, category, location, subjects, sourceMessage });
+    pendingBatch.items.push({
+        text,
+        category: item.category || 'general',
+        location: item.location ?? null,
+        subjects: item.subjects ?? null,
+        sourceMessage: item.sourceMessage ?? null,
+        atMessage: memoryStamp(item.atMessage),
+    });
     return pendingBatch.promise;
-}
-
-/** Queue one composed row (the composers below) for the next batch. */
-export function queueMemoryItem(apiKey, item, options = {}) {
-    if (!item || typeof item !== 'object') return Promise.resolve();
-    return queueMemory(apiKey, item.text, item.category || 'general', item.location ?? null, item.subjects ?? null, item.sourceMessage ?? null, options);
 }
 
 /** Embed and store everything queued so far, now. Resolves when done. */
@@ -489,9 +516,10 @@ function discardMemoryQueue() {
  * persists, alone or in a batch). Returns the stored entry, or null when the
  * text was already in the store. Shared by addMemory, addMemories, and the seed.
  */
-function storeMemoryEntry({ text, vector, category = 'general', location = null, subjects = null, sourceMessage = null }) {
+function storeMemoryEntry({ text, vector, category = 'general', location = null, subjects = null, sourceMessage = null, atMessage = null }) {
     if (memoryStore.some(m => m.text === text)) return null;
     const cleanSubjects = normalizeSubjects(subjects);
+    const stamp = memoryStamp(atMessage);
     const entry = {
         // Campaign key — rows are persisted per campaign so a switch loads its own
         // cache instead of wiping everything. An entry added before any seed set a
@@ -511,6 +539,10 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null,
         // The DM message this row was read from (retraction, 2026-09-30):
         // removing that message removes the row. Optional; legacy rows have none.
         ...(typeof sourceMessage === 'string' && sourceMessage.trim() && { sourceMessage: sourceMessage.trim().slice(0, 80) }),
+        // The message count when this memory was recorded (2026-10-21): the
+        // prompt block says "N turns ago" from it. Optional; legacy rows have
+        // none and print no age.
+        ...(stamp !== null && { atMessage: stamp }),
         schema: GEMINI_EMBED_SCHEMA,
         timestamp: Date.now(),
     };
@@ -533,8 +565,8 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null,
  *   then runs against a partial store until the next mount, which the
  *   player should hear about (it used to be console-only).
  */
-export function seedMemories(apiKey, items, sessionId = null, { onIncomplete = null, retiredTexts = null } = {}) {
-    const run = seedMemoriesInner(apiKey, items, sessionId, { onIncomplete, retiredTexts });
+export function seedMemories(apiKey, items, sessionId = null, { onIncomplete = null, retiredTexts = null, transcriptIds = null, onBranchPruned = null } = {}) {
+    const run = seedMemoriesInner(apiKey, items, sessionId, { onIncomplete, retiredTexts, transcriptIds, onBranchPruned });
     // Retrieval awaits an in-flight seed (2026-09-06 audit): the first turn
     // after Continue on an uncached campaign used to query a partial store
     // while the cold seed was still embedding — silently, with the DM's first
@@ -548,36 +580,52 @@ export function seedMemories(apiKey, items, sessionId = null, { onIncomplete = n
 /** The seed currently loading/embedding, or null — awaited by retrieveRelevant. */
 let seedInFlight = null;
 
-async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null, retiredTexts = null } = {}) {
+async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null, retiredTexts = null, transcriptIds = null, onBranchPruned = null } = {}) {
     if (!apiKey) return;
     activeSessionId = sessionId;
     memoryStore = [];
     discardMemoryQueue(); // a batch queued under the previous campaign
     if (!items?.length && sessionId == null) return;
 
-    // This campaign's cached embeddings first. Mutable-category rows (NPC notes,
-    // story cards — state snapshots that get reworded) are kept only while their
-    // exact text is still in the current seed: anything else is a stale
-    // predecessor wording, dropped here and from disk (replace, not append).
-    // Every disk write of the seed — the stale deletes, the retags, the new
-    // rows — rides ONE transaction at the end (2026-09-29 P2).
+    // This campaign's cached embeddings first. A RECORD-category row (a fact,
+    // a journal entry, an NPC note, a story card) is kept only while its exact
+    // text is still in the current seed: anything else is a stale predecessor
+    // wording OR a row from a future the player abandoned by loading an older
+    // slot (see isTransientCategory), dropped here and from disk (replace,
+    // not append). A TRANSIENT row (narrative / player — never in the seed) is
+    // kept unless its source stamp names a message the loaded transcript does
+    // not hold. Every disk write of the seed — the stale deletes, the retags,
+    // the new rows — rides ONE transaction at the end (2026-09-29 P2).
     const persistedRaw = sessionId != null ? await loadPersistedEmbeddings(sessionId) : [];
     const currentSeedTexts = new Set((items || []).map(item => item.text));
-    // Retired texts (2026-09-29): an IMMUTABLE-category row is normally kept
-    // even when the seed no longer carries it, so a world fact superseded by a
-    // flip would stay retrievable forever under its DM-given category. The
-    // caller names the texts the record has retired; those rows prune like a
-    // reworded mutable row, whatever their category.
+    // Retired texts (2026-09-29): the caller names the texts the record has
+    // retired (a superseded or retracted fact); those rows prune whatever
+    // their category. Since 2026-10-21 a special case of the record rule — a
+    // retired fact is out of the seed anyway — kept as the belt.
     const retired = retiredTexts instanceof Set ? retiredTexts : new Set(Array.isArray(retiredTexts) ? retiredTexts : []);
+    // The loaded transcript's message ids (2026-10-21, "a load is a branch"):
+    // null means the caller could not say, and every stamped row is kept.
+    const transcript = transcriptIds instanceof Set ? transcriptIds : (Array.isArray(transcriptIds) ? new Set(transcriptIds) : null);
     const persisted = [];
     const stale = [];
+    let branched = 0;
     for (const entry of persistedRaw) {
-        const keep = !retired.has(entry.text)
-            && (!isMutableSeedCategory(entry.category) || currentSeedTexts.has(entry.text));
+        let keep;
+        if (retired.has(entry.text)) {
+            keep = false;
+        } else if (isTransientCategory(entry.category)) {
+            keep = !transcript || typeof entry.sourceMessage !== 'string' || !entry.sourceMessage || transcript.has(entry.sourceMessage);
+            if (!keep) branched += 1;
+        } else {
+            keep = currentSeedTexts.has(entry.text);
+        }
         (keep ? persisted : stale).push(entry);
     }
     if (stale.length > 0) {
-        console.log(`[VectorMemory] Pruned ${stale.length} stale reworded rows from the campaign cache`);
+        console.log(`[VectorMemory] Pruned ${stale.length} stale rows from the campaign cache (${branched} written after this slot's last message)`);
+    }
+    if (branched > 0 && typeof onBranchPruned === 'function') {
+        try { onBranchPruned(branched); } catch { /* a note must never break the seed */ }
     }
     const toPersist = [];
     if (persisted.length > 0) {
@@ -601,13 +649,23 @@ async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null
     const seedByText = new Map((items || [])
         .filter(item => typeof item?.text === 'string' && item.text.trim())
         .map(item => [item.text, item]));
+    // A cached row without a `atMessage` stamp takes the seed's through the
+    // same upsert (2026-10-21): rows persisted before the stamp existed gain
+    // their age on the next mount, no re-embed.
     for (const entry of memoryStore) {
         const seedItem = seedByText.get(entry.text);
         const cleanSubjects = seedItem ? normalizeSubjects(seedItem.subjects) : null;
+        let changed = false;
         if (cleanSubjects && !sameSubjects(cleanSubjects, entry.subjects)) {
             entry.subjects = cleanSubjects;
-            toPersist.push(entry);
+            changed = true;
         }
+        const seedStamp = seedItem ? memoryStamp(seedItem.atMessage) : null;
+        if (seedStamp !== null && !Number.isFinite(entry.atMessage)) {
+            entry.atMessage = seedStamp;
+            changed = true;
+        }
+        if (changed) toPersist.push(entry);
     }
 
     const existingTexts = new Set(persisted.map(m => m.text));
@@ -624,7 +682,7 @@ async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null
         });
         newItems.forEach((item, i) => {
             if (vectors?.[i]) {
-                const entry = storeMemoryEntry({ text: item.text, vector: vectors[i], category: item.category || 'general', location: item.location, subjects: item.subjects });
+                const entry = storeMemoryEntry({ text: item.text, vector: vectors[i], category: item.category || 'general', location: item.location, subjects: item.subjects, atMessage: item.atMessage });
                 if (entry) toPersist.push(entry);
             } else {
                 missing += 1;
@@ -765,7 +823,14 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55,
         row.hits = (Number.isFinite(row.hits) ? row.hits : 0) + 1;
         if (Number.isFinite(atMessage)) row.lastHitMessage = atMessage;
     }
-    return chosen.map(m => ({ text: m.text, category: m.category, score: m.score, hits: m.entry.hits, ...(m.location && { location: m.location }) }));
+    return chosen.map(m => ({
+        text: m.text,
+        category: m.category,
+        score: m.score,
+        hits: m.entry.hits,
+        ...(m.location && { location: m.location }),
+        ...(Number.isFinite(m.atMessage) && { atMessage: m.atMessage }),
+    }));
 }
 
 /**
@@ -851,19 +916,25 @@ export function factMemoryText(fact) {
     return `${formatSecrecyTag(fact?.knownBy)}${typeof fact?.fact === 'string' ? fact.fact : ''}`;
 }
 
+// Every composer stamps `atMessage` from its record (2026-10-21, memory-research
+// M1 — a retrieved memory says when): a fact's own `atMessage` (re-stamped by
+// a state / intent restatement), a journal entry's span END, a card's first
+// sighting, an NPC's last sighting; the live scene lanes pass the count.
+
 /** A world fact's row (seed or live lane). */
-export function factMemoryItem(fact, { location = null, sourceMessage = null } = {}) {
+export function factMemoryItem(fact, { location = null, sourceMessage = null, atMessage = fact?.atMessage } = {}) {
     return {
         text: factMemoryText(fact),
         category: typeof fact?.category === 'string' && fact.category ? fact.category : 'world_fact',
         location,
         subjects: null,
         sourceMessage,
+        atMessage: memoryStamp(atMessage),
     };
 }
 
 /** A narrative or player row: the location in the text so a hit says where it was recorded. */
-export function sceneMemoryItem(text, { category = 'narrative', location = null, sourceMessage = null } = {}) {
+export function sceneMemoryItem(text, { category = 'narrative', location = null, sourceMessage = null, atMessage = null } = {}) {
     const clean = typeof text === 'string' ? text.slice(0, MEMORY_TEXT_CLAMP) : '';
     return {
         text: location ? `[Location: ${location}] ${clean}` : clean,
@@ -871,21 +942,24 @@ export function sceneMemoryItem(text, { category = 'narrative', location = null,
         location,
         subjects: null,
         sourceMessage,
+        atMessage: memoryStamp(atMessage),
     };
 }
 
-/** A journal entry's row, tagged with the roster people it names. */
+/** A journal entry's row, tagged with the roster people it names; aged at its span's end. */
 export function journalMemoryItem(entry, rosterNames = []) {
+    const range = Array.isArray(entry?.messageRange) ? entry.messageRange : null;
     return {
         text: typeof entry?.summary === 'string' ? entry.summary : '',
         category: 'journal',
         location: entry?.location ?? null,
         subjects: findSubjectsInText(entry?.summary, rosterNames),
         sourceMessage: null,
+        atMessage: memoryStamp(range?.[1]),
     };
 }
 
-/** An NPC's row: name, disposition and current notes, about that person. */
+/** An NPC's row: name, disposition and current notes, about that person; aged at their last sighting. */
 export function npcMemoryItem(npc) {
     return {
         text: `${npc?.name} (${npc?.disposition || 'unknown'}): ${npc?.lastNotes || npc?.notes}`,
@@ -893,10 +967,11 @@ export function npcMemoryItem(npc) {
         location: npc?.basedIn || npc?.lastLocation || null,
         subjects: [npc?.name],
         sourceMessage: null,
+        atMessage: memoryStamp(npc?.lastSeenMessage),
     };
 }
 
-/** A story card's row: secrecy tag, subject and text, about its linked people. */
+/** A story card's row: secrecy tag, subject and text, about its linked people; aged at its first sighting. */
 export function storyCardMemoryItem(card) {
     return {
         text: `${formatSecrecyTag(card?.knownBy)}${card?.subject ? `${card.subject}: ` : ''}${card?.text}`,
@@ -904,5 +979,6 @@ export function storyCardMemoryItem(card) {
         location: card?.location ?? null,
         subjects: Array.isArray(card?.linkedNpcNames) && card.linkedNpcNames.length > 0 ? card.linkedNpcNames : null,
         sourceMessage: null,
+        atMessage: memoryStamp(card?.firstSeenMessage),
     };
 }

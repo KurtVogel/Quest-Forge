@@ -29,6 +29,7 @@ import { briefNpcFieldForPrompt, findCompanionRecord, resolveCompanionLook } fro
 import { buildRelationshipBeatBlock } from '../engine/relationshipArc.js';
 import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
 import { describeStateTag, liveWorldFacts } from '../engine/worldFacts.js';
+import { describeTurnsAgo } from '../engine/replayLedger.js';
 
 // ——— RETRIEVED MEMORIES (the RAG block — moved here from engine/vectorMemory.js
 // 2026-10-11: a prompt block is the prompt builder's, and the engine module's
@@ -65,10 +66,16 @@ function clipMemoryText(text, max) {
 
 /**
  * Build the "retrieved memories" block for injection into the system prompt.
- * @param {Array<{text: string, category: string, location?: string}>} memories
+ * Each line ends `— N turns ago` from the row's `atMessage` stamp when the
+ * transcript is given (memory-research M1, 2026-10-21: a 60-turn-old journal
+ * summary of a flood used to print exactly like a 2-turn-old one while every
+ * other memory line in the game says its age); a row with no stamp prints no
+ * age — never "0 turns ago". The age is the LINE's, never the embedded text's.
+ * @param {Array<{text: string, category: string, location?: string, atMessage?: number}>} memories
+ * @param {{ messages?: Array|null }} [options]
  * @returns {string}
  */
-export function buildRetrievedMemoriesBlock(memories) {
+export function buildRetrievedMemoriesBlock(memories, { messages = null } = {}) {
     if (!memories || memories.length === 0) return '';
     const lines = [];
     let used = 0;
@@ -80,7 +87,8 @@ export function buildRetrievedMemoriesBlock(memories) {
             : category;
         const location = cleanMemoryLabel(m.location);
         const locationTag = location ? ` — recorded at: ${location}` : '';
-        const line = `- [${label}${locationTag}] ${clipMemoryText(m.text, RETRIEVED_MEMORY_ROW_MAX)}`;
+        const age = Array.isArray(messages) && Number.isFinite(m.atMessage) ? describeTurnsAgo(messages, m.atMessage) : '';
+        const line = `- [${label}${locationTag}] ${clipMemoryText(m.text, RETRIEVED_MEMORY_ROW_MAX)}${age ? ` — ${age}` : ''}`;
         if (used + line.length + 1 > RETRIEVED_MEMORIES_CHAR_CEILING) {
             omitted += 1;
             continue;
@@ -89,7 +97,7 @@ export function buildRetrievedMemoriesBlock(memories) {
         used += line.length + 1;
     }
     if (omitted > 0) lines.push(`- (+${omitted} more relevant ${omitted === 1 ? 'memory' : 'memories'} omitted for length)`);
-    return `## RETRIEVED MEMORIES (most relevant to current scene)\nUse canonical world facts and DM-established memories normally. An entry labeled "player statement/attempt" records something the player said, wanted, or tried; it is not proof that an external claim became true unless the established fiction corroborates it.\nThese are memories, not the current scene. An entry recorded at a DIFFERENT place than where the hero now stands is context from elsewhere — never transplant its creatures, factions, or local color into the present location unless the fiction has actually moved them here. Distant places stay distinct: give each region its own dangers.\n${lines.join('\n')}`;
+    return `## RETRIEVED MEMORIES (most relevant to current scene)\nUse canonical world facts and DM-established memories normally. An entry labeled "player statement/attempt" records something the player said, wanted, or tried; it is not proof that an external claim became true unless the established fiction corroborates it.\nThese are memories, not the current scene. An entry recorded at a DIFFERENT place than where the hero now stands is context from elsewhere — never transplant its creatures, factions, or local color into the present location unless the fiction has actually moved them here. Distant places stay distinct: give each region its own dangers.\nA line's "N turns ago" is when it was recorded: an older memory of a passing state (a flood, a wound, a mood, a watch at the gate) may no longer hold — the fiction decides whether it still does; treat it as a memory, not as the present weather.\n${lines.join('\n')}`;
 }
 
 /**
@@ -496,7 +504,7 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
         }
 
         // RAG: retrieved memories most relevant to the current player action
-        const ragBlock = buildRetrievedMemoriesBlock(retrievedMemories);
+        const ragBlock = buildRetrievedMemoriesBlock(retrievedMemories, { messages: ctx.messages });
         if (ragBlock) {
             parts.push(ragBlock, 'retrievedMemories');
         }

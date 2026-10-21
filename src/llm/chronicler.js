@@ -21,6 +21,23 @@ import { CHRONICLE_CHAPTER_TEXT_MAX, CHRONICLE_PART_CHAR_BUDGET, CHRONICLE_TITLE
 import { dmCallConfig } from './machinery.js';
 import { findFencedJsonBlocks } from './responseParser.js';
 import { listRevealableSetupIds } from '../engine/roleplayCheck.js';
+import { describeFrontReveal } from '../engine/fronts.js';
+
+/**
+ * The hidden pressures the hero ENDED inside a span (WOW 2026-10-21): their
+ * design, now known, handed to the chronicler so the symptoms the table saw
+ * are retold as foreshadowing. Read from the fronts themselves — a resolution
+ * stamps `resolvedAtMessage` at the 🕰️ row's index — so a reload, a late
+ * close or two resolutions in one span all carry; nothing new in the session.
+ * The DM never sees this beyond the 40-row echo; RAG and the Scribe never.
+ */
+export function describeRevealedFronts(fronts, fromIndex, toIndex) {
+    return (Array.isArray(fronts) ? fronts : [])
+        .filter(front => front && front.status === 'resolved'
+            && Number.isFinite(front.resolvedAtMessage)
+            && front.resolvedAtMessage >= fromIndex && front.resolvedAtMessage <= toIndex)
+        .map(front => `- "${String(front.title || 'A hidden threat').slice(0, 160)}": ${describeFrontReveal(front)}`);
+}
 
 /** The chronicler's own read of the transcript: the epilogue reply included. */
 export function collectChronicleEntries(messages, fromIndex, toIndex) {
@@ -74,6 +91,7 @@ RULES:
 - Unvarnished: keep what actually happened at full specificity — blood, fear, desire, humiliation, tenderness, failure. Intimate or bodily content stays frank in content and clinical in register: neutral anatomical language, never crude slang, and never faded, softened, or moralized beyond what the transcript itself does.
 - Write in the campaign's own tone and register. Prose only: no headings, no lists, no meta-commentary, no "in this chapter", no addressing the reader.
 - When PREVIOUS PASSAGE is provided, continue seamlessly from it without recapping.
+- When HIDDEN PRESSURES THE HERO ENDED is provided, the signs it names that the transcript shows were the steps of that design: tell them as foreshadowing, in hindsight, and the ending as the stopping of what was coming — never a sign the transcript does not show.
 - Length: follow the LENGTH AIM given with the transcript — it is sized to the material. Never pad a short span or invent to fill it.
 
 Output ONLY the narrative prose.`;
@@ -181,6 +199,10 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
 
     const heroName = state.character?.name || 'the hero';
     const premise = String(state.session?.premise || '').slice(0, 1200);
+    const revealed = describeRevealedFronts(state.fronts, fromIndex, toIndex);
+    const revealBlock = revealed.length > 0
+        ? `HIDDEN PRESSURES THE HERO ENDED IN THIS SPAN (their design, known only now — the signs the transcript shows were its steps; retell them as foreshadowing of what it wanted, in hindsight, and invent no sign the transcript lacks):\n${revealed.join('\n')}`
+        : null;
     const chunks = planChroniclePassages(eligible, heroName);
     const lastIndexOf = (chunk) => chunk.entries[chunk.entries.length - 1].index;
 
@@ -228,6 +250,7 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
         const userMessage = [
             `HERO: ${heroName}`,
             premise ? `CAMPAIGN PREMISE (background canon, not events of this span): ${premise}` : null,
+            revealBlock,
             // The tail threads across part boundaries too — the saga reads
             // seamlessly even where the storage splits into chapters.
             previousTail ? `PREVIOUS PASSAGE (continue seamlessly, do not recap):\n…${previousTail}` : null,

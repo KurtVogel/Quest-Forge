@@ -283,6 +283,75 @@ export function buildFrontResolutionFact(front, note = '') {
 }
 
 /**
+ * The authored step a front's clock has reached (WOW 2026-10-21, hidden-fronts
+ * payoff): the grim portents already come to pass (`passed`, the record's
+ * `stage` counts them — derived from the clock by the advance batch), the one
+ * NEXT unless the hero stops it, and the last of them. Once every portent has
+ * passed the stakes ("what changes if nobody interferes") are what is next.
+ * Null when the record holds no portents (a legacy or fallback front). Pure;
+ * read by the tempo block's permission card, the resolution reveal and the
+ * echo — the portents used to reach the cadence reflection alone, so a stage
+ * crossing changed a band and never a street.
+ */
+export function describeFrontPortents(front) {
+    const portents = normalizeTextArray(front?.grimPortents).map(bareClause);
+    if (portents.length === 0) return null;
+    const stageRaw = Number(front?.stage);
+    const stage = Number.isFinite(stageRaw) ? Math.max(0, Math.min(portents.length, Math.floor(stageRaw))) : 0;
+    const final = stage >= portents.length;
+    const stakes = bareClause(cleanText(front?.stakes));
+    return {
+        passed: portents.slice(0, stage),
+        next: final ? (stakes || null) : portents[stage],
+        last: portents[portents.length - 1],
+        final,
+    };
+}
+
+/** A portent as a clause: its terminal period / ellipsis dropped so it joins a sentence. */
+function bareClause(text) {
+    return typeof text === 'string' ? text.replace(/[.…]+$/, '').trim() : '';
+}
+
+/**
+ * The clockwork the hero stopped, said once at resolution (WOW 2026-10-21):
+ * what the pressure WANTED (the faction's goal, else the front's), what the
+ * table SAW of it (the newest placed symptoms) and what was COMING next (the
+ * next authored portent, then the last — or the stakes, once every step had
+ * come). The 🕰️ line carries it and the chronicler receives it at the
+ * chapter close; privacy still ends at resolution and not a turn before
+ * (DECISIONS 2026-08-03) — the same moment reveals more. Pure, ≤ ~800 chars.
+ */
+export function describeFrontReveal(front) {
+    const wanted = cleanText(front?.faction?.goal).slice(0, 200) || cleanText(front?.goal).slice(0, 200);
+    const seen = normalizeTextArray(front?.publicHints, [], { recent: true }).slice(-3).map(hint => `"${hint.slice(0, 120)}"`);
+    const portents = describeFrontPortents(front);
+    const parts = [];
+    if (wanted) parts.push(`What it wanted: ${wanted}`);
+    parts.push(seen.length > 0 ? `What you saw of it: ${seen.join('; ')}` : 'What you saw of it: little — it kept to the shadows');
+    if (portents) {
+        if (portents.final) {
+            parts.push(`Its last step had already come: ${portents.last.slice(0, 160)}${portents.next ? `; what remained was ${portents.next.slice(0, 160)}` : ''}`);
+        } else {
+            const next = portents.next.slice(0, 160);
+            const after = portents.last !== portents.next ? `; and after that, ${portents.last.slice(0, 160)}` : '';
+            parts.push(`What was coming next: ${next}${after}`);
+        }
+    }
+    return parts.map(part => (/[.!?…"]$/.test(part) ? part : `${part}.`)).join(' ');
+}
+
+/**
+ * The one line the RECENT VICTORY echo carries for 40 rows (WOW 2026-10-21):
+ * what nearly happened, so NPCs can say it in their own words. Null when the
+ * record holds no portents.
+ */
+export function describeAvertedPortent(front) {
+    const portents = describeFrontPortents(front);
+    return portents?.next ? portents.next.slice(0, 160) : null;
+}
+
+/**
  * The DM's `front_updates` entry, typed. By id only: the DM sees ids and
  * factions, never a title, so an emitted `title` is invention — and it used
  * to be WRITTEN (2026-10-15 hidden-fronts P2, measured: the 09-01 "by id

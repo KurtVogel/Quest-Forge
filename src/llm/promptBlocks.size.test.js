@@ -96,7 +96,7 @@ function maxedState({ messageCount = 400, live = 0, inCombat = false } = {}) {
         recentRulings: Array.from({ length: 5 }, (_, i) => ({ id: `rul-${i}`, text: fill(`ruling ${i}`, 300), messageIndex: messageCount - 2 - i, outcome: i % 2 ? 'withdrawn' : 'set_aside', skill: 'persuasion', dc: 12, location: 'Jewelglade' })),
         storyMemory: [...Array.from({ length: 5 }, (_, i) => cardAt(i, 'mystery'))],
         storyMemoryPool: [...Array.from({ length: 5 }, (_, i) => cardAt(i, 'mystery')), ...Array.from({ length: 12 }, (_, i) => cardAt(10 + i, 'promise'))],
-        retrievedMemories: Array.from({ length: 16 }, (_, i) => ({ text: fill(`memory ${i}`, 1000), category: 'journal', score: 0.9 - i * 0.01, location: 'Jewelglade', knownBy: ['Notable Person 1'] })),
+        retrievedMemories: Array.from({ length: 16 }, (_, i) => ({ text: fill(`memory ${i}`, 1000), category: 'journal', score: 0.9 - i * 0.01, atMessage: i, location: 'Jewelglade', knownBy: ['Notable Person 1'] })),
         premise: fill('premise', 8000),
         customSystemPrompt: fill('custom dm instructions', 4000),
         // Staged under the keys the blocks READ (2026-10-15 living-world test-depth

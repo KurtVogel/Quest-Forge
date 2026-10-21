@@ -121,17 +121,17 @@ describe('THE row composers: the live lane composes what the seed composes (P2)'
 
     it('the scene, journal, npc and story composers write the texts the seed always wrote', () => {
         expect(sceneMemoryItem('A'.repeat(600), { location: 'Saltmere', sourceMessage: 'a1' })).toEqual({
-            text: `[Location: Saltmere] ${'A'.repeat(500)}`, category: 'narrative', location: 'Saltmere', subjects: null, sourceMessage: 'a1',
+            text: `[Location: Saltmere] ${'A'.repeat(500)}`, category: 'narrative', location: 'Saltmere', subjects: null, sourceMessage: 'a1', atMessage: null,
         });
         expect(sceneMemoryItem('I draw my blade.', { category: 'player' }).text).toBe('I draw my blade.');
         expect(journalMemoryItem({ summary: 'Mira sold the ribbon.', location: 'Rimehollow' }, ['Mira', 'Tammo'])).toEqual({
-            text: 'Mira sold the ribbon.', category: 'journal', location: 'Rimehollow', subjects: ['Mira'], sourceMessage: null,
+            text: 'Mira sold the ribbon.', category: 'journal', location: 'Rimehollow', subjects: ['Mira'], sourceMessage: null, atMessage: null,
         });
         expect(npcMemoryItem({ name: 'Tammo', disposition: 'wary', lastNotes: 'Keeps the ferry.', basedIn: 'The Ferry' })).toEqual({
-            text: 'Tammo (wary): Keeps the ferry.', category: 'npc', location: 'The Ferry', subjects: ['Tammo'], sourceMessage: null,
+            text: 'Tammo (wary): Keeps the ferry.', category: 'npc', location: 'The Ferry', subjects: ['Tammo'], sourceMessage: null, atMessage: null,
         });
         expect(storyCardMemoryItem({ type: 'promise', subject: 'The ribbon', text: 'Mira promised a ribbon.', knownBy: ['Mira'], linkedNpcNames: ['Mira'], location: 'Rimehollow' })).toEqual({
-            text: '[SECRET — known only to: Mira] The ribbon: Mira promised a ribbon.', category: 'story_promise', location: 'Rimehollow', subjects: ['Mira'], sourceMessage: null,
+            text: '[SECRET — known only to: Mira] The ribbon: Mira promised a ribbon.', category: 'story_promise', location: 'Rimehollow', subjects: ['Mira'], sourceMessage: null, atMessage: null,
         });
     });
 });

@@ -57,7 +57,8 @@ describe('retractMemoriesFromMessage', () => {
 
         // The persisted cache no longer holds them: re-seeding the same
         // campaign REPLACES the store from the cache — only survivors load.
-        await seedMemories('key', [], 'sess-1');
+        // The seed carries the record (2026-10-21): the surviving fact rides it.
+        await seedMemories('key', [{ text: 'Orsa owns the countinghouse.', category: 'world_fact' }], 'sess-1');
         expect(getMemoryTexts()).not.toContain('The harbor road is flooded.');
         expect(getMemoryTexts()).not.toContain('[Location: Saltmere] The reeve says the road is flooded.');
         expect(getMemoryTexts()).toContain('Orsa owns the countinghouse.');

@@ -13,8 +13,9 @@ import { reconcileDeclaredSpells } from '../../engine/declaredSpells.js';
 import { buildScribeContext, runScribe, shouldScribeCombatBeat } from '../../llm/scribe.js';
 import { EPILOGUE_REQUEST_MESSAGE, isTableTalkMessage, RECAP_REQUEST_MESSAGE } from '../../llm/tableTalk.js';
 import { saveRosterCharacter } from '../../state/rosterStore.js';
-import { addMemory, factMemoryItem, factMemoryText, journalMemoryItem, npcMemoryItem, queueMemoryItem, retractMemoriesFromMessage, sceneMemoryItem, seedMemories, storyCardMemoryItem } from '../../engine/vectorMemory.js';
+import { addMemories, factMemoryItem, factMemoryText, journalMemoryItem, npcMemoryItem, queueMemoryItem, retractMemoriesFromMessage, sceneMemoryItem, seedMemories, storyCardMemoryItem } from '../../engine/vectorMemory.js';
 import { describeMemorySeedIncomplete, getMachineryGeminiKey, isMachineryReady } from '../../llm/machinery.js';
+import { captureProviderNote } from '../../debug/memoryInspectorStore.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { generateFrontAftermath, shouldGenerateFrontAftermath } from '../../llm/frontAftermath.js';
 import { generateAbsenceDrift, shouldGenerateAbsenceDrift } from '../../llm/absenceDrift.js';
@@ -435,9 +436,16 @@ export default function ChatPanel() {
         // page reload no longer re-embeds the whole corpus. One mount = one campaign
         // (AppShell is keyed by session id), so mount-time seeding is sound.
         seedMemories(machineryKey, items, s.session?.id || null, {
-            // The superseded facts' cached rows retire with them (immutable
-            // categories are otherwise kept when absent from the seed).
+            // The superseded facts' cached rows retire with them — the belt
+            // under the record rule (a retired fact is out of the seed too).
             retiredTexts: new Set((s.worldFacts || []).filter(f => f && (f.supersededBy || Number.isFinite(f.retractedAtMessage))).map(factMemoryText)),
+            // A load is a branch (memory-research M0, 2026-10-21): a narrative
+            // or player row stamped with a message this transcript does not
+            // hold was written in a future the player abandoned by loading an
+            // older slot — pruned from the store and the cache, said once in
+            // the Inspector (a load is not an error; no chat line).
+            transcriptIds: new Set((s.messages || []).map(m => m?.id).filter(id => typeof id === 'string' && id)),
+            onBranchPruned: (count) => captureProviderNote(`Memory seed: dropped ${count} cached ${count === 1 ? 'row' : 'rows'} written after this save's last message — the loaded slot is the branch the campaign plays on.`),
             // Rows the seed could not embed (a rate limit, an outage, a
             // rejected key) leave the whole session on a partial store — said
             // once, as an infrastructure line (2026-09-29 vector-memory P2).
@@ -623,9 +631,11 @@ export default function ChatPanel() {
                     // its Scribe canon but keep this row.
                     if (['victory', 'defeat', 'escaped'].includes(result.terminal) && machineryKey) {
                         const committed = runner.getLastCommittedTurn();
+                        const committedIndex = (latest.messages || []).findIndex(m => m?.id === committed?.id);
                         queueMemoryItem(machineryKey, sceneMemoryItem(narrative, {
                             location: latest.currentLocation,
                             sourceMessage: typeof committed?.id === 'string' ? committed.id : null,
+                            atMessage: committedIndex >= 0 ? committedIndex : (latest.messages || []).length,
                         })).catch(() => {});
                     }
                 }
@@ -709,17 +719,26 @@ export default function ChatPanel() {
             }
         }
 
+        // The row's id is minted HERE (2026-10-21) so the player row's memory
+        // can carry it: a load of an older slot prunes the row by that stamp
+        // (the DM row's lane has carried its id since 2026-09-30).
+        const playerMessageId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const playerMessageIndex = (stateRef.current.messages || []).length;
         dispatch({
             type: 'ADD_MESSAGE',
-            payload: { role: 'user', content: trimmed },
+            payload: { id: playerMessageId, role: 'user', content: trimmed },
         });
         const playerMachineryKey = getMachineryGeminiKey(stateRef.current.settings);
         if (playerMachineryKey && !tableTalkTurn) {
             // The player line lands before the reply exists, so it embeds
             // alone (a batch of one) rather than riding the turn's batch.
             const loc = stateRef.current.currentLocation;
-            const row = sceneMemoryItem(trimmed, { category: 'player', location: loc });
-            addMemory(playerMachineryKey, row.text, row.category, loc).catch(() => {});
+            addMemories(playerMachineryKey, [sceneMemoryItem(trimmed, {
+                category: 'player',
+                location: loc,
+                sourceMessage: playerMessageId,
+                atMessage: playerMessageIndex,
+            })]).catch(() => {});
         }
 
         setIsLoading(true);

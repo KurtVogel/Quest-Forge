@@ -491,7 +491,7 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
         return { sessionId, text, category, timestamp, vector: unitVector(0), schema: SCHEMA };
     }
 
-    it('re-seeding prunes stale reworded mutable-category rows but keeps immutable history', async () => {
+    it('re-seeding prunes stale reworded rows AND a fact row the record no longer carries (a load is a branch, 2026-10-21)', async () => {
         await putEmbeddings([
             row('Marn (friendly): guards the old gate.', 'npc', 1),
             row('Marn: promised the hero a map.', 'story_promise', 2),
@@ -505,7 +505,8 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
         embedTextMock.mockResolvedValue(unitVector(1));
 
         // Current state reworded both mutable NPC/story texts; the world fact is
-        // NOT in the seed at all (immutable categories must survive regardless).
+        // NOT in the seed at all — since 2026-10-21 that is a fact the loaded
+        // record does not hold (a stale wording or an abandoned future): pruned.
         const seed = [
             { text: 'Marn (wary): guards the new gate, resents the hero.', category: 'npc' },
             { text: 'Marn: promised the hero a map of the Underway.', category: 'story_promise' },
@@ -514,16 +515,16 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
         await seedMemories('key', seed, 's1');
         await flushAsync();
 
-        expect(getMemoryCount()).toBe(4);
+        expect(getMemoryCount()).toBe(3);
         // The stale wordings are gone from DISK too: a re-seed can't resurrect them.
         await seedMemories('key', seed, 's1');
-        expect(getMemoryCount()).toBe(4);
+        expect(getMemoryCount()).toBe(3);
         const texts = getMemoryTexts();
         expect(texts).not.toContain('Marn (friendly): guards the old gate.');
         expect(texts).not.toContain('Marn: promised the hero a map.');
         expect(texts).not.toContain('[Location: The coast] The party reached the coast.');
         expect(texts).toContain('The party reached the coast.');
-        expect(texts).toContain('The old gate fell in the goblin raid.');
+        expect(texts).not.toContain('The old gate fell in the goblin raid.');
     });
 
     it('retired texts prune even from an IMMUTABLE category — a superseded world fact leaves the cache (2026-09-29)', async () => {
@@ -532,13 +533,16 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
             row('The old gate fell in the goblin raid.', 'world_fact', 2),
         ]);
         embedTextMock.mockResolvedValue(unitVector(1));
-        const seed = [{ text: 'The bridge at Ashford is not passable.', category: 'world_fact' }];
+        const seed = [
+            { text: 'The bridge at Ashford is not passable.', category: 'world_fact' },
+            { text: 'The old gate fell in the goblin raid.', category: 'world_fact' },
+        ];
         await seedMemories('key', seed, 's1', { retiredTexts: new Set(['The bridge at Ashford is passable.']) });
         await flushAsync();
         const texts = getMemoryTexts();
         expect(texts).not.toContain('The bridge at Ashford is passable.');
         expect(texts).toContain('The bridge at Ashford is not passable.');
-        // Immutable rows absent from the seed but NOT retired still survive.
+        // A fact row the record still carries survives (the seed carries the whole record).
         expect(texts).toContain('The old gate fell in the goblin raid.');
         await seedMemories('key', seed, 's1');
         expect(getMemoryTexts()).not.toContain('The bridge at Ashford is passable.');
@@ -555,8 +559,10 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
         }
         expect(rows.length).toBe(MAX_CAMPAIGN_MEMORIES + 2);
         await putEmbeddings(rows);
+        // The seed carries the record (2026-10-21): a fact row absent from it prunes.
+        const durableSeed = rows.filter(r => r.category === 'world_fact').map(r => ({ text: r.text, category: r.category }));
 
-        await seedMemories('key', [], 's1');
+        await seedMemories('key', durableSeed, 's1');
         await flushAsync();
 
         expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES);
@@ -567,7 +573,7 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
         expect(texts.has('narrative beat three')).toBe(true);
 
         // Disk agrees: a fresh seed of the same campaign loads exactly the cap.
-        await seedMemories('key', [], 's1');
+        await seedMemories('key', durableSeed, 's1');
         expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES);
     });
 
@@ -577,7 +583,7 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
             rows.push(row(`Durable fact #${i}`, 'world_fact', 10 + i));
         }
         await putEmbeddings(rows);
-        await seedMemories('key', [], 's1');
+        await seedMemories('key', rows.filter(r => r.category === 'world_fact').map(r => ({ text: r.text, category: r.category })), 's1');
         expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES);
 
         embedTextMock.mockResolvedValue(unitVector(0));
@@ -598,16 +604,16 @@ describe('cache lifecycle (2026-08-06 P1)', () => {
 
         await deleteCampaignMemories('campaign-a');
 
-        await seedMemories('key', [], 'campaign-a');
+        await seedMemories('key', [{ text: 'Campaign A fact.', category: 'world_fact' }, { text: 'Another campaign A fact.', category: 'journal' }], 'campaign-a');
         expect(getMemoryCount()).toBe(0);
-        await seedMemories('key', [], 'campaign-b');
+        await seedMemories('key', [{ text: 'Campaign B fact.', category: 'world_fact' }], 'campaign-b');
         expect(getMemoryCount()).toBe(1);
     });
 
     it('deleteCampaignMemories tolerates a null id and resolves without touching anything', async () => {
         await putEmbeddings([row('Campaign A fact.', 'world_fact', 1, 'campaign-a')]);
         await expect(deleteCampaignMemories(null)).resolves.toBeUndefined();
-        await seedMemories('key', [], 'campaign-a');
+        await seedMemories('key', [{ text: 'Campaign A fact.', category: 'world_fact' }], 'campaign-a');
         expect(getMemoryCount()).toBe(1);
     });
 
@@ -977,7 +983,7 @@ describe('2026-09-06 audit: presence from the scene, seed-wins tags, durable cap
         const rows = [row('old player chatter', 'player', 1)];
         for (let i = 0; i < MAX_CAMPAIGN_MEMORIES; i++) rows.push(row(`Durable fact #${i}`, 'world_fact', 10 + i));
         await putEmbeddings(rows);
-        await seedMemories('key', [], 's1');
+        await seedMemories('key', rows.filter(r => r.category === 'world_fact').map(r => ({ text: r.text, category: r.category })), 's1');
         await flushAsync();
         expect(getMemoryCount()).toBe(MAX_CAMPAIGN_MEMORIES);
         expect(getMemoryTexts()).not.toContain('old player chatter');
@@ -1210,7 +1216,7 @@ describe('2026-09-17 audit: over-long texts, memory-less turns said out loud, ty
         await putEmbedding({ sessionId: 's1', text: 'Junk row.', vector: unitVector(3), category: 'world_fact', schema: SCHEMA, timestamp: 2, subjects: [{ bad: true }] });
         embedTextMock.mockResolvedValue(unitVector(0));
 
-        await seedMemories('key', [], 's1');
+        await seedMemories('key', [{ text: 'Junk row.', category: 'world_fact' }], 's1');
         expect(getMemoryTexts().sort()).toEqual(['Junk row.', 'Kraul fell.']);
 
         const rows = await retrieveRelevant('key', 'Kraul', 8, 0.55);

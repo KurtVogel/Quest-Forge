@@ -23,7 +23,7 @@
 
 import { findLocationRecord, getCurrentLocationRecord, isSameLocation } from './locationRegistry.js';
 import { conversationalDistance } from './replayLedger.js';
-import { DEFAULT_MAX_CLOCK } from './fronts.js';
+import { DEFAULT_MAX_CLOCK, describeAvertedPortent, describeFrontPortents } from './fronts.js';
 import { cleanText as typedText } from './text.js';
 
 export const INTENSITY_LEVELS = ['whispers', 'indirect', 'presence', 'confrontation'];
@@ -596,6 +596,20 @@ export function buildWorldTempoBlock({
         const suggestedSymptom = cleanText(directive.suggestedSymptom);
         lines.push(`THIS SCENE'S PERMISSION: you may surface ONE symptom of ${permittedFront.id} (${faction}).`);
         lines.push(`Maximum intensity: ${maxIntensity} — ${describeIntensity(maxIntensity)}.${where ? ` Natural place: ${where}.` : ''}${suggestedSymptom ? ` Suggested expression: ${suggestedSymptom}.` : ''} Weave it in only where the fiction allows; never exceed this intensity, and one symptom is the cap.`);
+        // The authored step (WOW 2026-10-21, hidden-fronts payoff): the
+        // portents the clock has passed and the one next — so the symptom is
+        // a face of the designed step, not a fresh invention. The newest two
+        // passed steps only; the reflection still chooses where and how.
+        const portents = describeFrontPortents(permittedFront);
+        if (portents) {
+            const passed = portents.passed.slice(-2).map(step => `"${step.slice(0, 140)}"`);
+            const next = portents.next ? portents.next.slice(0, 160) : '';
+            const steps = [
+                passed.length > 0 ? `Already come to pass off-screen: ${passed.join('; ')}.` : '',
+                next ? `Next, unless stopped: ${next}.` : '',
+            ].filter(Boolean).join(' ');
+            if (steps) lines.push(`The pressure's authored course — ${steps} Your symptom shows a face of that step (its signs, its reach), never the whole of it and never a later one.`);
+        }
         // Spend the accrued symptom ledger as anti-repeat guidance (2026-08-02
         // audit: publicHints rode every save but nothing re-injected it since
         // the tempo redesign).
@@ -618,9 +632,12 @@ export function buildWorldTempoBlock({
         // each echo repeated the same ~390-char sentence).
         for (const front of resolvedEchoes) {
             const resolution = cleanText(front.resolution, 160);
-            lines.push(`RECENT VICTORY: the pressure "${cleanText(front.title, 100)}" has been ENDED${resolution ? ` (${resolution})` : ''}.`);
+            // What nearly happened rides the echo (WOW 2026-10-21) so NPCs can
+            // say it in their own words — the DM was never told it before.
+            const averted = describeAvertedPortent(front);
+            lines.push(`RECENT VICTORY: the pressure "${cleanText(front.title, 100)}" has been ENDED${resolution ? ` (${resolution})` : ''}.${averted ? ` What was averted: ${averted}.` : ''}`);
         }
-        lines.push(`Show ${resolvedEchoes.length > 1 ? 'the absence of each ended pressure' : 'its absence'} concretely wherever the fiction touches what it threatened — relief, reopened roads, easing prices, rebuilding, talk of who moves into the vacuum. Never resurrect it, never field a lookalike threat with the same creatures or imagery, and let places it haunted stay free unless a NEW, distinct pressure claims them on-screen.`);
+        lines.push(`Show ${resolvedEchoes.length > 1 ? 'the absence of each ended pressure' : 'its absence'} concretely wherever the fiction touches what it threatened — relief, reopened roads, easing prices, rebuilding, talk of who moves into the vacuum, and people naming what nearly came to pass in their own words. Never resurrect it, never field a lookalike threat with the same creatures or imagery, and let places it haunted stay free unless a NEW, distinct pressure claims them on-screen.`);
     }
 
     if (encounters.length > 0) {

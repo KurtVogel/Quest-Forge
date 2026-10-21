@@ -35,6 +35,21 @@ export function conversationalDistance(messages, fromIndex, toIndex) {
 }
 
 /**
+ * "just now" / "N turns ago" in CONVERSATIONAL distance — one turn is the
+ * player's line plus the DM's answer. It used to say "scenes", which the
+ * number never measured (2026-09-21: "736 scenes ago" for last night). THE
+ * age phrase of every memory line: the recall dossier's rows, the epitaph,
+ * and — since 2026-10-21 (memory-research M1) — the RETRIEVED MEMORIES block.
+ */
+export function describeTurnsAgo(messages, atIndex) {
+    if (!Array.isArray(messages) || !Number.isFinite(atIndex)) return '';
+    const distance = conversationalDistance(messages, Math.max(0, Math.floor(atIndex)) - 1, messages.length - 1);
+    const turns = Math.ceil(distance / 2);
+    if (turns <= 0) return 'just now';
+    return `${turns} turn${turns === 1 ? '' : 's'} ago`;
+}
+
+/**
  * Conversational messages since a stamp written as "the message count at the
  * time", or null when the stamp is missing (a legacy record) or no transcript
  * position is known. With the live transcript the count skips system lines and

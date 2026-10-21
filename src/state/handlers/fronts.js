@@ -5,6 +5,7 @@
 import {
     applyFrontAdvanceBatch,
     buildFrontResolutionFact,
+    describeFrontReveal,
     DEFAULT_MAX_CLOCK,
     FRONTS_VERSION,
     isFrontGenerationClosed,
@@ -299,8 +300,12 @@ export const handlers = {
         }
         // The payoff reveal: the private clockwork surfaces as table canon
         // exactly once, at the moment the player has earned it.
+        // The reveal shows the clockwork (WOW 2026-10-21): the record's goal,
+        // the placed symptoms and the unfired portents used to die unread by
+        // anyone but the aftermath director — the line said the same sentence
+        // for every front.
         next.messages = [...(next.messages || []), systemMessage(
-            `🕰️ **The world shifts: "${updatedFront.title}" has ended.** A hidden pressure that has been moving against you since it first stirred is now broken for good — this victory is part of the campaign's canon. A major arc just closed: the Journal's Chronicle tab is ready to retell it as a chapter of your saga.`
+            `🕰️ **The world shifts: "${updatedFront.title}" has ended.** A hidden pressure that has been moving against you since it first stirred is now broken for good — this victory is part of the campaign's canon. ${describeFrontReveal(updatedFront)} A major arc just closed: the Journal's Chronicle tab is ready to retell it as a chapter of your saga.`
         )];
         // Milestone XP (DECISIONS.md 2026-08-05 ×2, rpg-balance-master ruling):
         // engine-computed from the character's CURRENT level at this exact

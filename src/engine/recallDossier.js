@@ -25,7 +25,7 @@ import { isRecordEntry } from './journalEntry.js';
 import { tokenSet } from './textMatch.js';
 import { findSubjectsInText } from './textMatch.js';
 import { collectNarrativeEntries } from '../llm/narrativeMessages.js';
-import { conversationalDistance } from './replayLedger.js';
+import { describeTurnsAgo } from './replayLedger.js';
 import { formatSecrecyTag } from './storyMemory.js';
 import { splitBondMoments } from './npcRoster.js';
 import { describeRetractedTag, describeStateTag, describeSupersededTag } from './worldFacts.js';
@@ -78,18 +78,9 @@ const clip = (value, max) => {
     return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 };
 
-/**
- * "just now" / "N turns ago" in CONVERSATIONAL distance — one turn is the
- * player's line plus the DM's answer. It used to say "scenes", which the
- * number never measured (2026-09-21: "736 scenes ago" for last night).
- */
-export function describeTurnsAgo(messages, atIndex) {
-    if (!Array.isArray(messages) || !Number.isFinite(atIndex)) return '';
-    const distance = conversationalDistance(messages, Math.max(0, Math.floor(atIndex)) - 1, messages.length - 1);
-    const turns = Math.ceil(distance / 2);
-    if (turns <= 0) return 'just now';
-    return `${turns} turn${turns === 1 ? '' : 's'} ago`;
-}
+// `describeTurnsAgo` moved to the replayLedger shelf 2026-10-21 (the RETRIEVED
+// MEMORIES block reads it too); re-exported so the dossier's readers keep working.
+export { describeTurnsAgo };
 
 function makeScorer(intent) {
     const subjects = (Array.isArray(intent?.subjects) ? intent.subjects : []).filter(s => typeof s === 'string' && s.trim());

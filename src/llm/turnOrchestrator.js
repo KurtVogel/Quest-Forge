@@ -963,9 +963,13 @@ export function createTurnRunner({
         if (machineryKey && !recallTurn) {
             // The narrative joins the facts sendToLLM queued and the whole
             // turn embeds as ONE request (2026-09-29 P2).
+            // Aged at the DM row's own index (2026-10-21): the state the turn
+            // left holds the row, so its index is the count before it.
+            const narrationIndex = (latest.messages || []).findIndex(m => m?.id === finalNarration.id);
             queueMemoryItem(machineryKey, sceneMemoryItem(finalNarration.content, {
                 location: turnLocation,
                 sourceMessage: typeof finalNarration.id === 'string' ? finalNarration.id : null,
+                atMessage: narrationIndex >= 0 ? narrationIndex : (latest.messages || []).length,
             })).catch(() => {});
         }
         // The last cadence's journal entry rides this turn's batch (see

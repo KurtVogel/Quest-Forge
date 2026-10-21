@@ -495,6 +495,10 @@ describe('resolved-front victory echo', () => {
             id,
             faction: { name: `Faction ${id} `.padEnd(100, 'f'), goal: 'g'.repeat(300) },
             publicHints: Array.from({ length: 6 }, (_, i) => `hint ${i} `.padEnd(240, 'h')),
+            // The authored course rides the permission card (2026-10-21): six
+            // portents at the clamp and the stakes at theirs, stage mid-way.
+            grimPortents: Array.from({ length: 6 }, (_, i) => `portent ${i} `.padEnd(240, 'p')),
+            stakes: 's'.repeat(280),
             clock: 7, stage: 3,
             ...extra,
         });
@@ -519,9 +523,9 @@ describe('resolved-front victory echo', () => {
         expect(block.split(reasons[0]).length - 1).toBe(1);
         expect(block.split('Never resurrect it').length - 1).toBe(1);
         expect(block.match(/RECENT VICTORY/g)).toHaveLength(2);
-        // Everything-at-once ceiling measures 4,925 (was 7,422); ~2.6 KB of it is
+        // Everything-at-once ceiling measures 5,634 (4,925 before the authored course rode the permission card and the averted step the echo, 2026-10-21; 7,422 before the 09-20 sweep); ~2.9 KB of it is
         // instruction prose the DM needs. A typical quiet turn is ~1 KB.
-        expect(block.length).toBeLessThan(5200);
+        expect(block.length).toBeLessThan(5800);
     });
 
     it('renders the echo even when the resolved front was the only front and there are no encounters', () => {
