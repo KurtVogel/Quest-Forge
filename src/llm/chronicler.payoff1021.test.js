@@ -41,7 +41,7 @@ describe('describeRevealedFronts', () => {
             front({ id: 'f-legacy', title: 'Legacy', resolvedAtMessage: undefined }),
         ], 2, 6);
         expect(lines).toHaveLength(1);
-        expect(lines[0]).toContain('- "The Mill Brood": What it wanted: Feed on the valley.');
+        expect(lines[0]).toContain('- "The Mill Brood" (ENDED by the hero): What it wanted: Feed on the valley.');
         expect(lines[0]).toContain('What you saw of it: "Burnt wagons on the north road."');
         expect(lines[0]).toContain('What was coming next: The valley empties.');
         expect(describeRevealedFronts(null, 0, 10)).toEqual([]);
@@ -65,10 +65,10 @@ describe('writeChronicleChapters hands the reveal to the chronicler', () => {
         };
         await writeChronicleChapters({ state });
         const request = sendMessage.mock.calls[0][0];
-        expect(request.userMessage).toContain('HIDDEN PRESSURES THE HERO ENDED IN THIS SPAN');
-        expect(request.userMessage).toContain('- "The Mill Brood": What it wanted: Feed on the valley.');
+        expect(request.userMessage).toContain('HIDDEN PRESSURES THAT ENDED IN THIS SPAN');
+        expect(request.userMessage).toContain('- "The Mill Brood" (ENDED by the hero): What it wanted: Feed on the valley.');
         expect(request.userMessage).toContain('retell them as foreshadowing');
-        expect(request.systemPrompt).toContain('When HIDDEN PRESSURES THE HERO ENDED is provided');
+        expect(request.systemPrompt).toContain('When HIDDEN PRESSURES THAT ENDED is provided');
     });
 
     it('a front resolved before the span (an earlier chapter) or still active is not handed over', async () => {

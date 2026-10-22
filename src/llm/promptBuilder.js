@@ -334,6 +334,10 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
             messages: ctx.messages,
             combatActive: ctx.combatActive,
             solo: !!character && ctx.party.length === 0,
+            // The doom card says whether the final step happens HERE or
+            // arrives as news (2026-10-22).
+            locations: ctx.locations,
+            currentLocation,
         });
         if (tempoBlock) {
             parts.push(tempoBlock, 'worldTempo');

@@ -149,7 +149,7 @@ const DYNAMIC_CEILINGS = {
     retrievedMemories: 9500, // 8,378 — RETRIEVED_MEMORIES_CHAR_CEILING 8,000 + header
     worldTempo: 6000,      // pinned at 5,200 by worldTempo's own test; 1,638 here
     relationshipBeat: 1500, // 862
-    regionalHearsay: 1500, // the block's own pin (regionalHearsay.test)
+    regionalHearsay: 1600, // the block's own pin (regionalHearsay.test); 1,528 since the header names a doom too (2026-10-22)
     absenceDrift: 2200,    // 2 developments × 300 + a 300-char fact + a 240-char symptom (yields under a tempo window — staged closed here)
     // The one-shot private blocks (wonder, hearsay, absence drift, the tell
     // beat, DM REMINDERS) are pinned by their feature tests; this fixture

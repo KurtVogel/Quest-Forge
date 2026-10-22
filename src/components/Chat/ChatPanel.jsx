@@ -18,6 +18,7 @@ import { describeMemorySeedIncomplete, getMachineryGeminiKey, isMachineryReady }
 import { captureProviderNote } from '../../debug/memoryInspectorStore.js';
 import { generateCampaignFronts, shouldGenerateCampaignFronts } from '../../llm/frontDirector.js';
 import { generateFrontAftermath, shouldGenerateFrontAftermath } from '../../llm/frontAftermath.js';
+import { generateFrontDoom, shouldGenerateFrontDoom } from '../../llm/frontDoom.js';
 import { generateAbsenceDrift, shouldGenerateAbsenceDrift } from '../../llm/absenceDrift.js';
 import { generateRegionalFronts, shouldGenerateRegionalFronts } from '../../llm/regionalFronts.js';
 import { generateWonder, shouldGenerateWonder } from '../../llm/wonderDirector.js';
@@ -96,6 +97,13 @@ const BACKGROUND_DIRECTORS = [
         generate: generateFrontAftermath,
         logSuccess: (s, key, fronts) => `[Fronts] Aftermath of ${key}: ${fronts.length} successor pressure(s) proposed.`,
         failureNote: '[Fronts] Aftermath generation failed; will retry:',
+    }),
+    // A prevailed front's landing (WOW 2026-10-22): the world as it is now.
+    markerDirector('frontDoom', {
+        ready: shouldGenerateFrontDoom,
+        generate: generateFrontDoom,
+        logSuccess: (s, key, change) => `[Fronts] Doom of ${key}: ${(change.developments || []).length} development(s), ${(change.places || []).length} place(s), ${(change.successors || []).length} successor(s)${change.fact ? ' + fact' : ''}.`,
+        failureNote: '[Fronts] Doom landing failed; will retry:',
     }),
     // What happened HERE while the hero was away (DECISIONS.md 2026-08-05).
     markerDirector('absenceDrift', {
@@ -387,6 +395,7 @@ export default function ChatPanel() {
         state.session?.id,
         state.session?.frontDirector?.generationVersion,
         state.session?.pendingFrontAftermath?.frontId,
+        state.session?.pendingFrontDoom?.frontId,
         state.session?.pendingAbsenceDrift?.key,
         state.session?.pendingRegionalFronts?.key,
         state.session?.pendingWonder?.key,

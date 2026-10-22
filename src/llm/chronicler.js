@@ -36,7 +36,10 @@ export function describeRevealedFronts(fronts, fromIndex, toIndex) {
         .filter(front => front && front.status === 'resolved'
             && Number.isFinite(front.resolvedAtMessage)
             && front.resolvedAtMessage >= fromIndex && front.resolvedAtMessage <= toIndex)
-        .map(front => `- "${String(front.title || 'A hidden threat').slice(0, 160)}": ${describeFrontReveal(front)}`);
+        // A doom's design is told the same way, in hindsight (2026-10-22):
+        // the chapter is the one place the signs read back as foreshadowing
+        // — literature's way, never the narrator's reproach.
+        .map(front => `- "${String(front.title || 'A hidden threat').slice(0, 160)}"${front.outcome === 'prevailed' ? ' (CAME TO PASS — nobody ended it; what it wanted, it got)' : ' (ENDED by the hero)'}: ${describeFrontReveal(front)}`);
 }
 
 /** The chronicler's own read of the transcript: the epilogue reply included. */
@@ -91,7 +94,7 @@ RULES:
 - Unvarnished: keep what actually happened at full specificity — blood, fear, desire, humiliation, tenderness, failure. Intimate or bodily content stays frank in content and clinical in register: neutral anatomical language, never crude slang, and never faded, softened, or moralized beyond what the transcript itself does.
 - Write in the campaign's own tone and register. Prose only: no headings, no lists, no meta-commentary, no "in this chapter", no addressing the reader.
 - When PREVIOUS PASSAGE is provided, continue seamlessly from it without recapping.
-- When HIDDEN PRESSURES THE HERO ENDED is provided, the signs it names that the transcript shows were the steps of that design: tell them as foreshadowing, in hindsight, and the ending as the stopping of what was coming — never a sign the transcript does not show.
+- When HIDDEN PRESSURES THAT ENDED is provided, the signs it names that the transcript shows were the steps of that design: tell them as foreshadowing, in hindsight, and the ending as the stopping of what was coming — or, for one marked CAME TO PASS, as its arrival; never a sign the transcript does not show, and never a reproach of the hero from the chronicler's own voice (a character in the telling may say what they think).
 - Length: follow the LENGTH AIM given with the transcript — it is sized to the material. Never pad a short span or invent to fill it.
 
 Output ONLY the narrative prose.`;
@@ -201,7 +204,7 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
     const premise = String(state.session?.premise || '').slice(0, 1200);
     const revealed = describeRevealedFronts(state.fronts, fromIndex, toIndex);
     const revealBlock = revealed.length > 0
-        ? `HIDDEN PRESSURES THE HERO ENDED IN THIS SPAN (their design, known only now — the signs the transcript shows were its steps; retell them as foreshadowing of what it wanted, in hindsight, and invent no sign the transcript lacks):\n${revealed.join('\n')}`
+        ? `HIDDEN PRESSURES THAT ENDED IN THIS SPAN — ended by the hero, or come to pass (their design, known only now — the signs the transcript shows were its steps; retell them as foreshadowing of what it wanted, in hindsight, and invent no sign the transcript lacks):\n${revealed.join('\n')}`
         : null;
     const chunks = planChroniclePassages(eligible, heroName);
     const lastIndexOf = (chunk) => chunk.entries[chunk.entries.length - 1].index;

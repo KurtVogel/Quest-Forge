@@ -335,7 +335,7 @@ describe('buildRegionalHearsayBlock', () => {
             items: [{ text: 'x'.repeat(2000), grade: 'not-a-grade' }, { text: '', grade: 'legend' }, null],
         }, { currentLocation: 'Saltmarsh', messages: msgs(2), messageCount: 2 });
         expect(block).toContain('second-hand news'); // unknown grade degrades to secondhand
-        expect(block.length).toBeLessThan(1500);
+        expect(block.length).toBeLessThan(1600); // the header names a doom too since 2026-10-22
     });
 });
 

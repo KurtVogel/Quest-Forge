@@ -5,22 +5,31 @@
 import {
     applyFrontAdvanceBatch,
     buildFrontResolutionFact,
+    describeFrontDoom,
     describeFrontReveal,
     DEFAULT_MAX_CLOCK,
+    DOOM_TIMING_DIE_SIDES,
     FRONTS_VERSION,
     isFrontGenerationClosed,
     normalizeFront,
     normalizeFrontProposal,
     normalizeFrontUpdate,
+    openDoomWindow,
     cadenceIdFor,
 } from '../../engine/fronts.js';
-import { DM_CLOCK_GAIN_WINDOW, MAX_ACTIVE_FRONTS, normalizeTempoDirective, WEB_TARGET_FRONTS } from '../../engine/worldTempo.js';
+import {
+    DM_CLOCK_GAIN_WINDOW, MAX_ACTIVE_FRONTS, MAX_DOOM_DEVELOPMENTS, MAX_DOOM_PLACES,
+    listClosedDooms, normalizeTempoDirective, sanitizeRecentEncounters, WEB_TARGET_FRONTS,
+} from '../../engine/worldTempo.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
 import { DIRECTOR_MAX_ATTEMPTS, getDirectorFailure, RETRYABLE_DIRECTORS } from '../../engine/directorRetry.js';
 import { foldExperience, getFrontResolutionMilestoneXp } from '../../engine/progression.js';
-import { isSameRegion, upsertLocation } from '../../engine/locationRegistry.js';
+import { findLocationRecord, isSameRegion, normalizeLocationRecord, upsertLocation } from '../../engine/locationRegistry.js';
+import { namesMatch } from '../../engine/npcRoster.js';
+import { rollDie } from '../../engine/dice.ts';
+import { isRecord } from '../../engine/text.js';
 import { gameReducer } from '../gameReducer.js';
-import { systemMessage } from './shared.js';
+import { systemMessage, upsertNpc } from './shared.js';
 
 /**
  * Shared installer core for the aftermath/regional one-shot proposals
@@ -40,6 +49,109 @@ function buildProposedFrontAdditions(fronts, proposals, room, idPrefix) {
         if (front) additions.push(front);
     }
     return additions;
+}
+
+/**
+ * A full clock opens the doom window (WOW 2026-10-22): after either lane
+ * moves a clock — the cadence batch or a DM gain — the engine stamps the
+ * window on at most one front and rolls the crypto die for WHEN (0–1
+ * scenes), the UPDATE_NPC turn-beat precedent. The card renders from the
+ * stamp; nothing else changes until the window closes.
+ */
+function openDoomIfFull(state) {
+    const { fronts, opened } = openDoomWindow(state.fronts || [], {
+        messageCount: (state.messages || []).length,
+        delayScenes: rollDie(DOOM_TIMING_DIE_SIDES) - 1,
+    });
+    return opened ? { ...state, fronts } : state;
+}
+
+/**
+ * THE conclusion of a front — one ceremony, two registers (2026-10-22). The
+ * hero's ending (`outcome` null: the DM's `resolved`) and the doom
+ * (`'prevailed'`: the window closed unanswered) share every structural
+ * step — the stamps, the freed theaters, the cancelled window, the pinned
+ * canon fact, the 🕰️ line, the Chronicle nudge, a background director — and
+ * differ in the register: the victory reveals the clockwork and pays the
+ * milestone, the doom states what the world now carries, pays nothing, and
+ * names no sign (the player who wants the signs asks the record or reads
+ * the chapter; the engine never reproaches).
+ */
+function concludeFront(state, idx, front, { outcome = null, note = '' } = {}) {
+    const prevailed = outcome === 'prevailed';
+    const messageCount = (state.messages || []).length;
+    const doom = describeFrontDoom(front);
+    const concluded = normalizeFront({
+        ...front,
+        status: 'resolved',
+        outcome,
+        resolvedAtMessage: messageCount,
+        resolution: prevailed ? (doom.stakes || doom.lastStep) : note,
+        // Remember the territory before it is freed below — regional
+        // hearsay grades a retelling at the front's own ground as
+        // firsthand (2026-08-31 P2).
+        resolvedTheaterIds: (state.locations || [])
+            .filter(record => (record.theaterFrontIds || []).includes(front.id))
+            .map(record => record.id),
+    }, front);
+    let next = {
+        ...state,
+        fronts: (state.fronts || []).map((entry, i) => (i === idx ? concluded : entry)),
+    };
+    // A dead pressure holds no territory: free its theaters so a future,
+    // different front can claim those places without inheriting the flavor.
+    next.locations = (state.locations || []).map(record =>
+        (record.theaterFrontIds || []).includes(front.id)
+            ? { ...record, theaterFrontIds: record.theaterFrontIds.filter(id => id !== front.id) }
+            : record);
+    // Cancel any granted-but-unspent symptom window pointed at this front.
+    if (next.worldTempo?.directive?.frontId === front.id) {
+        next.worldTempo = { ...next.worldTempo, directive: null };
+    }
+    // The payoff reveal: the private clockwork surfaces as table canon
+    // exactly once, at the moment the player has earned it.
+    // The reveal shows the clockwork (WOW 2026-10-21): the record's goal,
+    // the placed symptoms and the unfired portents used to die unread by
+    // anyone but the aftermath director — the line said the same sentence
+    // for every front. A DOOM reveals the title and what it took — never
+    // the signs (Vesa, 2026-10-22: an itemized "what you missed" is the
+    // game grading the player).
+    const wanted = typeof concluded.faction?.goal === 'string' && concluded.faction.goal.trim()
+        ? concluded.faction.goal.trim().slice(0, 200)
+        : concluded.goal.slice(0, 200);
+    next.messages = [...(next.messages || []), systemMessage(prevailed
+        ? `🕰️ **The world shifts: "${concluded.title}" has come to pass.** What it wanted — ${wanted.replace(/[.…]+$/, '')} — it now has${concluded.resolution ? `: ${concluded.resolution.replace(/[.…]+$/, '')}` : ''}. This is part of the campaign's canon now; the Journal's Chronicle tab is ready to retell it as a chapter of your saga.`
+        : `🕰️ **The world shifts: "${concluded.title}" has ended.** A hidden pressure that has been moving against you since it first stirred is now broken for good — this victory is part of the campaign's canon. ${describeFrontReveal(concluded)} A major arc just closed: the Journal's Chronicle tab is ready to retell it as a chapter of your saga.`
+    )];
+    // Milestone XP (DECISIONS.md 2026-08-05 ×2, rpg-balance-master ruling):
+    // engine-computed from the character's CURRENT level at this exact
+    // moment — never via the LLM's exp_awarded channel. The resolution's
+    // own one-shot guard is the replay ledger. A doom pays nothing.
+    if (!prevailed && next.character) {
+        next = foldExperience(next, getFrontResolutionMilestoneXp(next.character.level), {
+            reason: `campaign milestone — "${concluded.title}" ended`,
+        });
+    }
+    // Aftermath hook: a background director decides (later, outside the
+    // reducer) what the ending leaves behind — survivors, debts, a vacuum
+    // after a victory; the new order, who profits and who is gone after a
+    // doom. chapterCloseSuggested is the Chronicle tab's ceremony nudge,
+    // cleared when a chapter is written.
+    const marker = { frontId: front.id, title: concluded.title };
+    next.session = {
+        ...next.session,
+        ...(prevailed ? { pendingFrontDoom: marker } : { pendingFrontAftermath: marker }),
+        chapterCloseSuggested: {
+            reason: 'front',
+            frontId: front.id,
+            title: concluded.title,
+            at: Date.now(),
+        },
+    };
+    return gameReducer(next, {
+        type: 'ADD_WORLD_FACTS',
+        payload: [{ fact: buildFrontResolutionFact(concluded, prevailed ? '' : note), category: 'event', pinned: true }],
+    });
 }
 
 export const handlers = {
@@ -268,75 +380,129 @@ export const handlers = {
         // front resolving goes through the full ceremony like an active one —
         // dormancy is an engine pacing state, not a lesser kind of pressure.
         const resolvingNow = update.status === 'resolved' && !alreadyResolved;
-        let updatedFront = normalizeFront(boundedUpdate, existing);
-        if (resolvingNow) {
-            updatedFront = normalizeFront({
-                ...updatedFront,
-                resolvedAtMessage: (state.messages || []).length,
-                resolution: update.notes || '',
-                // Remember the territory before it is freed below — regional
-                // hearsay grades a retelling at the front's own ground as
-                // firsthand (2026-08-31 P2).
-                resolvedTheaterIds: (state.locations || [])
-                    .filter(record => (record.theaterFrontIds || []).includes(existing.id))
-                    .map(record => record.id),
-            }, updatedFront);
-        }
-        let next = {
-            ...state,
-            fronts: fronts.map((front, i) => i === idx ? updatedFront : front),
-        };
-        if (!resolvingNow) return next;
-
-        // A dead pressure holds no territory: free its theaters so a future,
-        // different front can claim those places without inheriting the flavor.
-        next.locations = (state.locations || []).map(record =>
-            (record.theaterFrontIds || []).includes(existing.id)
-                ? { ...record, theaterFrontIds: record.theaterFrontIds.filter(id => id !== existing.id) }
-                : record);
-        // Cancel any granted-but-unspent symptom window pointed at this front.
-        if (next.worldTempo?.directive?.frontId === existing.id) {
-            next.worldTempo = { ...next.worldTempo, directive: null };
-        }
-        // The payoff reveal: the private clockwork surfaces as table canon
-        // exactly once, at the moment the player has earned it.
-        // The reveal shows the clockwork (WOW 2026-10-21): the record's goal,
-        // the placed symptoms and the unfired portents used to die unread by
-        // anyone but the aftermath director — the line said the same sentence
-        // for every front.
-        next.messages = [...(next.messages || []), systemMessage(
-            `🕰️ **The world shifts: "${updatedFront.title}" has ended.** A hidden pressure that has been moving against you since it first stirred is now broken for good — this victory is part of the campaign's canon. ${describeFrontReveal(updatedFront)} A major arc just closed: the Journal's Chronicle tab is ready to retell it as a chapter of your saga.`
-        )];
-        // Milestone XP (DECISIONS.md 2026-08-05 ×2, rpg-balance-master ruling):
-        // engine-computed from the character's CURRENT level at this exact
-        // moment — never via the LLM's exp_awarded channel. The resolution's
-        // own one-shot guard is the replay ledger.
-        if (next.character) {
-            next = foldExperience(next, getFrontResolutionMilestoneXp(next.character.level), {
-                reason: `campaign milestone — "${updatedFront.title}" ended`,
+        const updatedFront = normalizeFront(boundedUpdate, existing);
+        if (!resolvingNow) {
+            // A DM clock gain can fill the clock too (2026-10-22): the doom
+            // opens on this lane exactly as on the cadence's.
+            return openDoomIfFull({
+                ...state,
+                fronts: fronts.map((front, i) => i === idx ? updatedFront : front),
             });
         }
-        // Aftermath hook: a background director decides (later, outside the
-        // reducer) whether this specific victory leaves survivors, debts, or a
-        // power vacuum — or was simply, cleanly won. chapterCloseSuggested is
-        // the Chronicle tab's ceremony nudge, cleared when a chapter is written.
-        next.session = {
-            ...next.session,
-            pendingFrontAftermath: {
-                frontId: existing.id,
-                title: updatedFront.title,
-            },
-            chapterCloseSuggested: {
-                reason: 'front',
-                frontId: existing.id,
-                title: updatedFront.title,
-                at: Date.now(),
-            },
+        return concludeFront(state, idx, updatedFront, { note: update.notes || '' });
+    },
+
+    /**
+     * The doom's close (WOW 2026-10-22), ticked by ADD_MESSAGE on every
+     * player row outside combat. A front whose window has CLOSED is first
+     * STAMPED (`doomClosedAtMessage`) and prevails on the next player row —
+     * the DM gets one ordinary turn after the card is gone, because the
+     * fight the doom started may have ended inside the window and a victory
+     * narration carries no events (the resolve lands on the turn after).
+     * A fight that ended since the stamp re-arms that grace for the same
+     * reason. Never inside combat.
+     */
+    SETTLE_DOOMS(state) {
+        if (state.combat?.active) return state;
+        const messageCount = (state.messages || []).length;
+        const closed = listClosedDooms(state.fronts || [], messageCount, state.messages);
+        if (closed.length === 0) return state;
+        const encounters = sanitizeRecentEncounters(state.recentEncounters);
+        let next = state;
+        for (const front of closed) {
+            const idx = (next.fronts || []).findIndex(entry => entry.id === front.id);
+            if (idx === -1) continue;
+            const live = next.fronts[idx];
+            const stamped = Number.isFinite(live.doomClosedAtMessage);
+            const fightSince = stamped && encounters.some(entry =>
+                Number.isFinite(entry.messageIndex) && entry.messageIndex >= live.doomClosedAtMessage);
+            if (!stamped || fightSince) {
+                next = {
+                    ...next,
+                    fronts: next.fronts.map((entry, i) => (i === idx
+                        ? normalizeFront({ ...entry, doomClosedAtMessage: messageCount }, entry)
+                        : entry)),
+                };
+                continue;
+            }
+            if (messageCount <= live.doomClosedAtMessage) continue;
+            next = concludeFront(next, idx, live, { outcome: 'prevailed' });
+        }
+        return next;
+    },
+
+    /**
+     * The doom's landing (WOW 2026-10-22): what the world is now that the
+     * pressure has won — one canon fact, existing roster NPCs' agenda /
+     * lastNotes moved by it, known places' current state, and 0–2 successor
+     * pressures born of the WIN (the new order, the resistance, the
+     * collaborator), which inherit the prevailed front's ground as their
+     * theater. The absence-drift bounds: known people only, nobody dies
+     * off-screen, mechanics untouched, an empty answer installs nothing.
+     */
+    INSTALL_DOOM_AFTERMATH(state, action) {
+        const payload = action.payload || {};
+        const pending = state.session?.pendingFrontDoom;
+        if (!pending || typeof pending.frontId !== 'string' || !pending.frontId
+            || payload.sessionId !== state.session?.id || payload.frontId !== pending.frontId) return state;
+        const session = { ...state.session, pendingFrontDoom: null };
+        const change = isRecord(payload.change) ? payload.change : {};
+        const text = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
+        const prevailed = (state.fronts || []).find(front => front?.id === pending.frontId) || null;
+
+        let npcs = state.npcs || [];
+        for (const dev of (Array.isArray(change.developments) ? change.developments : []).slice(0, MAX_DOOM_DEVELOPMENTS)) {
+            const name = text(dev?.name, 100);
+            const agenda = text(dev?.agenda, 300);
+            const lastNotes = text(dev?.lastNotes, 400);
+            if (!name || !(agenda || lastNotes)) continue;
+            // Exactly ONE roster record, or nobody (the shared-name rule).
+            const matches = npcs.filter(npc => namesMatch(npc.name, name));
+            if (matches.length !== 1) continue;
+            npcs = upsertNpc(npcs, {
+                ...(matches[0].id && { id: matches[0].id }),
+                name: matches[0].name,
+                ...(agenda && { agenda }),
+                ...(lastNotes && { lastNotes }),
+                _seen: false,
+            });
+        }
+
+        let locations = state.locations || [];
+        for (const place of (Array.isArray(change.places) ? change.places : []).slice(0, MAX_DOOM_PLACES)) {
+            const name = text(place?.name, 120);
+            const lastState = text(place?.lastState, 200);
+            if (!name || !lastState) continue;
+            const idx = findLocationRecord(locations, name);
+            if (idx === -1) continue;
+            // A current-state replace on the record itself — not an arrival
+            // (upsertLocation stamps a visit).
+            locations = locations.map((record, i) => (i === idx ? normalizeLocationRecord({ ...record, lastState }, record) : record));
+        }
+
+        const fronts = state.fronts || [];
+        const activeCount = fronts.filter(f => (f.status || 'active') === 'active').length;
+        const room = Math.min(2, Math.max(0, WEB_TARGET_FRONTS - activeCount));
+        const additions = buildProposedFrontAdditions(fronts, change.successors, room, 'front-doom');
+        const ground = prevailed?.resolvedTheaterIds || [];
+        if (additions.length > 0 && ground.length > 0) {
+            locations = locations.map(record => (ground.includes(record.id)
+                ? { ...record, theaterFrontIds: [...new Set([...(record.theaterFrontIds || []), ...additions.map(front => front.id)])] }
+                : record));
+        }
+
+        const next = {
+            ...state,
+            session,
+            npcs,
+            locations,
+            ...(additions.length > 0 && { fronts: [...fronts, ...additions] }),
         };
-        return gameReducer(next, {
-            type: 'ADD_WORLD_FACTS',
-            payload: [{ fact: buildFrontResolutionFact(updatedFront, update.notes), category: 'event', pinned: true }],
-        });
+        const fact = text(change.fact, 300);
+        // Private like every front: no system line, the player only ever feels it.
+        return fact
+            ? gameReducer(next, { type: 'ADD_WORLD_FACTS', payload: [{ fact, category: 'event' }] })
+            : next;
     },
 
     INSTALL_AFTERMATH_FRONTS(state, action) {
@@ -451,7 +617,7 @@ export const handlers = {
             previousCadenceId,
             advances: action.payload?.advances,
         });
-        return {
+        return openDoomIfFull({
             ...state,
             fronts: result.fronts,
             session: {
@@ -462,6 +628,6 @@ export const handlers = {
                     lastJournalEnd: journalEnd,
                 },
             },
-        };
+        });
     },
 };

@@ -50,6 +50,7 @@ export const PENDING_MARKER_KEYS = Object.freeze({
     pendingAbsenceDrift: Object.freeze(['key', 'locationName', 'awayDistance', 'returnMessage']),
     pendingRegionalFronts: Object.freeze(['key', 'region', 'locationName']),
     pendingFrontAftermath: Object.freeze(['frontId', 'title']),
+    pendingFrontDoom: Object.freeze(['frontId', 'title']),
 });
 
 export function sanitizeAbsenceDriftState(raw, { maxMessageCount } = {}) {
@@ -183,6 +184,8 @@ export function sanitizeLivingWorldSession(session, { maxMessageCount } = {}) {
         ['pendingAbsenceDrift', sanitizePendingAbsenceDrift],
         ['pendingRegionalFronts', sanitizePendingRegionalFronts],
         ['pendingFrontAftermath', sanitizePendingFrontAftermath],
+        // The doom's landing marker (2026-10-22): the aftermath's shape.
+        ['pendingFrontDoom', sanitizePendingFrontAftermath],
         ['chapterCloseSuggested', sanitizeChapterCloseSuggested],
         // NPC initiative window (2026-09-13 overhaul): complete-or-null.
         ['relationshipBeat', sanitizeRelationshipBeat],

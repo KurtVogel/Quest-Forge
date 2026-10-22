@@ -12,6 +12,7 @@ const { sendMessageMock } = vi.hoisted(() => ({ sendMessageMock: vi.fn() }));
 vi.mock('./adapter.js', () => ({ sendMessage: sendMessageMock }));
 
 const { buildFrontAftermathContext } = await import('./frontAftermath.js');
+const { buildFrontDoomContext } = await import('./frontDoom.js');
 const { buildAbsenceDriftContext } = await import('./absenceDrift.js');
 const { buildRegionalFrontsContext } = await import('./regionalFronts.js');
 const { buildWonderContext } = await import('./wonderDirector.js');
@@ -60,6 +61,7 @@ const worstCaseState = () => ({
         name: fill('campaign', 120),
         premise: fill('premise', 8000),
         pendingFrontAftermath: { frontId: 'front-done', title: 'The Done Thing' },
+        pendingFrontDoom: { frontId: 'front-done', title: 'The Done Thing' },
         pendingAbsenceDrift: { key: 'loc-a|200', locationName: 'Aldermill', awayDistance: 80, returnMessage: 200 },
         pendingRegionalFronts: { key: 'the saltreach|200', region: 'The Saltreach', locationName: 'Aldermill', atMessage: 200 },
         pendingWonder: { key: 'wonder|200', requestedAtMessage: 200, onDemand: false },
@@ -104,7 +106,7 @@ const size = context => JSON.stringify(context).length;
 describe('background director contexts — worst-case ceilings and key sets', () => {
     it('never ships a portrait, whatever the roster carries', () => {
         const state = worstCaseState();
-        for (const build of [buildFrontAftermathContext, buildAbsenceDriftContext, buildRegionalFrontsContext, buildWonderContext]) {
+        for (const build of [buildFrontAftermathContext, buildFrontDoomContext, buildAbsenceDriftContext, buildRegionalFrontsContext, buildWonderContext]) {
             expect(JSON.stringify(build(state))).not.toContain('base64');
         }
     });
@@ -118,6 +120,16 @@ describe('background director contexts — worst-case ceilings and key sets', ()
         expect(size(context.remainingActiveFronts)).toBeLessThan(1600);
         // The resolved front itself keeps its full dossier — it is the subject.
         expect(context.resolvedFront.grimPortents.length).toBeGreaterThan(0);
+        expect(size(context)).toBeLessThan(72000);
+    });
+
+    it('front doom (2026-10-22): the prevailed front ships its design, other fronts three fields, and the whole stays bounded', () => {
+        const context = buildFrontDoomContext(worstCaseState());
+        expect(Object.keys(context).sort()).toEqual(['activeQuests', 'campaignPremise', 'canonicalWorldFacts', 'currentLocation', 'hero', 'itsGround', 'journal', 'knownNpcs', 'knownPlaces', 'party', 'prevailedFront', 'recentEvents', 'remainingActiveFronts']);
+        for (const front of context.remainingActiveFronts) {
+            expect(Object.keys(front).sort()).toEqual(['faction', 'goal', 'title']);
+        }
+        expect(context.prevailedFront.stepsThatCameToPass.length).toBeGreaterThan(0);
         expect(size(context)).toBeLessThan(72000);
     });
 

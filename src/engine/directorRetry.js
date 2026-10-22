@@ -39,6 +39,11 @@ export const RETRYABLE_DIRECTORS = {
         install: (sessionId, key, fronts) => ({ type: 'INSTALL_AFTERMATH_FRONTS', payload: { sessionId, frontId: key, fronts } }),
         empty: [],
     },
+    frontDoom: {
+        pendingKey: session => session?.pendingFrontDoom?.frontId,
+        install: (sessionId, key, change) => ({ type: 'INSTALL_DOOM_AFTERMATH', payload: { sessionId, frontId: key, change } }),
+        empty: {},
+    },
     absenceDrift: {
         pendingKey: session => session?.pendingAbsenceDrift?.key,
         install: (sessionId, key, drift) => ({ type: 'INSTALL_ABSENCE_DRIFT', payload: { sessionId, key, drift } }),

@@ -216,7 +216,23 @@ export const FRONT_RECORD_KEYS = Object.freeze([
     'id', 'title', 'goal', 'stakes', 'grimPortents', 'clock', 'maxClock', 'stage', 'status',
     'publicHints', 'lastAdvanceId', 'lastAdvanceDelta', 'notes', 'faction',
     'resolvedAtMessage', 'resolution', 'resolvedTheaterIds', 'lastDmClockGainMessage',
+    'outcome', 'doomAtMessage', 'doomActivationDistance', 'doomClosedAtMessage',
 ]);
+
+/**
+ * How a resolved front ended (WOW 2026-10-22, the doom). `null` — the hero's
+ * ending (every resolution before the doom existed, and every DM-emitted
+ * `resolved` since); `'prevailed'` — the pressure came to pass: its clock
+ * filled, the doom window opened and closed, and nobody ended it on-screen.
+ * A resolved front is terminal either way; the outcome decides the register
+ * of every reader (the echo, hearsay, the record, the chapter).
+ */
+export const FRONT_OUTCOMES = Object.freeze(['prevailed']);
+
+/** The doom's timing die: 0–1 scenes (this scene or the next). */
+export const DOOM_TIMING_DIE_SIDES = 2;
+/** The doom window's length in conversational rows — the tempo window's own 24. */
+export const DOOM_WINDOW_MESSAGES = 24;
 
 export function normalizeFront(front = {}, existing = null) {
     const maxClock = clampInt(front.maxClock ?? front.max_clock, 3, 12, existing?.maxClock || DEFAULT_MAX_CLOCK);
@@ -247,6 +263,15 @@ export function normalizeFront(front = {}, existing = null) {
         .filter(id => typeof id === 'string' && id)
         .slice(0, 12);
 
+    // The doom's three stamps (2026-10-22) survive normalization and reloads
+    // like resolvedAtMessage: a reload inside the window must not re-roll the
+    // die, and a reload after the close must not forget the DM had its turn.
+    const doomAtMessage = finiteStamp(front.doomAtMessage, existing?.doomAtMessage ?? null);
+    const doomClosedAtMessage = finiteStamp(front.doomClosedAtMessage, existing?.doomClosedAtMessage ?? null);
+    const doomActivationDistance = clampInt(front.doomActivationDistance, 0, (DOOM_TIMING_DIE_SIDES - 1) * 2, existing?.doomActivationDistance ?? 0);
+    const outcomeRaw = cleanText(front.outcome).toLowerCase();
+    const outcome = FRONT_OUTCOMES.includes(outcomeRaw) ? outcomeRaw : (existing?.outcome ?? null);
+
     return {
         id: cleanText(front.id, existing?.id || `front-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`).slice(0, FRONT_ID_MAX),
         title: cleanText(front.title || front.name, existing?.title || 'Unnamed Front').slice(0, FRONT_TITLE_MAX),
@@ -266,7 +291,62 @@ export function normalizeFront(front = {}, existing = null) {
         resolution: cleanText(front.resolution, existing?.resolution || '').slice(0, 240),
         resolvedTheaterIds,
         lastDmClockGainMessage,
+        outcome,
+        doomAtMessage,
+        doomActivationDistance,
+        doomClosedAtMessage,
     };
+}
+
+/** A non-negative integer message stamp, else the fallback. */
+function finiteStamp(value, fallback) {
+    // `Number(null)` is 0: an absent stamp must stay absent, never become row 0.
+    if (value === null || value === undefined || value === '') return fallback;
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.max(0, Math.round(n)) : fallback;
+}
+
+/** Is this front's clock full — every authored step come to pass? The doom's trigger. */
+export function isFrontClockFull(front) {
+    return (front?.clock || 0) >= (front?.maxClock || DEFAULT_MAX_CLOCK);
+}
+
+/**
+ * Open the doom window on at most ONE front (WOW 2026-10-22): the first
+ * ACTIVE front whose clock is full and that has no window yet, and only while
+ * no other front's window is pending or open (a second full clock waits its
+ * turn; the next tick opens it). `delayScenes` is the engine's crypto die
+ * (0–1), counted like the tempo window's: one scene ≈ 2 conversational rows.
+ * Pure: returns the same array when nothing opens. Called after the cadence
+ * batch and after a DM clock gain — the two ways a clock moves.
+ */
+export function openDoomWindow(fronts = [], { messageCount = 0, delayScenes = 0 } = {}) {
+    const list = Array.isArray(fronts) ? fronts : [];
+    const occupied = list.some(front => (front?.status || 'active') === 'active'
+        && Number.isFinite(front?.doomAtMessage) && !Number.isFinite(front?.doomClosedAtMessage));
+    if (occupied) return { fronts: list, opened: null };
+    const idx = list.findIndex(front => front && (front.status || 'active') === 'active'
+        && isFrontClockFull(front) && !Number.isFinite(front.doomAtMessage));
+    if (idx === -1) return { fronts: list, opened: null };
+    const delay = clampInt(delayScenes, 0, DOOM_TIMING_DIE_SIDES - 1, 0);
+    const opened = normalizeFront({
+        ...list[idx],
+        doomAtMessage: Math.max(0, Math.round(Number(messageCount) || 0)),
+        doomActivationDistance: delay * 2,
+    }, list[idx]);
+    return { fronts: list.map((front, i) => (i === idx ? opened : front)), opened };
+}
+
+/**
+ * The doom's two sentences for the card, the ceremony and the fact: the
+ * final authored step (the last portent, when the record has any) and the
+ * stakes as a clause. Pure.
+ */
+export function describeFrontDoom(front) {
+    const portents = describeFrontPortents(front);
+    const lastStep = portents ? portents.last.slice(0, 200) : '';
+    const stakes = bareClause(cleanText(front?.stakes)).slice(0, 240);
+    return { lastStep, stakes };
 }
 
 /**
@@ -278,7 +358,12 @@ export function normalizeFront(front = {}, existing = null) {
 export function buildFrontResolutionFact(front, note = '') {
     const title = cleanText(front?.title, 'A hidden threat');
     const detail = cleanText(note) || cleanText(front?.resolution);
-    const base = `The threat known as "${title}" has ended, resolved through the hero's actions.`;
+    // A doom's canon is what CHANGED, in the past tense (2026-10-22): the
+    // stakes sentence was authored as exactly that ("what changes if nobody
+    // interferes"). No sign, no reproach — the record states the world.
+    const base = front?.outcome === 'prevailed'
+        ? `The pressure known as "${title}" has come to pass; the world now carries it.`
+        : `The threat known as "${title}" has ended, resolved through the hero's actions.`;
     return (detail ? `${base} ${detail}` : base).slice(0, 400);
 }
 

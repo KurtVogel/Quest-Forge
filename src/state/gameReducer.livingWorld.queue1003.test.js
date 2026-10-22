@@ -173,7 +173,7 @@ describe('"is the hero still at that place" is ONE predicate', () => {
 
 describe('the director registry: install IS the give-up', () => {
     it('every marker-keyed director has a pending key, an install action, and a quiet result', () => {
-        expect(Object.keys(RETRYABLE_DIRECTORS).sort()).toEqual(['absenceDrift', 'frontAftermath', 'regionalFronts', 'wonder']);
+        expect(Object.keys(RETRYABLE_DIRECTORS).sort()).toEqual(['absenceDrift', 'frontAftermath', 'frontDoom', 'regionalFronts', 'wonder']);
         for (const [name, row] of Object.entries(RETRYABLE_DIRECTORS)) {
             expect(typeof row.pendingKey, name).toBe('function');
             const action = row.install('campaign-1', 'key-1', row.empty);
@@ -188,6 +188,7 @@ describe('the director registry: install IS the give-up', () => {
         const session = {
             ...initialGameState.session, id: 'campaign-1',
             pendingFrontAftermath: { frontId: 'front-x', title: 'X' },
+            pendingFrontDoom: { frontId: 'front-y', title: 'Y' },
             pendingAbsenceDrift: { key: 'loc|1', locationName: 'Aldermill', awayDistance: 40, returnMessage: 1 },
             pendingRegionalFronts: { key: 'coast|1', region: 'the Coast', locationName: 'Fort Halla' },
             pendingWonder: { key: 'wonder-1-lull', requestedAtMessage: 1, onDemand: false },

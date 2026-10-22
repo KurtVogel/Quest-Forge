@@ -154,10 +154,14 @@ export function selectRegionalHearsay({
         const local = !!hereRecord && (front.resolvedTheaterIds || []).includes(hereRecord.id);
         const age = distanceSince(messages, front.resolvedAtMessage, messageIndex);
         if (!local && age < HEARSAY_MIN_TRAVEL_DISTANCE) continue;
+        // A doom travels too (2026-10-22): region-wide news of what came to
+        // pass, never of what the hero did or did not do.
         consider('front', `front:${front.id}`, {
             local,
             age,
-            text: `the hero ending the pressure known as "${cleanText(front.title, 90)}"${front.resolution ? ` (${cleanText(front.resolution, 160)})` : ''}`,
+            text: front.outcome === 'prevailed'
+                ? `the pressure known as "${cleanText(front.title, 90)}" coming to pass${front.resolution ? ` (${cleanText(front.resolution, 160)})` : ''}`
+                : `the hero ending the pressure known as "${cleanText(front.title, 90)}"${front.resolution ? ` (${cleanText(front.resolution, 160)})` : ''}`,
         });
     }
 
@@ -283,7 +287,7 @@ export function buildRegionalHearsayBlock(regionalHearsay, { currentLocation, lo
 
     const lines = [];
     lines.push('## REGIONAL HEARSAY — PRIVATE');
-    lines.push('Word of the hero\'s deeds has plausibly reached this place. If an NPC would naturally gossip, boast, warn, or recognize the hero, they may have heard:');
+    lines.push('Word of the hero\'s deeds — and of what has come to pass in the land — has plausibly reached this place. If an NPC would naturally gossip, boast, warn, or recognize the hero, they may have heard:');
     for (const item of items) {
         lines.push(`- ${item.text} — ${GRADE_GUIDANCE[item.grade]}.`);
     }

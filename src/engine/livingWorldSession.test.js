@@ -35,6 +35,7 @@ describe('pending one-shot markers', () => {
             pendingAbsenceDrift: sanitizePendingAbsenceDrift({ key: 'loc|50', locationName: 'Aldermill', returnMessage: 50, awayDistance: 40, extra: 'x' }),
             pendingRegionalFronts: sanitizePendingRegionalFronts({ key: 'k', region: 'Rimefell', locationName: 'Cold Harbor', atMessage: 60 }),
             pendingFrontAftermath: sanitizePendingFrontAftermath({ frontId: 'front-x', title: 'The Tithe', resolvedAt: 1700000000000 }),
+            pendingFrontDoom: sanitizePendingFrontAftermath({ frontId: 'front-y', title: 'The Ashen Hand', extra: 1 }),
         };
         for (const [marker, keys] of Object.entries(PENDING_MARKER_KEYS)) {
             expect(Object.keys(loaded[marker]).sort(), marker).toEqual([...keys].sort());

@@ -23,7 +23,7 @@
 
 import { findLocationRecord, getCurrentLocationRecord, isSameLocation } from './locationRegistry.js';
 import { conversationalDistance } from './replayLedger.js';
-import { DEFAULT_MAX_CLOCK, describeAvertedPortent, describeFrontPortents } from './fronts.js';
+import { DEFAULT_MAX_CLOCK, DOOM_WINDOW_MESSAGES, describeAvertedPortent, describeFrontDoom, describeFrontPortents } from './fronts.js';
 import { cleanText as typedText } from './text.js';
 
 export const INTENSITY_LEVELS = ['whispers', 'indirect', 'presence', 'confrontation'];
@@ -71,6 +71,9 @@ export const RESOLVED_ECHO_WINDOW_MESSAGES = 40;
 export const ABSENCE_DRIFT_MIN_AWAY = 30;
 export const ABSENCE_DRIFT_WINDOW_MESSAGES = 12;
 export const MAX_DRIFT_DEVELOPMENTS = 2;
+/** The doom's landing (2026-10-22): roster NPCs moved by it, and known places' current state. */
+export const MAX_DOOM_DEVELOPMENTS = 3;
+export const MAX_DOOM_PLACES = 2;
 /**
  * A homecoming stroll re-touches several stale records in a row; without a
  * cooldown each fired its own background DM-model call (two within a few
@@ -536,6 +539,63 @@ export function isTempoWindowActive(directive, messageCount, messages = null) {
 }
 
 /**
+ * Where a front's doom window stands (WOW 2026-10-22): `null` when the front
+ * has none or is no longer active, else `{ phase, distance }` with phase
+ * `pending` (the die has not landed), `open` (the card renders) or `closed`.
+ * The window is DOOM_WINDOW_MESSAGES conversational rows from its activation,
+ * measured like the tempo window — dice-turn chatter never advances it.
+ */
+export function describeDoomWindow(front, messageCount, messages = null) {
+    if (!front || (front.status || 'active') !== 'active' || !Number.isFinite(front.doomAtMessage)) return null;
+    const activation = Number.isFinite(front.doomActivationDistance) ? Math.max(0, front.doomActivationDistance) : 0;
+    const distance = distanceSince(messages, front.doomAtMessage, messageCount);
+    if (distance < activation) return { phase: 'pending', distance };
+    if (distance <= activation + DOOM_WINDOW_MESSAGES) return { phase: 'open', distance };
+    return { phase: 'closed', distance };
+}
+
+/** The one front whose doom window is OPEN now, else null. */
+export function findOpenDoom(fronts = [], messageCount = 0, messages = null) {
+    return (Array.isArray(fronts) ? fronts : [])
+        .find(front => describeDoomWindow(front, messageCount, messages)?.phase === 'open') || null;
+}
+
+/** Active fronts whose doom window has CLOSED — the settle's candidates. */
+export function listClosedDooms(fronts = [], messageCount = 0, messages = null) {
+    return (Array.isArray(fronts) ? fronts : [])
+        .filter(front => describeDoomWindow(front, messageCount, messages)?.phase === 'closed');
+}
+
+/**
+ * The doom card's lines (private; WOW 2026-10-22): the clock has run out,
+ * the final step is HERE — in person where the front holds theater (or has
+ * none), as news elsewhere — and the hero may still answer it. The DM's
+ * wires are unchanged: `front_updates` `resolved` ends it; nothing else
+ * does. Never a reproach, never the narrator's remark on what the hero might
+ * have done earlier — the people present may say what they see, once, in
+ * their own voice. Pure; rendered by buildWorldTempoBlock in the permission
+ * card's place.
+ */
+export function describeDoomCard(front, { locations = [], currentLocation = null } = {}) {
+    const faction = front.faction?.name
+        ? `${typedText(front.faction.name, 60)} — ${typedText(front.faction.goal || front.goal, 160)}`
+        : typedText(front.goal, 160);
+    const { lastStep, stakes } = describeFrontDoom(front);
+    const registry = Array.isArray(locations) ? locations : [];
+    const theaters = registry.filter(record => (record?.theaterFrontIds || []).includes(front.id));
+    const here = getCurrentLocationRecord(registry, currentLocation);
+    const inTheater = theaters.length === 0 || (!!here && theaters.some(record => record.id === here.id));
+    const theaterNames = theaters.map(record => typedText(record.name, 60)).filter(Boolean).slice(0, 3).join(', ');
+    const lines = [];
+    lines.push(`THE CLOCK HAS RUN OUT for ${front.id} (${faction}). This is not a symptom: its final step comes to pass NOW, at confrontation intensity — ${describeIntensity('confrontation')}.${lastStep ? ` The step: ${lastStep}.` : ''}${stakes ? ` Unless it is stopped here, ${stakes}.` : ''}`);
+    lines.push(inTheater
+        ? 'It happens in THIS scene, where the hero stands: put it on-screen, in motion, with the people it touches.'
+        : `It happens at ${theaterNames || 'its own ground'}; here it arrives as NEWS inside this scene — a rider, a refugee, a glow on the horizon, a bell — and the hero may still go.`);
+    lines.push('The hero may answer it, at a cost, and only this last step: what has already come to pass stays. If the hero ENDS the pressure itself on-screen, emit front_updates with its id and status "resolved" and a short notes epitaph. If the scene passes with the pressure unchecked, it will have prevailed and the world changes for good. Never force the hero\u2019s choice; never let the narrator say what the hero could have done earlier — a character present may say what they see, once, in their own voice.');
+    return lines.join('\n');
+}
+
+/**
  * The compact private pacing block that replaces the full fronts dossier.
  * The DM sees front ids + factions (it needs them for front_updates when the
  * player interferes) but no clocks, portents, stages, or notes.
@@ -550,6 +610,8 @@ export function buildWorldTempoBlock({
     messages = null,
     combatActive = false,
     solo = false,
+    locations = [],
+    currentLocation = null,
 } = {}) {
     const activeFronts = (Array.isArray(fronts) ? fronts : []).filter(f => f && (f.status || 'active') === 'active');
     const resolvedEchoes = recentlyResolvedFronts(fronts, messageCount, messages);
@@ -579,10 +641,16 @@ export function buildWorldTempoBlock({
     }
 
     const directive = worldTempo?.directive || null;
-    const windowActive = !combatActive && isTempoWindowActive(directive, messageCount, messages);
+    // The doom outranks a granted window (2026-10-22): while a clock has run
+    // out, the card in this slot is the doom's, and a cadence's permission for
+    // another front waits (it may expire unused — one scene holds one card).
+    const doomFront = combatActive ? null : findOpenDoom(activeFronts, messageCount, messages);
+    const windowActive = !doomFront && !combatActive && isTempoWindowActive(directive, messageCount, messages);
     const permittedFront = windowActive ? activeFronts.find(f => f.id === directive.frontId) : null;
 
-    if (permittedFront) {
+    if (doomFront) {
+        lines.push(describeDoomCard(doomFront, { locations, currentLocation }));
+    } else if (permittedFront) {
         const faction = permittedFront.faction?.name
             ? `${cleanText(permittedFront.faction.name, 60)} — ${cleanText(permittedFront.faction.goal || permittedFront.goal, 160)}`
             : cleanText(permittedFront.goal, 160);
@@ -630,14 +698,27 @@ export function buildWorldTempoBlock({
         // resolution minted a world fact revealing them.
         // One instruction however many echoes are live (2026-09-20 audit P2:
         // each echo repeated the same ~390-char sentence).
-        for (const front of resolvedEchoes) {
+        const victories = resolvedEchoes.filter(front => front.outcome !== 'prevailed');
+        const dooms = resolvedEchoes.filter(front => front.outcome === 'prevailed');
+        for (const front of victories) {
             const resolution = cleanText(front.resolution, 160);
             // What nearly happened rides the echo (WOW 2026-10-21) so NPCs can
             // say it in their own words — the DM was never told it before.
             const averted = describeAvertedPortent(front);
             lines.push(`RECENT VICTORY: the pressure "${cleanText(front.title, 100)}" has been ENDED${resolution ? ` (${resolution})` : ''}.${averted ? ` What was averted: ${averted}.` : ''}`);
         }
-        lines.push(`Show ${resolvedEchoes.length > 1 ? 'the absence of each ended pressure' : 'its absence'} concretely wherever the fiction touches what it threatened — relief, reopened roads, easing prices, rebuilding, talk of who moves into the vacuum, and people naming what nearly came to pass in their own words. Never resurrect it, never field a lookalike threat with the same creatures or imagery, and let places it haunted stay free unless a NEW, distinct pressure claims them on-screen.`);
+        if (victories.length > 0) {
+            lines.push(`Show ${victories.length > 1 ? 'the absence of each ended pressure' : 'its absence'} concretely wherever the fiction touches what it threatened — relief, reopened roads, easing prices, rebuilding, talk of who moves into the vacuum, and people naming what nearly came to pass in their own words. Never resurrect it, never field a lookalike threat with the same creatures or imagery, and let places it haunted stay free unless a NEW, distinct pressure claims them on-screen.`);
+        }
+        // The doom's echo (2026-10-22): the sign flipped — show what it COST,
+        // never the absence; and never a reproach from the narrator.
+        for (const front of dooms) {
+            const resolution = cleanText(front.resolution, 160);
+            lines.push(`THE PRESSURE "${cleanText(front.title, 100)}" HAS COME TO PASS${resolution ? ` — ${resolution}` : ''}. It is done and it stands.`);
+        }
+        if (dooms.length > 0) {
+            lines.push(`Show what ${dooms.length > 1 ? 'each' : 'it'} cost concretely wherever the fiction touches what it took — the new order and who profits from it, who is gone or changed, closed roads, prices, fear or relief, and people naming what happened in their own words. Never undo it, never let the narrator remark on what the hero might have done; a character may say so once, in their own voice, and may be wrong.`);
+        }
     }
 
     if (encounters.length > 0) {

@@ -264,7 +264,10 @@ export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CH
     ).forEach(({ item }) => {
         const ago = when(item.resolvedAtMessage);
         const epitaph = typeof item.resolution === 'string' && item.resolution.trim() ? ` — ${clip(item.resolution, 200)}` : '';
-        ledgers.push(row('fronts', `- ENDED${ago ? ` (${ago})` : ''}: the matter of ${clip(item.title || item.faction || 'a pressure', 80)} is finished${epitaph}`, item.resolvedAtMessage));
+        // A prevailed front is on the record as what came to pass (2026-10-22).
+        ledgers.push(row('fronts', item.outcome === 'prevailed'
+            ? `- CAME TO PASS${ago ? ` (${ago})` : ''}: the matter of ${clip(item.title || item.faction || 'a pressure', 80)} was not stopped${epitaph}`
+            : `- ENDED${ago ? ` (${ago})` : ''}: the matter of ${clip(item.title || item.faction || 'a pressure', 80)} is finished${epitaph}`, item.resolvedAtMessage));
     });
 
     pick(

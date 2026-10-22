@@ -11,6 +11,7 @@ import {
 } from '../../engine/roleplayCheck.js';
 import { appendRollHistory, reviveCharacter, systemMessage } from './shared.js';
 import { isLiveFact } from '../../engine/worldFacts.js';
+import { gameReducer } from '../gameReducer.js';
 
 export const handlers = {
     ADD_MESSAGE(state, action) {
@@ -48,6 +49,14 @@ export const handlers = {
                 ...next.messages,
                 systemMessage(`**You come to** — battered and barely standing at 1/${next.character.maxHP} HP.`),
             ];
+        }
+        // The doom's close ticks on the player's row (WOW 2026-10-22): a
+        // window that has shut is stamped here and prevails on the next
+        // row, after the DM's one ordinary turn. The guard is cheap — only
+        // a front carrying a window asks the question.
+        if (role === 'user' && !action.payload?.hidden
+            && (next.fronts || []).some(front => Number.isFinite(front?.doomAtMessage) && (front.status || 'active') === 'active')) {
+            return gameReducer(next, { type: 'SETTLE_DOOMS' });
         }
         return next;
     },

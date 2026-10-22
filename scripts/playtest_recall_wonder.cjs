@@ -12,6 +12,8 @@
  *   node scripts/playtest_recall_wonder.cjs tells pro   gemini gemini-3.8-flash (PROBE 4: hero tells — habit → recognition → "That's not me")
  *   node scripts/playtest_recall_wonder.cjs tells terra openai gpt-5.6-terra
  *   node scripts/playtest_recall_wonder.cjs proof pro   gemini gemini-3.8-flash (PROBE 5: place-card return visit + wound callback + recap taps)
+ *   node scripts/playtest_recall_wonder.cjs doom  flash gemini gemini-3.8-flash (PROBE 8, 2026-10-22: a full clock is a doom — the window as a scene,
+ *                                                                               the prevailed landing; QF_DOOM_ARM=ignore (default) | fight)
  *
  * Never the xAI/Grok DM (Vesa, 2026-09-14) — Gemini Flash and GPT Sol only (Pro retired 2026-10-11).
  * The Gemini Flash machinery (Scribe, journal, embeddings) is identical in every
@@ -67,8 +69,8 @@ const PROBE = process.argv[2];
 const runLabel = process.argv[3];
 const provider = process.argv[4];
 const model = process.argv[5];
-if (!['recall', 'wonder', 'full', 'tells', 'proof', 'grand', 'death'].includes(PROBE) || !runLabel || !provider || !model) {
-    console.error('Usage: node scripts/playtest_recall_wonder.cjs <recall|wonder|full|tells|proof|grand|death> <label> <provider> <model>');
+if (!['recall', 'wonder', 'full', 'tells', 'proof', 'grand', 'death', 'doom'].includes(PROBE) || !runLabel || !provider || !model) {
+    console.error('Usage: node scripts/playtest_recall_wonder.cjs <recall|wonder|full|tells|proof|grand|death|doom> <label> <provider> <model>');
     process.exit(1);
 }
 if (provider === 'xai') {
@@ -2353,6 +2355,228 @@ async function runDeathProbe(page) {
     fs.writeFileSync(path.join(OUT_DIR, 'death-final-state.json'), JSON.stringify(final, null, 2));
     saveAll();
 }
+// ---------------------------------------------------------------------------
+// PROBE 8 — a full clock is a doom (WOW 2026-10-22). The harness fills one
+// hidden front's clock through the cadence batch action (the reflection's own
+// channel, alternating with empty batches so the pacing guard never holds the
+// gain), watches the doom card reach the DM, judges the scene it plays, and —
+// on the "ignore" arm — plays the window out so the engine's prevail lands:
+// the 🕰️ line, the pinned fact, the landing director, the echo turns after.
+// ---------------------------------------------------------------------------
+const DOOM_ARM = process.env.QF_DOOM_ARM || 'ignore';
+
+async function doomSnap(page) {
+    return await page.evaluate(() => {
+        const s = window.__QF_STATE__;
+        if (!s) return null;
+        return {
+            msgCount: (s.messages || []).length,
+            fronts: (s.fronts || []).map(f => ({
+                id: f.id, title: f.title, status: f.status, outcome: f.outcome ?? null, clock: f.clock, maxClock: f.maxClock, stage: f.stage,
+                stakes: f.stakes, lastPortent: (f.grimPortents || []).at(-1) || null, faction: f.faction?.name || null, factionGoal: f.faction?.goal || null,
+                doomAtMessage: f.doomAtMessage ?? null, doomActivationDistance: f.doomActivationDistance ?? null, doomClosedAtMessage: f.doomClosedAtMessage ?? null,
+                resolvedAtMessage: f.resolvedAtMessage ?? null, resolution: f.resolution || null, publicHints: (f.publicHints || []).slice(-3),
+            })),
+            pendingFrontDoom: s.session?.pendingFrontDoom || null,
+            pendingFrontAftermath: s.session?.pendingFrontAftermath || null,
+            chapterCloseSuggested: s.session?.chapterCloseSuggested || null,
+            clockLines: (s.messages || []).map((m, i) => ({ i, content: m.content })).filter(m => typeof m.content === 'string' && m.content.includes('🕰️')),
+            facts: (s.worldFacts || []).slice(-6).map(f => ({ fact: f.fact, pinned: !!f.pinned, category: f.category })),
+            npcs: (s.npcs || []).map(n => ({ name: n.name, agenda: n.agenda || null, lastNotes: n.lastNotes || null })),
+            places: (s.locations || []).map(r => ({ name: r.name, lastState: r.lastState || null, theaterFrontIds: r.theaterFrontIds || [] })),
+            exp: s.character?.exp ?? null,
+            location: s.currentLocation,
+        };
+    }).catch(() => null);
+}
+
+async function injectFullClock(page) {
+    const before = await doomSnap(page);
+    const target = (before?.fronts || []).find(f => (f.status || 'active') === 'active' && f.faction && f.lastPortent)
+        || (before?.fronts || []).find(f => (f.status || 'active') === 'active');
+    if (!target) throw new Error('No active front to fill.');
+    const sessionId = await page.evaluate(() => window.__QF_STATE__?.session?.id);
+    let clock = target.clock || 0;
+    let batch = 0;
+    while (clock < (target.maxClock || 6) && batch < 16) {
+        batch += 1;
+        const gain = batch % 2 === 1;
+        await page.evaluate(({ id, sessionId, batch, gain }) => {
+            window.__QF_DISPATCH__?.({
+                type: 'APPLY_FRONT_ADVANCE_BATCH',
+                payload: {
+                    cadenceId: `journal-${sessionId}-probe-${batch}`,
+                    journalEnd: batch,
+                    advances: gain ? [{ id, delta: 1, symptom: `(probe-injected step ${batch})`, reason: 'Probe: the clock is filled by the harness.' }] : [],
+                },
+            });
+        }, { id: target.id, sessionId, batch, gain });
+        await delay(250);
+        const now = await doomSnap(page);
+        clock = now?.fronts.find(f => f.id === target.id)?.clock ?? clock;
+    }
+    const after = await doomSnap(page);
+    const front = after.fronts.find(f => f.id === target.id);
+    note('doom', `Filled ${front.id} "${front.title}" to ${front.clock}/${front.maxClock} in ${batch} batches; doomAtMessage=${front.doomAtMessage} delay=${front.doomActivationDistance}; last step: ${String(front.lastPortent).slice(0, 120)}; stakes: ${String(front.stakes).slice(0, 120)}`);
+    if (!Number.isFinite(front.doomAtMessage)) throw new Error('The window did not open on a full clock.');
+    results.push({ check: 'window-opened', pass: true, front: front.id, title: front.title, delay: front.doomActivationDistance });
+    return front;
+}
+
+async function judgeDoomScene(front, reply, { arrival }) {
+    return await flash(`You judge one turn of a text RPG. The engine privately told the Dungeon Master that a hidden pressure's FINAL step comes to pass NOW, on screen (or as news if the hero is elsewhere), and that the hero may still answer it.
+The pressure: "${front.title}" — it wanted: ${front.factionGoal || ''}. Its final step: "${front.lastPortent}". If unstopped: "${front.stakes}".
+The DM's reply:
+"""
+${String(reply).slice(0, 5000)}
+"""
+Answer JSON: {"stepOnScreen": true|false (does the final step, or unmistakable news of it, actually HAPPEN in this reply — not a hint, not a rumor of something coming?), "heroCanAnswer": true|false (does the reply leave the hero a live choice to act on it?), "narratorReproach": true|false (does the NARRATOR's own voice tell the hero what they could or should have done earlier, or that they ignored signs? A character saying so in dialogue is NOT a reproach), "endsOnAsk": true|false, "quote": "the one sentence where the step lands, verbatim, or empty"}${arrival ? '' : ''}`);
+}
+
+async function judgeDoomEcho(front, reply) {
+    return await flash(`You judge one turn of a text RPG. A hidden pressure has COME TO PASS a few turns ago: "${front.title}" — ${front.stakes}. The engine told the Dungeon Master to show what it COST concretely (the new order, who profits, who is gone, prices, fear or relief, people naming it in their own words) and never to let the narrator remark on what the hero might have done.
+The DM's reply:
+"""
+${String(reply).slice(0, 5000)}
+"""
+Answer JSON: {"costShown": true|false (is the changed world visible in concrete particulars, not a summary line?), "inCharacterVoice": true|false (does a character say something about it in their own words?), "narratorReproach": true|false, "undone": true|false (does the reply undo or soften the pressure's win into a near-miss?), "quote": "the most concrete sentence of cost, verbatim, or empty"}`);
+}
+
+async function doomTurn(page, label, action, front, { judge = null } = {}) {
+    const t0 = Date.now();
+    const { dm, record } = await playTurn(page, label, action, { settle: { quietMs: 6000, maxMs: 40000 } });
+    // The DM's own prompt, found by its tempo block — not by model name: the
+    // machinery runs on the same Flash as the DM since 2026-10-13, so the
+    // model-keyed dmPromptSince can hand back a Scribe call.
+    const dmCalls = captured.filter(c => c.t >= t0 && c.sys.includes('## WORLD TEMPO'));
+    const sys = dmCalls.length ? dmCalls[dmCalls.length - 1].sys : '';
+    const cardLive = sys.includes('THE CLOCK HAS RUN OUT');
+    const echoLive = sys.includes('HAS COME TO PASS');
+    const permission = sys.includes("THIS SCENE'S PERMISSION");
+    record.doom = { cardLive, echoLive, permission };
+    let verdict = null;
+    if (judge === 'scene' && dm) verdict = await judgeDoomScene(front, dm, { arrival: true });
+    if (judge === 'echo' && dm) verdict = await judgeDoomEcho(front, dm);
+    record.verdict = verdict;
+    note('doom', `${label}: card=${cardLive} echo=${echoLive} permission=${permission}${verdict ? ` verdict=${JSON.stringify(verdict).slice(0, 300)}` : ''}`);
+    saveAll();
+    return { dm, sys, verdict, cardLive, echoLive };
+}
+
+async function waitForDoomLanding(page, { maxMs = 180000 } = {}) {
+    const start = Date.now();
+    while (Date.now() - start < maxMs) {
+        const s = await doomSnap(page);
+        if (s && !s.pendingFrontDoom) return s;
+        await delay(3000);
+    }
+    return await doomSnap(page);
+}
+
+async function runDoomProbe(page) {
+    await bootAndCreateHero(page, { premiseMode: 'starter', premiseText: 'Homecoming to Brannock' });
+    await playTurn(page, 'ordinary', "I walk up from the ferry landing to my aunt Hesper's house on Tanner's Lane and knock on the door.");
+    await playTurn(page, 'ordinary', 'I tell Hesper I am sorry I never wrote, and ask how she has been managing.');
+    const front = await injectFullClock(page);
+    const beforeDoom = await doomSnap(page);
+    fs.writeFileSync(path.join(OUT_DIR, 'doom-state-before.json'), JSON.stringify(beforeDoom, null, 2));
+
+    // The die: a delay of 2 rows means the card renders from the SECOND call after the stamp.
+    if (front.doomActivationDistance > 0) {
+        await doomTurn(page, 'filler-before-die', 'I ask Hesper whether there is bread in the house, and set the kettle on.', front);
+    }
+    const scene = await doomTurn(page, 'doom-scene', 'I step outside to see what the noise in the lane is about.', front, { judge: 'scene' });
+    results.push({ check: 'card-reached-dm', pass: scene.cardLive, arm: DOOM_ARM });
+    results.push({ check: 'doom-scene-judged', pass: !!scene.verdict?.stepOnScreen && !scene.verdict?.narratorReproach, verdict: scene.verdict, reply: scene.dm.slice(0, 1200) });
+
+    if (DOOM_ARM === 'fight') {
+        const lines = [
+            'I go straight at them. Whatever this is, it ends here — I draw my sword and put myself between them and the lane.',
+            'I press the attack and shout for Hesper to bar the door.',
+            'I finish it: whoever leads them, I go for them, and I do not stop until the lane is clear.',
+            'I stand over what is left and make sure it is over. Is it over?',
+        ];
+        let resolved = false;
+        for (const [i, line] of lines.entries()) {
+            const t = await doomTurn(page, `fight-${i + 1}`, line, front);
+            const s = await doomSnap(page);
+            const f = s.fronts.find(x => x.id === front.id);
+            if (f.status === 'resolved') { resolved = true; note('doom', `The DM ended the pressure on turn fight-${i + 1}: outcome=${f.outcome} resolution="${f.resolution}"`); break; }
+            if (!t.cardLive && !s.pendingFrontDoom && f.status === 'active') note('doom', 'Card not live this turn (combat or window state).');
+        }
+        const s = await doomSnap(page);
+        const f = s.fronts.find(x => x.id === front.id);
+        results.push({ check: 'fight-arm-resolved-by-dm', pass: resolved && f.outcome === null, front: f, clockLines: s.clockLines.map(l => l.content) });
+        fs.writeFileSync(path.join(OUT_DIR, 'doom-state-final.json'), JSON.stringify(s, null, 2));
+        saveAll();
+        return;
+    }
+
+    // IGNORE arm: the hero keeps to their own business until the window shuts.
+    const fillers = [
+        'I keep my head down and go back inside. Whatever it is, it is not my fight today. I ask Hesper what needs mending in the house.',
+        'I spend the afternoon fixing the back gate and say nothing of the lane.',
+        'I go to the market for salt and flour and come straight back.',
+        'I sit with Hesper over supper and ask about the neighbors, keeping clear of trouble.',
+        'I turn in early and sleep.',
+        'In the morning I split wood behind the house.',
+        'I walk down to the ferry landing to see if there is work loading barges.',
+        'I take whatever loading work there is and keep my mouth shut all day.',
+        'I come home at dusk and eat.',
+        'I mend my boots by the fire.',
+        'I sleep.',
+        'I rise and ask Hesper what the day holds.',
+        'I go about the morning chores.',
+        'I keep to the house.',
+    ];
+    let closedSeen = false;
+    let prevailedAt = null;
+    for (const [i, line] of fillers.entries()) {
+        const t = await doomTurn(page, `ignore-${i + 1}`, line, front, { judge: i === 0 ? 'scene' : null });
+        const s = await doomSnap(page);
+        const f = s.fronts.find(x => x.id === front.id);
+        if (f.status === 'resolved') {
+            prevailedAt = i + 1;
+            note('doom', `PREVAILED on ignore-${i + 1}: outcome=${f.outcome} resolvedAtMessage=${f.resolvedAtMessage} resolution="${f.resolution}"`);
+            break;
+        }
+        if (Number.isFinite(f.doomClosedAtMessage) && !closedSeen) { closedSeen = true; note('doom', `Window stamped closed at ${f.doomClosedAtMessage} (ignore-${i + 1}); the DM gets one turn.`); }
+        if (!t.cardLive && !closedSeen && i > 0) note('doom', `ignore-${i + 1}: the card was not in the prompt (window phase?)`);
+    }
+    const landed = await waitForDoomLanding(page);
+    const f = landed.fronts.find(x => x.id === front.id);
+    const line = landed.clockLines.find(l => /come to pass/i.test(l.content));
+    results.push({
+        check: 'prevailed-through-ceremony',
+        pass: f?.status === 'resolved' && f?.outcome === 'prevailed' && !!line,
+        turn: prevailedAt, front: f, clockLine: line?.content || null,
+        noSignOnLine: line ? !/What you saw|could have|should have|ignored|missed/i.test(line.content) : null,
+        pinnedFact: landed.facts.find(x => x.pinned && /come to pass/.test(x.fact))?.fact || null,
+        xpUnchanged: landed.exp === beforeDoom.exp,
+        chapterNudge: landed.chapterCloseSuggested,
+    });
+    const npcChanges = landed.npcs.filter(n => { const b = beforeDoom.npcs.find(x => x.name === n.name); return !b || b.agenda !== n.agenda || b.lastNotes !== n.lastNotes; });
+    const placeChanges = landed.places.filter(r => { const b = beforeDoom.places.find(x => x.name === r.name); return b && b.lastState !== r.lastState; });
+    const successors = landed.fronts.filter(x => x.id.startsWith('front-doom'));
+    results.push({
+        check: 'landing-installed',
+        pass: !landed.pendingFrontDoom,
+        fact: landed.facts.filter(x => !x.pinned).slice(-1)[0]?.fact || null,
+        npcChanges, placeChanges, successors: successors.map(x => ({ id: x.id, title: x.title, faction: x.faction, stakes: x.stakes })),
+        doomConsole: consoleLines.map(c => c.text).filter(t => /Doom of/.test(t)),
+    });
+    note('doom', `Landing: npcs=${npcChanges.length} places=${placeChanges.length} successors=${successors.length}`);
+    fs.writeFileSync(path.join(OUT_DIR, 'doom-state-landed.json'), JSON.stringify(landed, null, 2));
+
+    // The echo: two turns with the doom in the tempo block.
+    const e1 = await doomTurn(page, 'echo-1', 'I walk the lane and look at what has become of it, and listen to what people are saying.', front, { judge: 'echo' });
+    const e2 = await doomTurn(page, 'echo-2', 'I go to the market and ask the salt-seller how things stand now.', front, { judge: 'echo' });
+    results.push({ check: 'echo-reached-dm', pass: e1.echoLive && e2.echoLive });
+    results.push({ check: 'cost-shown-judged', pass: [e1, e2].some(e => e.verdict?.costShown && !e.verdict?.narratorReproach && !e.verdict?.undone), verdicts: [e1.verdict, e2.verdict], replies: [e1.dm.slice(0, 1200), e2.dm.slice(0, 1200)] });
+    fs.writeFileSync(path.join(OUT_DIR, 'doom-state-final.json'), JSON.stringify(await doomSnap(page), null, 2));
+    saveAll();
+}
+
 async function run() {
     fs.rmSync(PROFILE_DIR, { recursive: true, force: true });
     const browser = await puppeteer.launch({
@@ -2372,6 +2596,7 @@ async function run() {
         else if (PROBE === 'proof') await runProofProbe(page);
         else if (PROBE === 'grand') await runGrandProbe(page);
         else if (PROBE === 'death') await runDeathProbe(page);
+        else if (PROBE === 'doom') await runDoomProbe(page);
         else await runWonderProbe(page);
     } finally {
         fs.writeFileSync(path.join(OUT_DIR, 'transcript.json'), JSON.stringify(await page.evaluate(() => (window.__QF_STATE__?.messages || []).map(m => ({ role: m.role, kind: m.kind || null, hidden: !!m.hidden, content: m.content }))).catch(() => []), null, 2));
