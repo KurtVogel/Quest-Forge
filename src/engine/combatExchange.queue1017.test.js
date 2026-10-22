@@ -87,7 +87,7 @@ describe('a STABLE hero cannot act (P1)', () => {
         const stable = state({ character: stableHero });
         expect(planCombatExchange(stable, attackIntent())).toMatchObject({
             ok: false,
-            error: 'Astra is unconscious at 0 HP (stable, not dying): the hero cannot act this exchange. Declare { "action": "pass" } as their only player slot — companions still act, and a potion or healing wakes them.',
+            error: 'Astra is unconscious at 0 HP (stable, not dying): the hero cannot act this exchange. Declare { "action": "pass" } as their only player slot — companions still act; a potion or healing wakes them.',
         });
         // Every other lane is shut too: a Second Wind, a cast, a check.
         expect(planCombatExchange(stable, normalizeCombatExchange({ player_slots: [{ action: 'second_wind' }] })).ok).toBe(false);
@@ -166,12 +166,15 @@ describe('the hero\'s own incapacitating condition is asked in a fight (P2)', ()
             ok: false, error: expect.stringContaining('Astra is paralyzed: the hero cannot act this exchange.'),
         });
         expect(planCombatExchange(paralyzed, normalizeCombatExchange({ player_slots: [{ action: 'cast', spell: 'fire bolt', target: 'Goblin' }] })).ok).toBe(false);
-        rollQueue.push(3, 17, 4); // the goblin's attack draws TWO d20s (advantage against a paralyzed target) + damage
+        // The goblin's attack draws TWO d20s (advantage against a paralyzed
+        // target) + TWO damage dice: a melee hit on a helpless hero is a crit
+        // (2026-10-22 enemy-stats P2 — 5e's ghoul rule, now the engine's).
+        rollQueue.push(3, 17, 4, 2);
         const plan = planCombatExchange(paralyzed, passIntent());
         expect(plan.ok).toBe(true);
         expect(rollQueue).toHaveLength(0);
-        expect(plan.payload.result.events.find(e => e.type === 'attack')).toMatchObject({ actor: 'Goblin', target: 'Astra', hit: true, damage: 6, targetType: 'player' });
-        expect(plan.payload.playerDamage).toBe(6);
+        expect(plan.payload.result.events.find(e => e.type === 'attack')).toMatchObject({ actor: 'Goblin', target: 'Astra', hit: true, critical: true, damage: 8, targetType: 'player' });
+        expect(plan.payload.playerDamage).toBe(8);
         expect(plan.payload.heroRolls).toEqual([]);
     });
 

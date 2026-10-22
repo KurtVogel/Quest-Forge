@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { isRecordEntry } from '../../engine/journalEntry.js';
 import { turnFlags } from '../../llm/turnFlags.js';
 import { useGame } from '../../state/GameContext.jsx';
+import { gameReducer } from '../../state/gameReducer.js';
 import { sendMessage, streamMessage } from '../../llm/adapter.js';
 import { createTurnRunner } from '../../llm/turnOrchestrator.js';
 import { COMBAT_PHASES } from '../../engine/combatPredicates.js';
@@ -597,7 +598,19 @@ export default function ChatPanel() {
         })
             .then(() => {
                 dispatch({ type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: result.exchangeId } });
-                const latest = stateRef.current;
+                // The beat's merge base is the state the narration LEFT, with
+                // the acknowledgement folded in (2026-10-22 scribe P2):
+                // `stateRef.current` one statement after the dispatch is the
+                // pre-END_COMBAT state, so the fight-memory moment, the engine
+                // wound card and the narration row itself were missing from
+                // the Scribe's context (its messageCount one short). The
+                // narration lane's `stateAfter` is the orchestrator's own
+                // projection; COMPLETE_COMBAT_NARRATION replays over it for
+                // the context only — the one divergence (END_COMBAT's die and
+                // minted ids differ from the live commit) touches nothing the
+                // Scribe reads.
+                const committed = runner.getLastCommittedTurn();
+                const latest = gameReducer(committed?.stateAfter || stateRef.current, { type: 'COMPLETE_COMBAT_NARRATION', payload: { exchangeId: result.exchangeId } });
                 // The Scribe runs on terminal narration and on beats that name
                 // an out-of-party roster NPC — not on every dice beat (2026-09-23
                 // combat-exchange P2: ~10 Flash calls per fight). Terminal RAG

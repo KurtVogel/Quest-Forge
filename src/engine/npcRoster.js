@@ -948,14 +948,34 @@ export function classifyNpcCandidate(payload = {}, existing = null) {
  * The roster-worthy candidate is dispatched wholesale with the classified
  * kind; UPDATE_NPC's own normalization is the field boundary.
  *
+ * The gate reads the ROSTER when the caller hands it one (2026-10-22 scribe
+ * P1): classified without the existing record, an update for a roster
+ * character the Scribe tagged `kind: 'creature'` — the prompt invites exactly
+ * that on fight turns — was dropped here before the reducer, whose own
+ * classify-with-record lets a character-tier record take any update. The
+ * record is found the way the reducer finds it (`resolveNpcRef`: exact id,
+ * exact name, the one short-name match, the scene's full name); an ambiguous
+ * name is nobody here and the reducer says so. A character keeps its kind.
+ *
  * @returns {boolean} true when the update was dispatched.
  */
-export function dispatchClassifiedNpcUpdate(dispatch, candidate, meta = null) {
+export function dispatchClassifiedNpcUpdate(dispatch, candidate, meta = null, { npcs = null, messageCount } = {}) {
     if (!candidate || typeof candidate !== 'object') return false;
-    const classified = classifyNpcCandidate(candidate);
+    const existing = existingRosterRecord(npcs, candidate, meta, messageCount);
+    const classified = classifyNpcCandidate(candidate, existing);
     if (!classified.allowRoster) return false;
-    dispatch({ type: 'UPDATE_NPC', payload: { ...candidate, kind: classified.kind }, ...(meta && typeof meta === 'object' && { meta }) });
+    const kind = existing?.rosterTier === 'character' ? (existing.kind || 'character') : classified.kind;
+    dispatch({ type: 'UPDATE_NPC', payload: { ...candidate, kind }, ...(meta && typeof meta === 'object' && { meta }) });
     return true;
+}
+
+function existingRosterRecord(npcs, candidate, meta, messageCount) {
+    if (!Array.isArray(npcs) || npcs.length === 0) return null;
+    const resolved = resolveNpcRef(npcs, candidate, {
+        presenceText: typeof meta?.presenceText === 'string' ? meta.presenceText : '',
+        messageCount,
+    });
+    return resolved.ambiguous.length > 1 ? null : resolved.npc;
 }
 
 /**

@@ -390,7 +390,11 @@ describe('gameReducer tiered bond moments (2026-09-12 — one scene, one moment;
         expect(replaced.npcs[0].openThread).toBe('Wants the hero to meet her sister\'s husband.');
         expect(replaced.npcs[0].openThreadMessage).toBe(20);
 
-        const junk = gameReducer(replaced, { type: 'UPDATE_NPC', payload: { name: 'Maren', openThread: { evil: true }, openThreadResolved: 'yes' } });
+        // A lane flag reads through toFlag (2026-10-22 scribe P2): `'no'` /
+        // `'false'` keep the thread, an object thread is junk; `'true'` settles
+        // it exactly like `true` (the string-flag case is pinned in
+        // gameReducer.queue1022.test.js).
+        const junk = gameReducer(replaced, { type: 'UPDATE_NPC', payload: { name: 'Maren', openThread: { evil: true }, openThreadResolved: 'no' } });
         expect(junk.npcs[0].openThread).toBe('Wants the hero to meet her sister\'s husband.');
         expect(junk.npcs[0].openThreadResolved).toBeUndefined();
 

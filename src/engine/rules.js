@@ -341,6 +341,20 @@ export function getWeaponDamageNotation(character, inventory = [], fallback = '1
  */
 export const ABILITY_KEY_SET = new Set(['strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma']);
 
+/**
+ * An ability name in its canonical key: the full key, or a three-letter short
+ * form ("DEX", "con") — null for anything else (a skill name is not an ability).
+ */
+export function resolveAbilityKey(value) {
+    const key = String(value || '').trim().toLowerCase();
+    if (!key) return null;
+    if (ABILITY_KEY_SET.has(key)) return key;
+    for (const ability of ABILITY_KEY_SET) {
+        if (ability.startsWith(key) && key.length >= 3) return ability;
+    }
+    return null;
+}
+
 export const SKILL_ABILITIES = {
     acrobatics: 'dexterity',
     animalHandling: 'wisdom',
@@ -429,13 +443,18 @@ export function getSavingThrowModifier(character, ability) {
  *   check           - the afflicted creature's ability/skill checks
  *   save            - the afflicted creature's saving throws
  *   incomingAttack  - attack rolls made AGAINST the afflicted creature
- * Values are 'advantage' | 'disadvantage'.
+ * Values are 'advantage' | 'disadvantage' — or, for a kind the condition
+ * touches only on SOME abilities, an object keyed by ability name
+ * (`restrained.save`: 5e puts disadvantage on DEX saves alone — 2026-10-22
+ * enemy-stats P2; one flat 'disadvantage' used to cost a restrained foe every
+ * save and a restrained hero their CON save against poison). A reader that
+ * names no ability gets no effect from an object entry.
  */
 export const CONDITION_EFFECTS = {
     poisoned: { attack: 'disadvantage', check: 'disadvantage' },
     blinded: { attack: 'disadvantage', incomingAttack: 'advantage' },
     frightened: { attack: 'disadvantage', check: 'disadvantage' },
-    restrained: { attack: 'disadvantage', save: 'disadvantage', incomingAttack: 'advantage' },
+    restrained: { attack: 'disadvantage', save: { dexterity: 'disadvantage' }, incomingAttack: 'advantage' },
     prone: { attack: 'disadvantage', incomingAttack: 'advantage' },
     invisible: { attack: 'advantage', incomingAttack: 'disadvantage' },
     // ONE key per condition: `exhaustion` folds to this at normalizeConditionName
@@ -453,6 +472,25 @@ export const CONDITION_EFFECTS = {
  * effectiveness on its own turn was a silent half-implementation (2026-07-13 audit).
  */
 export const INCAPACITATING_CONDITIONS = ['stunned', 'paralyzed', 'unconscious'];
+
+/**
+ * The HELPLESS pair (2026-10-22 enemy-stats P2): in 5e any attack that hits a
+ * paralyzed or unconscious creature from within reach is a critical hit —
+ * `stunned` is incapacitated but not helpless. combatMath's attack kernel
+ * reads it for a melee hit; the rule used to be prose nobody ran.
+ */
+export const HELPLESS_CONDITIONS = ['paralyzed', 'unconscious'];
+
+/** A conditions value as a list: a list as given, a scalar as one entry, anything else empty. */
+function conditionsAsList(conditions) {
+    if (Array.isArray(conditions)) return conditions;
+    return typeof conditions === 'string' ? [conditions] : [];
+}
+
+/** True when the list carries a helpless condition (a melee hit on it is a crit). */
+export function isHelpless(conditions) {
+    return conditionsAsList(conditions).some(raw => HELPLESS_CONDITIONS.includes(String(raw).toLowerCase().trim()));
+}
 
 /**
  * What a Long Rest clears off the hero AND every companion (read by TAKE_REST
@@ -507,7 +545,9 @@ export function normalizeConditionList(list) {
 
 /** First incapacitating condition on the list, or null when the creature can act. */
 export function getIncapacitatingCondition(conditions) {
-    for (const raw of conditions || []) {
+    // A scalar is one condition, never its characters (2026-10-22 belt — the
+    // three normalizers already read a scalar as a one-item list).
+    for (const raw of conditionsAsList(conditions)) {
         const name = String(raw).toLowerCase().trim();
         if (INCAPACITATING_CONDITIONS.includes(name)) return name;
     }
@@ -518,12 +558,17 @@ export function getIncapacitatingCondition(conditions) {
  * Collect condition-driven advantage/disadvantage for a roll kind.
  * @param {string[]} conditions - Active condition names (any casing)
  * @param {'attack'|'check'|'save'|'incomingAttack'} kind
+ * @param {{ ability?: string }} [options] - the ability a SAVE is rolled on
+ *   (`dexterity`, or a `dex` short form), for conditions whose save effect is
+ *   per-ability; a save with no named ability takes no per-ability effect.
  * @returns {{ advantage: boolean, disadvantage: boolean, sources: string[] }}
  */
-export function getConditionRollEffects(conditions, kind) {
+export function getConditionRollEffects(conditions, kind, { ability } = {}) {
     const result = { advantage: false, disadvantage: false, sources: [] };
-    for (const raw of conditions || []) {
-        const effect = CONDITION_EFFECTS[String(raw).toLowerCase().trim()]?.[kind];
+    const abilityKey = typeof ability === 'string' ? resolveAbilityKey(ability) : null;
+    for (const raw of conditionsAsList(conditions)) {
+        let effect = CONDITION_EFFECTS[String(raw).toLowerCase().trim()]?.[kind];
+        if (effect && typeof effect === 'object') effect = abilityKey ? effect[abilityKey] : undefined;
         if (effect === 'advantage') {
             result.advantage = true;
             result.sources.push(raw);

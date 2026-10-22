@@ -208,6 +208,13 @@ export const handlers = {
             };
         }
 
+        // Junk is REFUSED, never read as the lesser rest (2026-10-22
+        // enemy-stats P2): the wire folds "Long" / "long rest" to `long`
+        // upstream; anything else that reaches here is a caller's bug.
+        if (action.payload !== 'short' && action.payload !== 'long') {
+            console.warn(`[TAKE_REST] Ignored a rest payload that is neither "short" nor "long": ${JSON.stringify(action.payload)?.slice(0, 40)}`);
+            return state;
+        }
         const isLong = action.payload === 'long';
         const restType = isLong ? 'long' : 'short';
         const restMeta = action.meta || {};

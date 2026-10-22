@@ -35,14 +35,17 @@ function normalizeCombatEnemy(enemy, index, usedIds) {
     // `!!isUndead`). Offensive stats the DM gave ride validated; absent ones
     // fall to the exchange engine's flat ENEMY_DEFAULT_* at roll time, so older
     // saves whose enemies lack these fields still work.
+    // A declared maximum above the current HP fields the foe wounded
+    // (2026-10-22 enemy-stats nit — the parser carries `max_hp` as `maxHp`).
+    const maxHp = Number.isFinite(enemy?.maxHp) && enemy.maxHp > hp ? clampEnemyHP(enemy.maxHp) : hp;
     return {
         id: canonicalEnemyId(enemy, index, usedIds),
         ...typeEnemyFields(enemy, { fallbackName: `Enemy ${index + 1}` }),
-        maxHp: hp,
+        maxHp,
         hp,
         ac,
         initiative: rollDie(20),
-        condition: healthWord(hp, hp),
+        condition: healthWord(hp, maxHp),
         combatStatus: 'active',
         defending: false,
     };

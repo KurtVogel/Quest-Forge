@@ -7,7 +7,7 @@
  */
 import { toFiniteNumber } from '../data/items.js';
 import { MAX_ROLL_DC } from '../config/contentLimits.js';
-import { canonicalRollKey, findSkillInText } from './rules.js';
+import { canonicalRollKey, findSkillInText, normalizeConditionList } from './rules.js';
 import { normalizeEnemyConditions } from './enemyStats.js';
 import { cleanText } from './text.js';
 import { isEnemyActive } from './combatPredicates.js';
@@ -179,12 +179,23 @@ export function normalizeCombatExchange(raw) {
         ? [...new Set(rawFlankBroken.slice(0, 30).map(value => ref(value?.target ?? value)).filter(Boolean))]
         : [];
 
+    // The hero's release (2026-10-22 enemy-stats P1): `player_condition_updates:
+    // { "remove": [...] }` in the hero's free-form canonical condition names.
+    // REMOVE only — the exchange's own dice are the one lane for harm in a
+    // fight; the engine whitelists the names against the hero's live list.
+    const rawPlayerConditions = raw.player_condition_updates || raw.playerConditionUpdates;
+    const rawPlayerRemove = rawPlayerConditions && typeof rawPlayerConditions === 'object' && !Array.isArray(rawPlayerConditions)
+        ? (rawPlayerConditions.remove ?? rawPlayerConditions.remove_conditions ?? rawPlayerConditions.removeConditions)
+        : null;
+    const playerRemove = normalizeConditionList(Array.isArray(rawPlayerRemove) ? rawPlayerRemove : [rawPlayerRemove]);
+
     return {
         playerSlots,
         enemyIntents,
         companionIntents,
         ...(enemyConditionUpdates.length > 0 && { enemyConditionUpdates }),
         ...(flankBroken.length > 0 && { flankBroken }),
+        ...(playerRemove.length > 0 && { playerConditionUpdates: { remove: playerRemove } }),
     };
 }
 
@@ -253,6 +264,7 @@ export function reconcileStartingCombatExchange(rawExchange, enemies = []) {
             ...intent,
             ...(intent.target && { target: resolveEnemy(intent.target) }),
         })),
+        ...(exchange.playerConditionUpdates && { playerConditionUpdates: exchange.playerConditionUpdates }),
     };
 }
 

@@ -17,7 +17,7 @@
  */
 
 import { rollWithModifier, parseNotation } from './dice.ts';
-import { fightingStyleEffects, getEquippedWeapon, getSneakAttackDice, getConditionRollEffects, combineRollModifiers, isCriticalNatural, isWieldedTwoHanded } from './rules.js';
+import { fightingStyleEffects, getEquippedWeapon, getSneakAttackDice, getConditionRollEffects, combineRollModifiers, isCriticalNatural, isHelpless, isWieldedTwoHanded } from './rules.js';
 
 // The crit rule lives beside the ladder in rules.js since 2026-10-21 (the odds
 // card reads it there); the kernel's importers keep their name.
@@ -183,12 +183,23 @@ export function rollDamage(notation, description, {
  * is given, the attack roll (and the damage roll, if any) are pushed onto it.
  * `damage` is { notation, description, options } — rolled only on a hit,
  * with `critical` supplied here.
+ *
+ * A HELPLESS target (2026-10-22 enemy-stats P2 — 5e: an attack that hits a
+ * paralyzed or unconscious creature from within 5 feet is a critical hit)
+ * turns any hit into a crit when the caller says the blow is a melee one
+ * (`targetConditions` + `meleeReach`); a ranged shot and a spell attack keep
+ * the die's own verdict. The rule was prose in the catalog nobody ran.
  */
-export function resolveAttackRoll({ attacker = null, attackBonus, description, modifiers, targetAc, damage = null, rolls = null }) {
+export function resolveAttackRoll({ attacker = null, attackBonus, description, modifiers, targetAc, damage = null, rolls = null, targetConditions = null, meleeReach = false }) {
     const attack = rollD20Kept(attackBonus, description, modifiers.advantage, modifiers.disadvantage);
     if (rolls) rolls.push(attack.roll);
-    const critical = stampCriticalRoll(attacker, attack.roll, attack.natural);
+    let critical = stampCriticalRoll(attacker, attack.roll, attack.natural);
     const hit = attack.natural !== 1 && (critical || attack.roll.total >= targetAc);
+    if (hit && !critical && meleeReach && isHelpless(targetConditions)) {
+        critical = true;
+        attack.roll.isCritical = true;
+        attack.roll.criticalThreshold = 'helpless target';
+    }
     let damageTotal = 0;
     let damageRoll = null;
     if (hit && damage) {

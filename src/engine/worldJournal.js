@@ -438,6 +438,8 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex, {
             // for exactly that shape, the secondary() try swallowed it, and no
             // UPDATE_NPC was dispatched for the whole batch.
             const cadenceMeta = { presenceText: `${normalized.summary} ${normalized.keyDecisions.join(' ')}` };
+            // The classifier gate reads the roster (2026-10-22 scribe P1).
+            const cadenceRoster = { npcs: state.npcs, messageCount: (state.messages || []).length };
             for (const npc of encountered) {
                 if (!npc.name) continue;
                 // Journal schema → roster schema mapped ONCE (notes → lastNotes);
@@ -457,7 +459,7 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex, {
                     ...(npc.secrets && { secrets: npc.secrets }),
                     ...(npc.lastLocation && { lastLocation: npc.lastLocation }),
                     ...(npc.basedIn && { basedIn: npc.basedIn }),
-                }, cadenceMeta);
+                }, cadenceMeta, cadenceRoster);
             }
         });
 

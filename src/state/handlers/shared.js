@@ -31,7 +31,7 @@ import {
     sanitizeNpcLanePayload,
 } from '../../engine/npcRoster.js';
 import { NPC_OPEN_THREAD_MAX } from '../../engine/relationshipArc.js';
-import { clampNumber, systemMessage } from '../../engine/text.js';
+import { clampNumber, systemMessage, toFlag } from '../../engine/text.js';
 
 // Re-exported for the ledger's importers; the constant itself lives in
 // config/contentLimits.js so persistence.js reads the same one.
@@ -863,7 +863,10 @@ export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, pre
     // its own token). The stamp is never payload-writable.
     delete update.openThreadMessage;
     delete update.openThreadResolvedMessage;
-    const threadResolved = update.openThreadResolved === true;
+    // A lane flag reads through toFlag (2026-10-22 scribe P2): the Scribe
+    // template spells the flag as prose, Flash echoes `"true"`, and `=== true`
+    // left the settled thread standing on the record.
+    const threadResolved = toFlag(update.openThreadResolved);
     delete update.openThreadResolved;
     if (update.openThread !== undefined) {
         const thread = typeof update.openThread === 'string'

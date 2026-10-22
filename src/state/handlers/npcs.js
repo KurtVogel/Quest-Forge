@@ -100,6 +100,15 @@ function findTouchedNpc(after = [], payload = {}, context = {}) {
 /** The presence text a lane threaded on the action's meta (the turn's own texts), or ''. */
 const presenceTextOf = (action) => (typeof action?.meta?.presenceText === 'string' ? action.meta.presenceText : '');
 
+/** The payload names the HERO: an exact (case-folded) match or the roster's own short / long form fold. */
+const isHeroName = (heroName, name) => {
+    if (typeof heroName !== 'string' || typeof name !== 'string') return false;
+    const hero = heroName.trim();
+    const candidate = name.trim();
+    if (!hero || !candidate) return false;
+    return hero.toLowerCase() === candidate.toLowerCase() || namesMatch(candidate, hero);
+};
+
 /** May the regional seed buy a DM call: the installer tops the web to MAX_ACTIVE_FRONTS - 1, never the cap. */
 function regionalSeedHasRoom(fronts) {
     const activeFronts = (Array.isArray(fronts) ? fronts : []).filter(f => (f?.status || 'active') === 'active').length;
@@ -131,6 +140,15 @@ export const handlers = {
         // or load never writes here (2026-09-13 audit P1 — the chronicle guard).
         if (isStaleCampaignAction(state, action)) {
             console.warn('[NPC] Dropped an NPC update that started on a different campaign or load.');
+            return state;
+        }
+        // The hero is never an NPC (2026-10-22 scribe P2): no roster lane
+        // checked the hero's name, so a Scribe `npc_updates` entry on it minted
+        // a KNOWN NPCs line about the hero, a portrait slot and a stance
+        // "toward the hero" from the hero. The hero-tells sweep taught
+        // ADD_HERO_TELLS the name on 10-19; this is the other site.
+        if (isHeroName(state.character?.name, action.payload?.name)) {
+            console.warn(`[NPC] Dropped an NPC update named for the hero ("${String(action.payload?.name).trim()}").`);
             return state;
         }
         const messageCount = (state.messages || []).length;

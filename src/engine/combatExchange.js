@@ -21,6 +21,7 @@ import {
     computeACFromInventory,
     formatModifier,
     getConditionRollEffects,
+    getEquippedWeapon,
     getIncapacitatingCondition,
     getWeaponAttackBonus,
     getWeaponDamageNotation,
@@ -111,12 +112,14 @@ function isSharedFlankingRuling(ruling) {
 /**
  * An enemy's saving throw against a hero spell, honoring the foe's own
  * conditions the way the hero's saves do: a restrained foe saves at
- * disadvantage (CONDITION_EFFECTS.restrained.save). Before 2026-09-05 both
- * save lanes rolled flat, so the condition's save effect never reached an enemy.
+ * disadvantage (CONDITION_EFFECTS.restrained.save) — on a DEX save only, so
+ * the caller names the spell's `saveAbility` (2026-10-22). Before 2026-09-05
+ * both save lanes rolled flat, so the condition's save effect never reached
+ * an enemy.
  */
-function rollEnemySave(enemy, description) {
+function rollEnemySave(enemy, description, ability = null) {
     const bonus = validateEnemySaveBonus(enemy.saveBonus) ?? ENEMY_DEFAULT_SAVE_BONUS;
-    const conditionEffects = getConditionRollEffects(enemy.conditions, 'save');
+    const conditionEffects = getConditionRollEffects(enemy.conditions, 'save', { ability });
     const modifiers = combineRollModifiers(false, false, conditionEffects);
     const save = rollD20(bonus, description, modifiers.advantage, modifiers.disadvantage);
     return { ...save, mode: rollModeLabel(save, modifiers, null) || undefined };
@@ -278,7 +281,13 @@ function validateTurnShape(allSlots, state) {
     const incapacity = describeHeroIncapacity(state.character);
     if (incapacity) {
         if (allSlots.length === 1 && allSlots[0].action === 'pass') return null;
-        return `${incapacity.text}: the hero cannot act this exchange. Declare { "action": "pass" } as their only player slot — companions still act, and a potion or healing wakes them.`;
+        // The exit is named truthfully (2026-10-22 enemy-stats P1): a potion
+        // heals HP and ends no condition; the fiction ends one through the
+        // envelope's own `player_condition_updates`, applied before this gate.
+        const exit = incapacity.kind === 'condition'
+            ? `when the fiction ends the ${incapacity.condition} condition, declare "player_condition_updates": { "remove": ["${incapacity.condition}"] } in that same combat_exchange and the hero acts again (a potion heals HP but does not end a condition)`
+            : 'a potion or healing wakes them';
+        return `${incapacity.text}: the hero cannot act this exchange. Declare { "action": "pass" } as their only player slot — companions still act; ${exit}.`;
     }
     // Fighter bonus-action lane (Codex 2026-08-09): a player-invoked Second Wind
     // rides beside the normal action without consuming an action slot — the
@@ -492,7 +501,7 @@ function resolveEnemySpell({ character, enemies, events, rolls }, { spell, slotL
                 rolls,
             });
             if (outcome.hit) {
-                damageEnemy(enemy, outcome.damage);
+                damageEnemy(enemy, outcome.damage, events);
                 if (spell.condition && isEnemyActive(enemy)) {
                     applyEnemyConditionDelta(enemy, { add: [spell.condition], remove: [] }, events);
                 }
@@ -526,7 +535,7 @@ function resolveEnemySpell({ character, enemies, events, rolls }, { spell, slotL
         // `rolls` (the hero's ledger — 2026-10-17 audit P2: a Fireball's three
         // saves filled RECENT DICE ROLLS and evicted hero rows).
         for (const enemy of targets) {
-            const save = rollEnemySave(enemy, `${enemy.name} saves vs ${spell.name}`);
+            const save = rollEnemySave(enemy, `${enemy.name} saves vs ${spell.name}`, spell.saveAbility);
             const success = save.roll.total >= dc;
             events.push({
                 type: 'save', actor: enemy.name, description: `save vs ${spell.name}`,
@@ -587,10 +596,22 @@ function resolveEnemySpell({ character, enemies, events, rolls }, { spell, slotL
  * (2026-10-09 enemy-stats nit: seven inline writers, one of them a literal
  * 'dead'). Returns the standing sentence; damage ≥ hp kills.
  */
-function damageEnemy(enemy, amount) {
+function damageEnemy(enemy, amount, events = null) {
     enemy.hp = Math.max(0, enemy.hp - amount);
     enemy.condition = healthWord(enemy.hp, enemy.maxHp);
-    return enemy.hp <= 0 ? `${enemy.name} is down.` : `${enemy.name} remains alive at ${enemy.hp}/${enemy.maxHp} HP.`;
+    if (enemy.hp <= 0) return `${enemy.name} is down.`;
+    // A sleeper wakes on taking damage (2026-10-22 enemy-stats P2): the Sleep
+    // catalog row and the prompt both said so, and no lane did it — a
+    // Sleep-struck foe hit for 18 stayed `unconscious` and was skipped again.
+    // The weapon lanes pass `events` and get a note; the spell note lanes
+    // read the sentence.
+    const conditions = normalizeEnemyConditions(enemy.conditions);
+    if (amount > 0 && conditions.includes('unconscious')) {
+        enemy.conditions = conditions.filter(condition => condition !== 'unconscious');
+        if (events) events.push({ type: 'note', text: `${enemy.name} is no longer: unconscious — the blow wakes it.` });
+        else return `${enemy.name} remains alive at ${enemy.hp}/${enemy.maxHp} HP — the blow wakes it.`;
+    }
+    return `${enemy.name} remains alive at ${enemy.hp}/${enemy.maxHp} HP.`;
 }
 
 function stripConditionList(conditions, toRemove) {
@@ -814,7 +835,7 @@ function resolveChannelSlot({ character, enemies, events }, turn) {
     events.push({ type: 'note', text: `**${character.name || 'Player'} presents their holy symbol — Turn Undead** (save DC ${dc}).` });
     for (const enemy of enemies) {
         if (!isEnemyActive(enemy) || !enemy.isUndead) continue;
-        const save = rollEnemySave(enemy, `${enemy.name} saves vs Turn Undead`);
+        const save = rollEnemySave(enemy, `${enemy.name} saves vs Turn Undead`, 'wisdom');
         const success = save.roll.total >= dc;
         events.push({
             type: 'save', actor: enemy.name, description: 'save vs Turn Undead',
@@ -839,7 +860,8 @@ function resolveCheckSlot({ character, inventory, enemies, events, rolls }, turn
         type: isSave ? 'saving_throw' : 'skill_check',
         skill: slot.skill,
     });
-    const conditionEffects = getConditionRollEffects(character.conditions, kind);
+    // A save names its ability (2026-10-22): restrained costs a DEX save only.
+    const conditionEffects = getConditionRollEffects(character.conditions, kind, { ability: isSave ? slot.skill : null });
     const ruling = rulingFlags(slot.situationalRuling);
     const modifiers = combineRollModifiers(ruling.advantage, ruling.disadvantage, conditionEffects);
     const description = slot.description || `${slot.skill} ${slot.action}`;
@@ -877,6 +899,8 @@ function attackInventoryFor(inventory, weaponId) {
 
 function resolveAttackSlot({ state, character, inventory, enemies, events, rolls, standingFlankIds }, turn, slot) {
     const attackInventory = attackInventoryFor(inventory, slot.weaponId);
+    // A melee blow on a helpless foe is a crit (2026-10-22); a bow's is not.
+    const meleeReach = !getEquippedWeapon(attackInventory)?.ranged;
     const strikeLimit = getAttackCount(character);
     const strikes = [...slot.strikes];
     while (strikes.length < strikeLimit) strikes.push({ ...strikes[strikes.length - 1] });
@@ -909,8 +933,10 @@ function resolveAttackSlot({ state, character, inventory, enemies, events, rolls
                 },
             },
             rolls,
+            targetConditions: enemy.conditions,
+            meleeReach,
         });
-        if (outcome.hit) damageEnemy(enemy, outcome.damage);
+        if (outcome.hit) damageEnemy(enemy, outcome.damage, events);
         events.push({
             type: 'attack', actor: character.name || 'Player', target: enemy.name,
             rolled: outcome.attack.roll.total, natural: outcome.natural, dc: enemy.ac,
@@ -990,8 +1016,11 @@ function resolveCompanionAttack({ companion, target, events, situationalRuling =
         modifiers,
         targetAc: target.ac,
         damage: { notation: companionDamageNotation(companion), description: `${companion.name} damage` },
+        // A companion's one abstract weapon is read as a melee one (2026-10-22).
+        targetConditions: target.conditions,
+        meleeReach: true,
     });
-    if (outcome.hit) damageEnemy(target, outcome.damage);
+    if (outcome.hit) damageEnemy(target, outcome.damage, events);
     events.push({
         type: 'attack', actor: companion.name, target: target.name, rolled: outcome.attack.roll.total,
         natural: outcome.natural, dc: target.ac, mode: rollModeLabel(outcome.attack, modifiers, effectiveRuling),
@@ -1087,6 +1116,10 @@ function resolveEnemyAttack({ enemy, targetRef, character, playerAc, companions,
         modifiers,
         targetAc,
         damage: { notation: sanitizeEnemyDamage(enemy.damage) || ENEMY_DEFAULT_DAMAGE, description: `${enemy.name} damage` },
+        // A foe's attack is read as a melee one (no weapon on the record) —
+        // its hit on a paralyzed hero is a crit, as 5e's ghoul means it to be.
+        targetConditions,
+        meleeReach: true,
     });
     let damage = outcome.damage;
     let uncannyDodgeApplied = false;
@@ -1325,7 +1358,17 @@ function openExchange(state, exchange) {
 function applyConditionSync({ enemies, events }, updates) {
     for (const update of updates || []) {
         const enemy = findByRef(enemies, update.target);
-        if (isEnemyActive(enemy)) applyEnemyConditionDelta(enemy, update, events);
+        if (isEnemyActive(enemy)) {
+            applyEnemyConditionDelta(enemy, update, events);
+            continue;
+        }
+        // Said once (2026-10-22 enemy-stats nit): a sync aimed at nobody or at
+        // a foe out of the fight was silent, so the next intent call never
+        // learned the id it keeps using is wrong.
+        events.push({
+            type: 'note',
+            text: `enemy_condition_updates for "${update.target}" ignored — ${enemy ? `${enemy.name} is out of the fight` : 'no such foe'}.`,
+        });
     }
 }
 
@@ -1449,6 +1492,38 @@ function sealExchange(ctx, {
     };
 }
 
+/**
+ * The hero-side condition release (2026-10-22 enemy-stats P1): the
+ * envelope's `player_condition_updates.remove`, whitelisted to conditions the
+ * hero actually carries, applied to a working copy of the character so the
+ * turn gate and every roll of this exchange read the freed hero. Until this
+ * lane existed a hero paralyzed by a DM `conditions_gained` beside a
+ * `combat_start` had NO release while combat was active: the lockout drops
+ * `conditions_removed`, the envelope's `remove_conditions` is foes-only, and
+ * a potion heals HP and leaves the condition. Removal only — a hero condition
+ * GAINED in a fight is harm, and harm in a fight comes through the exchange's
+ * own dice. Returns `{ state, removed, events }`.
+ */
+function releaseHeroConditions(state, exchange) {
+    const asked = normalizeConditionList(exchange?.playerConditionUpdates?.remove);
+    if (asked.length === 0) return { state, removed: [], events: [] };
+    const held = normalizeConditionList(state.character?.conditions);
+    const removed = asked.filter(condition => held.includes(condition));
+    const unknown = asked.filter(condition => !held.includes(condition));
+    const events = [];
+    const name = state.character?.name || 'The hero';
+    if (unknown.length > 0) {
+        events.push({ type: 'note', text: `player_condition_updates: ${name} does not carry ${unknown.join(', ')} — nothing to end.` });
+    }
+    if (removed.length === 0) return { state, removed: [], events };
+    events.push({ type: 'note', text: `${name} is no longer: ${removed.join(', ')}.` });
+    return {
+        state: { ...state, character: mergeCharacterUpdates(state.character, { removeConditions: removed }) },
+        removed,
+        events,
+    };
+}
+
 /** Validate and resolve a committed player-centered combat exchange. */
 export function planCombatExchange(state, exchange) {
     if (!state.combat?.active || ![COMBAT_PHASES.AWAITING_PLAYER, COMBAT_PHASES.AWAITING_INTENT].includes(state.combat.phase)) {
@@ -1459,10 +1534,16 @@ export function planCombatExchange(state, exchange) {
     // would pass validation and then throw mid-resolve (2026-07-25 audit).
     if (!state.character) return { ok: false, error: 'No active character — the exchange cannot resolve.' };
     if (!exchange) return { ok: false, error: 'The DM did not provide a valid combat exchange.' };
+    // The hero's release (2026-10-22 enemy-stats P1) lands BEFORE the turn
+    // gate: a paralyzed hero the fiction frees this exchange acts this
+    // exchange, exactly as a foe's `remove_conditions` lands before its slot.
+    const release = releaseHeroConditions(state, exchange);
+    state = release.state;
     const validation = validatePlayerSlots(exchange, state);
     if (!validation.ok) return validation;
 
     const ctx = openExchange(state, exchange);
+    ctx.events.push(...release.events);
     const seal = {
         kind: 'exchange',
         exchangeId: makeExchangeId('exchange', state.combat),
@@ -1478,6 +1559,11 @@ export function planCombatExchange(state, exchange) {
     applyConditionSync(ctx, exchange.enemyConditionUpdates);
     ctx.standingFlankIds = carryStandingFlanks(ctx);
     const player = resolvePlayerSlots(ctx);
+    // The released list rides the character updates the reducer commits
+    // atomically with the exchange (the cast lane's own channel).
+    if (release.removed.length > 0) {
+        player.characterUpdates = { ...(player.characterUpdates || {}), removeConditions: release.removed };
+    }
     const healedBaseHp = player.playerHealing > 0
         ? Math.min(state.character.maxHP, state.character.currentHP + player.playerHealing)
         : state.character.currentHP;

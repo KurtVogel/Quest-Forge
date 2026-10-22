@@ -70,6 +70,14 @@ function guardedList(raw, { allowStrings = false, cap = Infinity, map = null } =
  * Validate and sanitize combat_start data from the LLM.
  * Ensures every enemy has required fields with sensible defaults.
  */
+/** The declared maximum HP of a combat_start foe, or null when the wire names none. */
+function maxHpOf(enemy) {
+    const raw = enemy?.max_hp ?? enemy?.maxHp;
+    if (raw == null || raw === '') return null;
+    const clamped = clampEnemyHP(raw, null);
+    return clamped === null ? null : clamped;
+}
+
 export function validateCombatStart(combatStart) {
     if (!combatStart || !isPlainObject(combatStart)) return null;
     if (!Array.isArray(combatStart.enemies) || combatStart.enemies.length === 0) return null;
@@ -94,6 +102,11 @@ export function validateCombatStart(combatStart) {
             ...typeEnemyFields(e),
             hp: clampEnemyHP(e.hp),
             ac: clampEnemyAC(e.ac),
+            // A foe may be declared already WOUNDED (2026-10-22 enemy-stats
+            // nit): `max_hp` above `hp` fields it bloodied, so the telegraph
+            // and the "bloodied foes break" bullet read the returning ogre
+            // right. Absent or below hp, the maximum is the hp (unchanged).
+            ...(maxHpOf(e) !== null && { maxHp: Math.max(clampEnemyHP(e.hp), maxHpOf(e)) }),
         }));
 
     if (sanitizedEnemies.length === 0) return null;
@@ -346,6 +359,21 @@ function normalizeMemoryUpdate(update) {
  * rule since 2026-08-05: no new DM event channels — this one existed by
  * omission (2026-09-15 audit P1).
  */
+/**
+ * The rest wire's fold (2026-10-22 enemy-stats P2): `"Long"`, `"long rest"`,
+ * `" short "` all mean the rest their head word names; anything else is no
+ * rest, said once. The wire used to pass the string verbatim, applyEvents
+ * dispatched only an exact `short` / `long`, and TAKE_REST read every other
+ * payload as a SHORT rest — a "Long" night healed like a nap, no receipt.
+ */
+function normalizeRestWire(raw) {
+    if (typeof raw !== 'string') return null;
+    const head = raw.trim().toLowerCase().match(/^(short|long)\b/);
+    if (head) return head[1];
+    if (raw.trim()) console.warn(`[eventChannels] Ignored rest_taken "${raw.trim().slice(0, 40)}" — it must be "short" or "long".`);
+    return null;
+}
+
 function normalizeLocationWire(raw) {
     const value = isPlainObject(raw) ? raw.name : raw;
     if (typeof value !== 'string') return null;
@@ -443,7 +471,7 @@ export const EVENT_CHANNELS = [
     // A flag wire is a toFlag wire (2026-09-19 audit P1): `!!` read the string
     // `"false"` most models emit for "no" as true and PAID the story milestone.
     { wire: 'level_up', key: 'levelUp', read: raw => toFlag(raw.level_up) },
-    { wire: 'rest_taken', key: 'restTaken', read: raw => (typeof raw.rest_taken === 'string' ? raw.rest_taken : null) },
+    { wire: 'rest_taken', key: 'restTaken', read: raw => normalizeRestWire(raw.rest_taken) },
     // Out-of-combat casting: the engine validates the spell and spends the slot.
     { wire: 'spell_cast', aliases: ['spells_cast', 'spell_casts'], key: 'spellCasts', read: raw => normalizeSpellCasts(raw.spell_cast ?? raw.spells_cast ?? raw.spell_casts) },
     // Hero conditions in canonical form (strings only, lowercase, bounded) —

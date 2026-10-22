@@ -23,6 +23,7 @@
  * Lives in engine/ (not llm/) so reducer handlers never import from llm/.
  */
 import { containment, tokenSet } from './textMatch.js';
+import { toFlag } from './text.js';
 import { clampMessageStamp, conversationalAgeSince, conversationalGap } from './replayLedger.js';
 import { BOND_SCENE_WINDOW_MESSAGES, namesMatch } from './npcRoster.js';
 import { BEAT_COOLDOWN_MESSAGES, BEAT_SCENE_MESSAGES, BEAT_WINDOW_MESSAGES, MAX_BEAT_DELAY_MESSAGES } from './relationshipArc.js';
@@ -155,7 +156,9 @@ export function normalizeHeroTell(raw, { maxMessageCount } = {}) {
         // whether a sighting happened before bystanders (an intimate tell is
         // never public), whether the player struck it ("that's not me").
         voicedBy: normalizeWitnesses(raw.voicedBy).slice(0, MAX_HERO_TELL_VOICES),
-        public: kind !== 'intimate' && raw.public === true,
+        // A lane flag reads through toFlag (2026-10-22 scribe P2): Flash echoes
+        // the template's prose `"true"`, and `=== true` read it as false.
+        public: kind !== 'intimate' && toFlag(raw.public),
         dormant: raw.dormant === true,
         lastAbsenceRemarkMessage: absence,
         sightings,
@@ -263,9 +266,9 @@ export function recordHeroTells(existing = [], reports = [], { messageCount, mes
             // aloud this turn. That is not a sighting of the hero doing it —
             // only `sighted: true` beside it adds one. `voicedBy` is the
             // speaker; a bare `voiced: true` still stamps the time.
-            const voiced = report?.voiced === true;
+            const voiced = toFlag(report?.voiced);
             const voicedBy = normalizeWitnesses(report?.voicedBy);
-            return { tell, voiced, voicedBy, sighted: !voiced || report?.sighted === true };
+            return { tell, voiced, voicedBy, sighted: !voiced || toFlag(report?.sighted) };
         })
         .filter(Boolean)
         .slice(0, HERO_TELL_REPORT_CAP);
@@ -382,7 +385,9 @@ export function prepareHeroTellReports(reports = [], { partyNames = [], heroName
         if (!report || typeof report !== 'object' || Array.isArray(report)) continue;
         const namedVoices = normalizeWitnesses(report.voicedBy);
         const voicedBy = notHero(namedVoices);
-        const voicedOnly = report.voiced === true && report.sighted !== true;
+        // `'true'` is true here (2026-10-22 scribe P2): a `voiced: 'true'`
+        // remark used to mint a SIGHTING with the party as witnesses.
+        const voicedOnly = toFlag(report.voiced) && !toFlag(report.sighted);
         if (voicedOnly) {
             // The speaker named was the hero and nobody else: no remark.
             if (namedVoices.length > 0 && voicedBy.length === 0) continue;
@@ -392,7 +397,7 @@ export function prepareHeroTellReports(reports = [], { partyNames = [], heroName
         const intimate = normalizeHeroTellKind(report.kind) === 'intimate';
         const witnesses = notHero([
             ...(Array.isArray(report.witnesses) ? report.witnesses : (typeof report.witnesses === 'string' ? [report.witnesses] : [])),
-            ...(report.voiced === true ? voicedBy : []),
+            ...(toFlag(report.voiced) ? voicedBy : []),
             ...(intimate ? [] : party),
         ]);
         if (witnesses.length === 0) continue;

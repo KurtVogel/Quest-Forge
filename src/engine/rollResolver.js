@@ -767,7 +767,8 @@ function resolvePlayerRoll(roll, character, dispatch, inventory = []) {
     const isAttack = kind === 'attack';
 
     // Active conditions impose advantage/disadvantage automatically (engine-owned).
-    const condEffects = getConditionRollEffects(character.conditions, kind);
+    // A save names its ability (2026-10-22): restrained costs a DEX save only.
+    const condEffects = getConditionRollEffects(character.conditions, kind, { ability: kind === 'save' ? roll.skill : null });
     const eff = combineRollModifiers(roll.advantage, roll.disadvantage, condEffects);
     const label = `${roll.description || defaultLabel}${eff.note || ''}`;
     const effRoll = { ...roll, advantage: eff.advantage, disadvantage: eff.disadvantage };

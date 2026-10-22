@@ -53,7 +53,7 @@ export const SPELLS = {
     },
     sleep: {
         key: 'sleep', name: 'Sleep', level: 1, classes: ['wizard'], castTime: 'action',
-        targeting: { side: 'enemy', mode: 'single' }, resolution: 'save', saveEffect: 'negate',
+        targeting: { side: 'enemy', mode: 'single' }, resolution: 'save', saveAbility: 'wisdom', saveEffect: 'negate',
         condition: 'unconscious',
         combatAvailable: true, outOfCombatAvailable: false,
         summary: 'One foe saves or falls unconscious (wakes on taking damage).',
@@ -74,7 +74,7 @@ export const SPELLS = {
     },
     holdPerson: {
         key: 'holdPerson', name: 'Hold Person', level: 2, classes: ['wizard'], castTime: 'action',
-        targeting: { side: 'enemy', mode: 'single' }, resolution: 'save', saveEffect: 'negate',
+        targeting: { side: 'enemy', mode: 'single' }, resolution: 'save', saveAbility: 'wisdom', saveEffect: 'negate',
         condition: 'paralyzed',
         combatAvailable: true, outOfCombatAvailable: false,
         summary: 'One foe saves or is paralyzed (lift it after ~1 round of struggle).',
@@ -88,21 +88,21 @@ export const SPELLS = {
     },
     fireball: {
         key: 'fireball', name: 'Fireball', level: 3, classes: ['wizard'], castTime: 'action',
-        targeting: { side: 'enemy', mode: 'upTo3' }, resolution: 'save', saveEffect: 'half',
+        targeting: { side: 'enemy', mode: 'upTo3' }, resolution: 'save', saveAbility: 'dexterity', saveEffect: 'half',
         damage: { dice: '6d6', upcastPerLevel: 1 },
         combatAvailable: true, outOfCombatAvailable: false,
         summary: 'Up to 3 named foes save for half of a 6d6 blast.',
     },
     fear: {
         key: 'fear', name: 'Fear', level: 3, classes: ['wizard'], castTime: 'action',
-        targeting: { side: 'enemy', mode: 'upTo3' }, resolution: 'save', saveEffect: 'negate',
+        targeting: { side: 'enemy', mode: 'upTo3' }, resolution: 'save', saveAbility: 'wisdom', saveEffect: 'negate',
         condition: 'frightened',
         combatAvailable: true, outOfCombatAvailable: false,
         summary: 'Up to 3 named foes save or are frightened.',
     },
     iceStorm: {
         key: 'iceStorm', name: 'Ice Storm', level: 4, classes: ['wizard'], castTime: 'action',
-        targeting: { side: 'enemy', mode: 'upTo3' }, resolution: 'save', saveEffect: 'half',
+        targeting: { side: 'enemy', mode: 'upTo3' }, resolution: 'save', saveAbility: 'dexterity', saveEffect: 'half',
         damage: { dice: '6d8', upcastPerLevel: 1 },
         combatAvailable: true, outOfCombatAvailable: false,
         summary: 'Up to 3 named foes save for half of a 6d8 hail.',
@@ -115,14 +115,14 @@ export const SPELLS = {
     },
     coneOfCold: {
         key: 'coneOfCold', name: 'Cone of Cold', level: 5, classes: ['wizard'], castTime: 'action',
-        targeting: { side: 'enemy', mode: 'upTo3' }, resolution: 'save', saveEffect: 'half',
+        targeting: { side: 'enemy', mode: 'upTo3' }, resolution: 'save', saveAbility: 'constitution', saveEffect: 'half',
         damage: { dice: '8d8', upcastPerLevel: 0 },
         combatAvailable: true, outOfCombatAvailable: false,
         summary: 'Capstone blast: up to 3 named foes save for half of 8d8.',
     },
     holdMonster: {
         key: 'holdMonster', name: 'Hold Monster', level: 5, classes: ['wizard'], castTime: 'action',
-        targeting: { side: 'enemy', mode: 'single' }, resolution: 'save', saveEffect: 'negate',
+        targeting: { side: 'enemy', mode: 'single' }, resolution: 'save', saveAbility: 'wisdom', saveEffect: 'negate',
         condition: 'paralyzed',
         combatAvailable: true, outOfCombatAvailable: false,
         summary: 'Any one foe saves or is paralyzed.',
@@ -168,7 +168,7 @@ export const SPELLS = {
     },
     command: {
         key: 'command', name: 'Command', level: 1, classes: ['cleric'], castTime: 'action',
-        targeting: { side: 'enemy', mode: 'single' }, resolution: 'save', saveEffect: 'negate',
+        targeting: { side: 'enemy', mode: 'single' }, resolution: 'save', saveAbility: 'wisdom', saveEffect: 'negate',
         condition: 'prone',
         combatAvailable: true, outOfCombatAvailable: false,
         summary: 'One word of divine command: the foe saves or drops prone.',
@@ -203,7 +203,7 @@ export const SPELLS = {
     },
     bestowCurse: {
         key: 'bestowCurse', name: 'Bestow Curse', level: 3, classes: ['cleric'], castTime: 'action',
-        targeting: { side: 'enemy', mode: 'single' }, resolution: 'save', saveEffect: 'negate',
+        targeting: { side: 'enemy', mode: 'single' }, resolution: 'save', saveAbility: 'wisdom', saveEffect: 'negate',
         condition: 'poisoned',
         combatAvailable: true, outOfCombatAvailable: false,
         summary: 'A withering curse: the foe saves or fights at disadvantage.',
@@ -224,7 +224,7 @@ export const SPELLS = {
     },
     flameStrike: {
         key: 'flameStrike', name: 'Flame Strike', level: 5, classes: ['cleric'], castTime: 'action',
-        targeting: { side: 'enemy', mode: 'upTo3' }, resolution: 'save', saveEffect: 'half',
+        targeting: { side: 'enemy', mode: 'upTo3' }, resolution: 'save', saveAbility: 'dexterity', saveEffect: 'half',
         damage: { dice: '6d8', upcastPerLevel: 0 },
         combatAvailable: true, outOfCombatAvailable: false,
         summary: 'A pillar of divine fire: up to 3 named foes save for half of 6d8.',

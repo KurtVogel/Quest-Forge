@@ -26,9 +26,9 @@ import { factMemoryItem, queueMemoryItem } from '../engine/vectorMemory.js';
 import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
 import { HERO_TELL_REPORT_CAP, isHeroTellEstablished } from '../engine/heroTells.js';
-import { liveWorldFacts, planWorldFactAdditions } from '../engine/worldFacts.js';
+import { liveWorldFacts, planWorldFactAdditions, sanitizeWorldFactPayload } from '../engine/worldFacts.js';
 import { cleanText } from '../engine/text.js';
-import { compareCardRecency } from '../engine/storyMemory.js';
+import { compareCardRecency, findStoryMemoryMatch, normalizeStoryMemoryCard, stripStoryMemoryEngineStamps } from '../engine/storyMemory.js';
 import {
     CAST_AUDIT_RULES,
     describeAppliedLoot,
@@ -67,7 +67,7 @@ Output ONLY valid JSON:
       "bondMoment": { "text": "one-line record of the ONE significant personal moment between the hero and this NPC in this exchange — stated concretely with both parties. Omit for ordinary interaction. The REGISTER rule binds THIS field hardest: an intimate moment is recorded in neutral anatomical language, never the scene's own crude diction", "kind": "meeting|flirtation|intimacy|confession|promise|gift|rescue|shared_danger|betrayal|quarrel|reconciliation|farewell|other", "salience": "1-5 — 5 redefines the relationship (a first night together, a betrayal, a life saved, an oath); 4 a beat both would recall years later; 3 memorable; 2 texture (a shared drink, a good joke — usually not worth a moment); 1 trivial (omit)", "voice": "ONLY for salience 4-5: the moment in this NPC's OWN words, one line, as they would tell it later — warm, wry, bitter, cold, or contemptuous as fits THEM (a rival's line is a grudge, an indifferent one's a shrug). Plain language, first person, no stage directions; shown to the player, never to the DM" },
       "openThread": "the ONE thing currently pending between this NPC and the hero, from the NPC's side, one line — a promise the hero made her, a question she asked and he dodged, a favor owed, a confession she is waiting to hear answered, an invitation left open. Emit only when this exchange opens or changes it; it replaces the recorded thread",
       "openThreadResolved": "true ONLY when this exchange settles the recorded open thread (the promise kept, the question answered, the debt paid) and nothing new is pending — omit otherwise",
-      "trust": 0,
+      "trust": "a number 0-100 ONLY when this exchange visibly changes how far they trust the hero — omit otherwise (never echo a placeholder)",
       "privateNotes": "hidden NPC intent or unrevealed motive useful for future consistency",
       "callbackHooks": ["short hooks this NPC could later bring back naturally — complete phrases in the neutral REGISTER, never crude slang"]
     }
@@ -393,13 +393,55 @@ export function buildScribeContext(state, ...texts) {
         knownHeroTells: buildKnownHeroTells(state),
         knownLocations: buildKnownLocations(state),
         // The record the Scribe's facts are judged against before they embed
-        // live (2026-10-11): the facts, the transcript length, the place.
+        // live (2026-10-11): the facts, the transcript length, the place —
+        // and since 2026-10-22 the roster (the classifier gate reads it) and
+        // the card pool (the card cap counts novel cards).
         memoryContext: {
             worldFacts: state?.worldFacts || [],
             messageCount: (state?.messages || []).length,
             location: state?.currentLocation || null,
+            npcs: state?.npcs || [],
+            storyMemory: state?.storyMemory || [],
         },
     };
+}
+
+/** The engine's per-pass ceilings: facts / cards ACCEPTED, and the raw rows scanned to find them. */
+export const SCRIBE_FACT_CAP = 3;
+export const SCRIBE_CARD_CAP = 3;
+export const SCRIBE_SCAN_CAP = 8;
+
+/**
+ * The fact candidates the pass dispatches (2026-10-22 scribe P2): every
+ * restatement (a duplicate the reducer drops or a state it re-stamps — free),
+ * plus the first SCRIBE_FACT_CAP the record's own plan would ADD.
+ */
+export function capAcceptedFacts(candidates, plan) {
+    const added = new Set((plan?.added || []).map(fact => fact.fact));
+    let novel = 0;
+    return candidates.filter(candidate => {
+        const sanitized = sanitizeWorldFactPayload(candidate);
+        if (!sanitized) return false;
+        if (!added.has(sanitized.fact)) return true;
+        return novel++ < SCRIBE_FACT_CAP;
+    });
+}
+
+/**
+ * The card candidates the pass dispatches (2026-10-22 scribe P2): every
+ * re-report the reducer would merge into a card on record (by id, subject +
+ * type, text, or near-duplicate — `findStoryMemoryMatch`, the reducer's own
+ * matcher), plus the first SCRIBE_CARD_CAP genuinely new ones.
+ */
+export function capNovelCards(candidates, pool) {
+    let novel = 0;
+    return candidates.filter(candidate => {
+        const normalized = normalizeStoryMemoryCard(stripStoryMemoryEngineStamps(candidate));
+        if (!normalized) return false;
+        const probe = typeof candidate.id === 'string' && candidate.id ? { ...normalized, id: candidate.id } : { ...normalized, id: null };
+        if (findStoryMemoryMatch(pool, probe) !== -1) return true;
+        return novel++ < SCRIBE_CARD_CAP;
+    });
 }
 
 /**
@@ -554,9 +596,23 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
 
         // Engine-owned budget backstop: the prompt caps extraction at 2-3 per turn,
         // but a chatty model must not be able to flood the fact/card stores anyway.
-        const worldFacts = (Array.isArray(extracted.world_facts)
+        // The cap counts ACCEPTED rows (2026-10-22 scribe P2): cut on the raw
+        // reply, three restatements spent the budget and the one new fact
+        // behind them was lost with no line — so the record's own plan judges
+        // the candidates first, the first SCRIBE_FACT_CAP novel ones are
+        // dispatched and restatements ride free (a state re-stamp is a change
+        // the reducer owns; a duplicate costs nothing).
+        const hasMemoryContext = !!memoryContext && typeof memoryContext === 'object';
+        const candidateFacts = (Array.isArray(extracted.world_facts)
             ? extracted.world_facts.filter(fact => !contradictsAuthoritativeCombat(fact?.fact, authoritativeContext))
-            : []).slice(0, 3);
+            : []).slice(0, SCRIBE_SCAN_CAP);
+        const factPlan = hasMemoryContext
+            ? planWorldFactAdditions(memoryContext.worldFacts, candidateFacts, {
+                messageCount: Number.isFinite(memoryContext.messageCount) ? memoryContext.messageCount : 0,
+                sourceMessage: sourceMessageId,
+            })
+            : null;
+        const worldFacts = factPlan ? capAcceptedFacts(candidateFacts, factPlan) : candidateFacts.slice(0, SCRIBE_FACT_CAP);
         if (worldFacts.length > 0) {
             dispatch({ type: 'ADD_WORLD_FACTS', payload: worldFacts, ...(laneMeta && { meta: laneMeta }) });
             console.log(`[Scribe] Added ${worldFacts.length} world fact(s)`);
@@ -568,13 +624,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             // the rows born are CARRIED onto the next turn's batch (the turn's
             // own batch flushed seconds ago — an embed here was a request of
             // its own on every fact turn), stamped for retraction.
-            if (memoryContext && typeof memoryContext === 'object') {
-                const planned = planWorldFactAdditions(memoryContext.worldFacts, worldFacts, {
-                    messageCount: Number.isFinite(memoryContext.messageCount) ? memoryContext.messageCount : 0,
-                    sourceMessage: sourceMessageId,
-                });
+            if (factPlan) {
                 const location = (typeof dmLocationEvent === 'string' && dmLocationEvent) || memoryContext.location || null;
-                for (const fact of planned.added) {
+                for (const fact of factPlan.added.slice(0, SCRIBE_FACT_CAP)) {
                     queueMemoryItem(background.apiKey, factMemoryItem(fact, { location, sourceMessage: typeof sourceMessageId === 'string' ? sourceMessageId : null }), { carry: true }).catch(() => {});
                 }
             }
@@ -592,8 +644,12 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     continue;
                 }
                 // Shared classify→dispatch with the journal's npcs_encountered
-                // loop (2026-08-31 P2 — one helper owns the roster boundary).
-                if (dispatchClassifiedNpcUpdate(dispatch, npc, npcLaneMeta)) {
+                // loop (2026-08-31 P2 — one helper owns the roster boundary);
+                // the gate reads the roster the caller captured (2026-10-22).
+                if (dispatchClassifiedNpcUpdate(dispatch, npc, npcLaneMeta, {
+                    npcs: hasMemoryContext ? memoryContext.npcs : null,
+                    messageCount: hasMemoryContext ? memoryContext.messageCount : undefined,
+                })) {
                     rosteredNames.push(npc?.name || '(unnamed)');
                 }
             }
@@ -604,11 +660,16 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
 
         // Plain-object cards only (2026-09-17 story-memory P1): a `null`
         // element survived `memory?.text` and threw inside the reducer batch.
-        const storyMemory = (Array.isArray(extracted.story_memory)
+        // The cap counts NOVEL cards (2026-10-22 scribe P2): a re-report the
+        // reducer would merge into a card on record rides free.
+        const candidateCards = (Array.isArray(extracted.story_memory)
             ? extracted.story_memory
                 .filter(memory => memory && typeof memory === 'object' && !Array.isArray(memory))
                 .filter(memory => !contradictsAuthoritativeCombat(memory.text, authoritativeContext))
-            : []).slice(0, 3);
+            : []).slice(0, SCRIBE_SCAN_CAP);
+        const storyMemory = hasMemoryContext && Array.isArray(memoryContext.storyMemory)
+            ? capNovelCards(candidateCards, memoryContext.storyMemory)
+            : candidateCards.slice(0, SCRIBE_CARD_CAP);
         if (storyMemory.length > 0) {
             dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: storyMemory, ...(laneMeta && { meta: laneMeta }) });
             console.log(`[Scribe] Added ${storyMemory.length} story memory card(s)`);
@@ -646,7 +707,12 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         const turnText = `${playerMessage || ''}\n${dmNarrative || ''}`;
         const evidenceText = turnText.slice(0, 6000);
         const location = sanitizeExtractedLocation(extracted.location);
-        if (location && isLocationEvidencedInText(location, turnText)) {
+        // The hero's PLACE is evidenced by the narration alone (2026-10-22
+        // scribe P2): "I set out for Rimehollow" in the player's line relocated
+        // the hero to a town the DM's prose never reached, and the arrival
+        // (hearsay, drift, the visit count) fired on it. The profile / travel
+        // gates below keep both texts — their details are judged per field.
+        if (location && isLocationEvidencedInText(location, dmNarrative || '')) {
             // When the DM's OWN events already relocated the hero this turn, that
             // explicit call is the narrator's authoritative statement — the async
             // Scribe may confirm or refine it but never relocate away from it
@@ -735,7 +801,7 @@ Output ONLY valid JSON:
       "agenda": "what they likely try next",
       "relationshipTension": "attraction, rivalry, fear, debt, loyalty, distrust, or leverage",
       "stanceToPlayer": "their current personal stance toward the hero — affection, attraction, respect, resentment, obligation — complete, written from the NPC's side",
-      "trust": 50,
+      "trust": "a number 0-100 ONLY when the record's trust should visibly move — omit otherwise (never echo a placeholder)",
       "privateNotes": "hidden intent or secret pressure",
       "callbackHooks": ["one or two details they could naturally bring back later — complete phrases in neutral anatomical language, never crude slang"]
     }
@@ -986,8 +1052,16 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
             // 2026-10-13): a shared first name resolves to the person the
             // context names in full, or to nobody.
             const reflectionMeta = { presenceText: JSON.stringify(context) };
+            const reflectionRoster = { npcs: state.npcs, messageCount: (state.messages || []).length };
             for (const npc of reflected.npc_updates) {
-                if (dispatchClassifiedNpcUpdate(dispatch, npc, reflectionMeta)) {
+                // The reflection writes the OFF-SCREEN (2026-10-22 scribe P1):
+                // its subjects are people near the place, not people in the
+                // scene, so its update is never a sighting — `_seen: false`
+                // like the journal cadence and absence drift, or every agenda
+                // it wrote reset the absence clock for exactly the person the
+                // absence beat was waiting to miss (Rarg 2 → 40, measured).
+                const payload = npc && typeof npc === 'object' && !Array.isArray(npc) ? { ...npc, _seen: false } : npc;
+                if (dispatchClassifiedNpcUpdate(dispatch, payload, reflectionMeta, reflectionRoster)) {
                     reflectedNames.push(npc?.name || '(unnamed)');
                 }
             }

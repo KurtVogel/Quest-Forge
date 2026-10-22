@@ -49,7 +49,7 @@ describe('buildScribeContext (scribe P2, 2026-10-10)', () => {
             knownOpenPlans: buildKnownOpenPlans(state),
             knownHeroTells: buildKnownHeroTells(state),
             knownLocations: buildKnownLocations(state),
-            memoryContext: { worldFacts: state.worldFacts, messageCount: 0, location: null },
+            memoryContext: { worldFacts: state.worldFacts, messageCount: 0, location: null, npcs: state.npcs, storyMemory: state.storyMemory },
         });
         expect(context.knownAppearances).toContain('Mira');
         expect(context.knownAppearances).not.toContain('Tammo');

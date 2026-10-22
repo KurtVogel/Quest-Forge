@@ -127,8 +127,15 @@ export const handlers = {
 
     ADD_STORY_MEMORY_CARD(state, action) {
         // A lane card never carries the engine's stamps (2026-09-16 P2) —
-        // birth and merge stamp them below from the live transcript.
-        const card = normalizeStoryMemoryCard(stripStoryMemoryEngineStamps(action.payload));
+        // birth and merge stamp them below from the live transcript — nor a
+        // STATUS (2026-10-22 scribe P2): the KNOWN STORY CARDS line prints
+        // `status:` beside the id it asks the Scribe to echo, and an echoed
+        // `resolved` terminally paid off a promise the DM never paid, while a
+        // fresh card could be born dormant. A card on this lane is born
+        // active and a re-report revives only a dormant one; the DM's
+        // `memory_updates` (UPDATE_STORY_MEMORY) is the one status channel.
+        const { status: _laneStatus, ...lanePayload } = (action.payload && typeof action.payload === 'object' && !Array.isArray(action.payload)) ? action.payload : {};
+        const card = normalizeStoryMemoryCard(stripStoryMemoryEngineStamps(lanePayload));
         if (!card) return state;
         const idx = findStoryMemoryMatch(state.storyMemory || [], card);
         const messageCount = (state.messages || []).length;

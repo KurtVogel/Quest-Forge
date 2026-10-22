@@ -255,6 +255,16 @@ function applyMissingGearHandoffs(missing, lootAudit, dispatch) {
         const companion = findCompanionByName(state?.party, entry.companion);
         if (!companion || companion.status === 'dead') continue;
         if (entry.kind === 'keepsake') {
+            // A keepsake the hero OWNED leaves the pack (2026-10-22 scribe P2):
+            // the DECISIONS 2026-07-22 contract pairs any handed-over item with
+            // its loss, and the audit built to backstop it left "Mother's
+            // locket" in two places. Unambiguous-only, one unit (a bare name
+            // takes one of a stack), once per stack per narration.
+            const keepsakeOwned = resolveOwnedItem(state?.inventory, entry.item, 'Narrated keepsake');
+            if (keepsakeOwned && keepsakeOwned !== AMBIGUOUS && !handedOffItemIds.has(keepsakeOwned.id)) {
+                handedOffItemIds.add(keepsakeOwned.id);
+                dispatch({ type: 'REMOVE_ITEM_BY_NAME', payload: keepsakeOwned.name });
+            }
             dispatch({ type: 'UPDATE_COMPANION', payload: { id: companion.id, keepsake: entry.item } });
             applied += 1;
             continue;
