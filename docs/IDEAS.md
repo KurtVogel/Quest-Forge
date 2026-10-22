@@ -3745,3 +3745,28 @@ off the hero (`prone` and `frightened` survive the night) and EVERYTHING off a c
 handler touches the same field on two actor kinds, both writes read one constant. Payoff: a longsword
 that hits like a longsword in two hands, a saga whose last page is the ending the player asked for,
 and a hero who stands up in the morning.
+
+### [strengthening] A mechanic promised in text has a performer in code; a borrowed dispatcher is audited for the stamps it carries; a schema placeholder is a sample reply — status: `idea` (2026-10-22)
+Three rules from the enemy-stats-conditions + scribe Lap-1 pass (2026-10-22), each reproduced with a
+throwaway test over the real parser, reducer, exchange planner and Scribe runner. **(1)** A hero the DM
+paralyzes as a fight opens (DECISIONS 2026-10-17 lets the fight open) has NO release while combat is
+active: the lockout drops `conditions_removed`, the envelope's `remove_conditions` is foes-only, a
+potion heals HP and leaves the condition — yet the STATUS line and the rejection text promise both, and
+the Sleep catalog summary says a sleeper "wakes on taking damage" while no lane wakes it. Rule: for
+every mechanic sentence in a prompt block, a catalog summary or a rejection text, grep the code path
+that performs it; a promise with no performer is a missing lane or a wrong sentence, fixed the same
+day. The fix is a hero-side `remove_conditions` on the exchange envelope applied before the hero's
+slot, and the helpless-foe trio (wake on damage, crit on the helpless, restrained = DEX saves only) in
+the engine with the balance master's line. **(2)** The cadence reflection dispatches its `npc_updates`
+through the per-turn Scribe's `dispatchClassifiedNpcUpdate` and inherits its defaults: every agenda it
+writes for an off-screen NPC stamps `lastSeenMessage` = now (the absence beat can never fire for the
+person the reflection keeps alive), and the dispatcher's first classifier gate — written for NEW names
+— drops an existing character's update the moment Flash tags it `creature`. Rule: when a second lane
+adopts a dispatcher, list the stamps and gates it carries and state for each whether this lane earns
+them. **(3)** Flash echoes the schema's shape: three flags the template spells as prose strings are read
+`=== true` (`openThreadResolved`, `voiced`, `sighted` — a `'true'` remark minted a SIGHTING with the
+party as witnesses) and the literal `"trust": 0` placeholder overwrote a trusted record. Rule: every
+boolean a machinery schema declares reads through `toFlag` — a lane-flag table with an agreement test
+that feeds `'true'` / `true` / `'false'` through each reader — and no template field carries a literal
+the reducer would honor. Payoff: a paralyzed hero the fiction can free, an NPC who can be missed, and
+a Scribe reply that cannot resolve a promise or zero a friendship by echoing its own template.
