@@ -18,9 +18,9 @@ _Last updated: 2026-10-23 (the 10-22 strengthening queue cleared — 3 P1 + 5 P2
 
 **Not exercised live:** everything is pinned by vitest. The DM's uptake of `player_condition_updates` (does Flash declare it when the paralysis ends?) and the helpless crit's feel in a real fight wait for the next grand run; the doom harness arm (below) is still the smallest owed live proof. The strengthening queue is EMPTY; the WOW W1 (NPC ties, 10-07) and memory M1 (lexical RRF) rows still wait for Vesa's pick.
 
-**Next:** the doom arm on Flash (`QF_DOOM_ARM=ignore`); the WOW companion slice's live proof; the next grand run on Sol with the fight staging on (OpenAI prepay is at zero — top up first); the commitment probe's multi-arm run; `eval:death` for the downed-hero bullet and the stable-hero pass.
+**Next:** the doom arm on Sol once the prepay is topped up; the WOW companion slice's live proof; the next grand run on Sol with the fight staging on (OpenAI prepay is at zero — top up first); the commitment probe's multi-arm run; `eval:death` for the downed-hero bullet and the stable-hero pass.
 
-## 2026-10-22 — WOW hidden-fronts-payoff slice A finished: a full clock is a DOOM (the window, the `prevailed` outcome, the landing director) — built 10-22, committed and deployed 10-23
+## 2026-10-22 — WOW hidden-fronts-payoff slice A finished: a full clock is a DOOM (the window, the `prevailed` outcome, the landing director) — built 10-22, committed and deployed 10-23, proved live on Flash 10-22 night
 
 **Ruling: DECISIONS.md 2026-10-22, six numbered points (written 10-23 from the shipped code — the 10-22 session built and tested the slice but ended before its own wrap-up: no commit, no STATUS, no DECISIONS; the 10-23 session committed it as its own commit before its queue work).** Vesa ruled the doom built whole, with one correction: the engine names NO sign on a doom. `npm test` 3,916 / 244 files green (+25 in `engine/fronts.doom1022.test.js`).
 
@@ -28,7 +28,7 @@ _Last updated: 2026-10-23 (the 10-22 strengthening queue cleared — 3 P1 + 5 P2
 
 **What changed underneath:** `openDoomWindow` / `isFrontClockFull` / `describeDoomCard` / `describeFrontDoom` / `DOOM_WINDOW_MESSAGES` / `FRONT_OUTCOMES` (`engine/fronts.js`), `SETTLE_DOOMS` from ADD_MESSAGE (`handlers/messages.js`), `concludeFront` as the one ceremony + `INSTALL_DOOM_AFTERMATH` (`handlers/fronts.js`), the `frontDoom` director + registry row + `RETRYABLE_DIRECTORS` entry, the flipped echo / hearsay / record / chronicler lines, the harness arm `playtest_recall_wonder.cjs doom`. CLAUDE / AGENTS twins amended (10-22).
 
-**Not exercised live:** the harness arm is unrun — the next session's smallest live proof (`QF_DOOM_ARM=ignore` on Flash: the scene, the prevail, the echo).
+**Proved live on Flash, both arms (10-22 night, DECISIONS point 6; `test-results/recall-wonder/flash-ignore` + `flash-fight`):** the window opened on the filled clock; the first carded call put the final portent on screen in the hero's sight (judge: step on screen, hero can answer, no narrator reproach); the aunt's bitter line was the reproach in HER voice; the prevail landed on the second player row after the window shut with the loss line and no sign named; the landing moved four NPCs, one place and bore one successor born of the win; both echo turns showed the cost in particulars with nothing undone. The fight arm: the hero drew, killed the hirelings through the exchange machine, and the DM resolved the front on the next ordinary turn with its own epitaph — the victory ceremony, no doom. GPT Sol NOT EXERCISED (429, no credits). One watch item: Flash let the pressure keep moving through an ignored window beyond the last step (the aunt's house ransacked); the card's "what has come to pass stays" is a floor, left as is.
 
 ## 2026-10-21 (evening) — the three queues evaluated: memory M0 + M1, the WOW reveal slice and the permission-card half of the doom slice built — pushed AND deployed
 
