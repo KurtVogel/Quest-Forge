@@ -3771,3 +3771,25 @@ boolean a machinery schema declares reads through `toFlag` — a lane-flag table
 that feeds `'true'` / `true` / `'false'` through each reader — and no template field carries a literal
 the reducer would honor. Payoff: a paralyzed hero the fiction can free, an NPC who can be missed, and
 a Scribe reply that cannot resolve a promise or zero a friendship by echoing its own template.
+
+### [strengthening] A rule landed on one lane is grepped on its twin by what the lanes share; a cache keyed by one field re-reads every other field on a hit; a module-level "current X" behind async writers is a race until a generation says otherwise — status: `idea` (2026-10-23)
+Three rules from the quests + vector-memory-rag Lap-1 pass (2026-10-23), each reproduced with a
+throwaway test over the real reducer, wire, seed and batch embed. **(1)** The 10-10 fix made a DM-chosen
+quest id a HINT on `ADD_QUEST` and left `COMPLETE_QUEST` on id-OR-name, so a completion pairing one
+arc's name with another's id closes both and pays one; the 10-14 ruling closed the DM XP lanes by their
+PAYLOAD shape (`ADD_EXP` / `LEVEL_UP`) and left two DM-TRIGGERED engine-amount folds open — a dying
+hero whose reply completed a quest stood up "Fully healed" with the death-save clock wiped. Rule: when
+a finding names "lane X", list every lane that reads the same input or writes the same field, then
+apply or explicitly exempt each in the same commit. **(2)** The RAG cache row is keyed by its text and
+the seed's hit path re-reads `subjects` (09-06), then `atMessage` for stamp-less rows only (10-21), and
+`location` never — a `state` fact the record re-stamped from turn 10 to turn 90 retrieves as "@10" on
+every mount, an NPC who moved retrieves at the old town. Rule: for a cache row with a key and N
+derived fields, the hit path compares all N against the record in one place; a field it does not
+compare is a field the cache will serve stale. **(3)** `activeSessionId` and `memoryStore` are module
+singletons a seed replaces synchronously while an `addMemories` of the previous campaign is past its
+`await embedTexts`; the late writer stamps its rows with the NEW campaign's id and persists them there
+(healed only by the next mount's branch prune), and two overlapping seeds embed the cold set twice.
+Rule: any module-level "current X" that async writers stamp onto their output captures a generation
+before the await and checks it after. Payoff: a quest that closes exactly the arc it names and never
+wakes the dying, a retrieved memory whose age and place are the record's, and a campaign switch that
+cannot cross-pollinate two stores.
