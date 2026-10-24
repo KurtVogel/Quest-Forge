@@ -3793,3 +3793,24 @@ Rule: any module-level "current X" that async writers stamp onto their output ca
 before the await and checks it after. Payoff: a quest that closes exactly the arc it names and never
 wakes the dying, a retrieved memory whose age and place are the record's, and a campaign switch that
 cannot cross-pollinate two stores.
+
+### [strengthening] A fenced-lane fix has an unfenced twin; a judge fed the selector's own criteria confirms the selection; an exact-field identity merges only when the content agrees as far as the fuzzy rule would — status: `idea` (2026-10-24)
+Three rules from the response-parsing + story-memory Lap-1 pass (2026-10-24), each reproduced with a
+throwaway test over the real parser and reducer. **(1)** 09-05 made the FENCED lane append the prose
+after the block ("a JSON-first reply is never an empty message"); the UNFENCED lane — the weak-JSON
+models' lane — kept `response.slice(0, startIndex)`, so a JSON-first unfenced reply commits a BLANK
+assistant row with its events applied (the empty-reply guard reads the events BAG as events) and a
+mid-reply block drops THE ASK after it. Rule: the 10-23 twin-lane rule keyed on what the lanes share —
+here, prose after the block — not on what they are called. **(2)** `curateStoryMemory` picks a card
+by its token overlap with the location, the present NPC and the query; `detectCallbackPayoff` then
+measures the card's token overlap with the reply in that same scene — so a reply at the Rimehollow
+well with Tammo present lands "Tammo owes the hero a debt from the Rimehollow well" without a word of
+debt, and the player sees a `↺` chip for a callback nobody said. Rule: a detector that follows a
+selector scores on what the selector did NOT use (the card's tokens minus the scene's). **(3)**
+`findStoryMemoryMatch` merges on exact subject + type, or on id, BEFORE the text comparison it runs for
+everything else — two beats about one person (the schema names a person first for `subject`)
+collapse into one card and the first is lost; a wrong id echo rewrites a card wholesale; hero tells
+gated their id path on kind + wording 09-24. Rule: an exact-field match merges only when the content
+agrees at least as far as the fuzzy rule would demand. Payoff: no turn's story lost to the shape of
+its JSON, a landed-callback chip that means a callback landed, and a card pool where two beats about
+one person are two cards.
