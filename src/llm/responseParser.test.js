@@ -476,8 +476,9 @@ describe('detectPreNarratedOutcome', () => {
             '"Every arrow he fires strikes true," the innkeeper says of the marksman.',
             // KNOWN-BLUNT: past-context recap ('you kill' matches inside 'you killed').
             'The wanted poster names the raider you killed at the ford last winter.',
-            // KNOWN-BLUNT: perception prose with no roll in play ('you notice').
-            'You notice the door is locked, its hinges rusted shut.',
+            // 'you spot' — a Perception RESULT in 5e's own words ('you notice'
+            // was dropped 2026-10-24: it opens ordinary setup prose).
+            'You spot the door is locked, its hinges rusted shut.',
         ];
         for (const narrative of bluntFalsePositives) {
             expect(detectPreNarratedOutcome(narrative), narrative).toBe(true);
@@ -1256,17 +1257,16 @@ describe('detectSemanticTextRolls', () => {
 });
 
 describe('hostile event-block shapes (2026-07-27 audit)', () => {
-    it('survives a fenced ```json null``` block — valid JSON, so no repair engages', () => {
-        const { narrative, events } = parseResponse('The mist thickens.\n\n```json\nnull\n```');
+    it('a fenced ```json null``` block is NO events — the pure-narrative shape (2026-10-24: it used to be an empty bag)', () => {
+        const { narrative, events, eventsDropped } = parseResponse('The mist thickens.\n\n```json\nnull\n```');
         expect(narrative).toBe('The mist thickens.');
-        expect(events).not.toBeNull();
-        expect(events.requestedRolls).toEqual([]);
-        expect(events.questUpdates).toEqual([]);
+        expect(events).toBeNull();
+        expect(eventsDropped).toBeUndefined();
     });
 
-    it('survives fenced scalar and array blocks the same way', () => {
-        expect(parseResponse('Onward.\n\n```json\n42\n```').events.requestedRolls).toEqual([]);
-        expect(parseResponse('Onward.\n\n```json\n["loose"]\n```').events.requestedRolls).toEqual([]);
+    it('fenced scalar and array blocks are no events the same way', () => {
+        expect(parseResponse('Onward.\n\n```json\n42\n```').events).toBeNull();
+        expect(parseResponse('Onward.\n\n```json\n["loose"]\n```').events).toBeNull();
     });
 
     it('drops null/scalar/array elements in requested_rolls and keeps valid siblings', () => {

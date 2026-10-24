@@ -101,7 +101,7 @@ export default function QuestPanel() {
                         className="quest-completed-toggle"
                         onClick={() => setShowCompleted(!showCompleted)}
                     >
-                        {showCompleted ? '▾' : '▸'} Completed ({completedQuests.length})
+                        {showCompleted ? '▾' : '▸'} Finished ({completedQuests.length})
                     </button>
 
                     {showCompleted && (

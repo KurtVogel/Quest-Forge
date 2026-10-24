@@ -17,8 +17,9 @@ import { findSkillInText, SKILL_ABILITIES } from '../engine/rules.js';
 import { markTurn } from './turnFlags.js';
 import { sendMessage } from './adapter.js';
 import { getPreCommitConfig } from './machinery.js';
-import { normalizeEvents, EVENT_CHANNELS } from './eventChannels.js';
+import { normalizeEvents, EVENT_CHANNELS, KNOWN_WIRE_KEYS } from './eventChannels.js';
 import { isMemoryInspectorEnabled } from '../debug/memoryInspectorStore.js';
+import { DEFAULT_ROLL_DC } from '../config/contentLimits.js';
 
 export { normalizeEvents };
 
@@ -35,7 +36,8 @@ const debugLog = (...args) => {
 // requested_rolls dropped every other unfenced channel silently and leaked the
 // raw JSON into the displayed narrative → journal → RAG (2026-08-05 audit P1).
 // Plain-word wires (location, healing, purchase…) are excluded: they occur in
-// ordinary prose, snake_case keys only ever appear as JSON.
+// ordinary prose, snake_case keys only ever appear as JSON. An object of ONLY
+// plain-word wires on its own line is caught by `findPlainWireObject` instead.
 const UNFENCED_EVENT_ANCHORS = EVENT_CHANNELS
     .flatMap(c => [c.wire, ...(c.aliases || [])])
     .filter(key => key.includes('_'));
@@ -64,16 +66,22 @@ const ROLL_SKILL_PHRASES = [
 const SKILL_REQUEST_PATTERNS = ROLL_SKILL_PHRASES.map(phrase => ({
     phrase,
     pattern: new RegExp(
-        `\\b(?:rolls?|makes?|attempts?|gives? me|need)\\b[\\s\\S]{0,40}?\\b${phrase.replace(/ /g, '[\\s-]*')}\\s+(?:check|save|saving throw)\\b`,
+        // `\)?` admits 5e's paren spelling, "Wisdom (Insight) check" (2026-10-24).
+        `\\b(?:rolls?|makes?|attempts?|gives? me|need)\\b[\\s\\S]{0,40}?\\b${phrase.replace(/ /g, '[\\s-]*')}\\)?\\s+(?:check|save|saving throw)\\b`,
         'i',
     ),
 }));
 
-// Outcome language that should never appear BEFORE dice are rolled
+// Outcome language that should never appear BEFORE dice are rolled.
+// 'you notice' was dropped 2026-10-24 (audit P2 nit): it is the ordinary
+// opener of SETUP prose ("You notice the lock is old iron. Pick it?") and
+// flagged a pre-narrated outcome on roll-free scene description; 'you spot'
+// stays (a Perception result in 5e's own words). 'you find the' stays too —
+// it is a search outcome, and no setup fixture depends on it either way.
 const OUTCOME_KEYWORDS = [
     'you succeed', 'you fail', 'you hit', 'you miss', 'misses you',
     'strikes true', 'you manage to', 'you land', 'you slay', 'you kill',
-    'falls dead', 'you spot', 'you notice', 'you find the', 'critical hit',
+    'falls dead', 'you spot', 'you find the', 'critical hit',
     'you successfully', 'your attack lands', 'your blow', 'you strike',
 ];
 
@@ -85,16 +93,11 @@ const OUTCOME_KEYWORDS = [
  */
 export function detectTextRollRequests(narrative) {
     const rolls = [];
-    const lower = narrative.toLowerCase();
 
-    // Extract DC if mentioned: "DC 15", "DC15", "difficulty class 14"
-    const dcMatch = lower.match(/\bdc\s*(\d+)\b/) || lower.match(/difficulty class\s*(\d+)/);
-    // A malformed prose request without an explicit DC should fall back to the
-    // normal solo-play obstacle, not the old overly punishing DC 15 default.
-    const dc = dcMatch ? parseInt(dcMatch[1], 10) : 10;
-
-    // Pattern 1: "roll a/an [skill] check/save"
-    const rollPattern = /(?:roll|make|attempt)\s+(?:a|an)\s+([\w\s']+?)\s+(?:check|save|saving throw)/gi;
+    // Pattern 1: "roll a/an [skill] check/save" — the skill phrase may carry
+    // 5e's own paren spelling, "Wisdom (Insight) check" (the paren group is
+    // part of the captured phrase; findSkillInText names the skill inside it).
+    const rollPattern = /(?:roll|make|attempt)\s+(?:a|an)\s+([\w\s']+?(?:\s*\([\w\s']+\))?)\s+(?:check|save|saving throw)/gi;
     let match;
     while ((match = rollPattern.exec(narrative)) !== null) {
         // The engine's own lookup names the skill, or there is no roll here.
@@ -102,6 +105,7 @@ export function detectTextRollRequests(narrative) {
         if (skill) {
             // Note: "saving" does NOT contain the substring "save" — match both forms.
             const type = /sav(e|ing)/i.test(match[0]) ? 'saving_throw' : 'skill_check';
+            const dc = dcForMatch(narrative, match.index, match[0].length);
             rolls.push({ type, skill, dc, description: match[0].trim() });
         }
     }
@@ -118,12 +122,31 @@ export function detectTextRollRequests(narrative) {
             const skill = findSkillInText(phrase);
             if (!skill) continue;
             const type = /save|saving throw/i.test(hit[0]) ? 'saving_throw' : 'skill_check';
+            const dc = dcForMatch(narrative, hit.index, hit[0].length);
             rolls.push({ type, skill, dc, description: `${phrase} check (DC ${dc})` });
             break; // One detected roll per response is enough to trigger the system
         }
     }
 
     return rolls;
+}
+
+/**
+ * The DC of ONE detected prose request: the number inside the match or in the
+ * clause right after it ("Make a Stealth check (DC 12)", "Roll Athletics, DC
+ * 15"), else the engine's one default. The detector used to read the FIRST
+ * "DC n" in the whole reply (2026-10-24 audit P2): two requests in one reply
+ * both priced at the first, and a recap's "your DC 18 Athletics feat" re-priced
+ * a new Persuasion check at 18 — the 10-05 ruling class through the detector.
+ */
+const DC_AFTER_MATCH_CHARS = 40;
+const DC_PATTERN = /\b(?:dc|difficulty class)\s*(\d+)\b/i;
+function dcForMatch(narrative, index, length) {
+    const matched = narrative.slice(index, index + length);
+    // The clause right after the match: up to a sentence end, within a short window.
+    const after = narrative.slice(index + length, index + length + DC_AFTER_MATCH_CHARS).split(/[.!?\n]/)[0];
+    const hit = matched.match(DC_PATTERN) || after.match(DC_PATTERN);
+    return hit ? parseInt(hit[1], 10) : DEFAULT_ROLL_DC;
 }
 
 /**
@@ -161,7 +184,9 @@ export function findFencedJsonBlocks(response) {
         const rest = response.slice(from);
         // The EARLIEST opener of either kind — a tagged fence later in the
         // reply must not outrank a bare object block before it.
-        const tagged = rest.match(/```json\s*/i);
+        // The tag admits ```jsonc / ```json5 / "``` json" (2026-10-24 audit
+        // P2: `jsonc` matched the old tag with its `c` as the body's first byte).
+        const tagged = rest.match(/```\s*json\w*\s*/i);
         const bare = rest.match(/```\s*(?=\{)/);
         const opener = (tagged && bare) ? (tagged.index <= bare.index ? tagged : bare) : (tagged || bare);
         if (!opener) break;
@@ -170,13 +195,22 @@ export function findFencedJsonBlocks(response) {
         let block = null;
         if (response[bodyStart] === '{') {
             const end = scanBalancedObject(response, bodyStart);
-            const closer = end === -1 ? null : response.slice(end).match(/^\s*```/);
+            // A TAGGED fence closes at the next fence; a BARE fence must close
+            // right after its object (a bare fence around prose is never a block).
+            const closerRule = /^```\s*json/i.test(opener[0]) ? /^[\s\S]*?```/ : /^\s*```/;
+            const closer = end === -1 ? null : response.slice(end).match(closerRule);
             if (closer) {
-                block = { full: response.slice(index, end + closer[0].length), body: response.slice(bodyStart, end), index };
+                // The balanced object IS the body, whatever follows it up to
+                // the closer: a note the DM left inside the fence after the
+                // object is prose to append, never a reason to drop the events
+                // (2026-10-24 audit P2 — the walk had the object in hand and
+                // discarded it because the closer was not NEXT).
+                const note = response.slice(end, end + closer[0].length - 3).trim();
+                block = { full: response.slice(index, end + closer[0].length), body: response.slice(bodyStart, end), index, note };
             }
         }
-        if (!block && /^```json/i.test(opener[0])) {
-            const lazy = rest.slice(opener.index).match(/^```json\s*\n?([\s\S]*?)\n?\s*```/i);
+        if (!block && /^```\s*json/i.test(opener[0])) {
+            const lazy = rest.slice(opener.index).match(/^```\s*json\w*\s*\n?([\s\S]*?)\n?\s*```/i);
             if (lazy) block = { full: lazy[0], body: lazy[1], index };
         }
         if (block) {
@@ -187,6 +221,61 @@ export function findFencedJsonBlocks(response) {
         }
     }
     return blocks;
+}
+
+/**
+ * The UNFENCED lane's result — the twin of the fenced lane's prose rule
+ * (2026-10-24 audit P1): the prose BEFORE the block and the prose AFTER it,
+ * joined. The lane used to keep only the prose before (`slice(0, startIndex)`),
+ * so a JSON-first unfenced reply committed a BLANK assistant row with its
+ * events applied, and a mid-reply block dropped THE ASK after it.
+ *
+ * A truncated / unclosed fence leaves its opener dangling at the end of the
+ * prose before the block: strip it, and the closer it may still have at the
+ * head of the tail. Only an ODD fence count is dangling — a CLOSED prose
+ * fence before the block (a sign, a letter) keeps its closer (the old strip
+ * removed ANY trailing ``` and left that fence open, rendering the rest of
+ * the row as code — 2026-10-24 nit).
+ */
+function unfencedResult(response, start, end, value) {
+    let before = response.slice(0, start);
+    let after = response.slice(end);
+    const fences = (before.match(/```/g) || []).length;
+    if (fences % 2 === 1 && /```[^\n]*\s*$/.test(before)) {
+        before = before.replace(/```[^\n]*\s*$/, '');
+        after = after.replace(/^\s*```\w*/, '');
+    }
+    let narrative = before.trim();
+    const trailing = after.trim();
+    if (trailing) {
+        console.warn('[ResponseParser] Prose after the unfenced JSON — appended to the narrative.');
+        narrative = narrative ? `${narrative}\n\n${trailing}` : trailing;
+    }
+    return { narrative, events: normalizeEvents(value) };
+}
+
+/**
+ * An unfenced object on its OWN line whose top-level keys are all registered
+ * wires — `{"healing": 8, "location": "The Mill"}` — is JSON, not prose,
+ * though no snake_case anchor names it (2026-10-24 audit nit). Returns
+ * `{ start, end, value }` or null. The key test is the whole gate: prose that
+ * happens to open a line with a brace never carries only wire keys.
+ */
+function findPlainWireObject(response) {
+    const lineStart = /^[ \t]*\{/gm;
+    let hit;
+    while ((hit = lineStart.exec(response)) !== null) {
+        const start = hit.index + hit[0].length - 1;
+        const end = scanBalancedObject(response, start);
+        if (end === -1) return null;
+        const value = parseJsonText(response.slice(start, end));
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+            const keys = Object.keys(value);
+            if (keys.length > 0 && keys.every(key => KNOWN_WIRE_KEYS.has(key))) return { start, end, value };
+        }
+        lineStart.lastIndex = end;
+    }
+    return null;
 }
 
 /**
@@ -214,9 +303,19 @@ export function parseResponse(response) {
             const parsed = parseBalancedJsonAt(response, anchor);
             if (!parsed) continue; // try the next anchor
             console.warn(`[ResponseParser] Parsed unfenced JSON (anchor: ${anchor}).`);
-            // A truncated/unclosed fence leaves its opener dangling on the narrative.
-            const narrative = response.slice(0, parsed.startIndex).replace(/```\w*\s*$/, '').trim();
-            return { narrative, events: normalizeEvents(parsed.value) };
+            // The block's extent is the string-aware balanced walk from its
+            // start; a truncated (repaired) block runs to the end of the reply.
+            const end = scanBalancedObject(response, parsed.startIndex);
+            return unfencedResult(response, parsed.startIndex, end === -1 ? response.length : end, parsed.value);
+        }
+        // Fallback 1b: an unfenced object on its own line whose keys are ALL
+        // registered wires ({"healing": 8, "location": "The Mill"}) — the
+        // anchors exclude plain-word wires by design, so it rode the narrative
+        // raw into the chat, the save, the window and RAG (2026-10-24 audit).
+        const plainWires = findPlainWireObject(response);
+        if (plainWires) {
+            console.warn('[ResponseParser] Parsed unfenced JSON (plain-word wires on their own line).');
+            return unfencedResult(response, plainWires.start, plainWires.end, plainWires.value);
         }
 
         // Fallback 2: text roll detector — DM put roll request in narrative prose
@@ -252,18 +351,34 @@ export function parseResponse(response) {
     let trailing = response.slice(jsonStart + jsonMatch.full.length);
     for (const block of extraBlocks) trailing = trailing.replace(block.full, '');
     trailing = trailing.trim();
-    if (trailing) {
+    // An in-fence note after the object is prose too (the fence grammar hands
+    // it over) — but only once the object has PARSED: on the dropped path the
+    // "note" is the tail of the broken block, and a tail of stray brackets
+    // after a balanced object is never prose.
+    const note = jsonMatch.note && !/^[\s\]}),;]*$/.test(jsonMatch.note) ? jsonMatch.note : '';
+    const appendTrailing = (extra) => {
+        const tail = [extra, trailing].filter(Boolean).join('\n\n');
+        if (!tail) return;
         console.warn('[ResponseParser] Prose after the JSON block — appended to the narrative.');
-        narrative = narrative ? `${narrative}\n\n${trailing}` : trailing;
-    }
+        narrative = narrative ? `${narrative}\n\n${tail}` : tail;
+    };
 
     // Parse the JSON, attempting repair on failure
     // Parse → repair once (jsonExtractor's ONE walk, 2026-10-11).
-    // A body that parses to a non-object (`null`, a scalar, a list) is a
-    // VALID empty bag — normalizeEvents handles it; only a body nothing can
-    // parse is dropped.
+    // A body that parses to a non-object (`null`, a scalar, a list) carries
+    // NO events — `events: null`, the pure-narrative shape, so a reply that
+    // is only such a block is an EMPTY reply to the orchestrator's guard
+    // (2026-10-24 audit P2: normalizeEvents coerced it to an empty bag, the
+    // guard read the bag as events, and a blank bubble committed). Only a
+    // body nothing can parse is DROPPED (flagged below).
     let events = parseJsonText(jsonMatch.body, { label: 'ResponseParser' });
+    if (events !== undefined && (events === null || typeof events !== 'object' || Array.isArray(events))) {
+        console.warn('[ResponseParser] Fenced block is not an object — no events.');
+        appendTrailing(note);
+        return { narrative, events: null };
+    }
     if (events === undefined) {
+        appendTrailing('');
         debugLog('[ResponseParser] Raw JSON string:', jsonMatch.body);
         // Unrepairable events are DROPPED — flag it so the caller can surface
         // a visible notice instead of the events vanishing in silence. The
@@ -273,6 +388,7 @@ export function parseResponse(response) {
         return { narrative, events: null, eventsDropped: true };
     }
 
+    appendTrailing(note);
     events = normalizeEvents(events);
 
     if (events.requestedRolls.length > 0) {
@@ -326,12 +442,14 @@ Output ONLY valid JSON:
   "requested_rolls": [
     {
       "type": "skill_check|saving_throw",
-      "skill": "perception|stealth|athletics|insight|etc", // the specific skill or ability name
-      "dc": 12, // the DC if specified, default to 10
+      "skill": "perception|stealth|athletics|insight|etc",
+      "dc": 12,
       "description": "The exact check description or context"
     }
   ]
 }
+
+"skill" is the specific skill or ability name. "dc" is the DC the text states; when none is stated, use ${DEFAULT_ROLL_DC}. Write plain JSON with no comments.
 
 If no roll request is found in the text, return:
 {

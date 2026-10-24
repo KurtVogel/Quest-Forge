@@ -178,7 +178,7 @@ describe('story memory curation', () => {
 });
 
 describe('normalizeStoryMemoryUpdate', () => {
-    it('normalizes the full rewrite branches: text, subject, tags, linked NPCs, location', () => {
+    it('carries id / subject / text as LOOKUP keys and drops tags, linked NPCs, location (the DM lane is a status channel, 2026-10-24)', () => {
         const out = normalizeStoryMemoryUpdate({
             id: ' mem-1 ',
             text: '  Maren now knows the hero lied about Tanelorn.  ',
@@ -190,9 +190,9 @@ describe('normalizeStoryMemoryUpdate', () => {
         expect(out.id).toBe('mem-1');
         expect(out.text).toBe('Maren now knows the hero lied about Tanelorn.');
         expect(out.subject).toBe('Tanelorn lie');
-        expect(out.tags).toContain('lie');
-        expect(out.linkedNpcNames).toEqual(['Maren']);
-        expect(out.location).toBe('Millhaven');
+        expect(out.tags).toBeUndefined();
+        expect(out.linkedNpcNames).toBeUndefined();
+        expect(out.location).toBeUndefined();
     });
 
     it('carries used:true as a FLAG (the reducer stamps the clocks) and clamps salience/emotionalCharge', () => {

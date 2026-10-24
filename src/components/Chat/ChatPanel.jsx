@@ -433,7 +433,9 @@ export default function ChatPanel() {
             // bookkeeping, not memory — a content-free row would compete for
             // retrieval slots on every reload (2026-09-06 P2).
             ...(s.journal || []).filter(isRecordEntry).map(j => journalMemoryItem(j, rosterNames)),
-            ...(s.npcs || []).filter(n => n.lastNotes || n.notes).map(npcMemoryItem),
+            // The composer returns null for a note-less NPC (2026-10-23 nit) —
+            // the filter lives where the text is composed, not beside it.
+            ...(s.npcs || []).map(npcMemoryItem).filter(Boolean),
             // Non-active cards stay out of retrieval: a resolved promise or a
             // dormant scene beat retrieving beside live ones invites the DM to
             // revive a paid-off arc (2026-08-06 audit). Their cached rows are

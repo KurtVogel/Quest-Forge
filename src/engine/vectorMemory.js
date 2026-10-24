@@ -191,6 +191,16 @@ async function loadPersistedEmbeddings(sessionId) {
 let memoryStore = [];
 /** Campaign whose memories are currently loaded; stamped onto every new entry. */
 let activeSessionId = null;
+/**
+ * Seed GENERATION (2026-10-23 vector-memory P2): bumped the moment a seed
+ * replaces the store. An async writer captures it before its embed await and
+ * storeMemoryEntry refuses a row from a stale generation — a batch of campaign
+ * A that was on the wire when campaign B seeded used to land UNDER B (stamped
+ * with the new activeSessionId, written to B's disk key, retrievable in B's
+ * scenes for the rest of the session). A superseded seed itself bails out at
+ * each of its awaits for the same reason.
+ */
+let seedGeneration = 0;
 
 /**
  * Per-session QUERY-vector memo (2026-09-22 roll-resolution P2). The post-roll
@@ -417,7 +427,14 @@ export async function addMemories(apiKey, items) {
         fresh.push(item);
     }
     if (fresh.length === 0) return;
+    // The generation this batch belongs to (2026-10-23 P2): a seed that lands
+    // while the embed is on the wire makes these rows another campaign's.
+    const generation = seedGeneration;
     const vectors = await embedTexts(apiKey, fresh.map(item => item.text), { inputType: 'document' });
+    if (generation !== seedGeneration) {
+        console.log(`[VectorMemory] Dropped ${fresh.length} rows embedded for a campaign that is no longer loaded`);
+        return;
+    }
     const stored = [];
     fresh.forEach((item, i) => {
         if (!vectors?.[i]) {
@@ -427,6 +444,7 @@ export async function addMemories(apiKey, items) {
         const entry = storeMemoryEntry({
             text: item.text, vector: vectors[i], category: item.category || 'general',
             location: item.location, subjects: item.subjects, sourceMessage: item.sourceMessage, atMessage: item.atMessage,
+            generation,
         });
         if (entry) stored.push(entry);
     });
@@ -516,10 +534,14 @@ function discardMemoryQueue() {
  * persists, alone or in a batch). Returns the stored entry, or null when the
  * text was already in the store. Shared by addMemory, addMemories, and the seed.
  */
-function storeMemoryEntry({ text, vector, category = 'general', location = null, subjects = null, sourceMessage = null, atMessage = null }) {
+function storeMemoryEntry({ text, vector, category = 'general', location = null, subjects = null, sourceMessage = null, atMessage = null, generation = seedGeneration }) {
+    // A row from a stale generation (2026-10-23 P2) belongs to a campaign the
+    // store no longer holds: refused, never stamped with the live session.
+    if (generation !== seedGeneration) return null;
     if (memoryStore.some(m => m.text === text)) return null;
     const cleanSubjects = normalizeSubjects(subjects);
     const stamp = memoryStamp(atMessage);
+    const place = cleanLocation(location);
     const entry = {
         // Campaign key — rows are persisted per campaign so a switch loads its own
         // cache instead of wiping everything. An entry added before any seed set a
@@ -531,7 +553,7 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null,
         // Where the hero was when this memory was recorded — lets retrieval label
         // memories from elsewhere so the DM doesn't transplant local color across
         // the map. Optional; older cached embeddings simply have no tag.
-        ...(typeof location === 'string' && location.trim() && { location: location.trim().slice(0, 80) }),
+        ...(place !== null && { location: place }),
         // Who this memory is ABOUT — presence-aware retrieval (2026-08-28)
         // down-weights person-tied memories in scenes that person is nowhere
         // near. Optional; untagged rows are never gated.
@@ -550,6 +572,18 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null,
     return entry;
 }
 
+/** A row's place tag: a trimmed, clamped string, or null — the one shape the store and the retag compare. */
+function cleanLocation(location) {
+    return typeof location === 'string' && location.trim() ? location.trim().slice(0, 80) : null;
+}
+
+/**
+ * The seed currently loading/embedding — `{ promise, sessionId }`, or null.
+ * Awaited by retrieveRelevant; a second seed of the SAME campaign chains
+ * behind it (2026-10-23 P2).
+ */
+let seedInFlight = null;
+
 /**
  * Bulk-seed the active campaign's memories. Loads that campaign's cached
  * embeddings from IndexedDB and re-embeds only the items not already cached.
@@ -566,22 +600,36 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null,
  *   player should hear about (it used to be console-only).
  */
 export function seedMemories(apiKey, items, sessionId = null, { onIncomplete = null, retiredTexts = null, transcriptIds = null, onBranchPruned = null } = {}) {
-    const run = seedMemoriesInner(apiKey, items, sessionId, { onIncomplete, retiredTexts, transcriptIds, onBranchPruned });
+    const options = { onIncomplete, retiredTexts, transcriptIds, onBranchPruned };
+    // Two overlapping seeds of ONE campaign (2026-10-23 P2 — a doubled mount
+    // effect, a Continue tapped twice) used to embed the cold set TWICE: the
+    // second read `existingTexts` before the first's rows had landed. The
+    // second now runs AFTER the first settles and reads its rows from disk
+    // (the seed awaits its own persist before resolving). A seed of a
+    // DIFFERENT campaign starts at once; its generation bump makes the
+    // superseded seed bail out at its next await.
+    const previous = seedInFlight;
+    const run = previous && sessionId != null && previous.sessionId === sessionId
+        ? previous.promise.catch(() => {}).then(() => seedMemoriesInner(apiKey, items, sessionId, options))
+        : seedMemoriesInner(apiKey, items, sessionId, options);
     // Retrieval awaits an in-flight seed (2026-09-06 audit): the first turn
     // after Continue on an uncached campaign used to query a partial store
     // while the cold seed was still embedding — silently, with the DM's first
     // narration of the session missing exactly the memories it needed most.
-    seedInFlight = run;
-    const settle = () => { if (seedInFlight === run) seedInFlight = null; };
+    const inFlight = { promise: run, sessionId };
+    seedInFlight = inFlight;
+    const settle = () => { if (seedInFlight === inFlight) seedInFlight = null; };
     run.then(settle, settle);
     return run;
 }
 
-/** The seed currently loading/embedding, or null — awaited by retrieveRelevant. */
-let seedInFlight = null;
-
 async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null, retiredTexts = null, transcriptIds = null, onBranchPruned = null } = {}) {
     if (!apiKey) return;
+    // This seed's generation (2026-10-23 P2): a later seed moves it, and this
+    // one then stops at its next await — its late rows would otherwise be
+    // stamped with the OTHER campaign's session and pushed into its store.
+    const generation = ++seedGeneration;
+    const superseded = () => seedGeneration !== generation;
     activeSessionId = sessionId;
     memoryStore = [];
     discardMemoryQueue(); // a batch queued under the previous campaign
@@ -597,6 +645,7 @@ async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null
     // not hold. Every disk write of the seed — the stale deletes, the retags,
     // the new rows — rides ONE transaction at the end (2026-09-29 P2).
     const persistedRaw = sessionId != null ? await loadPersistedEmbeddings(sessionId) : [];
+    if (superseded()) return;
     const currentSeedTexts = new Set((items || []).map(item => item.text));
     // Retired texts (2026-09-29): the caller names the texts the record has
     // retired (a superseded or retracted fact); those rows prune whatever
@@ -649,20 +698,33 @@ async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null
     const seedByText = new Map((items || [])
         .filter(item => typeof item?.text === 'string' && item.text.trim())
         .map(item => [item.text, item]));
-    // A cached row without a `atMessage` stamp takes the seed's through the
-    // same upsert (2026-10-21): rows persisted before the stamp existed gain
-    // their age on the next mount, no re-embed.
+    // The text is the key; `subjects`, `atMessage` and `location` are NOT —
+    // they follow the record (2026-10-23 P2: a cache keyed by one field
+    // re-reads every OTHER field on a hit, in ONE place). The stamp used to be
+    // carried into a stamp-LESS row only (2026-10-21), so a `state` fact the
+    // record re-stamped @10 → @90 — the one fact kind whose age the DM is
+    // asked to judge — retrieved as @10 on every later mount, and `location`
+    // was never re-read: an NPC moved Dunmere → Rimehollow retrieved at
+    // Dunmere. A seed item carrying NO stamp or NO location leaves the cached
+    // one alone, the subjects rule — the live fact lane tags "where recorded"
+    // and the seed's fact composer carries no place by design.
     for (const entry of memoryStore) {
         const seedItem = seedByText.get(entry.text);
-        const cleanSubjects = seedItem ? normalizeSubjects(seedItem.subjects) : null;
+        if (!seedItem) continue;
         let changed = false;
+        const cleanSubjects = normalizeSubjects(seedItem.subjects);
         if (cleanSubjects && !sameSubjects(cleanSubjects, entry.subjects)) {
             entry.subjects = cleanSubjects;
             changed = true;
         }
-        const seedStamp = seedItem ? memoryStamp(seedItem.atMessage) : null;
-        if (seedStamp !== null && !Number.isFinite(entry.atMessage)) {
+        const seedStamp = memoryStamp(seedItem.atMessage);
+        if (seedStamp !== null && entry.atMessage !== seedStamp) {
             entry.atMessage = seedStamp;
+            changed = true;
+        }
+        const seedLocation = cleanLocation(seedItem.location);
+        if (seedLocation !== null && entry.location !== seedLocation) {
+            entry.location = seedLocation;
             changed = true;
         }
         if (changed) toPersist.push(entry);
@@ -680,9 +742,10 @@ async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null
             inputType: 'document',
             onError: (reason) => { failure = reason; },
         });
+        if (superseded()) return;
         newItems.forEach((item, i) => {
             if (vectors?.[i]) {
-                const entry = storeMemoryEntry({ text: item.text, vector: vectors[i], category: item.category || 'general', location: item.location, subjects: item.subjects, atMessage: item.atMessage });
+                const entry = storeMemoryEntry({ text: item.text, vector: vectors[i], category: item.category || 'general', location: item.location, subjects: item.subjects, atMessage: item.atMessage, generation });
                 if (entry) toPersist.push(entry);
             } else {
                 missing += 1;
@@ -690,7 +753,10 @@ async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null
             }
         });
     }
-    syncPersistedEmbeddings({ put: toPersist, remove: stale });
+    // Awaited (2026-10-23 P2): the seed resolves once its rows are on disk, so
+    // a same-campaign seed chained behind it reads them instead of re-embedding.
+    await syncPersistedEmbeddings({ put: toPersist, remove: stale });
+    if (superseded()) return;
     if (persisted.length === 0) {
         console.log(`[VectorMemory] Seeded ${memoryStore.length} memories (fresh embeddings)`);
     }
@@ -736,17 +802,20 @@ export const CATEGORY_BOOST = {
  * @param {string} query - embedded as the search query (unchanged by presenceText)
  * @param {number} [topN]
  * @param {number} [minScore]
- * @param {{ presenceText?: string, onUnavailable?: (reason: object|null) => void }} [options] -
+ * @param {{ presenceText?: string, onUnavailable?: (reason: object|null) => void, atMessage?: number|null }} [options] -
  *   `presenceText`: extra scene text (the last narrative turns) consulted ONLY
  *   for who is present; never embedded. `onUnavailable`: called once when the
  *   QUERY embed fails (a memory-less turn) with the provider's failure reason
- *   (`{ status, message, timedOut }`) or null.
+ *   (`{ status, message, timedOut }`) or null. `atMessage`: the message count
+ *   this retrieval is for — stamped as `lastHitMessage` on each retrieved
+ *   store row (inspector telemetry, in-memory only; 2026-09-30).
+ * @returns {Promise<Array<{text: string, category: string, score: number, hits: number, location?: string, atMessage?: number}>>}
  */
 export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55, { presenceText = '', onUnavailable = null, atMessage = null } = {}) {
     if (!apiKey || !query) return [];
     // A cold seed still embedding: wait for the store to be whole rather than
     // answer from the slice that happens to have landed.
-    if (seedInFlight) await seedInFlight.catch(() => {});
+    if (seedInFlight) await seedInFlight.promise.catch(() => {});
     if (memoryStore.length === 0) return [];
 
     let failure = null;
@@ -959,10 +1028,20 @@ export function journalMemoryItem(entry, rosterNames = []) {
     };
 }
 
-/** An NPC's row: name, disposition and current notes, about that person; aged at their last sighting. */
+/**
+ * An NPC's row: name, disposition and current notes, about that person; aged
+ * at their last sighting. NULL for an NPC with no notes or no name (2026-10-23
+ * nit): the seed site used to pre-filter `lastNotes || notes` on its own and
+ * agree with this text by coincidence — a divergence read "Tammo (friendly):
+ * undefined". The composer owns the rule; callers `.filter(Boolean)`
+ * (queueMemoryItem already skips a null item).
+ */
 export function npcMemoryItem(npc) {
+    const name = typeof npc?.name === 'string' && npc.name.trim() ? npc.name : null;
+    const notes = [npc?.lastNotes, npc?.notes].find(value => typeof value === 'string' && value.trim()) ?? null;
+    if (name === null || notes === null) return null;
     return {
-        text: `${npc?.name} (${npc?.disposition || 'unknown'}): ${npc?.lastNotes || npc?.notes}`,
+        text: `${name} (${npc?.disposition || 'unknown'}): ${notes}`,
         category: 'npc',
         location: npc?.basedIn || npc?.lastLocation || null,
         subjects: [npc?.name],

@@ -240,7 +240,17 @@ const QUEST_STATUS_ALIASES = {
     complete: 'completed', done: 'completed', finished: 'completed',
     finish: 'completed', fulfilled: 'completed', resolved: 'completed',
     success: 'completed', succeeded: 'completed',
+    // `closed` is `resolved`'s sibling (2026-10-23 quests P2): the prompt's own
+    // verb for a finished arc is "close", and the failed side has its own
+    // words below — a DM meaning failure reaches for them, not for "closed".
+    closed: 'completed',
     fail: 'failed', failure: 'failed', abandoned: 'failed', botched: 'failed',
+    // The failed / abandoned side was thin (2026-10-23 quests P2, measured):
+    // every one of these read as `new`, and the quest the fiction had just
+    // ended stayed in ACTIVE QUESTS as an upsert refresh.
+    cancelled: 'failed', canceled: 'failed', dropped: 'failed', declined: 'failed',
+    expired: 'failed', lost: 'failed', forfeited: 'failed', rejected: 'failed',
+    'given up': 'failed', given_up: 'failed', 'gave up': 'failed',
     update: 'updated', progress: 'updated', in_progress: 'updated',
     'in progress': 'updated', ongoing: 'updated', active: 'updated',
     added: 'new', accepted: 'new', started: 'new', opened: 'new',
@@ -250,20 +260,29 @@ const QUEST_STATUS_ALIASES = {
  * Type-guard a quest update at the parser boundary (mirrors the world-fact
  * whitelist): an object-valued name/description would persist into the save and
  * crash QuestPanel's render on every open (2026-07-25 audit). A valid identity
- * with a missing or misspelled status defaults to 'new' — the DM's "job
- * accepted" intent must not vanish silently, and ADD_QUEST upserts so an
- * existing quest just refreshes.
+ * with a MISSING status defaults to 'new' — the DM's "job accepted" intent
+ * must not vanish silently, and ADD_QUEST upserts so an existing quest just
+ * refreshes. An unrecognised NON-empty status is 'updated' since 2026-10-23
+ * (quests P2): both route to the same ADD_QUEST upsert (a name the record
+ * does not hold still inserts), so nothing is lost, and "something changed"
+ * is the honest reading of a word the table does not know. Trailing
+ * punctuation and symbols are stripped before the lookup (`complete!`,
+ * `Completed ✓`, `in-progress`).
  */
 function normalizeQuestUpdate(raw) {
-    const id = (typeof raw.id === 'string' || typeof raw.id === 'number')
-        ? String(raw.id).trim().slice(0, 80)
-        : '';
+    // A numeric id must be a safe integer (2026-10-23 quests nit): `NaN` and
+    // `1e21` used to spell themselves into ids "NaN" / "1e+21".
+    const id = typeof raw.id === 'string'
+        ? raw.id.trim().slice(0, 80)
+        : (Number.isSafeInteger(raw.id) ? String(raw.id) : '');
     const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 160) : '';
     if (!id && !name) return null;
     const description = typeof raw.description === 'string' ? raw.description.trim().slice(0, 800) : '';
-    const rawStatus = typeof raw.status === 'string' ? raw.status.trim().toLowerCase() : '';
+    const rawStatus = typeof raw.status === 'string'
+        ? raw.status.toLowerCase().replace(/[^a-z0-9_ ]+/g, ' ').replace(/\s+/g, ' ').trim()
+        : '';
     const aliased = QUEST_STATUS_ALIASES[rawStatus] || rawStatus;
-    const status = QUEST_UPDATE_STATUSES.has(aliased) ? aliased : 'new';
+    const status = QUEST_UPDATE_STATUSES.has(aliased) ? aliased : (rawStatus ? 'updated' : 'new');
     // A row that OPENS needs a name (2026-10-10 quests P2): an id-only `new`
     // used to mint a nameless live row — `- **** [id: q-7]: No details` in
     // ACTIVE QUESTS every turn, an empty panel row — that the load twin
@@ -341,8 +360,11 @@ function normalizeMemoryUpdate(update) {
         ...(text && { text }),
         ...(status && { status }),
         ...(used !== undefined && { used: !!used }),
-        ...(typeof update.salience === 'number' && { salience: update.salience }),
-        ...(typeof emotionalCharge === 'number' && { emotionalCharge }),
+        // Numeric-string parity with every other numeric wire (2026-10-24
+        // story-memory P2): `salience: "2"` was dropped here while the coin,
+        // count and slot_level wires coerce.
+        ...(toFiniteNumber(update.salience) !== null && { salience: toFiniteNumber(update.salience) }),
+        ...(toFiniteNumber(emotionalCharge) !== null && { emotionalCharge: toFiniteNumber(emotionalCharge) }),
         ...(Array.isArray(update.tags) && { tags: strList(update.tags, 40) }),
         ...(linkedNpcNames && { linkedNpcNames: strList(linkedNpcNames, 100) }),
         ...(location && { location }),

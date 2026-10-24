@@ -126,7 +126,10 @@ describe('M1: every composer stamps atMessage from its record', () => {
         expect(bare.atMessage).toBeUndefined();
     });
 
-    it('the seed stamps new rows, carries a stamp into a cached stamp-less row with NO re-embed, and never overwrites a cached stamp', async () => {
+    // Flipped 2026-10-23 (vector-memory P2): the stamp FOLLOWS the record —
+    // a `state` fact the record re-stamped @3 → @99 retrieves as @99, no re-embed.
+    // A seed item with NO stamp still leaves the cached stamp alone.
+    it('the seed stamps new rows, carries a stamp into a cached stamp-less row with NO re-embed, and moves a cached stamp the record moved', async () => {
         await putEmbeddings([
             row('Old fact without a stamp.', 'world_fact'),
             row('Old fact with a stamp.', 'world_fact', { atMessage: 3 }),
@@ -144,14 +147,16 @@ describe('M1: every composer stamps atMessage from its record', () => {
         const rows = await retrieveRelevant('key', 'fact', 8, 0.5);
         const byText = Object.fromEntries(rows.map(r => [r.text, r.atMessage]));
         expect(byText['Old fact without a stamp.']).toBe(11);
-        expect(byText['Old fact with a stamp.']).toBe(3);
+        expect(byText['Old fact with a stamp.']).toBe(99);
         expect(byText['A new fact.']).toBe(20);
 
-        // The carried stamp is on DISK: a second mount reads it back without the seed's help.
+        // Both stamps are on DISK: a second mount whose seed carries NO stamps
+        // reads them back and leaves them alone, without the seed's help.
         embedTextsMock.mockClear();
         await seedMemories('key', seed.map(({ text, category }) => ({ text, category })), 's1');
         const again = await retrieveRelevant('key', 'fact', 8, 0.5);
         expect(again.find(r => r.text === 'Old fact without a stamp.').atMessage).toBe(11);
+        expect(again.find(r => r.text === 'Old fact with a stamp.').atMessage).toBe(99);
         expect(embedTextsMock).not.toHaveBeenCalled();
     });
 });

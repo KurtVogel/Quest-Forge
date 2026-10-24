@@ -1,5 +1,6 @@
 import { containment, overlapCount, tokenSet as sharedTokenSet } from './textMatch.js';
 import { conversationalAgeSince } from './replayLedger.js';
+import { isStillAtPlace } from './locationRegistry.js';
 import { clampNumber, textOr as cleanText, toFlag } from './text.js';
 
 const ALLOWED_TYPES = new Set([
@@ -41,8 +42,50 @@ const RECENCY_DECAY_MESSAGES = 20;
  * the DM could not already see.
  */
 export const CALLBACK_MIN_AGE = 20;
-/** The landed-callback judge: this share of a curated card's meaning tokens in the DM's reply. */
-export const CALLBACK_PAYOFF_CONTAINMENT = 0.5;
+/**
+ * The landed-callback judge (2026-10-24 story-memory P1): the card's
+ * DISTINCTIVE tokens — what the scene it was curated for did not already
+ * supply — in the DM's reply, at least CALLBACK_PAYOFF_MIN_HITS of them and
+ * this share. The old judge read half the card's tokens against the whole
+ * reply, and curation had picked the card BECAUSE its tokens overlap the
+ * scene: a reply at the Rimehollow well with Tammo present landed "Tammo
+ * owes the hero a debt from the night at the Rimehollow well" on tammo /
+ * rimehollow / well / night alone. A spoken callback carries the card's
+ * NOUNS (the ribbon, the key, the loft), rarely its verbs, so a third of the
+ * distinctive tokens is the share; two is the floor so a lone noun never
+ * lands a card.
+ */
+export const CALLBACK_PAYOFF_CONTAINMENT = 0.3;
+export const CALLBACK_PAYOFF_MIN_HITS = 2;
+/**
+ * An id is a CLAIM, not an identity (2026-10-24 story-memory P2, the
+ * hero-tells 09-24 rule): KNOWN STORY CARDS asks the Scribe for the id, and a
+ * card carrying ANOTHER card's id with an unrelated type / subject / text
+ * used to rewrite that card wholesale (the ferryman promise became the Ilse
+ * mystery). An id re-report stands only when the type agrees and the text
+ * touches the held wording at this containment; otherwise the id is dropped
+ * and the card is judged by the other rungs.
+ */
+export const ID_REPORT_CONTAINMENT = 0.3;
+/**
+ * A PERSON-named subject is not a card's identity (2026-10-24 story-memory
+ * P1): the schema names a person first for `subject`, so "Tammo trusted the
+ * hero with the key" and "Tammo struck the hero at the feast" (both
+ * `relationship`, subject `Tammo`) used to collapse into ONE card and the
+ * trust beat was gone from the pool, the callbacks, the dossier and the RAG.
+ * Two same-type beats about one named person merge only when their texts —
+ * the name itself set aside, since it is on both by construction — share at
+ * least SAME_SUBJECT_MIN_SHARED meaning tokens AND this containment. "hero"
+ * is on nearly every card and alone cannot reach it on a text of three or
+ * more meaning tokens; a reworded restatement keeps its object nouns and
+ * clears it. The fuzzy rung's 0.5 text bar is the ceiling (an exact subject
+ * is stronger evidence than a 0.8 fuzzy one). A BEAT-named subject
+ * ("blacksmith debt") keeps the plain exact-subject rule — its tokens ARE
+ * the meaning — and so does `npcAgenda`, a current-state card by the roster
+ * `agenda` field's own rule: one person, one agenda.
+ */
+export const SAME_SUBJECT_CONTAINMENT = 0.4;
+export const SAME_SUBJECT_MIN_SHARED = 2;
 const LEGACY_CALLBACK_COOLDOWN_MS = 1000 * 60 * 8;
 const LEGACY_RECENCY_DECAY_HOURS = 24;
 /**
@@ -145,7 +188,21 @@ export function isNearDuplicateStoryCard(a = {}, b = {}) {
     const subjectA = meaningTokens(a.subject);
     const subjectB = meaningTokens(b.subject);
     if (!subjectA.size || !subjectB.size) return false;
-    return tokenContainment(subjectA, subjectB) >= 0.8 && textScore >= 0.5;
+    if (tokenContainment(subjectA, subjectB) < 0.8) return false;
+    // A NAMED subject is on both texts by construction (2026-10-24 P1): the
+    // name and "hero" alone put a four-token text at 0.5, so two unrelated
+    // beats about one person read as one. The name's tokens are set aside
+    // before the text score; a beat-named subject's tokens ARE the meaning
+    // and stay.
+    if (isNameSubject(a.subject) || isNameSubject(b.subject)) {
+        const names = new Set([...subjectA, ...subjectB]);
+        const strip = tokens => new Set([...tokens].filter(token => !names.has(token)));
+        const strippedA = strip(textA);
+        const strippedB = strip(textB);
+        if (!strippedA.size || !strippedB.size) return false;
+        return tokenContainment(strippedA, strippedB) >= 0.5;
+    }
+    return textScore >= 0.5;
 }
 
 /** On a near-duplicate merge the newest framing usually wins, but a bare
@@ -170,9 +227,27 @@ const PUBLIC_KNOWER_RE = /^(public|everyone|everybody|all|common knowledge)$/i;
  * saying "everyone knows" must never render as a secret known to "everyone".
  */
 export function normalizeKnownBy(value) {
-    const list = normalizeTextArray(value, MAX_LINKED_NPCS);
+    // A SCALAR knowers string may name several people ("the hero, Tammo"):
+    // the schema spells the field as prose since 2026-10-24 (the placeholder
+    // used to be a LIST holding instruction prose, echoed as a knower), so a
+    // comma / "and" list in one string is read as its people, not one name.
+    if (typeof value === 'string' && isPlaceholderKnower(value)) return [];
+    const source = typeof value === 'string' ? value.split(/\s*(?:,|;|&|\band\b)\s*/) : value;
+    const list = normalizeTextArray(source, MAX_LINKED_NPCS).filter(name => !isPlaceholderKnower(name));
     if (list.some(name => PUBLIC_KNOWER_RE.test(name))) return [];
     return list;
+}
+
+/**
+ * An echoed schema placeholder is not a knower (2026-10-24 story-memory P2
+ * nit, the 10-22 `trust: 0` class): "ONLY for private information: exactly
+ * who knows it…" used to make the card a SECRET known to that sentence,
+ * strip `witnessed`, and hide it from every NPC. Instruction prose carries
+ * words no person's name does.
+ */
+const PLACEHOLDER_KNOWER_RE = /\b(omit|only for|common knowledge|exactly who|exact names?|list of|placeholder|private information)\b/i;
+function isPlaceholderKnower(name) {
+    return PLACEHOLDER_KNOWER_RE.test(name);
 }
 
 /** "[SECRET — known only to: X, Y] " prefix, or '' for common knowledge. */
@@ -297,11 +372,20 @@ export function normalizeStoryMemoryUpdate(update = {}) {
     const text = cleanText(update.text);
     if (!id && !subject && !text) return null;
 
+    // The DM lane is a STATUS channel (2026-10-24 story-memory P2): `id` /
+    // `subject` / `text` are LOOKUP keys for UPDATE_STORY_MEMORY and never
+    // written — a hallucinated `text` used to replace an ENGINE wound card's
+    // text ("Took a crossbow bolt through the shoulder" → "A scratch, long
+    // healed") and a RESOLVED card's, the two texts the Scribe lane may not
+    // touch either; tags / linked people / location are the Scribe's and the
+    // engine's. The DM changes status / salience / emotionalCharge / used.
     const out = {};
     if (id) out.id = id;
     if (subject) out.subject = subject.slice(0, MAX_SUBJECT_LENGTH);
     if (text) out.text = text.slice(0, MAX_TEXT_LENGTH);
-    if (update.status && ALLOWED_STATUS.has(update.status)) out.status = update.status;
+    // Case folds like the type (same P2): `"Resolved"` was dropped silently.
+    const status = cleanText(update.status).toLowerCase();
+    if (ALLOWED_STATUS.has(status)) out.status = status;
     // The engine owns the clock: `used` is a FLAG the reducer turns into the
     // conversational `lastUsedMessage` (and its wall-clock twin). A raw
     // lastUsedAt pass-through was never part of the DM contract ({id, used})
@@ -313,22 +397,68 @@ export function normalizeStoryMemoryUpdate(update = {}) {
     if (update.emotionalCharge !== undefined || update.emotional_charge !== undefined) {
         out.emotionalCharge = clampNumber(update.emotionalCharge ?? update.emotional_charge, 0, 5, 2);
     }
-    // Same scalar-is-a-list reading as the card lane (2026-09-17 P1).
-    const isListField = value => Array.isArray(value) || typeof value === 'string';
-    if (isListField(update.tags)) out.tags = normalizeTextArray(update.tags, MAX_TAGS);
-    if (isListField(update.linkedNpcNames) || isListField(update.linked_npc_names)) {
-        out.linkedNpcNames = normalizeTextArray(update.linkedNpcNames || update.linked_npc_names, MAX_LINKED_NPCS);
-    }
-    if (update.location) out.location = cleanText(update.location).slice(0, MAX_SUBJECT_LENGTH);
     return out;
 }
 
+/** The DM lane's WRITABLE fields of a normalized update; the rest are lookup keys. */
+export const STORY_MEMORY_UPDATE_FIELDS = Object.freeze(['status', 'salience', 'emotionalCharge']);
+
+/**
+ * Does an id re-report AGREE with the card it names? Same type and a text that
+ * touches the held wording (ID_REPORT_CONTAINMENT). A roster promotion is a
+ * regenerated dossier SNAPSHOT whose type flips with the dossier and whose
+ * text may shrink to nothing it shared (handlers/npcs.js, 2026-08-30): its
+ * stable `npc-bond-` id IS identity, so a snapshot landing on a snapshot is
+ * exempt — a lane card never carries that source (the merge keeps the stored
+ * one).
+ */
+export function idReportAgrees(held, card) {
+    if (!held || !card) return false;
+    if (held.source === 'npc_roster' && card.source === 'npc_roster') return true;
+    if (held.type !== card.type) return false;
+    return tokenContainment(meaningTokens(held.text), meaningTokens(card.text)) >= ID_REPORT_CONTAINMENT;
+}
+
+const SUBJECT_FILLER_WORDS = new Set(['the', 'of', 'and', 'a', 'an', 'at', 'in', 'on']);
+
+/**
+ * A subject that NAMES someone or something — every content token capitalized
+ * ("Tammo", "Odo Grells", "The Lady", "Sundial, Oren, Jack"), four at most —
+ * as against a BEAT-named subject ("blacksmith debt", "mysterious letter",
+ * "Mira ribbon"). The Scribe capitalizes names reliably; a lowercase name
+ * falls to the plain rule (no worse than before), a capitalized beat gets the
+ * text gate (the fuzzy rung still catches its restatements).
+ */
+export function isNameSubject(subject) {
+    const tokens = cleanText(subject).split(/[\s,;/&]+/).filter(token => token && !SUBJECT_FILLER_WORDS.has(token.toLowerCase()));
+    if (tokens.length === 0 || tokens.length > 4) return false;
+    return tokens.every(token => /^\p{Lu}/u.test(token));
+}
+
+/** Two same-type cards on one exact subject: the same beat, or two beats about one person? */
+function sameSubjectAgrees(held, card) {
+    if (card.type === 'npcAgenda' || !isNameSubject(card.subject)) return true;
+    if (held.source === 'npc_roster' && card.source === 'npc_roster') return true;
+    const nameTokens = meaningTokens(card.subject);
+    const strip = tokens => new Set([...tokens].filter(token => !nameTokens.has(token)));
+    const a = strip(meaningTokens(held.text));
+    const b = strip(meaningTokens(card.text));
+    if (a.size === 0 || b.size === 0) return false;
+    return overlapScore(a, b) >= SAME_SUBJECT_MIN_SHARED && tokenContainment(a, b) >= SAME_SUBJECT_CONTAINMENT;
+}
+
+/**
+ * The stored card an incoming card is a report OF, or -1. Four rungs, each a
+ * CLAIM the content must bear out (2026-10-24: the id and exact-subject rungs
+ * used to merge before any text comparison — see idReportAgrees and
+ * SAME_SUBJECT_CONTAINMENT); a rung that fails falls through to the next.
+ */
 export function findStoryMemoryMatch(memories = [], card = {}) {
     const subject = cleanText(card.subject).toLowerCase();
     const text = cleanText(card.text).toLowerCase();
     return memories.findIndex(m => {
-        if (card.id && m.id === card.id) return true;
-        if (subject && m.subject?.toLowerCase() === subject && m.type === card.type) return true;
+        if (card.id && m.id === card.id && idReportAgrees(m, card)) return true;
+        if (subject && m.subject?.toLowerCase() === subject && m.type === card.type && sameSubjectAgrees(m, card)) return true;
         if (text && m.text?.toLowerCase() === text) return true;
         return isNearDuplicateStoryCard(m, card);
     });
@@ -378,8 +508,11 @@ export function compareCardRecency(a, b) {
  *   cooldown/recency (falls back to raw index distance, then to wall-clock).
  * @param {number} [scene.messageCount] - transcript length when omitted.
  * @param {number} [scene.now] - wall-clock, legacy-card fallback only.
+ * @param {object[]} [scene.locations] - the location registry, so the place
+ *   bonus reads the registry's fold (2026-10-24 P2 nit): "Rimehollow" against
+ *   the folded "The Rimehollow market square" lost the +4 on an exact string.
  */
-export function scoreStoryMemory(card, { query = '', location = '', npcs = [], messages = null, messageCount, now = Date.now() } = {}) {
+export function scoreStoryMemory(card, { query = '', location = '', npcs = [], messages = null, messageCount, now = Date.now(), locations = [] } = {}) {
     if (!card || (card.status || 'active') !== 'active') return 0;
     const usedAge = conversationalAgeSince(card.lastUsedMessage, { messages, messageCount });
     if (usedAge !== null) {
@@ -408,7 +541,10 @@ export function scoreStoryMemory(card, { query = '', location = '', npcs = [], m
     let score = card.salience * 2 + card.emotionalCharge;
     score += overlapScore(cardTokens, queryTokens) * 3;
 
-    if (location && card.location && card.location.toLowerCase() === String(location).toLowerCase()) {
+    // THE "same place" judgement (`isStillAtPlace`: same name, same canonical
+    // record, or one cluster — the town square and its own tavern); an exact
+    // string still matches, a registry-less call keeps the token fold.
+    if (location && card.location && isStillAtPlace(locations, String(card.location), String(location))) {
         score += 4;
     }
 
@@ -515,10 +651,10 @@ export function applyStoryMemoryDormancy(cards = [], journal = []) {
  * `speakers` — the card's linked people who are IN the scene, the ones who
  * could say it (WOW 2026-10-14).
  */
-export function curateStoryMemory({ memories = [], query = '', location = '', npcs = [], messages = null, messageCount, now = Date.now(), limit = DEFAULT_CARD_LIMIT } = {}) {
+export function curateStoryMemory({ memories = [], query = '', location = '', npcs = [], messages = null, messageCount, now = Date.now(), limit = DEFAULT_CARD_LIMIT, locations = [] } = {}) {
     const present = new Set((npcs || []).map(n => String(n?.name || '').toLowerCase()).filter(Boolean));
     return (memories || [])
-        .map(card => ({ card, score: scoreStoryMemory(card, { query, location, npcs, messages, messageCount, now }) }))
+        .map(card => ({ card, score: scoreStoryMemory(card, { query, location, npcs, messages, messageCount, now, locations }) }))
         .filter(item => item.score > 0)
         .sort((a, b) => b.score - a.score)
         .slice(0, limit)
@@ -536,21 +672,40 @@ export function curateStoryMemory({ memories = [], query = '', location = '', np
 }
 
 /**
- * Did the DM's reply pay off a curated card? Meaning-token containment of the
- * card's text in the narrative at CALLBACK_PAYOFF_CONTAINMENT (WOW 2026-10-14):
- * the engine judges the landing beside the DM's own `memory_updates`, so a
- * callback the DM wove in without marking still rests and still shows.
+ * Did the DM's reply pay off a curated card? (WOW 2026-10-14) The engine judges
+ * the landing beside the DM's own `memory_updates`, so a callback the DM wove
+ * in without marking still rests and still shows. A detector that follows a
+ * selector scores on what the selector did NOT use (2026-10-24 P1): the
+ * card's tokens MINUS the scene's — the player's line, the location, the
+ * present people's names, the hero's name and "hero", and the scene's recent
+ * text — must appear in the reply at CALLBACK_PAYOFF_MIN_HITS and
+ * CALLBACK_PAYOFF_CONTAINMENT. A card that is nothing but the scene can never
+ * land; a card under 3 meaning tokens never did.
+ *
+ * @param {object[]} curated - the cards `curateStoryMemory` offered this turn
+ * @param {string} narrative - the DM's reply
+ * @param {object} [scene] - what the card was curated FOR
+ * @param {string} [scene.query] - the curation query (the player's line + context)
+ * @param {string} [scene.location] - the hero's current location
+ * @param {Array<object|string>} [scene.npcs] - the present NPCs (records or names)
+ * @param {string} [scene.heroName]
+ * @param {string} [scene.presenceText] - the scene's recent narrative text
  */
-export function detectCallbackPayoff(curated = [], narrative = '') {
+export function detectCallbackPayoff(curated = [], narrative = '', { query = '', location = '', npcs = [], heroName = '', presenceText = '' } = {}) {
     const reply = meaningTokens(typeof narrative === 'string' ? narrative : '');
     if (reply.size === 0) return [];
+    const sceneTokens = meaningTokens([
+        'hero', query, location, heroName, presenceText,
+        ...(Array.isArray(npcs) ? npcs : []).map(n => (typeof n === 'string' ? n : n?.name)),
+    ].filter(part => typeof part === 'string' && part).join(' '));
     return (Array.isArray(curated) ? curated : []).filter(card => {
         if (!card || typeof card.id !== 'string') return false;
         const tokens = meaningTokens(card.text);
         if (tokens.size < 3) return false;
-        let found = 0;
-        for (const token of tokens) if (reply.has(token)) found += 1;
-        return found / tokens.size >= CALLBACK_PAYOFF_CONTAINMENT;
+        const distinctive = [...tokens].filter(token => !sceneTokens.has(token));
+        if (distinctive.length < CALLBACK_PAYOFF_MIN_HITS) return false;
+        const found = distinctive.filter(token => reply.has(token)).length;
+        return found >= CALLBACK_PAYOFF_MIN_HITS && found / distinctive.length >= CALLBACK_PAYOFF_CONTAINMENT;
     });
 }
 

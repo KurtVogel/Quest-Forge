@@ -332,7 +332,11 @@ describe('fuzzy quest-name identity (Terra playtest P3, ruling follow-up 2026-08
         expect(next.quests[0]).toMatchObject({ id: 'q-relic', status: 'completed' });
     });
 
-    it('an ambiguous fuzzy match falls through to the fallback insert — never a guess', () => {
+    // Retitled 2026-10-23 (quests P2): these two rows were never a fuzzy family for
+    // this ref (containment 1.0 but a 2/4 size ratio; 2/4 containment), so the insert
+    // is the NO-match path. A genuinely ambiguous close now posts one ⚖ line and
+    // records nothing — gameReducer.quests.queue1023.test.js.
+    it('a name outside every fuzzy family falls through to the fallback insert as its own table history', () => {
         let state = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q-1', name: 'The Cellar Rats' } });
         state = gameReducer(state, { type: 'ADD_QUEST', payload: { id: 'q-2', name: 'Rats in the Cellar Shrine' } });
         const next = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { name: 'Cellar Rats Dealt With', description: 'd' } });

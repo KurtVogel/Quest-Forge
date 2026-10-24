@@ -3,15 +3,17 @@
  * arcs opened and resolved in one response), and removal. Completing a tracked
  * quest pays engine-owned XP (rpg-balance-master ruling 2026-08-22) — the
  * quest's own prior status is the one-shot guard, so a DM re-emitting the same
- * completion on a later turn re-writes a terminal status harmlessly and never
- * pays twice.
+ * completion on a later turn is a no-op (a DIFFERENT terminal status on a
+ * finished row is refused with a ⚖ line — 2026-10-23 quests P2: a late
+ * `failed` used to flip a paid completion into a failure and re-stamp its
+ * close) and never pays twice.
  *
  * Only the DM channel pays (2026-09-04 audit P1): applyEvents always sends an
  * OBJECT ref, while the Quests panel's ✓ button sends the bare row id. A
  * bare-string completion is bookkeeping only — the panel's + then ✓ was an
  * unbounded self-service XP mine (8 click-cycles = a level at any level).
  */
-import { foldExperience, getQuestCompletionXp, QUEST_INSTANT_XP } from '../../engine/progression.js';
+import { foldExperience, getQuestCompletionXp, isHeroDown, QUEST_INSTANT_XP } from '../../engine/progression.js';
 import { containment, tokenSet } from '../../engine/textMatch.js';
 import { cleanText } from '../../engine/text.js';
 import { normalizeRefToken, systemMessage } from './shared.js';
@@ -177,7 +179,12 @@ export const handlers = {
                 quests: state.quests.map(quest => quest.id === existing.id
                     ? {
                         ...quest,
-                        name: payload.name || quest.name,
+                        // The held text survives a DRIFTED match (2026-10-23
+                        // quests nit): an `updated` carrying the fuzzy short
+                        // form ("The Relic of Kel") used to rename "Find the
+                        // Relic of Kel" to it in the panel and the prompt.
+                        // Only an exact (normalized-equal) name replaces.
+                        name: (payload.name && sameName(quest)) ? payload.name : quest.name,
                         description: payload.description || quest.description,
                     }
                     : quest),
@@ -199,44 +206,79 @@ export const handlers = {
     COMPLETE_QUEST(state, action) {
         const terminalStatus = action.type === 'COMPLETE_QUEST' ? 'completed' : 'failed';
         const ref = action.payload || '';
-        const refId = typeof ref === 'object' ? ref.id : ref;
-        const refName = typeof ref === 'object' ? ref.name : ref;
+        const isObjectRef = typeof ref === 'object';
+        const refId = isObjectRef ? ref.id : ref;
+        const refName = isObjectRef ? ref.name : ref;
         const nameToken = normalizeRefToken(refName);
-        let isMatch = (q) => q.id === refId || (nameToken && normalizeRefToken(q.name) === nameToken);
-        // Recurring quest names must never rewrite closed-arc history: when an
-        // exact match hits BOTH an active row and a terminal row (arc 2 of a
-        // reused name), scope the rewrite to the active rows only — failing arc 2
-        // used to flip arc 1's completed row to failed. Terminal-only matches
-        // keep the rewrite: re-writing a terminal status is harmless and is the
-        // one-shot guard against the DM re-emitting a completion later.
-        const exactMatches = state.quests.filter(isMatch);
-        if (exactMatches.some(q => q.status === 'active')) {
-            const activeIds = new Set(exactMatches.filter(q => q.status === 'active').map(q => q.id));
-            isMatch = (q) => activeIds.has(q.id);
-        }
-        if (!state.quests.some(isMatch) && nameToken) {
+        const sameName = (q) => !!nameToken && normalizeRefToken(q.name) === nameToken;
+        const fuzzyMatch = nameToken ? questNameMatcher(refName) : () => false;
+        // The open lane's identity rule, on the close lane too (2026-10-23
+        // quests P1): ACTIVE QUESTS prints `[id: …]` for the DM to echo, and an
+        // echo that pairs one arc's name with another's id —
+        // `{ id: 'q-relic', name: 'Escort the salt caravan' }` — used to close
+        // BOTH arcs and pay one. With a name on the ref, the id's row counts
+        // only when the name agrees with it (exact or the fuzzy near-equality);
+        // an id-ONLY ref (the panel's ✓, a nameless terminal wire) keeps its
+        // by-id close.
+        const idGated = isObjectRef && !!nameToken;
+        const byId = (q) => !!refId && q.id === refId && (!idGated || sameName(q) || fuzzyMatch(q.name));
+        // Recurring quest names must never rewrite closed-arc history: when a
+        // match hits BOTH an active row and a terminal row (arc 2 of a reused
+        // name), the active rows alone are the target — failing arc 2 used to
+        // flip arc 1's completed row to failed. A terminal-only match is the
+        // one-shot guard (see below).
+        const liveFirst = (rows) => rows.some(q => q.status === 'active') ? rows.filter(q => q.status === 'active') : rows;
+        let targets = liveFirst(state.quests.filter(sameName));
+        if (targets.length === 0) targets = liveFirst(state.quests.filter(byId));
+        let ambiguous = null;
+        if (targets.length === 0 && nameToken) {
             // Fuzzy fallback before the fallback INSERT: a drifted completion name
             // ("The Relic" for "Find the Relic") closes the tracked arc instead of
             // minting a phantom second terminal row. Unambiguous only — active
-            // rows preferred, and 2+ candidates keep the exact-match behavior
-            // (the insert), never a guess.
-            const fuzzyMatch = questNameMatcher(refName);
-            const fuzzy = state.quests.filter(q => fuzzyMatch(q.name));
-            const pool = fuzzy.some(q => q.status === 'active')
-                ? fuzzy.filter(q => q.status === 'active')
-                : fuzzy;
-            if (pool.length === 1) {
-                const matchedId = pool[0].id;
-                isMatch = (q) => q.id === matchedId;
-            }
+            // rows preferred; 2+ candidates are a shared name, and a shared name
+            // is not a quest (the 10-13 `resolveNpcRef` rule): one ⚖ line names
+            // them and nothing is recorded (2026-10-23 quests P2 — the old fall
+            // to the insert minted a THIRD terminal row, no line, no XP).
+            const pool = liveFirst(state.quests.filter(q => fuzzyMatch(q.name)));
+            if (pool.length === 1) targets = pool;
+            else if (pool.length > 1) ambiguous = pool;
         }
-        const matched = state.quests.some(isMatch);
+        if (ambiguous) {
+            const names = ambiguous.map(q => `"${q.name}"`).join(', ');
+            return {
+                ...state,
+                messages: [...state.messages, systemMessage(
+                    `⚖ "${cleanText(refName, QUEST_NAME_MAX_LENGTH)}" matches ${ambiguous.length} tracked quests (${names}) — nothing was ${terminalStatus}. Name the one that ended exactly.`,
+                    { dmVisible: true }
+                )],
+            };
+        }
+        const targetIds = new Set(targets.map(q => q.id));
+        const isMatch = (q) => targetIds.has(q.id);
+        if (targets.length > 0 && targets.every(q => q.status !== 'active')) {
+            // Terminal-only match. The SAME status is the DM re-emitting a
+            // completion it already landed: the one-shot guard, a silent no-op.
+            // A DIFFERENT terminal status is refused — a `failed` carrying a
+            // completed row's id used to turn `completed @2` into `failed @9`
+            // (history rewritten, the XP kept, the close re-stamped where the
+            // post-journal verifier reads a late settlement).
+            if (targets.every(q => q.status === terminalStatus)) return state;
+            const held = targets.find(q => q.status !== terminalStatus);
+            return {
+                ...state,
+                messages: [...state.messages, systemMessage(
+                    `⚖ "${held.name}" already ended as ${held.status} — a finished quest never becomes ${terminalStatus}. Nothing changed.`,
+                    { dmVisible: true }
+                )],
+            };
+        }
+        const matched = targets.length > 0;
         if (matched) {
             const closedAtMessage = (state.messages || []).length;
             let next = {
                 ...state,
                 quests: state.quests.map(q => isMatch(q)
-                    ? { ...q, status: terminalStatus, ...(q.status !== terminalStatus && { closedAtMessage }) }
+                    ? { ...q, status: terminalStatus, closedAtMessage }
                     : q),
             };
             // Engine-owned completion XP. Only genuine completions pay (FAIL_QUEST
@@ -269,7 +311,16 @@ export const handlers = {
                     ? (instantAlreadyPaid ? 0 : QUEST_INSTANT_XP)
                     : getQuestCompletionXp(state.character.level);
                 if (xp > 0) {
-                    next = foldExperience(next, xp, { reason: `quest completed: ${paying.name || 'quest'}` });
+                    // No DM channel stands a DOWN hero up (DECISIONS 2026-10-14
+                    // point 2, extended 2026-10-23 quests P1): the amount is the
+                    // engine's, the TRIGGER is the DM's `quest_updates`, and a
+                    // dying hero whose reply completed the errand woke "Fully
+                    // healed" with the death-save clock wiped. A standing hero
+                    // keeps the full level-up heal.
+                    next = foldExperience(next, xp, {
+                        reason: `quest completed: ${paying.name || 'quest'}`,
+                        keepDowned: isHeroDown(state.character),
+                    });
                 } else {
                     next = {
                         ...next,
@@ -286,7 +337,20 @@ export const handlers = {
         // (playtest #14: the premise's letter delivery vanished without a trace).
         // Only named object refs qualify; a bare id string that matches nothing
         // (panel buttons, stale ids) stays a no-op.
-        if (typeof ref !== 'object') return state;
+        if (!isObjectRef) return state;
+        // An id-only close whose id matches nothing (a stale or invented id)
+        // used to return state untouched — the DM closed a quest, the quest
+        // stayed in ACTIVE QUESTS, and nothing said it did not land
+        // (2026-10-23 quests P2). One line for the DM's window.
+        if (!nameToken) {
+            return {
+                ...state,
+                messages: [...state.messages, systemMessage(
+                    `⚖ No tracked quest has the id "${cleanText(refId, 80)}" — nothing was ${terminalStatus}. Name the quest to close it.`,
+                    { dmVisible: true }
+                )],
+            };
+        }
         // Never-tracked terminal inserts pay NOTHING (DECISIONS.md 2026-09-04,
         // revisiting the 2026-08-26 flat instant tier here): this path exists to
         // record table history (playtest #14 was about the record), and the

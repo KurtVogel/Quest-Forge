@@ -45,11 +45,11 @@ describe('P1: a SCALAR list field is a one-item list', () => {
         expect(best.score).toBeGreaterThan(card.salience * 2 + card.emotionalCharge + 5);
     });
 
-    it('tags: "map" is one tag, and the update lane reads scalars the same way', () => {
+    it('tags: "map" is one tag; the DM update lane no longer writes tags or linked people at all (2026-10-24 P2)', () => {
         expect(normalizeStoryMemoryCard({ text: 'x marks the spot', tags: 'map' }).tags).toEqual(['map']);
         const update = normalizeStoryMemoryUpdate({ id: 'mem-1', tags: 'map', linked_npc_names: 'Maren' });
-        expect(update.tags).toEqual(['map']);
-        expect(update.linkedNpcNames).toEqual(['Maren']);
+        expect(update.tags).toBeUndefined();
+        expect(update.linkedNpcNames).toBeUndefined();
     });
 });
 

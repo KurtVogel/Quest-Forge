@@ -387,6 +387,7 @@ export function createTurnRunner({
         const wantsMemories = lane.wantsMemories && !!originalPlayerMessage;
         let retrievedMemories = [];
         let dramaticMemories = [];
+        let callbackScene = null;
         let curationQuery = originalPlayerMessage;
         // "Remember when…" (WOW 2026-09-18): a question about the past gets
         // the engine's dossier of what actually happened, wider retrieval with
@@ -431,12 +432,24 @@ export function createTurnRunner({
         if (wantsMemories) {
             // Scene-driven curation: present NPCs only, and the live transcript
             // for the conversational cooldown/recency windows (2026-09-06).
-            dramaticMemories = curateStoryMemory({
-                memories: promptState.storyMemory || [],
+            // The scene the cards are curated FOR, kept for the payoff judge
+            // (2026-10-24 P1): a detector that follows a selector scores on
+            // what the selector did not use.
+            callbackScene = {
                 query: curationQuery,
                 location: promptState.currentLocation || '',
                 npcs: findPresentNpcs(promptState, originalPlayerMessage),
+                heroName: promptState.character?.name || '',
+                presenceText: buildPresenceText(promptState.messages || []),
+            };
+            dramaticMemories = curateStoryMemory({
+                memories: promptState.storyMemory || [],
+                query: callbackScene.query,
+                location: callbackScene.location,
+                npcs: callbackScene.npcs,
                 messages: promptState.messages || [],
+                // The registry's fold for the place bonus (2026-10-24 P2 nit).
+                locations: promptState.locations || [],
             });
         }
         if (wantsMemories || recallDossier) {
@@ -724,7 +737,7 @@ export function createTurnRunner({
             // whose meaning the reply carries LANDED, marked or not — the DM's
             // own `used` ids are stamped by applyEvents above and skipped here.
             const declared = new Set((events?.memoryUpdates || []).filter(u => u?.used && typeof u.id === 'string').map(u => u.id));
-            const landed = detectCallbackPayoff(dramaticMemories, narrative);
+            const landed = detectCallbackPayoff(dramaticMemories, narrative, callbackScene || {});
             const unmarked = landed.filter(card => !declared.has(card.id));
             if (unmarked.length > 0) {
                 record({ type: 'MARK_CALLBACK_PAYOFF', payload: { messageId: msgId, cardIds: unmarked.map(card => card.id) } });

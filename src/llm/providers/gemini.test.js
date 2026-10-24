@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EMBED_QUERY_TIMEOUT_MS, EMBED_RETRY_DEFAULT_MS, embedText, embedTexts, GEMINI_EMBED_DIMENSIONS, MAX_EMBED_INPUT_CHARS, MAX_REJECTED_EMBED_REQUESTS, sendGeminiMessage, streamGeminiMessage } from './gemini.js';
+import { EMBED_QUERY_TIMEOUT_MS, EMBED_RETRY_DEFAULT_MS, embedText, embedTexts, GEMINI_EMBED_DIMENSIONS, MAX_BAD_TEXT_ISOLATION_REQUESTS, MAX_EMBED_INPUT_CHARS, MAX_REJECTED_EMBED_REQUESTS, sendGeminiMessage, streamGeminiMessage } from './gemini.js';
 
 function jsonResponse(payload, { ok = true, status = 200, statusText = 'OK' } = {}) {
     return { ok, status, statusText, json: async () => payload };
@@ -498,6 +498,52 @@ describe('embed input cap + rejected-chunk bisect (2026-09-17 vector-memory P1)'
         expect(vectors.filter(Boolean)).toHaveLength(119);
         // 1 first attempt + ~8 rejections along the bisect + the healthy halves + the second chunk.
         expect(fetchMock.mock.calls.length).toBeLessThan(25);
+    });
+
+    it('TWO rejected texts in a 100-chunk cost exactly two null slots (2026-10-23 P2 — the depth-first budget used to null 13)', async () => {
+        const fetchMock = rejectingFetch();
+        vi.stubGlobal('fetch', fetchMock);
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const bad = new Set([10, 90]);
+        const texts = Array.from({ length: 100 }, (_, i) => (bad.has(i) ? `Journal ${BAD} entry ${i}.` : `Fact ${i}.`));
+        const vectors = await embedTexts('test-key', texts);
+
+        expect(vectors.map((v, i) => (v ? null : i)).filter(i => i !== null)).toEqual([10, 90]);
+        expect(vectors.filter(Boolean)).toHaveLength(98);
+        // Each isolation walks ≤ ⌈log₂ 100⌉ + 1 rejections and as many healthy siblings.
+        expect(fetchMock.mock.calls.length).toBeLessThan(1 + 2 * 2 * 8);
+    });
+
+    it('THREE rejected texts across both halves cost exactly three null slots (the measured case lost the whole second half, 51 rows)', async () => {
+        const fetchMock = rejectingFetch();
+        vi.stubGlobal('fetch', fetchMock);
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const bad = new Set([3, 50, 97]);
+        const texts = Array.from({ length: 100 }, (_, i) => (bad.has(i) ? `Journal ${BAD} entry ${i}.` : `Fact ${i}.`));
+        const vectors = await embedTexts('test-key', texts);
+
+        expect(vectors.map((v, i) => (v ? null : i)).filter(i => i !== null)).toEqual([3, 50, 97]);
+        expect(fetchMock.mock.calls.length).toBeLessThan(1 + 3 * 2 * 8);
+    });
+
+    it('a dozen rejected texts still cost a row apiece; a call where MOST texts reject hits the isolation ceiling and nulls the rest instead of fanning out', async () => {
+        const fetchMock = rejectingFetch();
+        vi.stubGlobal('fetch', fetchMock);
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const dozen = Array.from({ length: 100 }, (_, i) => (i % 8 === 0 ? `Journal ${BAD} entry ${i}.` : `Fact ${i}.`));
+        const vectors = await embedTexts('test-key', dozen);
+        expect(vectors.filter(v => v === null)).toHaveLength(13);
+
+        fetchMock.mockClear();
+        const mostly = Array.from({ length: 100 }, (_, i) => (i % 2 === 0 ? `Journal ${BAD} entry ${i}.` : `Fact ${i}.`));
+        const sparse = await embedTexts('test-key', mostly);
+        // Every stored vector is a healthy text's; the walk stopped under the ceiling.
+        sparse.forEach((v, i) => { if (v) expect(mostly[i]).not.toContain(BAD); });
+        const rejections = fetchMock.mock.results.length;
+        expect(rejections).toBeLessThanOrEqual(MAX_BAD_TEXT_ISOLATION_REQUESTS * 2 + 2);
     });
 
     it('a key-level 400 (every request rejected) stays within the rejected-request budget instead of fanning out per text', async () => {

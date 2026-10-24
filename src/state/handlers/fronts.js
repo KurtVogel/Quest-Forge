@@ -23,7 +23,7 @@ import {
 } from '../../engine/worldTempo.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
 import { DIRECTOR_MAX_ATTEMPTS, getDirectorFailure, RETRYABLE_DIRECTORS } from '../../engine/directorRetry.js';
-import { foldExperience, getFrontResolutionMilestoneXp } from '../../engine/progression.js';
+import { foldExperience, getFrontResolutionMilestoneXp, isHeroDown } from '../../engine/progression.js';
 import { findLocationRecord, isSameRegion, normalizeLocationRecord, upsertLocation } from '../../engine/locationRegistry.js';
 import { namesMatch } from '../../engine/npcRoster.js';
 import { rollDie } from '../../engine/dice.ts';
@@ -130,6 +130,11 @@ function concludeFront(state, idx, front, { outcome = null, note = '' } = {}) {
     if (!prevailed && next.character) {
         next = foldExperience(next, getFrontResolutionMilestoneXp(next.character.level), {
             reason: `campaign milestone — "${concluded.title}" ended`,
+            // No DM channel stands a DOWN hero up (DECISIONS 2026-10-14 point 2,
+            // extended 2026-10-23 quests P1): the amount is the engine's, the
+            // TRIGGER is the DM's `front_updates: resolved`. A standing hero
+            // keeps the full level-up heal.
+            keepDowned: isHeroDown(next.character),
         });
     }
     // Aftermath hook: a background director decides (later, outside the

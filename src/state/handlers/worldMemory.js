@@ -11,6 +11,7 @@ import {
     normalizeStoryMemoryCard,
     normalizeStoryMemoryUpdate,
     pickMergedCardText,
+    STORY_MEMORY_UPDATE_FIELDS,
     stripStoryMemoryEngineStamps,
 } from '../../engine/storyMemory.js';
 import { gameReducer } from '../gameReducer.js';
@@ -137,11 +138,19 @@ export const handlers = {
         const { status: _laneStatus, ...lanePayload } = (action.payload && typeof action.payload === 'object' && !Array.isArray(action.payload)) ? action.payload : {};
         const card = normalizeStoryMemoryCard(stripStoryMemoryEngineStamps(lanePayload));
         if (!card) return state;
-        const idx = findStoryMemoryMatch(state.storyMemory || [], card);
+        const pool = state.storyMemory || [];
+        const idx = findStoryMemoryMatch(pool, card);
         const messageCount = (state.messages || []).length;
         if (idx === -1) {
-            const born = bornStoryMemoryCard(card, messageCount, { sourceMessage: action.meta?.sourceMessage });
-            return { ...state, storyMemory: [...(state.storyMemory || []), born] };
+            // An id ECHO that names a held card it does not agree with
+            // (2026-10-24 P2, `idReportAgrees`) is a new card with the id
+            // DROPPED — two cards may never share one id (memory_updates
+            // addresses the first it finds).
+            const fresh = card.id && pool.some(memory => memory?.id === card.id)
+                ? normalizeStoryMemoryCard({ ...card, id: null })
+                : card;
+            const born = bornStoryMemoryCard(fresh, messageCount, { sourceMessage: action.meta?.sourceMessage });
+            return { ...state, storyMemory: [...pool, born] };
         }
         const existing = state.storyMemory[idx];
         // `resolved` is TERMINAL here (2026-09-06 P1, the fronts' 2026-09-01
@@ -226,7 +235,13 @@ export const handlers = {
         // Conversational twins of the wall-clock stamps: the curation cooldown
         // and recency windows read these (2026-09-06).
         const messageCount = (state.messages || []).length;
-        const { used, ...fields } = update;
+        // The DM lane WRITES status / salience / emotionalCharge / used only
+        // (2026-10-24 P2): `id` / `subject` / `text` were the lookup above and
+        // are never spread — a hallucinated `text` used to replace an ENGINE
+        // wound card's and a RESOLVED card's text, which the Scribe lane
+        // (ADD_STORY_MEMORY_CARD) has frozen since 09-16 / 09-30.
+        const { used } = update;
+        const fields = Object.fromEntries(STORY_MEMORY_UPDATE_FIELDS.filter(key => update[key] !== undefined).map(key => [key, update[key]]));
         const now = Date.now();
         return {
             ...state,
@@ -261,7 +276,20 @@ export const handlers = {
         const storyMemory = (state.storyMemory || []).map(card => {
             if (!card || !ids.has(card.id)) return card;
             landed.push(card);
-            return normalizeStoryMemoryCard({ ...card, lastUsedAt: now, lastUsedMessage: messageCount, usedCount: (card.usedCount || 0) + 1, id: card.id }, card);
+            // ONE clock for a landing, whichever lane judged it (2026-10-24 P2):
+            // the DM's `used` stamps `lastSeenMessage` too (the card is on the
+            // page now — it scores 0 for the window and its age restarts); the
+            // engine's judgement used to stamp `lastUsedMessage` alone, so the
+            // card was re-offered 10 rows after it landed as "25 turns ago".
+            return normalizeStoryMemoryCard({
+                ...card,
+                lastSeenAt: now,
+                lastSeenMessage: messageCount,
+                lastUsedAt: now,
+                lastUsedMessage: messageCount,
+                usedCount: (card.usedCount || 0) + 1,
+                id: card.id,
+            }, card);
         });
         if (landed.length === 0) return state;
         const marks = landed.map(card => ({ name: card.subject || card.type, kind: 'callback', label: `callback landed: ${String(card.text || '').slice(0, 120)}` }));

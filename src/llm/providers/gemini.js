@@ -301,6 +301,10 @@ export async function embedTexts(apiKey, texts, { inputType = 'document', onErro
     const requestTimeoutMs = () => (deadline == null ? EMBED_BATCH_TIMEOUT_MS : Math.max(1, deadline - Date.now()));
     const retryFits = (waitMs) => deadline == null || Date.now() + waitMs + EMBED_RETRY_MIN_ROOM_MS < deadline;
     let rejectedRequests = 0;
+    // Has ANY request of this call embedded? The key-level 400 (a rejected
+    // key) is the one case the rejected-request budget exists for, and its
+    // signature is that NOTHING succeeds (2026-10-23 P2).
+    let keyProven = false;
     // The first failure's reason, reported once (2026-09-29): the seed says
     // out loud when rows are still missing, and with what cause.
     let reported = false;
@@ -419,10 +423,23 @@ export async function embedTexts(apiKey, texts, { inputType = 'document', onErro
     // ~8 rejected requests; the budget caps a key-level 400 (invalid key)
     // from fanning out into a request per text — past it the rest nulls out
     // exactly like before and the next mount retries.
+    // The budget is spent depth-first, so it used to end the walk for TWO or
+    // more bad texts in one chunk and null everything unsent (2026-10-23 P2,
+    // measured: bad-10 + bad-90 cost 13 rows, three bad texts cost 51 — the
+    // whole second half, re-lost on every mount since the same texts reject
+    // again). A key-level 400 rejects EVERY request; once one request of this
+    // call has embedded the key is proven and each further rejection is a bad
+    // text being isolated (≤ 2·⌈log₂ 100⌉ + 1 requests apiece), so the walk
+    // goes on under the wider MAX_BAD_TEXT_ISOLATION_REQUESTS ceiling — the
+    // belt against a pathological call where most texts reject.
     const embedChunk = async (chunk) => {
-        if (rejectedRequests > MAX_REJECTED_EMBED_REQUESTS) return;
+        if (rejectedRequests > (keyProven ? MAX_BAD_TEXT_ISOLATION_REQUESTS : MAX_REJECTED_EMBED_REQUESTS)) return;
         const outcome = await sendChunkWithRetry(chunk);
-        if (outcome.ok || !outcome.rejected) return;
+        if (outcome.ok) {
+            keyProven = true;
+            return;
+        }
+        if (!outcome.rejected) return;
         rejectedRequests += 1;
         if (chunk.length < 2) return;
         const mid = Math.ceil(chunk.length / 2);
@@ -436,8 +453,15 @@ export async function embedTexts(apiKey, texts, { inputType = 'document', onErro
     return results;
 }
 
-/** Rejected (400/413) batch requests one embedTexts call may spend bisecting. */
+/** Rejected (400/413) batch requests one embedTexts call may spend bisecting before ANY request has embedded (a rejected key). */
 export const MAX_REJECTED_EMBED_REQUESTS = 12;
+/**
+ * Rejected requests one call may spend isolating bad texts once a request HAS
+ * embedded (the key works). One bad text in a 100-chunk costs ≤ 8 rejections,
+ * so this tolerates a dozen per call; past it the rest nulls out and the next
+ * mount retries (2026-10-23 vector-memory P2).
+ */
+export const MAX_BAD_TEXT_ISOLATION_REQUESTS = 100;
 
 /**
  * Stream a message from Gemini.

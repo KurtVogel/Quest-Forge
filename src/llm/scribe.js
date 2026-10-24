@@ -44,7 +44,7 @@ export const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keep
 Output ONLY valid JSON:
 {
   "world_facts": [
-    { "fact": "A canonical statement of something now true in this world", "category": "lore|character|location|event|relationship", "knownBy": ["ONLY for private information: exactly who knows it (use 'the hero' for the player) — omit entirely for common knowledge"], "supersedes": "ONLY when this fact is the OUTCOME of a plan listed under KNOWN OPEN PLANS — carried out, failed, or abandoned — that plan's exact id; omit otherwise" }
+    { "fact": "A canonical statement of something now true in this world", "category": "lore|character|location|event|relationship", "knownBy": "a LIST of the exact names of who knows it, ONLY for private information (use 'the hero' for the player) — omit entirely for common knowledge (never echo a placeholder)", "supersedes": "ONLY when this fact is the OUTCOME of a plan listed under KNOWN OPEN PLANS — carried out, failed, or abandoned — that plan's exact id; omit otherwise" }
   ],
   "npc_updates": [
     {
@@ -83,7 +83,7 @@ Output ONLY valid JSON:
       "emotionalCharge": 0,
       "linkedNpcNames": ["exact NPC names"],
       "location": "place tied to the memory if any",
-      "knownBy": ["ONLY for private information: exactly who knows it (use 'the hero' for the player) — omit entirely for common knowledge"],
+      "knownBy": "a LIST of the exact names of who knows it, ONLY for private information (use 'the hero' for the player) — omit entirely for common knowledge (never echo a placeholder)",
       "witnessed": false,
       "source": "scribe"
     }

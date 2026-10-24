@@ -496,7 +496,7 @@ describe('turn runner — the post-roll outcome is a first-class turn (2026-09-0
     });
 
     it('re-stages a pre-narrated chained check with preNarrated: true and lineage to the resolved proposal', async () => {
-        const outcome = 'You slip past the sergeant and you notice a second guard at the inner door.\n'
+        const outcome = 'You slip past the sergeant and you spot a second guard at the inner door.\n'
             + '```json\n{"requested_rolls": [{"type": "skill_check", "skill": "stealth", "dc": 12,'
             + ' "description": "Slip past the inner guard"}]}\n```';
         const { runner, getState } = createHarness({
@@ -513,7 +513,7 @@ describe('turn runner — the post-roll outcome is a first-class turn (2026-09-0
 
         const staged = getState().pendingRoleplayCheck;
         expect(staged).toBeTruthy();
-        expect(staged.preNarrated).toBe(true); // "you notice" — the correction note reaches the next roll
+        expect(staged.preNarrated).toBe(true); // "you spot" — the correction note reaches the next roll
         expect(staged.supersedesId).toBe(firstId);
         expect(staged.id).not.toBe(firstId);
         // One heat entry for the moment, not two.
