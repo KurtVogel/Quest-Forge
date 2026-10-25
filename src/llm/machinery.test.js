@@ -113,6 +113,9 @@ describe('getBackgroundConfig', () => {
             thinkingBudget: 0,
             maxOutputTokens: 8192,
             timeoutMs: 60_000,
+            // This lane may wait out a provider-sent retry-after of up to
+            // 30 s inside its 3 × 60 s budget (2026-10-25 providers-adapter P2).
+            retryAfterCapMs: BACKGROUND_RETRY_AFTER_CAP_MS,
         });
     });
 
@@ -132,13 +135,22 @@ describe('type-strict keys (2026-09-16 providers-adapter P2 — a numeric key cr
 });
 
 import { describeMemorySeedIncomplete, getPreCommitConfig, PRE_COMMIT_TIMEOUT_MS } from './machinery.js';
+import { BACKGROUND_RETRY_AFTER_CAP_MS, RETRY_AFTER_CAP_MS } from './providers/sse.js';
 
 describe('the pre-commit lane (2026-09-29 providers-adapter P2 — a blocking call held the turn for 183 s)', () => {
-    it('getPreCommitConfig is the background config with ONE attempt at 20 s', () => {
+    it('getPreCommitConfig is the background config with ONE attempt at 20 s on the primary, plus the spread\'s one fallback attempt on a capacity refusal, under the default 10 s retry-after cap', () => {
         const settings = { llmProvider: 'openai', apiKey: 'oa-key', geminiApiKey: 'gem-key' };
         expect(PRE_COMMIT_TIMEOUT_MS).toBe(20_000);
-        expect(getPreCommitConfig(settings)).toEqual({ ...getBackgroundConfig(settings), timeoutMs: 20_000, maxRetries: 0 });
-        expect(getPreCommitConfig(settings).apiKey).toBe('gem-key');
+        const config = getPreCommitConfig(settings);
+        expect(config).toEqual({ ...getBackgroundConfig(settings), timeoutMs: 20_000, maxRetries: 0, retryAfterCapMs: RETRY_AFTER_CAP_MS });
+        expect(config.apiKey).toBe('gem-key');
+        // The fallback rides the spread: a 503 on the primary costs a second
+        // request on MACHINERY_FALLBACK_MODEL (adapter.test.js pins the 40 s
+        // worst case) — the old pin name said "ONE attempt" and lied.
+        expect(config.fallbackModel).toBe(MACHINERY_FALLBACK_MODEL);
+        // The player is watching: the background lane's 30 s wait is overridden.
+        expect(config.retryAfterCapMs).toBe(RETRY_AFTER_CAP_MS);
+        expect(config.retryAfterCapMs).toBeLessThan(BACKGROUND_RETRY_AFTER_CAP_MS);
     });
 });
 

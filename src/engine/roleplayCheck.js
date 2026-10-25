@@ -1,5 +1,5 @@
 import { normalizeRequestedRoll } from '../llm/eventChannels.js';
-import { MAX_ROLL_DC } from '../config/contentLimits.js';
+import { LOCATION_NAME_MAX, MAX_ROLL_DC } from '../config/contentLimits.js';
 import { conversationalDistance } from './replayLedger.js';
 
 // String-or-empty (2026-09-18 P2): String(object) persisted "[object Object]" as a
@@ -58,6 +58,13 @@ export function sanitizePendingRoleplayCheck(value) {
         // second row the reveal paths restore. One challenge per proposal, so
         // one slot; its prose is already appended to `setupNarrative`.
         rulingMessageId: text(value.rulingMessageId, 160) || null,
+        // The setup's own `location` (2026-10-25 chat-orchestration nit): a
+        // travel check's stated destination used to move the hero BEFORE the
+        // dice (visit count, travel link, the arrival directors), and a
+        // set-aside left them there. It rides the proposal and lands with
+        // the outcome — the outcome reply's own location wins when present;
+        // a set-aside never moves anyone.
+        setupLocation: text(value.setupLocation, LOCATION_NAME_MAX) || null,
         loot: value.loot ? {
             goldFound: Number.isFinite(value.loot.goldFound) ? Math.max(0, value.loot.goldFound) : 0,
             silverFound: Number.isFinite(value.loot.silverFound) ? Math.max(0, value.loot.silverFound) : 0,
@@ -79,8 +86,8 @@ export function sanitizePendingRoleplayCheck(value) {
     };
 }
 
-export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null, rulingMessageId = null, supersedesId = null } = {}) {
-    return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, setupNarrative, setupMessageId, rulingMessageId, supersedesId });
+export function buildRoleplayCheckProposal(rolls, playerAction, { challengeUsed = false, preNarrated = false, loot = null, setupNarrative = '', setupMessageId = null, rulingMessageId = null, setupLocation = null, supersedesId = null } = {}) {
+    return sanitizePendingRoleplayCheck({ rolls, playerAction, challengeUsed, preNarrated, loot, setupNarrative, setupMessageId, rulingMessageId, setupLocation, supersedesId });
 }
 
 /**

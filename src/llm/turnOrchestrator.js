@@ -26,7 +26,7 @@
 
 import { isRecordEntry } from '../engine/journalEntry.js';
 import { buildSystemPrompt, buildSystemPromptSplit } from './promptBuilder.js';
-import { parseResponse, detectPreNarratedOutcome, normalizeEvents, detectSemanticTextRolls } from './responseParser.js';
+import { parseResponse, detectPreNarratedOutcome, displayCutIndex, normalizeEvents, detectSemanticTextRolls } from './responseParser.js';
 import { applyEvents } from '../state/applyEvents.js';
 import { gameReducer } from '../state/gameReducer.js';
 import { handleRequestedRolls } from '../engine/rollResolver.js';
@@ -37,12 +37,12 @@ import { isEpilogueRequest } from './tableTalk.js';
 import { factMemoryItem, flushMemoryQueue, journalMemoryItem, queueMemoryItem, retrieveRelevant, sceneMemoryItem } from '../engine/vectorMemory.js';
 import { findSubjectsInText } from '../engine/textMatch.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
-import { describeMemoryUnavailable, dmCallConfig, getMachineryGeminiKey } from './machinery.js';
+import { describeMemoryUnavailable, dmCallConfig, getMachineryGeminiKey, PRE_COMMIT_TIMEOUT_MS } from './machinery.js';
 import { curateStoryMemory, detectCallbackPayoff } from '../engine/storyMemory.js';
-import { planWorldFactAdditions } from '../engine/worldFacts.js';
 import { markTurn, turnFlags } from './turnFlags.js';
 import { captureCallbackPayoff, captureInjection, captureProviderNote, captureUsage } from '../debug/memoryInspectorStore.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from '../components/Chat/turnVisibility.js';
+import { extractProposalLoot } from '../components/Chat/eventRouting.js';
 import { buildNudgePrompt, detectMissingEventsCue, extractNudgeEventFields } from '../components/Chat/missingEventsNudge.js';
 import { buildRollRulingRecord, buildRoleplayChallengePrompt, buildRoleplayCheckProposal, listRevealableSetupIds, pruneRecentRulings } from '../engine/roleplayCheck.js';
 import { detectRecallIntent } from './recallIntent.js';
@@ -363,7 +363,7 @@ export function createTurnRunner({
      * @param {boolean} [extras.suppressHpEvents] - the engine already applied
      *   this turn's HP deltas (a post-roll outcome).
      */
-    const sendToLLM = async (userMessage, originalPlayerMessage, { lane: laneName = 'standard', pendingUserRow = null, playerActionContext = '', onNarrative = null, suppressHpEvents = false } = {}) => {
+    const sendToLLM = async (userMessage, originalPlayerMessage, { lane: laneName = 'standard', pendingUserRow = null, playerActionContext = '', onNarrative = null, suppressHpEvents = false, deferredLocation = null } = {}) => {
         const lane = dmLane(laneName);
         // Per-call semantics: a call that commits nothing (combat intent,
         // failure) must never leave an older turn's message readable here.
@@ -522,11 +522,13 @@ export function createTurnRunner({
                 if (firstChunkAt === null) firstChunkAt = performance.now();
                 streamBuffer += chunk;
                 if (lane.jsonOnly) return;
-                // Once we hit a ```json fence, freeze the display text — all remaining
-                // chunks are JSON data that parseResponse handles on the full text.
-                // (Paint coalescing stays in the component; this only supplies the
-                // ready-to-display text per chunk.)
-                const fenceIdx = streamBuffer.search(/```json/i);
+                // Once we hit the events fence, freeze the display text — all
+                // remaining chunks are JSON data that parseResponse handles on the
+                // full text. The opener is THE parser's (`displayCutIndex`,
+                // 2026-10-25 P2 — a third spelling here streamed "``` json" and
+                // a bare object fence to the player). Paint coalescing stays in
+                // the component; this only supplies the ready-to-display text.
+                const fenceIdx = displayCutIndex(streamBuffer);
                 onStreamChunkText(fenceIdx !== -1 ? streamBuffer.slice(0, fenceIdx).trimEnd() : streamBuffer);
             },
             signal: abortController.signal,
@@ -620,8 +622,9 @@ export function createTurnRunner({
             events = { ...events, requestedRolls: [] };
         }
 
-        // If no JSON events/rolls were detected, check if we should run the Scribe to semantically detect any requested rolls in text
-        if (lane.detectors && (!events || !events.requestedRolls?.length) && !events?.combatStart && originalPlayerMessage && !combatWasActive && s.settings.apiKey) {
+        // If no JSON events/rolls were detected, check if we should run the Scribe to semantically detect any requested rolls in text.
+        // Gated on the MACHINERY key (2026-10-25 nit): the detector runs on Gemini Flash whatever the DM vendor.
+        if (lane.detectors && (!events || !events.requestedRolls?.length) && !events?.combatStart && originalPlayerMessage && !combatWasActive && machineryKey) {
             const semanticRolls = await detectSemanticTextRolls(narrative, s.settings, { signal: abortController.signal });
             if (semanticRolls && semanticRolls.length > 0) {
                 console.warn('[Turn] Scribe detected text-based rolls semantically:', semanticRolls);
@@ -666,13 +669,23 @@ export function createTurnRunner({
         if (hideSetup) clearStreamingDisplay();
         // Pre-generate a stable message ID so applyEvents can reference it as a loot source key.
         const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        // A row is committed only for PROSE (2026-10-25 chat-orchestration P1):
+        // the jsonOnly intent lane's rule, now every lane's. A block-only reply
+        // with events used to commit `{ role: 'assistant', content: '' }` — a
+        // blank bubble in the chat and the save, and a blank turn in the DM's
+        // own window (Gemini 400s an empty text part). Events still flow to the
+        // caller and through applyEvents below; `lastCommittedTurn` stays null,
+        // matching "nothing narrated" — so the cast backstop's narration lane
+        // row becomes the one the post-turn extraction reads. The one deferral
+        // that needs the row (the hidden setup's reveal) names none.
+        const commits = !!narrative.trim();
         if (events) {
             // Let callers staging a roleplay-check proposal recover this response's
             // narration (the withheld setup) and reveal/reuse it later. The ENTRY
             // combat flag rides the turn too (2026-10-13 P2): the caller routes
             // the events against the state the call READ, never against a ref
             // it re-reads after the dispatches.
-            markTurn(events, { setupMessageId: msgId, setupHidden: hideSetup, combatWasActive });
+            markTurn(events, { setupMessageId: commits ? msgId : null, setupHidden: hideSetup, combatWasActive });
             // In a batched combat round the client already rolled AND applied HP from the
             // inline damage, so ignore any HP deltas the DM narrated to avoid double-counting.
             // Finalized BEFORE dispatch: this object enters the reducer store, and an
@@ -683,13 +696,6 @@ export function createTurnRunner({
             }
         }
         if (!isMounted()) return null; // Never commit a turn into a different campaign's store
-        // A combat-intent translation is JSON-only by contract: with no prose
-        // there is nothing to show or remember, and storing the empty assistant
-        // message padded saves AND the DM's 20-message window with blank turns
-        // (queue 2026-08-09, live playtest #8). Events still flow to the caller
-        // and through applyEvents below (condition syncs ride intent turns);
-        // the committed-turn record stays null, matching "nothing narrated".
-        const commits = !(lane.jsonOnly && !narrative.trim());
         if (commits) {
             // The row carries NO `events` (2026-09-28 audit P2): the normalized
             // object materializes every channel key (~620 bytes for an EMPTY
@@ -723,13 +729,44 @@ export function createTurnRunner({
                 // in full here, or to nobody.
                 presenceText: `${originalPlayerMessage || playerActionContext || ''} ${narrative} ${buildPresenceText(promptState.messages || [])}`,
             });
-            // A fight-starting response's queued exchange never blocks its
-            // location: with no live combat, an exchange here always rides a
-            // combat_start (orphans were dropped above), and the narration-only
-            // lane that follows cannot replay it.
-            if (events.location && !combatWasActive) {
-                record({ type: 'SET_LOCATION', payload: events.location });
+        }
+        // A reply the CALLER routes: a roll request becomes the proposal card,
+        // a rejected check gets the correction. Read by the location rule and
+        // the empty-reply floor below.
+        const callerRoutes = events?.requestedRolls?.length > 0
+            || !!turnFlags(events).attackAsCheckRejected
+            || !!turnFlags(events).playerAuthorityRollRejected;
+        // Where the hero IS after this reply. A fight-starting response's
+        // queued exchange never blocks its location: with no live combat, an
+        // exchange here always rides a combat_start (orphans were dropped
+        // above), and the narration-only lane that follows cannot replay it.
+        // A withheld roll SETUP's location is deferred like its other outcomes
+        // (2026-10-25 nit): a travel check's stated destination used to move
+        // the hero — visit count, travel link, the arrival directors — before
+        // the dice, and a set-aside left them there. It rides the turn flags
+        // and the proposal as `setupLocation`, comes back to the outcome call
+        // as `deferredLocation`, and LANDS here — in the turn's own record,
+        // so the Scribe's merge base and the scene embed see the arrival —
+        // unless the outcome moved the hero itself or chained another check
+        // (carried on again). A set-aside never moves anyone.
+        let landedLocation = null;
+        if (!combatWasActive) {
+            if (events?.location) {
+                if (!setupPhase || events.combatStart) landedLocation = events.location;
+                else markTurn(events, { setupLocation: events.location });
+            } else if (deferredLocation) {
+                if (callerRoutes) markTurn(events, { setupLocation: deferredLocation });
+                else landedLocation = deferredLocation;
             }
+        }
+        if (landedLocation) record({ type: 'SET_LOCATION', payload: landedLocation });
+        // A block-only reply whose events dispatched NOTHING is an empty reply
+        // (2026-10-25 P1, the floor): no prose, no row, no state change — the
+        // player would see silence. The jsonOnly lane is a data block by
+        // contract and its caller plans the exchange from the return; a reply
+        // the caller routes is not silence either.
+        if (!lane.jsonOnly && !commits && turnActions.length === 0 && !callerRoutes) {
+            throw new Error('The DM returned only a data block that changed nothing — nothing was narrated and no game state changed. Retry, or if the model is declining, edit or remove (✕) the message it objected to.');
         }
 
         if (commits && !hideSetup && dramaticMemories.length > 0) {
@@ -745,52 +782,15 @@ export function createTurnRunner({
             captureCallbackPayoff({ landed: [...new Set([...landed.map(card => card.id), ...declared])] });
         }
 
-        if (commits) {
-            // The state this turn LEFT, for the post-turn extraction: the
-            // captured prompt state plus every action the turn dispatched,
-            // replayed through the pure reducer. The Scribe's KNOWN contexts
-            // used to be built from a ref read after the dispatches — PRE-TURN
-            // by the render lag, so a stance or look the DM wrote this turn
-            // was absent from the merge base the Scribe is told to restate,
-            // and its facts were judged for embedding against a record that
-            // lacked the DM's own. The replay's one divergence: a record the
-            // reducer mints an id for (a new fact) carries a different id here
-            // than in the store — the Scribe reads people by name and cards
-            // by id, and the one id-keyed fact lane (`supersedes` on a live
-            // intent fact) cannot close a plan born in the same turn either way.
-            const stateAfter = turnActions.reduce(gameReducer, promptState);
-            lastCommittedTurn = { id: msgId, content: narrative, events, hidden: hideSetup, recall: !!recallDossier, combatWasActive, stateAfter };
-        }
-
-        // RAG: embed any new world facts the DM emitted this turn (per response).
-        // The per-turn Scribe + narrative embedding run once in handleSend on the FINAL
-        // narrated outcome, so they capture results rather than withheld setup text.
-        // Skip on a setup turn (pending rolls) — those facts ride on the outcome narration.
-        // A fight-starting setup applied its facts already (applyEvents) — embed them too.
-        if ((!setupPhase || events?.combatStart) && !combatWasActive && events?.worldFacts?.length > 0 && machineryKey) {
-            // The RECORD's rows, not the wire's (2026-10-11 P2): the same plan
-            // the reducer just committed judges these candidates against the
-            // captured state — a restatement the record refuses is never
-            // embedded, the text is the sanitized text with the record's own
-            // secrecy tag (the seed's format, so no mismatched twin on reload),
-            // and the row carries this message's id for retraction.
-            // QUEUED, not embedded (2026-09-29 P2): the turn's facts and its
-            // narrative ride ONE batch request, flushed by the post-turn
-            // extraction (or by the queue's own window when no extraction
-            // follows — a fight-starting response).
-            const planned = planWorldFactAdditions(s.worldFacts, events.worldFacts, { messageCount: (s.messages || []).length, sourceMessage: msgId });
-            for (const f of planned.added) {
-                queueMemoryItem(machineryKey, factMemoryItem(f, { location: events?.location || s.currentLocation, sourceMessage: msgId })).catch(() => {});
-            }
-        }
-
         // Missing-events nudge (IDEAS 2026-07-11): a no-JSON response at a contract
         // moment loses quest_updates/starting_items forever — the only channels with
         // no Scribe audit backstop. Recovery is one JSON-only follow-up, whitelisted.
         // Gated on the ENTRY combat flag (2026-10-13 P2): the two ref reads
         // that stood here landed pre-turn by the render lag — the same flag,
         // by accident. A fight this very turn started has a JSON block, so the
-        // cue never fires on it anyway.
+        // cue never fires on it anyway. It runs BEFORE the turn's state is
+        // replayed below (2026-10-25 P2): its dispatches ride `record`, so the
+        // quest it recovers is in the Scribe's merge base this turn.
         if (lane.nudge && !combatWasActive && !(events?.requestedRolls?.length > 0)) { // a text-detected check owns this turn
             const nudgeCue = detectMissingEventsCue({
                 hadEventBlock: !!parsed.events,
@@ -799,7 +799,50 @@ export function createTurnRunner({
                 narrative,
                 combatActive: combatWasActive,
             });
-            if (nudgeCue) await recoverMissingEvents(nudgeCue, { id: msgId, content: narrative }, abortController.signal);
+            if (nudgeCue) await recoverMissingEvents(nudgeCue, { id: msgId, content: narrative }, abortController.signal, record);
+        }
+
+        // The state this turn LEFT: the captured prompt state plus every action
+        // the turn dispatched, replayed through the pure reducer. The Scribe's
+        // KNOWN contexts used to be built from a ref read after the dispatches
+        // — PRE-TURN by the render lag, so a stance or look the DM wrote this
+        // turn was absent from the merge base the Scribe is told to restate,
+        // and its facts were judged for embedding against a record that
+        // lacked the DM's own. The replay's one divergence: a record the
+        // reducer mints an id for (a new fact) carries a different id here
+        // than in the store — the Scribe reads people by name and cards
+        // by id, and the one id-keyed fact lane (`supersedes` on a live
+        // intent fact) cannot close a plan born in the same turn either way.
+        // Reduced whether or not a row was committed (2026-10-25): the fact
+        // embed below reads the record's rows from it.
+        const stateAfter = turnActions.reduce(gameReducer, promptState);
+        if (commits) {
+            lastCommittedTurn = { id: msgId, content: narrative, events, hidden: hideSetup, recall: !!recallDossier, combatWasActive, location: landedLocation, stateAfter };
+        }
+
+        // RAG: embed any new world facts the DM emitted this turn (per response).
+        // The per-turn Scribe + narrative embedding run once in handleSend on the FINAL
+        // narrated outcome, so they capture results rather than withheld setup text.
+        // Skip on a setup turn (pending rolls) — those facts ride on the outcome narration.
+        // A fight-starting setup applied its facts already (applyEvents) — embed them too.
+        if ((!setupPhase || events?.combatStart) && !combatWasActive && events?.worldFacts?.length > 0 && machineryKey) {
+            // The RECORD's rows (2026-10-11 P2, and literally so since 2026-10-25
+            // P2): the facts the reducer COMMITTED this turn, read off the
+            // replayed state by this message's source stamp — a restatement the
+            // record refused is never embedded, the text is the sanitized text
+            // with the record's own secrecy tag (the seed's format, so no
+            // mismatched twin on reload), the row carries this message's id for
+            // retraction and the record's own `atMessage`. A second plan against
+            // the ENTRY state used to stamp the row two rows early and could
+            // embed a fact the record refused (an orphan the seed pruned).
+            // QUEUED, not embedded (2026-09-29 P2): the turn's facts and its
+            // narrative ride ONE batch request, flushed by the post-turn
+            // extraction (or by the queue's own window when no extraction
+            // follows — a fight-starting response).
+            const committedFacts = (stateAfter.worldFacts || []).filter(f => f?.sourceMessage === msgId);
+            for (const f of committedFacts) {
+                queueMemoryItem(machineryKey, factMemoryItem(f, { location: landedLocation || s.currentLocation, sourceMessage: msgId })).catch(() => {});
+            }
         }
 
         return events;
@@ -810,7 +853,7 @@ export function createTurnRunner({
      * hard-whitelisted (missingEventsNudge.js) and re-shaped through the real parser
      * before applying, so nothing beyond quest_updates/starting_items can enter.
      */
-    const recoverMissingEvents = async (cue, committed, signal) => {
+    const recoverMissingEvents = async (cue, committed, signal, record = dispatch) => {
         try {
             // ONE state for the call's prompt and window. The narration rides
             // ONCE, as the history's last assistant row (2026-10-01 P2): the
@@ -825,8 +868,15 @@ export function createTurnRunner({
             // The turn's own abort signal rides along (2026-09-07 audit P2):
             // Stop used to be inert here — the nudge ran to the 90s stall guard
             // (times retries) while isLoading kept the Stop button showing.
+            // The PRE-COMMIT budget (2026-10-25 P2): the narration is on
+            // screen and the player waits on this call, so it gets ONE attempt
+            // at 20 s like the arbiter and the detector — it used to hold the
+            // turn on the background lane's 90 s × 3; its fallback is "nothing
+            // recovered, the Scribe audits the rest".
             const response = await sendMessage({
                 ...dmCallConfig(s.settings),
+                timeoutMs: PRE_COMMIT_TIMEOUT_MS,
+                maxRetries: 0,
                 // The nudge's own projection (2026-10-13 P2): the character
                 // line, INVENTORY and ACTIVE QUESTS over the cached prefix —
                 // it used to carry the whole 82k-char dynamic half for a reply
@@ -841,7 +891,9 @@ export function createTurnRunner({
             if (!rawFields) return;
             const synthetic = parseResponse('```json\n' + JSON.stringify(rawFields) + '\n```');
             if (!synthetic.events) return;
-            applyEvents(synthetic.events, dispatch, getState, {
+            // Through the turn's `record` (2026-10-25 P2): the recovered quest
+            // is in the replayed `stateAfter` the Scribe reads this turn.
+            applyEvents(synthetic.events, record, getState, {
                 openingScene: cue.reason === 'opening',
                 lootSourceId: `${committed.id}:nudge`,
             });
@@ -883,6 +935,11 @@ export function createTurnRunner({
             preNarrated: !!flags.preNarratedOutcome,
             loot,
             ...setup,
+            // The deferred destination (2026-10-25 nit): this response's own
+            // withheld `location` — or the one it carried on as
+            // `deferredLocation` (a chained check, a correction) — else the
+            // original setup's (a challenge).
+            setupLocation: flags.setupLocation || setupFrom?.setupLocation || null,
             supersedesId,
         });
         if (!proposal) return false;
@@ -957,7 +1014,9 @@ export function createTurnRunner({
             // The DM's own location event (already applied) outranks the async
             // Scribe for this turn: the Scribe's location downgrades to
             // confirm-or-fill so it can never relocate the hero backwards.
-            dmLocationEvent: finalNarration.events?.location || null,
+            // A deferred setup destination that landed with this outcome counts
+            // as the DM's own event (2026-10-25).
+            dmLocationEvent: finalNarration.location || finalNarration.events?.location || null,
             // Loot persistence audit: recover coins/items the narrative granted
             // but the DM's structured events missed — post-roll outcomes lose
             // them most often (the withheld setup already dropped its events by
@@ -1033,9 +1092,57 @@ export function createTurnRunner({
      * playerActionContext keeps the replay guards honest; a check that
      * overrode the player's authored delivery gets a no-dice narration.
      */
-    const sendRollCorrection = ({ attackAsCheck = false, playerAction = '' } = {}) => (attackAsCheck
-        ? sendToLLM(attackAsCheckCorrectionPrompt(playerAction), null, { playerActionContext: playerAction })
-        : sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { lane: 'narration' }));
+    const sendRollCorrection = async ({ attackAsCheck = false, playerAction = '', setupLocation = null } = {}) => {
+        let narrative = '';
+        const onNarrative = text => { narrative = text; };
+        // The attack correction is a NARRATIVE turn with the player's action
+        // on it (2026-10-25): the arbiter and the detector run on its reply
+        // like the first hop's, so a re-staged attack check is refused again
+        // here and never reaches the proposal card.
+        // `setupLocation` is the rejected setup's deferred destination: it lands
+        // with the correction's reply or rides on to the proposal it stages.
+        const events = attackAsCheck
+            ? await sendToLLM(attackAsCheckCorrectionPrompt(playerAction), playerAction || null, { playerActionContext: playerAction, onNarrative, deferredLocation: setupLocation })
+            : await sendToLLM(playerAuthorityRollCorrectionPrompt(), null, { lane: 'narration', onNarrative, deferredLocation: setupLocation });
+        return { events, route: routeCorrectionReply(events, { playerAction, narrative }) };
+    };
+
+    /**
+     * A re-response is a TURN (2026-10-25 chat-orchestration P2): all three
+     * callers of `sendRollCorrection` used to drop its return, so a correction
+     * answered with prose + `requested_rolls` committed its row hidden (the
+     * setup policy), staged nothing, and the player saw NO reply — no
+     * proposal, no reveal path. Routed like a first hop, ONCE:
+     * - a roll request → a staged proposal, the hidden row riding as its setup
+     *   (the first hop's own rule in stageRoleplayCheck);
+     * - a check the arbiter rejected AGAIN → no second correction; the hidden
+     *   prose is revealed and extracted (the set-aside's path) and stands;
+     * - otherwise the reply stands — a `combat_start` + queued exchange was
+     *   applied by applyEvents (START_COMBAT; ChatPanel's effects play the
+     *   opening), plain prose is the scene. (A deferred destination landed or
+     *   was carried on inside the call itself.)
+     * @returns {'staged'|'revealed'|'combat'|'narrated'}
+     */
+    const routeCorrectionReply = (events, { playerAction = '', narrative = '' } = {}) => {
+        const flags = turnFlags(events);
+        if (events?.requestedRolls?.length > 0 && !flags.combatWasActive) {
+            stageRoleplayCheck(events.requestedRolls, playerAction, {
+                events,
+                narrative,
+                loot: extractProposalLoot(events),
+            });
+            return 'staged';
+        }
+        if (flags.attackAsCheckRejected || flags.playerAuthorityRollRejected) {
+            const committed = getLastCommittedTurn();
+            if (committed?.hidden && committed.content?.trim()) {
+                dispatch({ type: 'REVEAL_MESSAGE', payload: { id: committed.id } });
+                extractRevealedSetup(playerAction, [committed.id]);
+            }
+            return 'revealed';
+        }
+        return events?.combatStart ? 'combat' : 'narrated';
+    };
 
     const acceptRoleplayCheck = async () => {
         const proposal = getState().pendingRoleplayCheck;
@@ -1062,6 +1169,9 @@ export function createTurnRunner({
                 setupNarrative: proposal.setupNarrative,
                 setupMessageId: proposal.setupMessageId,
                 rulingMessageId: proposal.rulingMessageId,
+                // The setup's deferred destination lands with the outcome call
+                // (2026-10-25 nit) — or rides on to a chained check.
+                setupLocation: proposal.setupLocation,
                 onFollowUpRolls: (rolls, meta) => {
                     // The follow-up response's own events and narration: a
                     // withheld follow-up is the re-staged proposal's setup
@@ -1077,7 +1187,12 @@ export function createTurnRunner({
                 // The outcome call now runs the roll arbiter (2026-09-02 P1); a
                 // chained check it rejects takes the same correction routes the
                 // first hop gets in ChatPanel — the rejected narration was withheld.
-                onFollowUpRejected: ({ attackAsCheck }) => sendRollCorrection({ attackAsCheck, playerAction: proposal.playerAction }),
+                // The correction's reply is ROUTED (2026-10-25 P2): a staged
+                // proposal is a follow-up like the chained check's.
+                onFollowUpRejected: async ({ attackAsCheck }) => {
+                    const correction = await sendRollCorrection({ attackAsCheck, playerAction: proposal.playerAction, setupLocation: proposal.setupLocation });
+                    if (correction.route === 'staged') stagedFollowUp = true;
+                },
                 pendingLoot: proposal.loot,
             });
             // Every roll resolved to nothing and the withheld rows were revealed:
@@ -1128,7 +1243,10 @@ export function createTurnRunner({
             const events = await sendToLLM(
                 buildRoleplayChallengePrompt(proposal, challenge),
                 proposal.playerAction,
-                { pendingUserRow: challengeRow },
+                // The setup's deferred destination (2026-10-25 nit): a
+                // withdrawn check is the approach succeeding diceless, so it
+                // lands; a re-ruling carries it on to the re-staged proposal.
+                { pendingUserRow: challengeRow, deferredLocation: proposal.setupLocation },
             );
             if (events?.requestedRolls?.length > 0) {
                 // Upheld/revised rulings are JSON-only responses by contract; the
@@ -1156,7 +1274,7 @@ export function createTurnRunner({
                     challenge,
                 });
                 if (ruling) dispatch({ type: 'RECORD_ROLL_RULING', payload: ruling });
-                if (turnFlags(events).playerAuthorityRollRejected) await sendRollCorrection();
+                if (turnFlags(events).playerAuthorityRollRejected) await sendRollCorrection({ setupLocation: proposal.setupLocation });
                 finalizeRoleplayTurn(proposal.playerAction);
             }
         } catch (error) {

@@ -777,6 +777,8 @@ export default function ChatPanel() {
             });
 
             const combatStartedNow = !!events?.combatStart;
+            // What a correction's reply became (`sendRollCorrection`'s route).
+            let correction = null;
             // The routing decision is pure and unit-tested in eventRouting.js;
             // this switch only executes the chosen route's side effects. It
             // reads the turn's own ENTRY combat flag (turnFlags) — never the
@@ -806,9 +808,13 @@ export default function ChatPanel() {
                     loot: routed.proposalLoot,
                 });
             } else if (routed.route === TURN_ROUTES.ATTACK_AS_CHECK) {
-                await runner.sendRollCorrection({ attackAsCheck: true, playerAction: trimmed });
+                // The correction's reply is ROUTED by the runner (2026-10-25
+                // P2): a check it carries is staged, a fight it starts is
+                // started, a re-rejected check stands revealed. The rejected
+                // setup's deferred destination rides along.
+                correction = await runner.sendRollCorrection({ attackAsCheck: true, playerAction: trimmed, setupLocation: turnFlags(events).setupLocation || null });
             } else if (routed.route === TURN_ROUTES.AUTHORITY_CORRECTION) {
-                await runner.sendRollCorrection();
+                correction = await runner.sendRollCorrection({ setupLocation: turnFlags(events).setupLocation || null });
             }
             if (startedCombatIntent && !combatIntentHandled) {
                 dispatch({ type: 'CANCEL_COMBAT_INTENT' });
@@ -832,7 +838,10 @@ export default function ChatPanel() {
             // updates, or memories from it would canonize table talk.
             const waitsForResolution = !!events?.combatExchange
                 || combatStartedNow
-                || !!events?.requestedRolls?.length;
+                || !!events?.requestedRolls?.length
+                // A correction that staged a check or started a fight waits too.
+                || correction?.route === 'staged'
+                || correction?.route === 'combat';
             if (!waitsForResolution && !tableTalkTurn) {
                 runner.runPostTurnExtraction(trimmed, { auditCasts: true });
             }

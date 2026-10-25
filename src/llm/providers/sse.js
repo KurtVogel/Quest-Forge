@@ -20,8 +20,16 @@ import { isRecord } from '../../engine/text.js';
  * line the server never terminated is still delivered when the body ends.
  * The field separator is `data:` with an OPTIONAL space — both are valid
  * SSE, and a proxy in a player's path may emit either (2026-09-06 audit).
+ *
+ * `onActivity` (2026-10-25 providers-adapter P2) fires on every read that
+ * returns BYTES, before they are parsed: liveness is bytes, not text. The
+ * adapter's idle timer used to be armed by the consumer's text callback
+ * alone, so a reasoning model's text-less keep-alives (a `thought` part, a
+ * `usageMetadata`-only event, an empty OpenAI `delta`) kept the connection
+ * alive and the timer dead — a think longer than the idle budget was cut as
+ * "stalled" while data flowed.
  */
-export async function readSseStream(response, onEvent) {
+export async function readSseStream(response, onEvent, { onActivity = null } = {}) {
     // A response without a body is a dropped connection, not a TypeError out
     // of getReader (2026-09-16 audit P2).
     if (!response?.body || typeof response.body.getReader !== 'function') {
@@ -60,6 +68,7 @@ export async function readSseStream(response, onEvent) {
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (value?.length && typeof onActivity === 'function') onActivity();
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
@@ -104,14 +113,23 @@ export function isTransient(errorOrStatus) {
 
 /**
  * The wait before retry `attempt` (0-based): exponential backoff from `base`
- * plus up to `jitterMs` of jitter, and a provider's `Retry-After` (the
- * `.retryAfterMs` that makeHttpError stamps, already capped) wins whenever it
- * is longer — a per-minute quota 429 burned all three attempts in ~3 s and
- * lost the Scribe/journal extraction (2026-09-06).
+ * plus up to `jitterMs` of jitter, and a provider's retry-after (the
+ * `.retryAfterMs` that makeHttpError stamps, under the HARD cap) wins
+ * whenever it is longer — a per-minute quota 429 burned all three attempts
+ * in ~3 s and lost the Scribe/journal extraction (2026-09-06).
+ *
+ * `capMs` is the LANE's ceiling on that provider-sent wait (2026-10-25
+ * providers-adapter P2): the DM stream and the pre-commit lane keep
+ * RETRY_AFTER_CAP_MS (10 s — the player is watching), the background lane
+ * and the embed seed may wait BACKGROUND_RETRY_AFTER_CAP_MS (30 s) inside
+ * their own budgets, because Gemini's per-minute windows say 20–60 s and a
+ * 10 s wait simply burned the retry.
  */
-export function retryDelay(attempt, error, { base = 1000, jitterMs = 250 } = {}) {
+export function retryDelay(attempt, error, { base = 1000, jitterMs = 250, capMs = RETRY_AFTER_CAP_MS } = {}) {
     const backoff = base * 2 ** attempt + Math.random() * jitterMs;
-    return Math.max(backoff, Number.isFinite(error?.retryAfterMs) ? error.retryAfterMs : 0);
+    const cap = Number.isFinite(capMs) && capMs > 0 ? capMs : RETRY_AFTER_CAP_MS;
+    const retryAfter = Number.isFinite(error?.retryAfterMs) ? Math.min(error.retryAfterMs, cap) : 0;
+    return Math.max(backoff, retryAfter);
 }
 
 export const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -182,10 +200,34 @@ const SYMBOLIC_STATUS = {
 };
 
 /**
- * `Retry-After` in milliseconds — delta-seconds or an HTTP-date — capped so a
- * hostile/huge header can never park the retry loop; null when absent or junk.
+ * The provider-sent retry-after has TWO caps since 2026-10-25 (providers-
+ * adapter P2). The parse site clamps to the HARD cap, so a hostile or huge
+ * value can never park a retry loop whatever lane reads it; each lane then
+ * applies its own ceiling in `retryDelay` — the default (the DM stream, the
+ * pre-commit arbiter / detector) is 10 s, the background extraction lane and
+ * the embed seed take 30 s (their budgets are 3 × 60 s and a whole-call
+ * deadline), so a Gemini per-minute window is waited out instead of burning
+ * the retry at 10 s and losing the Scribe pass.
  */
+export const RETRY_AFTER_HARD_CAP_MS = 60_000;
 export const RETRY_AFTER_CAP_MS = 10_000;
+export const BACKGROUND_RETRY_AFTER_CAP_MS = 30_000;
+
+/** A positive, finite millisecond wait clamped to the hard cap, else null. */
+function clampRetryMs(ms) {
+    if (ms == null || !Number.isFinite(ms) || ms <= 0) return null;
+    return Math.min(ms, RETRY_AFTER_HARD_CAP_MS);
+}
+
+/**
+ * `Retry-After` in milliseconds — delta-seconds or an HTTP-date — under the
+ * hard cap; null when absent or junk. NOTE (2026-10-25, measured from the
+ * deployed origin): `Retry-After` is not a CORS-safelisted response header,
+ * so a browser reads it only when the provider's `Access-Control-Expose-
+ * Headers` names it — xAI exposes `*`, OpenAI exposes `CF-Ray` alone, Google
+ * exposes the reply's own header names. The body's copy of the same fact
+ * (`parseBodyRetryDelayMs`) is readable everywhere and is the fallback.
+ */
 export function parseRetryAfterMs(headerValue) {
     const raw = String(headerValue || '').trim();
     if (!raw) return null;
@@ -196,8 +238,56 @@ export function parseRetryAfterMs(headerValue) {
         const at = Date.parse(raw);
         if (Number.isFinite(at)) ms = at - Date.now();
     }
-    if (ms == null || !Number.isFinite(ms) || ms <= 0) return null;
-    return Math.min(ms, RETRY_AFTER_CAP_MS);
+    return clampRetryMs(ms);
+}
+
+/** Seconds out of Google's duration forms: "32s" / "32.5s", or `{ seconds, nanos }`. */
+function durationSeconds(value) {
+    if (typeof value === 'string') {
+        const match = /^\s*(\d+(?:\.\d+)?)\s*s\s*$/i.exec(value);
+        return match ? Number(match[1]) : null;
+    }
+    if (isRecord(value)) {
+        const seconds = Number(value.seconds ?? 0);
+        const nanos = Number(value.nanos ?? 0);
+        if (!Number.isFinite(seconds) || !Number.isFinite(nanos)) return null;
+        return seconds + nanos / 1e9;
+    }
+    return null;
+}
+
+/**
+ * The retry delay a Google API error BODY carries, in milliseconds under the
+ * hard cap, else null (2026-10-25 providers-adapter P2). Two places say it:
+ * `error.details[]` holds a `google.rpc.RetryInfo` entry (`@type` ending in
+ * `RetryInfo`) with `retryDelay` as "32s" / "32.5s" or `{ seconds, nanos }`,
+ * and the message itself reads "Please retry in 32.5s". The body is readable
+ * cross-origin where the `Retry-After` header is not, so both Gemini lanes
+ * read it when the header is absent. Harmless for an OpenAI / xAI body (no
+ * `details`, no such phrasing → null). Takes the parsed record or the raw
+ * body text.
+ */
+export function parseBodyRetryDelayMs(body) {
+    let record = body;
+    if (typeof body === 'string') {
+        try {
+            record = JSON.parse(body);
+        } catch {
+            return null;
+        }
+    }
+    const error = asRecord(asRecord(record).error);
+    const details = Array.isArray(error.details) ? error.details : [];
+    for (const detail of details) {
+        if (!isRecord(detail) || !/RetryInfo$/.test(String(detail['@type'] || ''))) continue;
+        const seconds = durationSeconds(detail.retryDelay);
+        if (seconds != null) return clampRetryMs(seconds * 1000);
+    }
+    if (typeof error.message === 'string') {
+        const match = /retry (?:in|after) (\d+(?:\.\d+)?)\s*(?:s\b|secs?\b|seconds?\b)/i.exec(error.message);
+        if (match) return clampRetryMs(Number(match[1]) * 1000);
+    }
+    return null;
 }
 
 /**
@@ -243,7 +333,8 @@ export function makeCompletionGuard({ completeReason, truncatedReason, truncated
  * than printing "[object Object]". `.status` lets the adapter retry
  * transient failures, and `.retryAfterMs` carries a `Retry-After` header so
  * a per-minute quota 429 is not burned through in three ~1 s attempts
- * (2026-09-06 audit).
+ * (2026-09-06 audit) — or, when the browser cannot read the header (not
+ * CORS-exposed), the BODY's own delay (`parseBodyRetryDelayMs`, 2026-10-25).
  */
 export function makeHttpError(label) {
     return async function httpError(response) {
@@ -257,7 +348,7 @@ export function makeHttpError(label) {
             || response.statusText;
         const err = new Error(`${label} API error (${response.status}): ${detail}`);
         err.status = response.status;
-        const retryAfterMs = parseRetryAfterMs(response.headers?.get?.('retry-after'));
+        const retryAfterMs = parseRetryAfterMs(response.headers?.get?.('retry-after')) ?? parseBodyRetryDelayMs(error);
         if (retryAfterMs != null) err.retryAfterMs = retryAfterMs;
         return err;
     };

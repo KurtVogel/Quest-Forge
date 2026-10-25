@@ -328,6 +328,9 @@ function buildRollOutcomePrompt({ summary, preNarrated = false, setupNarrative =
  * @param {function} [options.onFollowUpRejected] - called when the roll arbiter
  *   rejected every check the outcome chained (`{ attackAsCheck }`); the caller owns
  *   the correction response, exactly like the first hop's routing.
+ * @param {string|null} [options.setupLocation] - the withheld setup's deferred
+ *   `location` (2026-10-25): handed to the outcome call as `deferredLocation`,
+ *   where it lands unless the outcome moves the hero itself or chains a check.
  * @returns {Promise<{ revealedIds: string[] }|undefined>} — `revealedIds` ONLY when
  *   every roll resolved to nothing and the withheld rows were revealed (the caller
  *   extracts the fiction that just became canon); "did dice land" is still read off
@@ -345,6 +348,7 @@ export async function handleRequestedRolls(requestedRolls, {
     setupNarrative = '',
     setupMessageId = null,
     rulingMessageId = null,
+    setupLocation = null,
 }) {
     const state = getState();
     const character = state.character;
@@ -404,6 +408,7 @@ export async function handleRequestedRolls(requestedRolls, {
                 suppressHpEvents: appliedHp,
                 playerActionContext: playerAction,
                 onNarrative: text => { followUpNarrative = text; },
+                deferredLocation: setupLocation,
             }
         );
 

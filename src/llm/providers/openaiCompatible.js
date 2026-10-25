@@ -133,20 +133,43 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
      * per-server cache can hit). A custom header costs a CORS preflight; if
      * the provider's edge does not allow it the browser fails the request
      * before any byte, as a network TypeError — then the request is sent
-     * ONCE more without the header and the caller is told, so a header the
-     * edge rejects can never take the DM lane down. A caller abort passes.
+     * ONCE more without the header, so a header the edge rejects can never
+     * take the DM lane down. A caller abort passes.
+     *
+     * The refusal is JUDGED by the plain re-send and REMEMBERED for the
+     * session (2026-10-25 providers-adapter P2): a network TypeError on the
+     * headered fetch is also what an OFFLINE call looks like, so the header is
+     * proven refused only when the plain send gets a response (any status) —
+     * then `headerRejected` drops the extra headers from every later call of
+     * this factory instance (the `explicitCacheRejected` twin) and the caller
+     * is told once. When the plain send ALSO fails as a network failure it was
+     * never the header: the original error is rethrown with no note. The old
+     * shape sent every offline xAI call twice per attempt and posted a false
+     * "refused the header" inspector note on each.
      */
+    let headerRejected = false;
     async function fetchWithExtraHeaders(args, init) {
-        const extra = extraHeaders(args) || {};
+        const extra = headerRejected ? {} : (extraHeaders(args) || {});
         const keys = Object.keys(extra);
         if (keys.length === 0) return fetch(baseUrl, init);
+        let headeredError;
         try {
             return await fetch(baseUrl, { ...init, headers: { ...init.headers, ...extra } });
         } catch (error) {
             if (args.signal?.aborted || !isNetworkFailure(error)) throw error;
-            args.onHeaderRejected?.(keys);
-            return fetch(baseUrl, init);
+            headeredError = error;
         }
+        let plain;
+        try {
+            plain = await fetch(baseUrl, init);
+        } catch (plainError) {
+            // Offline, a blocked host, an abort: nothing the header did.
+            if (args.signal?.aborted || !isNetworkFailure(plainError)) throw plainError;
+            throw headeredError;
+        }
+        headerRejected = true;
+        args.onHeaderRejected?.(keys);
+        return plain;
     }
     const httpError = makeHttpError(label);
 
@@ -188,7 +211,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
 
     /** Stream a message, calling onChunk with each text fragment. */
     async function stream(args) {
-        const { model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk, temperature, maxOutputTokens, onUsage } = args;
+        const { model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk, temperature, maxOutputTokens, onUsage, onActivity } = args;
         const response = await requestWithCacheFallback(args, (explicitCache) => ({
             model,
             messages: formatMessages(systemPrompt, messageHistory, userMessage, { systemPromptParts, explicitCache }),
@@ -210,6 +233,8 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
         let finishReason = null;
         let usage = null;
 
+        // `onActivity` is the adapter's idle timer, armed per READ (bytes, not
+        // text — 2026-10-25): a reasoning model's empty keep-alive delta is life.
         await readSseStream(response, (parsed) => {
             if (parsed.usage && typeof parsed.usage === 'object') usage = parsed.usage;
             const choice = parsed.choices?.[0];
@@ -221,7 +246,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
                 fullText += text;
                 onChunk(text);
             }
-        });
+        }, { onActivity });
 
         if (refusalText.trim()) {
             throw refusalError(refusalText);

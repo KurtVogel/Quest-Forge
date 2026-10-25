@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { asRecord, historyText, isTransient, makeHttpError, makeStreamError, parseRetryAfterMs, readSseStream, reportUsage, RETRY_AFTER_CAP_MS, retryDelay, TRANSIENT_STATUS } from './sse.js';
+import { asRecord, historyText, isTransient, makeHttpError, makeStreamError, parseRetryAfterMs, readSseStream, reportUsage, RETRY_AFTER_HARD_CAP_MS, retryDelay, TRANSIENT_STATUS } from './sse.js';
 
 /** Response whose body yields the given strings as successive reader chunks. */
 function streamResponse(chunks) {
@@ -85,11 +85,11 @@ describe('makeHttpError', () => {
         expect(err.retryAfterMs).toBeUndefined();
     });
 
-    it('parses delta-seconds Retry-After into retryAfterMs (capped)', async () => {
+    it('parses delta-seconds Retry-After into retryAfterMs (under the HARD cap; the lane cap is retryDelay\'s since 2026-10-25)', async () => {
         const short = await makeHttpError('Test')(response({}, { status: 429, headers: { 'retry-after': '3' } }));
         expect(short.retryAfterMs).toBe(3000);
         const long = await makeHttpError('Test')(response({}, { status: 429, headers: { 'retry-after': '3600' } }));
-        expect(long.retryAfterMs).toBe(RETRY_AFTER_CAP_MS);
+        expect(long.retryAfterMs).toBe(RETRY_AFTER_HARD_CAP_MS);
     });
 
     it('parses an HTTP-date Retry-After relative to now and ignores junk', async () => {

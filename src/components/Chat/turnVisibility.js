@@ -112,8 +112,14 @@ export function dropOrphanCombatExchange(events, combatActive) {
 export function buildMessageWindow(messages, windowSize, { pendingUserMessage = null } = {}) {
     const unsummarized = (messages || []).filter(m => {
         if (m.summarized || m.hidden || m.deleted || m.exchangeLine) return false;
+        // A text-less row never reaches a provider (2026-10-25
+        // chat-orchestration P1): a block-only reply used to commit an empty
+        // assistant row, and the pre-10-25 unfenced lane left blank rows in
+        // live saves — Gemini 400s an empty text part, the compat APIs read a
+        // blank turn. The filter is the floor for rows already stored.
+        if (typeof m.content !== 'string' || !m.content.trim()) return false;
         if (m.role === 'system') {
-            return m.dmVisible === true || /rolled \*\*/i.test(m.content || '');
+            return m.dmVisible === true || /rolled \*\*/i.test(m.content);
         }
         return true;
     });

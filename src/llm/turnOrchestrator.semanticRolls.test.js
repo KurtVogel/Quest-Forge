@@ -14,6 +14,20 @@ vi.mock('./responseParser.js', async (importOriginal) => ({
     ...(await importOriginal()),
     detectSemanticTextRolls: detectMock,
 }));
+// The detector's gate reads the MACHINERY key (2026-10-25 nit), so the
+// harness carries one — and the other machinery lanes that key opens stay
+// off the network: retrieval and the fact embed are stubbed, the arbiter's
+// adapter call answers '' and takes its sync rules.
+vi.mock('../engine/vectorMemory.js', async (importOriginal) => ({
+    ...(await importOriginal()),
+    retrieveRelevant: async () => [],
+    queueMemoryItem: async () => {},
+    flushMemoryQueue: async () => {},
+}));
+vi.mock('./adapter.js', async (importOriginal) => ({
+    ...(await importOriginal()),
+    sendMessage: vi.fn(async () => ''),
+}));
 
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
 import { createCharacter } from '../engine/characterUtils.js';
@@ -36,7 +50,7 @@ function createHarness({ streamMessage } = {}) {
     let state = {
         ...initialGameState,
         character: createCharacter('Testa', 'human', 'fighter', ABILITY_SCORES, ['athletics']),
-        settings: { ...initialGameState.settings, llmProvider: 'openai', apiKey: 'test-key', model: 'test-model' },
+        settings: { ...initialGameState.settings, llmProvider: 'openai', apiKey: 'test-key', geminiApiKey: 'machinery-key', model: 'test-model' },
         session: { ...initialGameState.session, id: 'session-test' },
     };
     const dispatch = (action) => { state = gameReducer(state, action); };

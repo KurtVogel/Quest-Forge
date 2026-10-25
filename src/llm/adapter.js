@@ -88,6 +88,11 @@ export const STREAM_START_MAX_RETRIES = 2;
  *   and retried (default 90s).
  * @param {number} [options.maxRetries] - Retries after the first attempt
  *   (default 2; 0 = one attempt, for a call the player is waiting on).
+ * @param {number} [options.retryAfterCapMs] - The LANE's ceiling on a
+ *   provider-sent retry-after (sse.js retryDelay; default RETRY_AFTER_CAP_MS
+ *   10 s). The background lane passes BACKGROUND_RETRY_AFTER_CAP_MS (30 s)
+ *   through getBackgroundConfig so a Gemini per-minute window is waited out
+ *   inside its 3 × 60 s budget instead of burning the retry (2026-10-25).
  * @param {AbortSignal} [options.signal] - External cancel; never retried.
  * @param {function} [options.onUsage] - Receives `{ promptTokens, cachedTokens,
  *   outputTokens }` once the provider reports usage (2026-09-30 cache
@@ -110,7 +115,7 @@ export const STREAM_START_MAX_RETRIES = 2;
  *   answered every call.
  * @returns {Promise<string>} LLM response text
  */
-export async function sendMessage({ provider, apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, timeoutMs = DEFAULT_SEND_TIMEOUT_MS, maxRetries = DEFAULT_SEND_MAX_RETRIES, signal, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected, fallbackModel }) {
+export async function sendMessage({ provider, apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, temperature, thinkingBudget, maxOutputTokens, timeoutMs = DEFAULT_SEND_TIMEOUT_MS, maxRetries = DEFAULT_SEND_MAX_RETRIES, retryAfterCapMs, signal, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected, fallbackModel }) {
     const p = providers[provider];
     if (!p) throw new Error(`Unknown LLM provider: "${provider}"`);
     if (!apiKey) throw new Error('API key is required. Please set it in Settings.');
@@ -145,8 +150,9 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, syste
                 throw new Error(`${provider} request stalled — no response after ${Math.round(timeoutMs / 1000)}s (${requests} attempt${requests === 1 ? '' : 's'}).`);
             }
             const reason = stalled ? `stalled after ${Math.round(timeoutMs / 1000)}s` : error.message;
-            // A `Retry-After` the provider sent wins over the backoff (sse.js retryDelay).
-            const delay = retryDelay(attempt, error, { base: SEND_RETRY_BASE_MS });
+            // A retry-after the provider sent (header or body) wins over the
+            // backoff, under the lane's cap (sse.js retryDelay).
+            const delay = retryDelay(attempt, error, { base: SEND_RETRY_BASE_MS, capMs: retryAfterCapMs });
             console.warn(`[LLM Adapter] Transient ${provider} failure (${reason}); retry ${attempt + 1}/${MAX_RETRIES} in ~${Math.round(delay)}ms.`);
             await sleep(delay);
         } finally {
@@ -160,9 +166,10 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, syste
  * Stream a message from the configured LLM provider.
  * Calls onChunk with each text fragment as it arrives. The visible DM turn's
  * lane: it takes NONE of sendMessage's timeoutMs / maxRetries / thinkingBudget
- * / maxOutputTokens / fallbackModel — its stall guard is the idle timer, its
- * retry budget is STREAM_START_MAX_RETRIES (before the first byte only), and
- * the provider's own model defaults govern thinking and the output cap.
+ * / fallbackModel — its stall guard is the idle timer, its retry budget is
+ * STREAM_START_MAX_RETRIES (before the first byte only), and the provider's
+ * own model defaults govern thinking; `maxOutputTokens` is forwarded like the
+ * send's (2026-10-25 — the providers honored it, the adapter dropped it).
  * @param {object} options
  * @param {string} options.provider - Provider name ('gemini' | 'openai' | 'xai')
  * @param {string} options.apiKey - API key
@@ -174,14 +181,19 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, syste
  * @param {AbortSignal} [options.signal] - Optional abort signal (the Stop
  *   button); surfaces as an AbortError, never retried
  * @param {number} [options.temperature] - Sampling temperature (default 0.9)
- * @param {number} [options.idleTimeoutMs] - Abort when no chunk has arrived
- *   for this long (default DEFAULT_STREAM_IDLE_TIMEOUT_MS, reset per chunk)
+ * @param {number} [options.maxOutputTokens] - Per-call output cap override;
+ *   omitted, the provider's per-model cap governs.
+ * @param {number} [options.idleTimeoutMs] - Abort when no BYTES have arrived
+ *   for this long (default DEFAULT_STREAM_IDLE_TIMEOUT_MS). Reset on every
+ *   transport read through the provider's `onActivity` (2026-10-25 — a
+ *   reasoning model's text-less keep-alives used to leave the timer dead)
+ *   and on every text chunk.
  * @param {function} [options.onUsage] - As sendMessage
  * @param {string} [options.conversationId] - As sendMessage
  * @param {function} [options.onHeaderRejected] - As sendMessage
  * @returns {Promise<string>} Complete response text
  */
-export async function streamMessage({ provider, apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk, signal, temperature, idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected }) {
+export async function streamMessage({ provider, apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk, signal, temperature, maxOutputTokens, idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected }) {
     const p = providers[provider];
     if (!p) throw new Error(`Unknown LLM provider: "${provider}"`);
     if (!apiKey) throw new Error('API key is required. Please set it in Settings.');
@@ -209,7 +221,10 @@ export async function streamMessage({ provider, apiKey, model, systemPrompt, sys
         let result;
         for (let attempt = 0; ; attempt++) {
             try {
-                result = await p.stream({ apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk: (chunk) => { streamed = true; guardedOnChunk(chunk); }, signal: controller.signal, temperature, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected });
+                // `onActivity`: the transport's per-read liveness arms the idle
+                // timer too — the text callback alone missed a reasoning
+                // model's text-less events (2026-10-25).
+                result = await p.stream({ apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk: (chunk) => { streamed = true; guardedOnChunk(chunk); }, onActivity: armIdleTimer, signal: controller.signal, temperature, maxOutputTokens, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected });
                 break;
             } catch (error) {
                 // A transient refusal BEFORE the first byte is safe to retry —

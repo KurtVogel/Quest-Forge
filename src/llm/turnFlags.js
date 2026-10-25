@@ -15,6 +15,10 @@
  * - playerAuthorityRollRejected — every proposed roll was a player-authority override
  * - preNarratedOutcome — the setup narrated the result before the dice
  * - setupMessageId / setupHidden — the committed setup row and whether it was withheld
+ *   (a block-only setup commits no row and names none — 2026-10-25)
+ * - setupLocation — the `location` a withheld roll setup stated, held back
+ *   from SET_LOCATION until the dice resolve to an outcome (2026-10-25); the
+ *   proposal carries it as `setupLocation`
  * - combatWasActive — the ENTRY combat flag the call read (2026-10-13): the
  *   caller routes the events against it, never against a ref re-read after
  *   the dispatches

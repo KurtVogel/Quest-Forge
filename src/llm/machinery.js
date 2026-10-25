@@ -20,6 +20,8 @@
 // sensitive consumers (Scribe appearance/stance merges, roll audits) remain
 // the quality gate on any future swap; the parser / Scribe golden fixtures
 // and scribe.size.test.js are the floor.
+import { BACKGROUND_RETRY_AFTER_CAP_MS, RETRY_AFTER_CAP_MS } from './providers/sse.js';
+
 export const MACHINERY_MODEL = 'gemini-3.8-flash';
 
 /**
@@ -128,6 +130,12 @@ export function isMachineryReady(settings) {
  * from burning reasoning tokens against the output cap (2-4 such calls run
  * per turn, two of them blocking), and 8192 output tokens is generous for
  * every consumer's bounded JSON. Both ride the sendMessage options spread.
+ *
+ * `retryAfterCapMs` (2026-10-25 providers-adapter P2): this lane may wait
+ * out a provider-sent retry-after of up to 30 s inside its 3 × 60 s budget —
+ * Gemini's per-minute windows say 20–60 s, and the adapter's default 10 s
+ * ceiling burned the retry and lost the Scribe pass. The DM stream and the
+ * pre-commit lane keep the 10 s default (the player is watching).
  */
 export function getBackgroundConfig(settings) {
     return {
@@ -138,6 +146,7 @@ export function getBackgroundConfig(settings) {
         thinkingBudget: 0,
         maxOutputTokens: 8192,
         timeoutMs: 60_000,
+        retryAfterCapMs: BACKGROUND_RETRY_AFTER_CAP_MS,
     };
 }
 
@@ -168,9 +177,15 @@ export function dmCallConfig(settings) {
  */
 export const PRE_COMMIT_TIMEOUT_MS = 20_000;
 
-/** getBackgroundConfig for a call the player is waiting on: one attempt, 20 s. */
+/**
+ * getBackgroundConfig for a call the player is waiting on: ONE attempt at
+ * 20 s on the primary, plus the spread's one fallback attempt on a capacity
+ * refusal (two requests, 40 s worst case — adapter.test.js pins it), and the
+ * adapter's default 10 s retry-after ceiling (the background lane's 30 s is
+ * for a lane nobody watches).
+ */
 export function getPreCommitConfig(settings) {
-    return { ...getBackgroundConfig(settings), timeoutMs: PRE_COMMIT_TIMEOUT_MS, maxRetries: 0 };
+    return { ...getBackgroundConfig(settings), timeoutMs: PRE_COMMIT_TIMEOUT_MS, maxRetries: 0, retryAfterCapMs: RETRY_AFTER_CAP_MS };
 }
 
 /**

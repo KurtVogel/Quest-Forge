@@ -145,12 +145,17 @@ describe('xAI affinity header — x-grok-conv-id with a one-time preflight fallb
     });
 
     it('a preflight refusal (network TypeError before any byte) resends ONCE without the header and reports the header names', async () => {
+        // A proven refusal is REMEMBERED by the factory instance (2026-10-25),
+        // so this test runs on a fresh xai.js module and leaves the singleton
+        // the later tests share untouched.
+        vi.resetModules();
+        const { sendXaiMessage: sendFresh } = await import('./providers/xai.js');
         const fetchMock = vi.fn()
             .mockRejectedValueOnce(new TypeError('Failed to fetch'))
             .mockResolvedValueOnce(jsonResponse({ choices: [{ finish_reason: 'stop', message: { content: 'Ok.' } }] }));
         vi.stubGlobal('fetch', fetchMock);
         const onHeaderRejected = vi.fn();
-        expect(await sendXaiMessage({ ...ARGS, apiKey: 'xai-test', conversationId: 'session-abc', onHeaderRejected })).toBe('Ok.');
+        expect(await sendFresh({ ...ARGS, apiKey: 'xai-test', conversationId: 'session-abc', onHeaderRejected })).toBe('Ok.');
         expect(fetchMock).toHaveBeenCalledTimes(2);
         expect(fetchMock.mock.calls[0][1].headers['x-grok-conv-id']).toBe('session-abc');
         expect(fetchMock.mock.calls[1][1].headers['x-grok-conv-id']).toBeUndefined();

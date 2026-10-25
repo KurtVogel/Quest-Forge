@@ -2,9 +2,14 @@
  * Google Gemini API provider.
  * Uses the REST API directly (no SDK dependency needed).
  */
-import { asRecord, assertStreamComplete, historyText, isTransient, makeCompletionGuard, makeHttpError, parseRetryAfterMs, readSseStream, reportUsage, retryDelay, sleep } from './sse.js';
+import { asRecord, assertStreamComplete, BACKGROUND_RETRY_AFTER_CAP_MS, historyText, isTransient, makeCompletionGuard, makeHttpError, parseBodyRetryDelayMs, parseRetryAfterMs, readSseStream, reportUsage, retryDelay, sleep } from './sse.js';
 
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1alpha/models';
+// v1beta on both lanes since 2026-10-25 (providers-adapter nit): the chat
+// lane rode v1alpha with no recorded reason while the embed rode v1beta.
+// Probed live on gemini-3.8-flash with the app's own body shape (system
+// instruction, contents, safetySettings BLOCK_NONE, thinkingConfig) — both
+// generateContent and streamGenerateContent?alt=sse answered 200 with text.
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const GEMINI_EMBED_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 // Google's current embedding model. Its default output is 3072 dimensions; 768 is
 // an officially supported Matryoshka truncation that keeps the browser cache compact.
@@ -346,7 +351,9 @@ export async function embedTexts(apiKey, texts, { inputType = 'document', onErro
                     ok: false,
                     rejected: response.status === 400 || response.status === 413,
                     transient,
-                    retryAfterMs: transient ? parseRetryAfterMs(response.headers?.get?.('retry-after')) : null,
+                    // The header first; the body's RetryInfo / "retry in Ns"
+                    // when the browser cannot read the header (2026-10-25).
+                    retryAfterMs: transient ? (parseRetryAfterMs(response.headers?.get?.('retry-after')) ?? parseBodyRetryDelayMs(body)) : null,
                     reason: { status: response.status, message: apiErrorMessage(body) || response.statusText || '', timedOut: false },
                 };
             }
@@ -403,7 +410,10 @@ export async function embedTexts(apiKey, texts, { inputType = 'document', onErro
     const sendChunkWithRetry = async (chunk) => {
         let outcome = await sendChunk(chunk);
         if (!outcome.ok && outcome.transient && !transientRetryExhausted) {
-            const waitMs = retryDelay(0, outcome, { base: EMBED_RETRY_DEFAULT_MS, jitterMs: 0 });
+            // The embed lane waits like the background lane: up to 30 s of a
+            // provider-sent delay (no player watches the seed; the query
+            // lane's whole-call deadline still gates the retry below).
+            const waitMs = retryDelay(0, outcome, { base: EMBED_RETRY_DEFAULT_MS, jitterMs: 0, capMs: BACKGROUND_RETRY_AFTER_CAP_MS });
             if (retryFits(waitMs)) {
                 console.warn(`[Gemini embed] Transient failure (${outcome.reason.status ?? outcome.reason.message}); retrying once in ${waitMs}ms.`);
                 await sleep(waitMs);
@@ -466,7 +476,7 @@ export const MAX_BAD_TEXT_ISOLATION_REQUESTS = 100;
 /**
  * Stream a message from Gemini.
  */
-export async function streamGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, maxOutputTokens, onUsage }) {
+export async function streamGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, maxOutputTokens, onUsage, onActivity }) {
     const url = `${GEMINI_API_BASE}/${model}:streamGenerateContent?alt=sse`;
     // A passed output cap is honored like the send's (2026-10-12); the DM
     // lane passes none and keeps GEMINI_MAX_OUTPUT_TOKENS.
@@ -489,6 +499,8 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
     let blockedPayload = null;
     let usageMetadata = null;
 
+    // `onActivity` is the adapter's idle timer, armed per READ (bytes, not
+    // text — 2026-10-25): a thought-only or usageMetadata-only event is life.
     await readSseStream(response, (data) => {
         // Every chunk may carry usageMetadata; the last one is the whole call's.
         if (data.usageMetadata && typeof data.usageMetadata === 'object') usageMetadata = data.usageMetadata;
@@ -504,7 +516,7 @@ export async function streamGeminiMessage({ apiKey, model, systemPrompt, message
             fullText += text;
             onChunk(text);
         }
-    });
+    }, { onActivity });
 
     if (blockReason && !finishReason) {
         throw promptBlockedError(blockReason, blockedPayload);

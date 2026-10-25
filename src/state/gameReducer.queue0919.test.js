@@ -126,12 +126,12 @@ describe('message rows at load (2026-09-19 P2)', () => {
         expect(next.messages[0]).toBe(row);
     });
 
-    it('buildMessageWindow is the belt: a live non-string / oversized row never reaches a provider raw', () => {
+    it('buildMessageWindow is the belt: a live non-string row is a blank row and is dropped (2026-10-25), an oversized row is clamped', () => {
         const window = buildMessageWindow([
             { role: 'user', content: { evil: true } },
             { role: 'assistant', content: 'Y'.repeat(MESSAGE_CONTENT_MAX + 500) },
         ], 20);
-        expect(window[0].content).toBe('');
-        expect(window[1].content).toHaveLength(MESSAGE_CONTENT_MAX);
+        expect(window).toHaveLength(1);
+        expect(window[0].content).toHaveLength(MESSAGE_CONTENT_MAX);
     });
 });

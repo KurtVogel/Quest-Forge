@@ -161,6 +161,31 @@ export function detectPreNarratedOutcome(narrative) {
 }
 
 /**
+ * The TAGGED fence opener — ```json, ```JSON, ```jsonc, ```json5, "``` json"
+ * — stated once for the finder below and the display freeze (2026-10-25
+ * chat-orchestration P2: the orchestrator searched `/```json/i`, a third
+ * spelling of the grammar, so "``` json" and a bare object fence streamed the
+ * raw block to the player until the committed row replaced it).
+ */
+const TAGGED_FENCE_RE = /```\s*json\w*\s*/i;
+
+/**
+ * Where the VISIBLE prose of a streaming reply ends, or -1 while all of it
+ * is prose: the first tagged fence opener, or a bare ``` followed by an
+ * object's `{` (the finder's bare-fence rule). While streaming, a bare fence
+ * not yet followed by `{` is still prose — a sign or a letter in a code
+ * block is displayed, and the next chunk decides.
+ */
+export function displayCutIndex(text) {
+    if (typeof text !== 'string' || !text) return -1;
+    const tagged = text.search(TAGGED_FENCE_RE);
+    const bare = text.search(/```\s*\{/);
+    if (tagged === -1) return bare;
+    if (bare === -1) return tagged;
+    return Math.min(tagged, bare);
+}
+
+/**
  * THE fence grammar (2026-10-11 audit P2 — the finder, the second-fence
  * warning and the trailing strip each had their own idea of a fence, so a
  * bare ``` block after the ```json block shipped as raw JSON in the story
@@ -186,7 +211,7 @@ export function findFencedJsonBlocks(response) {
         // reply must not outrank a bare object block before it.
         // The tag admits ```jsonc / ```json5 / "``` json" (2026-10-24 audit
         // P2: `jsonc` matched the old tag with its `c` as the body's first byte).
-        const tagged = rest.match(/```\s*json\w*\s*/i);
+        const tagged = rest.match(TAGGED_FENCE_RE);
         const bare = rest.match(/```\s*(?=\{)/);
         const opener = (tagged && bare) ? (tagged.index <= bare.index ? tagged : bare) : (tagged || bare);
         if (!opener) break;
