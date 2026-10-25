@@ -3814,3 +3814,24 @@ gated their id path on kind + wording 09-24. Rule: an exact-field match merges o
 agrees at least as far as the fuzzy rule would demand. Payoff: no turn's story lost to the shape of
 its JSON, a landed-callback chip that means a callback landed, and a card pool where two beats about
 one person are two cards.
+
+### [strengthening] A header a browser reads is a header the provider must expose; liveness is bytes, not text; a deliberate empty commit is still an empty row in the window; a re-response is a turn — status: `idea` (2026-10-25)
+Four rules from the providers-adapter + chat-orchestration Lap-1 pass (2026-10-25), the first measured
+with `curl` from the deployed origin, the rest with a throwaway test over the real turn runner. **(1)**
+`makeHttpError` reads `Retry-After` as a header; the app is browser-only and `Retry-After` is not a
+CORS-safelisted response header, so cross-origin it is `null` unless the provider's
+`Access-Control-Expose-Headers` names it — OpenAI exposes `CF-Ray` alone, Google its own header names,
+xAI `*`. The 09-06 Retry-After decision is live on one provider, dead on another, unproven on the third,
+and the tests pass `headers.get` mocks that Node reads freely. Rule: for every response header the code
+reads, one probe from the deployed origin per provider — and prefer the BODY's copy of the same fact
+(Gemini's `RetryInfo.retryDelay`) when the API offers one. **(2)** the DM stream's idle timer is armed
+by the TEXT callback, so a reasoning model's thought-only / usage-only / keep-alive events keep the
+connection alive and the timer dead; a long think reads as a stall. Rule: a stall guard listens at the
+transport (every parsed event), the display at the content. **(3)** a block-only reply with events
+commits an empty assistant row on purpose (the JSON-only cast backstop adds its narration as a SECOND
+row) and `buildMessageWindow` carries it to the provider like any row — the same blank row the 09-06
+and 10-24 fixes chased when a lane committed it by accident. Rule: when a guard's exception becomes a
+lane, grep every reader of what the guard protected. **(4)** `sendRollCorrection` returns events like
+any DM call and all three callers drop them, so a correction answered with another check is a hidden
+row and no proposal — a vanished turn. Rule: a call that can return `requested_rolls` is routed like
+the first hop or has them stripped; `await x()` with the value unused is the grep.
