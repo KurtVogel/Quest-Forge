@@ -11,6 +11,82 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
+### [wow] The world has lands, not a name: region profiles, a durable bestiary tally, and the interlude that reads them — status: `idea` (2026-10-26, Vesa's continent voyage)
+Vesa, from the long campaign: he travelled south for turns on end through "muddy pine woods" and
+"mouthless blind undead scavengers" in every dungeon, took a ship to ANOTHER CONTINENT to see
+something else — and the new land opened on a muddy timber outpost, pine woods, and "an eyeless,
+lanky…" in the first dungeon. Three facts in the code explain exactly that, and all three are
+engine gaps, not model luck:
+1. **A region is a NAME and nothing else.** `locationRegistry.js` stores `region` as a string on
+   each place; no record holds what the land IS. The one moment the engine KNOWS a new land began
+   (a registry-new region → `llm/regionalFronts.js`) hands the director the region's name, the
+   arrival place's type / danger, the campaign's fronts, and the last ten messages — the pine woods
+   it just wrote. Nothing says "here is every land this world already has; make this one unlike
+   them". The arrival is spent on hidden pressures and not one word on the land's face.
+2. **FOE FATIGUE cannot see the ghoul.** `foeFamilyKey` groups foes by the NAME's head noun
+   ("Eyeless Scavenger" / "Blind Husk" / "Ghoul" / "Undead Thing" = four families, one creature)
+   — the tic lives in the DESCRIPTION, where the counter never looks — and the ledger holds
+   `MAX_RECENT_ENCOUNTERS` 10 fights, so a trope reached for every fourth dungeon never trips
+   `FOE_FATIGUE_THRESHOLD` 3 across a long campaign.
+3. **The scenery half was parked.** The 2026-08-03 motif-fatigue idea was merged into the place
+   card with "wait until signatures exist". Signatures have existed since 2026-09-16; nobody picked
+   it back up.
+The interlude (the narrator's rare wide shot, first raised the same day) is the THIRD slice and
+not the first: an establishing shot drawn from a name and ten messages of mud is more mud. The
+order is material first, counter second, voice last.
+- **Slice 1 — the region profile, written where the region is born.** Extend the regional-fronts
+  call's SCHEMA (one call, not a new director — the director family rule, DECISIONS 2026-10-04):
+  `region_profile: { terrain, people, built, dread, names }` — terrain and climate; the people and
+  their trade; how they build and dress; what THIS land's dead and wilds are like (the bestiary
+  seed the DM reads before it reaches for a ghoul); how names sound here (the stock-name list's
+  positive twin). Each ≤ 160, clamped and string-or-drop at the installer. The context carries
+  EVERY known region's profile under a hard contrast rule — differ on every line from each of
+  them; the new land is not the old land with a new name. Stored as `regions: { [name]: profile }`
+  (a new top-level field persists by construction; typed at load, known keys only; the home
+  region's profile is written from the journal + premise the first time ANY region is named,
+  fronts skipped as today). Rendered as ONE `Region:` line under Current location (`Rimefell
+  Marches — <terrain>; <people>; its dead: <dread>` ≈ 300 dynamic chars; `promptBlocks.size.test.js`
+  pins it) and fed to the scene director as a cast-less setting line so the ART changes continent
+  too. Pushback on the obvious alternative (a standing "vary the biome" prompt rule): a rule with
+  no record cannot say what the last land WAS; the contrast has to be read from the record.
+- **Slice 2 — the durable bestiary + motif tally (replaces the 10-fight window as the variety
+  source; the ledger keeps its heat / hearsay roles).** The Scribe already profiles hostile sites
+  (`location_profile`); let the same object carry `archetype` (the creature kind met there in
+  plain words: "eyeless undead", "pine-wood bandits"; ≤ 40, lowercase) and `motifs` (≤ 2 imagery
+  particulars: "timber outpost", "black ichor"; ≤ 40 each) — and END_COMBAT tags the fight's
+  foes with the Scribe's archetype when the terminal beat ran, the head-noun key as the fallback.
+  A campaign-level `worldMotifs: { [key]: { count, lastMessage } }` (cap 40, lowest-count first
+  eviction, typed at load) counts across DISTINCT location records and distinct fights. The tempo
+  block renders ONE standing line once any key reaches 3 — `THIS WORLD HAS ALREADY SHOWN: eyeless
+  undead ×6, pine woods ×9, timber outposts ×4 — a new place or foe is none of these unless
+  established canon puts it HERE` — the stock-name list proved a negative list moves these models.
+  Zero new calls; ~120 dynamic chars; the existing FOE FATIGUE line folds into it.
+- **Slice 3 — the interlude ("the world turns").** A private, windowed block like the wonder die,
+  asking the DM to OPEN its next reply with a short set-apart passage (3–5 sentences, italic, the
+  narrator's wide voice allowed for once; the ordinary turn follows under its own grammar):
+  engine-triggered only — arrival in a NEW region (the establishing shot, read from slice 1's
+  profile), a front stage crossing (the engine already knows which portents came to pass
+  off-screen — `portentsFired`; the passage speaks their PUBLIC face, never the front), the
+  close of a doom / resolution echo window, a long rest or a stated time skip; plus `OOC:
+  interlude` on demand (the `isWonderRequest` pattern). Sourced ONLY from public material — passed
+  portents, hearsay the land carries, other places' `lastState`, a prevailed front's consequence —
+  never a title, clock or secret; "word in the valley is…" keeps the hearsay rule's texture (may be
+  a little wrong). Long cooldown (60 rows), never in combat, ~400 chars when open, prefix untouched.
+  NOT a calendar: we have no day / season state and this slice must not grow one; the passage says
+  what CHANGED, not how many days passed.
+- Caveat for the old campaign: regions exist only where the Scribe named one that passed
+  `sanitizeRegionName`, and that save predates the system — if the Places tab groups both
+  continents under one region, the new-region trigger never fired and slice 1 cannot help until
+  the land has a name (a LOAD heal cannot invent one; "Deepen memory" for places is the twin).
+- Proof: a scripted two-continent run on Flash + Sol — the arrival turn in land B names ≥ 3
+  profile particulars that contradict land A's (judge), the first hostile site in B fields no
+  archetype the tally holds at ≥ 3 (deterministic), and the interlude passage reads as report
+  (no front title, no clock, no "you could have") in 5/5 (judge); fixtures pin the contrast
+  context, the tally's eviction and the block's window.
+- Pillar check: 1 (the LLM spends its magic on the land's face), 2 (the engine holds the record the
+  contrast reads from), 4 (brief — one line per turn, one passage per seam). Strain: slice 1's
+  profile line is a new always-on dynamic block; measure it at its ceiling before shipping.
+
 ### Hero tells — the world notices the hero's MANNER (habits, tone, principles, intimate knowledge) — status: `shipped` (2026-09-23, all five slices)
 Vesa's idea: others register not only what the hero DID but how they are — "Let me guess, he dug out his pipe and walked away?", "He's never serious. Is he afraid of something?" — so the player catches sight of their own patterns; and a lover's knowledge of the hero's body and ways in bed is in the same lane, because the reward is that the companion can tease, joke, or talk seriously with it. Shipped (DECISIONS.md 2026-09-23 ×2): Scribe `hero_tells` sightings → engine-owned pattern (3 different scenes; intimate = one night, partner-only) → witness-only standing block + an engine-timed pointed-remark window (relationship-beat pattern); same day the four follow-ups below shipped too (all `[x]`). **Still open:** a bond moment on the beat's speaker when the remark lands hard (needs the Scribe to grade it — cheap, later); a live playtest watching for over-use and motive-guessing at the Scribe.
 - [x] **The character sheet's "How others see you"** — established tells that have been VOICED at least once (`voicedCount > 0`, so the player hears it first and reads it second), with who said it; a player toggle to strike a tell they reject ("that's not me") that sets it dormant. Zero LLM.
@@ -805,6 +881,10 @@ edit for places (the `SET_NPC_LOOK` / LookEditor twin) is a later slice. Full sh
   `signature` field IS that source: once hostile sites carry a signature, the engine can count
   motif recurrence across DISTINCT records exactly like foe families and render a MOTIF FATIGUE
   line in the tempo block — zero new calls. Wait for the place card to exist first.
+  **2026-10-26:** the place card has existed since 2026-09-16 and this was never picked up;
+  it is now slice 2 of "[wow] The world has lands, not a name" at the top of this section (the
+  Scribe tags archetype + motifs on `location_profile`, a campaign-level tally replaces the
+  10-fight window as the variety source).
 
 ### ~~Scenery/motif fatigue beyond combat foes~~ — status: `merged` into "[wow] The place card" above (2026-09-16 wow audit)
 Foe fatigue (shipped 2026-08-03) is deterministic because END_COMBAT hands the engine
