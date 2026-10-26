@@ -3835,3 +3835,25 @@ lane, grep every reader of what the guard protected. **(4)** `sendRollCorrection
 any DM call and all three callers drop them, so a correction answered with another check is a hidden
 row and no proposal — a vanished turn. Rule: a call that can return `requested_rolls` is routed like
 the first hop or has them stripped; `await x()` with the value unused is the grep.
+
+### [strengthening] A write that lands minutes after the state it read is a write to whatever campaign is live; a settled rule that cannot tell the lane's writes from play's has settled the verifier; a flag with two readers has two meanings; a backward scan that skips non-matches finds the last match, not the current one — status: `idea` (2026-10-26)
+Four rules from the prompt-building + memory-journal Lap-1 pass (2026-10-26), each measured with a
+throwaway test over the real reducer / builder. **(1)** the journal cadence is the app's slowest writer
+(a Flash call, then a second for the reflection) and every dispatch after its await — the entry, the
+MARK, the facts, the location, the reflection's roster writes — goes through React's one stable
+`dispatch` with no campaign stamp; a player who ends a turn and Continues another save inside that
+window gets a foreign journal entry and 35 of their rows flagged `summarized` with nothing summarizing
+them (the DM window 60 → 25, the hole permanent, autosaved). The chronicle guard (09-13) stamped the
+Journal panel's slow writes and `isStaleCampaignAction` has waited since for the cadence. Rule: every
+dispatch below the first `await` of a lane the player can walk away from carries
+`campaignStamp(stateItRead)`, and every reducer it reaches checks it. **(2)** the post-journal verifier's
+settled rule exempts any stamp at or after the snapshot; the cadence's own settles land there by
+construction, so the verifier can no longer report the lane it watches and its one reachable report is
+the player's own promise payoff, posted as a loss. Rule: a lane verifier diffs the lane's RECORDED
+dispatches (the 10-14 option b), never the live state — a stamp can only ever say WHEN, not WHO.
+**(3)** `pinned` on an NPC takes an unbounded prompt slot; `pinned` on a fact is the verifier's list and
+WORLD FACTS drops it after 15 newer facts — the front reveal, the doom. Rule: for every record flag,
+list its readers; a flag read by one lane is named for that lane. **(4)** LOCATION TRANSITION HISTORY's
+backward scan keeps walking while nothing matches, so on a return before the next cadence it shows
+the previous visit's arrival as this one's. Rule: a trail block renders only when the trail's last step
+is the present.
