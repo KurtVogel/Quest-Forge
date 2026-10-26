@@ -27,7 +27,9 @@ export {
     SESSION_HISTORY_CONSEQUENCES,
     SESSION_HISTORY_CONSEQUENCE_CHARS,
 } from '../llm/journalBlocks.js';
-import { snapshotCommitments, verifyCommitmentsAfterCadence } from './commitmentVerifier.js';
+import { hasCommitments, snapshotCommitments, verifyCommitmentsAfterCadence } from './commitmentVerifier.js';
+import { gameReducer } from '../state/gameReducer.js';
+import { campaignStamp } from '../state/handlers/shared.js';
 import { runNpcFrontReflection } from '../llm/scribe.js';
 import { collectNarrativeEntries } from '../llm/narrativeMessages.js';
 import { sanitizeExtractedLocation } from './locationRegistry.js';
@@ -263,11 +265,12 @@ Rules:
  * Check if we should auto-summarize and do so if needed.
  * Call this after each DM response.
  * @param {object} state - Current game state
- * @param {function} dispatch - Game state dispatch function
+ * @param {function} commit - Game state dispatch function (wrapped below: every
+ *   write this cadence makes is campaign-stamped and recorded)
  * @param {number} lastSummarizedIndex - Index of last message that was summarized
  * @returns {Promise<{index: number, journalEntry: object|null}>} Updated index and new journal entry if created
  */
-export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex, { getState = null } = {}) {
+export async function maybeAutoSummarize(state, commit, lastSummarizedIndex) {
     const messageCount = state.messages.length;
     // The cut: everything before it may be summarized, the tail after it
     // never is (KEEP_TAIL). Under the raw cap the cut also never splits a
@@ -298,6 +301,25 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex, {
 
     const background = getBackgroundConfig(state.settings);
     if (!background.apiKey) return { index: lastSummarizedIndex, journalEntry: null };
+
+    // THE cadence's dispatch (2026-10-26 memory-journal P1 + P2). Every write
+    // below — the entry, its MARK, the facts, the location, the reflection's
+    // roster / card / front writes, the verifier's line — is STAMPED with the
+    // campaign this cadence READ (`campaignStamp(state)`; the dispatcher drops
+    // a stamp that no longer matches the live campaign — a player who ended a
+    // turn and Continued another save inside this lane's Flash window used to
+    // get a foreign journal entry and 35 of their rows flagged summarized
+    // with nothing summarizing them, permanent and autosaved) and RECORDED,
+    // so the post-journal verifier can diff the snapshot against the lane's
+    // OWN writes replayed over the state it read — never against the live
+    // state, where play's settles and the lane's were indistinguishable.
+    const stamp = campaignStamp(state);
+    const recorded = [];
+    const dispatch = (action) => {
+        const stamped = { ...action, meta: { ...stamp, ...(action?.meta || {}) } };
+        recorded.push(stamped);
+        commit(stamped);
+    };
 
     const batchEnd = Math.min(batchBoundary(state.messages, lastSummarizedIndex), cut);
     const batchKey = `${state.session?.id || 'campaign'}:${lastSummarizedIndex}`;
@@ -438,7 +460,12 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex, {
             // for exactly that shape, the secondary() try swallowed it, and no
             // UPDATE_NPC was dispatched for the whole batch.
             const cadenceMeta = { presenceText: `${normalized.summary} ${normalized.keyDecisions.join(' ')}` };
-            // The classifier gate reads the roster (2026-10-22 scribe P1).
+            // The classifier gate reads the roster (2026-10-22 scribe P1) — the
+            // roster from BEFORE the Flash call, by design: the per-turn Scribe
+            // may have landed a record meanwhile, and `upsertNpc`'s own
+            // `existing` gate (the belt) resolves against the LIVE roster at
+            // the reducer, so a stale first gate costs a classification at
+            // worst, never a record (2026-10-26 nit).
             const cadenceRoster = { npcs: state.npcs, messageCount: (state.messages || []).length };
             for (const npc of encountered) {
                 if (!npc.name) continue;
@@ -499,8 +526,22 @@ export async function maybeAutoSummarize(state, dispatch, lastSummarizedIndex, {
             // NPC / card / front dispatches) have all landed — anything the
             // record no longer carries is said out loud, once. Guarded: a throw
             // here used to be an unhandled rejection (2026-10-14 nit).
+            //
+            // The diff reads the LANE's writes replayed over the state the
+            // cadence read (2026-10-26 P2, the 10-14 option b): the live state
+            // used to be the `after`, and the settled rule that spared play's
+            // settles (a quest the DM completed, a thread the Scribe closed)
+            // spared the lane's own too — every cadence settle lands at or
+            // after the snapshot by construction — so the verifier could no
+            // longer see the lane it verifies. Nothing play did is in this
+            // replay; everything the lane did is. (The replay's one
+            // divergence — a reducer-minted id, a crypto die — never reaches a
+            // commitment.) Skipped when the snapshot held nothing to lose.
             try {
-                if (typeof getState === 'function') verifyCommitmentsAfterCadence(commitmentsBefore, getState(), dispatch);
+                if (hasCommitments(commitmentsBefore)) {
+                    const stateAfterLane = recorded.reduce((s, action) => gameReducer(s, action), state);
+                    verifyCommitmentsAfterCadence(commitmentsBefore, stateAfterLane, dispatch);
+                }
             } catch (e) {
                 console.warn('[Journal] Commitment check failed:', e);
             }

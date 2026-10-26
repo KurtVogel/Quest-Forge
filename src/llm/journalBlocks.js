@@ -120,19 +120,27 @@ export function buildTransitionHistoryBlock(journal, currentLocation) {
     // them, silently suppressing this block right after travel. isSameLocation
     // is the registry's token-containment rule.
     if (!hasLocationName(currentLocation) || entries.length === 0) return '';
+    // The trail must END here (2026-10-26 memory-journal P2): the scan used to
+    // keep walking while nothing matched, so on a RETURN before the next
+    // cadence — the newest entries elsewhere, the hero back in town — it
+    // landed on the PREVIOUS visit's run and told the DM the hero had just
+    // walked in from the harbor they left ten entries ago. Now the newest
+    // located entry must be the current place (an entry with no location says
+    // nothing about place and is skipped); otherwise there is no trail to
+    // show — the place card's "Visited ×N · last here N turns ago" carries the
+    // return. The run then walks back over the stay to its first entry.
     const scanFloor = Math.max(0, entries.length - TRANSITION_SCAN_ENTRIES);
-    let transitionIdx = -1;
     let i = entries.length - 1;
+    while (i >= scanFloor && !entries[i]?.location) i--;
+    if (i < scanFloor || !isSameLocation(entries[i].location, currentLocation)) return '';
+    let transitionIdx = i;
     while (i >= scanFloor) {
-        const entryLoc = entries[i].location;
-        if (entryLoc && isSameLocation(entryLoc, currentLocation)) {
-            transitionIdx = i;
-        } else if (transitionIdx !== -1) {
-            break;
-        }
+        const entryLoc = entries[i]?.location;
+        if (!entryLoc) { i--; continue; }
+        if (!isSameLocation(entryLoc, currentLocation)) break;
+        transitionIdx = i;
         i--;
     }
-    if (transitionIdx === -1) return '';
 
     const shownFloor = entries.length - Math.min(entries.length, SESSION_HISTORY_ENTRIES); // SESSION HISTORY's window
     const arrivalEntry = entries[transitionIdx];

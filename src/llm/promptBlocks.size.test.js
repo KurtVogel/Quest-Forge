@@ -125,6 +125,9 @@ function build(state, flags = {}) {
 }
 
 const sizes = (parts) => Object.fromEntries(parts.map(p => [p.name, p.text.length]));
+const INTENT_CEILING = 12200; // 11,074 measured 2026-10-26 (16,263 on 10-15 with the living-world family aboard)
+// The intent lane's dynamic parts, measured 2026-10-26 (no `mode` on this fixture; DM REMINDERS renders only with content).
+const INTENT_PARTS = ['character', 'party', 'inventory', 'combat', 'formatReminder'];
 const PREFIX_END = 'heroSheet'; // the last per-campaign constant block (2026-09-26: HERO IDENTITY → SPELLBOOK → HERO SHEET)
 
 /**
@@ -218,8 +221,27 @@ describe('prompt blocks — per-block ceilings, prefix stability, per-call-type 
         // went mechanics-only — 8.5k of bond prose off every round, and
         // 2026-10-15 at 16,263 once the fixture staged the tempo state under
         // its real keys: three fronts' shown-symptom ledgers and a victory echo).
-        expect(intent).toBeLessThan(18000);
+        // Re-measured 2026-10-26 at 11,074 once the living-world
+        // family left the intent lane (prompt-building P2: the tempo block
+        // alone was 1,137 chars on a one-front state, 41 % of the lane).
+        expect(intent).toBeLessThan(INTENT_CEILING);
         expect(narration).toBeLessThan(52000); // 47,192 on the 2026-10-15 fixture
+    });
+
+    // 2026-10-26 prompt-building P2: the intent lane's parts BY NAME — the
+    // size pins above never listed them, which is why the living-world family
+    // (tempo / away / hearsay / beat / wonder) rode a call that translates ids
+    // and actions, twice per round, unexamined since 10-13.
+    it('the intent lane dynamic half is the character, the party (mechanics), the inventory and the combat block (DM REMINDERS and the mode join only with content) — no living-world part', () => {
+        const parts = build(fight, { intentOnly: true, storyMemory: [], retrievedMemories: [] });
+        const names = parts.map(p => p.name);
+        const dynamicNames = names.slice(names.indexOf(PREFIX_END) + 1);
+        expect(dynamicNames).toEqual(INTENT_PARTS);
+        for (const name of ['worldTempo', 'absenceDrift', 'regionalHearsay', 'relationshipBeat', 'wonder', 'knownNpcs', 'worldFacts', 'quests']) {
+            expect(dynamicNames).not.toContain(name);
+        }
+        // The narration lane keeps the family: a victory echo is narration.
+        expect(build(fight, { narrationOnly: true, storyMemory: [], retrievedMemories: [] }).map(p => p.name)).toContain('worldTempo');
     });
 
     // 2026-10-13 chat-orchestration P2: the missing-events nudge used to build

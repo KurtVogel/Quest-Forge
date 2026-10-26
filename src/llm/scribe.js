@@ -11,6 +11,7 @@
  */
 
 import { isRecordEntry } from '../engine/journalEntry.js';
+import { campaignStamp } from '../state/handlers/shared.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { conversationalGap } from '../engine/replayLedger.js';
@@ -402,6 +403,12 @@ export function buildScribeContext(state, ...texts) {
             location: state?.currentLocation || null,
             npcs: state?.npcs || [],
             storyMemory: state?.storyMemory || [],
+            // The campaign this pass READ (2026-10-26): every dispatch the
+            // Scribe makes after its Flash await carries it, so a load between
+            // the read and the reply drops the writes at the dispatcher instead
+            // of landing them in the campaign Continued (the cadence's rule,
+            // one lane over).
+            campaign: campaignStamp(state),
         },
     };
 }
@@ -512,7 +519,16 @@ export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'story_memor
  */
 export const RECALL_TURN_RULE = 'RECALL TURN: the player asked about the PAST and the DM answered from the engine\'s own record of this campaign. Extract NOTHING new from the answer — no world_facts, no story cards, no location change, no loot, no payment, no appearance — everything it recounts is already on record. The ONE exception: if the remembering itself visibly moved someone (warmth, grief, a grudge surfacing), report that as an npc_updates bondMoment or stanceToPlayer for that person. Emit "world_facts": [] and leave every other field empty.';
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownHeroTells = null, knownLocations = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch: commit, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownHeroTells = null, knownLocations = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null }) {
+    // Campaign-stamped writes (2026-10-26, the cadence's rule): when the
+    // context names the campaign this pass read, every dispatch below carries
+    // it and the dispatcher drops the lot once another campaign is live. A
+    // caller without a `memoryContext.campaign` (the older harnesses) keeps
+    // the raw dispatch.
+    const campaign = memoryContext?.campaign && typeof memoryContext.campaign === 'object' ? memoryContext.campaign : null;
+    const dispatch = campaign
+        ? (action) => commit({ ...action, meta: { ...campaign, ...(action?.meta || {}) } })
+        : commit;
     // Source-stamped retraction (memory-research M0, 2026-09-30): every
     // record this pass writes remembers the DM message it was read from.
     // The turn's own texts are the scene for the NPC lane (M0, 2026-10-13):

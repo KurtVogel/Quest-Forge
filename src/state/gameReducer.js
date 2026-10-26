@@ -27,6 +27,7 @@ import { handlers as frontHandlers } from './handlers/fronts.js';
 import { handlers as combatHandlers } from './handlers/combat.js';
 import { handlers as sessionHandlers } from './handlers/session.js';
 import { handlers as heroTellHandlers } from './handlers/heroTells.js';
+import { isStaleCampaignAction } from './handlers/shared.js';
 
 export { initialGameState };
 // Helpers that moved into domain modules but remain part of this module's
@@ -52,7 +53,31 @@ const HANDLERS = {
     ...heroTellHandlers,
 };
 
+/**
+ * Handlers that answer a stale campaign stamp THEMSELVES (a visible line —
+ * minutes of paid DM-model work were discarded). Every other stamped action
+ * from a campaign that is no longer live is dropped here, once, before any
+ * handler runs.
+ */
+const STALE_SELF_HANDLED = new Set(['ADD_CHRONICLE_CHAPTER']);
+
 export function gameReducer(state, action) {
+    // A write that lands minutes after the state it read is a write to
+    // whatever campaign is LIVE (2026-10-26 memory-journal P1): the journal
+    // cadence — the entry, its MARK, the facts, the location, the reflection's
+    // roster / card / front writes — used to land in the campaign the player
+    // had Continued meanwhile (a foreign SESSION HISTORY entry, 35 rows
+    // flagged summarized with nothing summarizing them, the DM window 60 →
+    // 25, autosaved). A lane that reads a state and awaits stamps every
+    // dispatch `meta = campaignStamp(stateItRead)` (shared.js); the dispatcher
+    // judges the stamp ONCE for every handler, so a new handler can never be
+    // the one that forgot. Stamp-less actions (LOAD_GAME, the UI, the DM
+    // event lane) are untouched — the guard reads only `meta.sessionId` /
+    // `meta.loadNonce`.
+    if (!STALE_SELF_HANDLED.has(action.type) && isStaleCampaignAction(state, action)) {
+        console.warn(`[Reducer] Dropped ${action.type} from a campaign or load that is no longer live.`);
+        return state;
+    }
     // Own-property check so a hostile/buggy action type that collides with an
     // Object.prototype member ('toString', 'constructor') still falls through
     // to the unknown-action path, exactly like the old switch default.

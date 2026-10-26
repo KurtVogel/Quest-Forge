@@ -11,6 +11,16 @@
  * anything, so a loss here is a lane doing what it may not. One visible
  * infrastructure line names what went; nothing is restored automatically
  * (restoring would make the verifier a survival rule, which it is not).
+ *
+ * The `after` is the LANE's recorded dispatches replayed over the state the
+ * cadence read (2026-10-26 memory-journal P2, the 10-14 option b), never the
+ * live state: play continues under the cadence's two Flash calls, and the
+ * settled rule that spared play's settles (a quest the DM completed, a thread
+ * the Scribe closed — stamped at or after the snapshot) spared every settle
+ * the lane itself made, because those land at or after the snapshot by
+ * construction. A stamp can say WHEN; only the record of who dispatched can
+ * say WHO. With the replay as the after, nothing play did is in the diff and
+ * everything the lane did is — so the stamps are no longer read here.
  */
 import { isLiveFact } from './worldFacts.js';
 import { containment, tokenSet } from './textMatch.js';
@@ -31,42 +41,28 @@ const carryTokens = (value) => tokenSet(value, { stopWords: CARRY_STOP_WORDS, mi
 /**
  * The commitments as they stand now: `{ quests, facts, threads, promises }`,
  * each a Map of id → label, plus `carriers` (the full texts of every active
- * promise and open thread), `promiseTexts` (id → full text), the three SETTLED
- * maps — `resolvedThreads` (NPC id → the message the thread was settled at,
- * the reducer's `openThreadResolvedMessage` stamp), `closedQuests` (quest id
- * → `closedAtMessage`, stamped by COMPLETE_QUEST / FAIL_QUEST) and
- * `settledFacts` (fact id → `supersededAtMessage` / `retractedAtMessage`) —
- * and `messageCount` (the transcript length at the snapshot).
+ * promise and open thread) and `promiseTexts` (id → full text).
  */
 export function snapshotCommitments(state = {}) {
     const quests = new Map();
-    const closedQuests = new Map();
     for (const quest of (Array.isArray(state.quests) ? state.quests : [])) {
         if (!quest || typeof quest.id !== 'string') continue;
         if ((quest.status || 'active') === 'active') quests.set(quest.id, text(quest.name) || quest.id);
-        else if (Number.isFinite(quest.closedAtMessage)) closedQuests.set(quest.id, quest.closedAtMessage);
     }
     const facts = new Map();
-    const settledFacts = new Map();
     for (const fact of (Array.isArray(state.worldFacts) ? state.worldFacts : [])) {
         if (!fact || typeof fact.id !== 'string') continue;
         if (fact.pinned === true && isLiveFact(fact)) facts.set(fact.id, text(fact.fact).slice(0, 80));
-        else if (Number.isFinite(fact.retractedAtMessage)) settledFacts.set(fact.id, fact.retractedAtMessage);
-        else if (Number.isFinite(fact.supersededAtMessage)) settledFacts.set(fact.id, fact.supersededAtMessage);
     }
     const threads = new Map();
-    const resolvedThreads = new Map();
     const carriers = [];
     for (const npc of (Array.isArray(state.npcs) ? state.npcs : [])) {
         if (!npc || typeof npc.id !== 'string') continue;
         if (text(npc.openThread)) {
             threads.set(npc.id, text(npc.name) || npc.id);
             carriers.push(text(npc.openThread));
-        } else if (Number.isFinite(npc.openThreadResolvedMessage)) {
-            resolvedThreads.set(npc.id, npc.openThreadResolvedMessage);
         }
     }
-    const messageCount = Array.isArray(state.messages) ? state.messages.length : 0;
     const promises = new Map();
     const promiseTexts = new Map();
     for (const card of (Array.isArray(state.storyMemory) ? state.storyMemory : [])) {
@@ -76,7 +72,13 @@ export function snapshotCommitments(state = {}) {
             if (text(card.text)) carriers.push(text(card.text));
         }
     }
-    return { quests, facts, threads, promises, promiseTexts, carriers, resolvedThreads, closedQuests, settledFacts, messageCount };
+    return { quests, facts, threads, promises, promiseTexts, carriers };
+}
+
+/** Whether a snapshot holds anything the cadence could lose (the replay is skipped otherwise). */
+export function hasCommitments(snapshot) {
+    if (!snapshot) return false;
+    return ['quests', 'facts', 'threads', 'promises'].some(key => snapshot[key] instanceof Map && snapshot[key].size > 0);
 }
 
 /**
@@ -87,30 +89,25 @@ export function snapshotCommitments(state = {}) {
  * card when it is no longer active AND no other active promise or open
  * thread still says it (a reworded successor is not a loss).
  *
- * THE SETTLED RULE, for all three stamped kinds: a commitment a lane settled
- * AT OR AFTER the snapshot is not a loss — the verifier runs after two Flash
- * calls against the LIVE state while play continues. Threads since
- * 2026-10-03 (`openThreadResolved: true` stamps `openThreadResolvedMessage`;
- * the Sol run's 📓 line reported a serving woman's thread the Scribe had just
- * closed); quests and facts since 2026-10-14 (memory-journal P1, measured:
- * the DM's next reply COMPLETED the quest, +38 XP, and the line said the
- * record no longer carried it — COMPLETE_QUEST stamps `closedAtMessage`, a
- * flip or a retraction stamps the fact).
+ * `after` is the snapshot of the lane's recorded writes replayed over the
+ * state `before` was taken from (worldJournal.js) — the settled rule that
+ * read the three stamps against the snapshot's transcript length (threads
+ * 2026-10-03, quests and facts 2026-10-14) is retired with it: play's settles
+ * never enter the replay, so they need no exemption, and the lane's own
+ * settles are no longer hidden behind one.
  */
 export function diffCommitments(before, after) {
     const losses = [];
-    const snapshotAt = before.messageCount ?? 0;
-    const settledSince = (stamp) => Number.isFinite(stamp) && stamp >= snapshotAt;
     for (const [id, label] of before.quests) {
-        if (after.quests.has(id) || settledSince(after.closedQuests?.get(id))) continue;
+        if (after.quests.has(id)) continue;
         losses.push({ kind: 'quest', label });
     }
     for (const [id, label] of before.facts) {
-        if (after.facts.has(id) || settledSince(after.settledFacts?.get(id))) continue;
+        if (after.facts.has(id)) continue;
         losses.push({ kind: 'fact', label });
     }
     for (const [id, label] of before.threads) {
-        if (after.threads.has(id) || settledSince(after.resolvedThreads?.get(id))) continue;
+        if (after.threads.has(id)) continue;
         losses.push({ kind: 'thread', label });
     }
     const carriers = (after.carriers || []).map(carryTokens).filter(set => set.size > 0);
@@ -139,8 +136,8 @@ export function describeCommitmentLosses(losses) {
 }
 
 /**
- * Run the verifier against the live state once the cadence's writes have
- * landed; dispatches ONE `kind: 'error'` system line on a loss (an
+ * Run the verifier against the lane's replayed state once the cadence's
+ * writes have landed; dispatches ONE `kind: 'error'` system line on a loss (an
  * infrastructure line — never retold as saga). Returns the losses.
  */
 export function verifyCommitmentsAfterCadence(before, stateAfter, dispatch) {

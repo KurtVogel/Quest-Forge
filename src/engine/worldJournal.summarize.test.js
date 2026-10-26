@@ -118,8 +118,8 @@ describe('maybeAutoSummarize', () => {
         expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_JOURNAL_ENTRY' }));
         // fillOnly: a batch summary may fill/re-affirm a location but never
         // relocate the hero past a fresher same-turn Scribe arrival.
-        expect(dispatch).toHaveBeenCalledWith({ type: 'SET_LOCATION', payload: { name: 'Brackwater', fillOnly: true } });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 12 });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'SET_LOCATION', payload: { name: 'Brackwater', fillOnly: true } }));
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 12 }));
         // World facts are capped per batch so one summary cannot flood the store.
         const factsCall = dispatch.mock.calls.find(([action]) => action.type === 'ADD_WORLD_FACTS');
         expect(factsCall[0].payload).toHaveLength(5);
@@ -135,7 +135,7 @@ describe('maybeAutoSummarize', () => {
         const result = await maybeAutoSummarize(state, dispatch, 0);
 
         expect(result.index).toBe(10);
-        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 10 });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 10 }));
     });
 
     it('does not advance the index when the response has no parseable JSON', async () => {
@@ -227,7 +227,7 @@ describe('poison-batch escape hatch + batch bounds (2026-08-18 audit P1)', () =>
         expect(result.journalEntry.summary).toContain('archived without a summary');
         expect(result.journalEntry.messageRange).toEqual([0, 12]);
         expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_JOURNAL_ENTRY' }));
-        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 12 });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 12 }));
         // No facts, NPCs, location, or reflection ride a fallback archive.
         expect(dispatch.mock.calls.every(([action]) => ['ADD_JOURNAL_ENTRY', 'MARK_MESSAGES_SUMMARIZED'].includes(action.type))).toBe(true);
         expect(reflectionMock).not.toHaveBeenCalled();
@@ -261,7 +261,7 @@ describe('poison-batch escape hatch + batch bounds (2026-08-18 audit P1)', () =>
         // Only the oldest 40 are summarized; the backlog drains next cadence.
         expect(result.index).toBe(40);
         expect(result.journalEntry.messageRange).toEqual([0, 40]);
-        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 40 });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 40 }));
 
         const payload = sendMessageMock.mock.calls[0][0].userMessage;
         const transcriptLines = payload.split('\n\n').filter(line => line.startsWith('['));
@@ -283,7 +283,7 @@ describe('poison-batch escape hatch + batch bounds (2026-08-18 audit P1)', () =>
 
         expect(result).toEqual({ index: 40, journalEntry: null });
         expect(sendMessageMock).not.toHaveBeenCalled();
-        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 40 });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 40 }));
         expect(dispatch.mock.calls).toHaveLength(1);
     });
 });
@@ -303,7 +303,7 @@ describe('the cadence keeps a tail (2026-10-01 P1: every cadence used to EMPTY t
         expect(result.index).toBe(10);
         expect(result.index).toBe(messages.length - KEEP_TAIL);
         expect(result.journalEntry.messageRange).toEqual([0, 10]);
-        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 10 });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 10 }));
         // The tail never reaches the summarizer: it is still the DM's verbatim window.
         const payload = sendMessageMock.mock.calls[0][0].userMessage;
         expect(payload).toContain('Message 9');
@@ -432,7 +432,7 @@ describe('the journal batch is narrative-eligible play only (2026-09-06 memory-j
         expect(payload).toContain('rolled **17**');
         expect(payload).toContain('Message 9');
         // The excluded rows are still archived behind the boundary like any summarized stretch.
-        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 14 });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'MARK_MESSAGES_SUMMARIZED', payload: 14 }));
     });
 
     it('counts the cadence in narrative-eligible messages, not raw rows (a dice turn burns ~5 raw rows)', async () => {
@@ -503,7 +503,7 @@ describe('combat-exchange dice lines are weightless to the cadence (2026-09-23 c
         expect(sendMessageMock).toHaveBeenCalledTimes(1);
         expect(first.index).toBe(fightEnd);
         expect(first.journalEntry.messageRange).toEqual([0, fightEnd]);
-        expect(dispatch).toHaveBeenCalledWith({ type: 'MARK_MESSAGES_SUMMARIZED', payload: fightEnd });
+        expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'MARK_MESSAGES_SUMMARIZED', payload: fightEnd }));
         const payload = sendMessageMock.mock.calls[0][0].userMessage;
         expect(payload).not.toContain('Rolled **');
         expect(payload).toContain('Message 11');

@@ -331,7 +331,17 @@ export const handlers = {
         // refused (the cadence never writes one).
         const entry = normalizeJournalEntry(action.payload, { maxMessageCount: (state.messages || []).length });
         if (!entry) return state;
-        const journal = [...state.journal, entry];
+        // A span has ONE entry (2026-10-26 nit): two rows over the same
+        // messageRange are one cadence committed twice (a second runner under
+        // the per-mount in-flight guard, a replayed action) — the first row
+        // stands, the echo is refused. The fallback stub and a real entry over
+        // one span are the same cadence too: the stub was the give-up.
+        const span = Array.isArray(entry.messageRange) ? entry.messageRange : null;
+        if (span && (state.journal || []).some(held => Array.isArray(held?.messageRange)
+            && held.messageRange[0] === span[0] && held.messageRange[1] === span[1])) {
+            return state;
+        }
+        const journal = [...(state.journal || []), entry];
         // The cadence's engine ticks, in order: the NPC-initiative tick
         // (2026-09-13 overhaul — if no beat is pending and the cooldown has
         // passed, the one bonded NPC with the most pull may reach out; the

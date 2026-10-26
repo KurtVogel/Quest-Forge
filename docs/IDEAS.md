@@ -3836,7 +3836,7 @@ any DM call and all three callers drop them, so a correction answered with anoth
 row and no proposal — a vanished turn. Rule: a call that can return `requested_rolls` is routed like
 the first hop or has them stripped; `await x()` with the value unused is the grep.
 
-### [strengthening] A write that lands minutes after the state it read is a write to whatever campaign is live; a settled rule that cannot tell the lane's writes from play's has settled the verifier; a flag with two readers has two meanings; a backward scan that skips non-matches finds the last match, not the current one — status: `idea` (2026-10-26)
+### [strengthening] A write that lands minutes after the state it read is a write to whatever campaign is live; a settled rule that cannot tell the lane's writes from play's has settled the verifier; a flag with two readers has two meanings; a backward scan that skips non-matches finds the last match, not the current one — status: `built` 2026-10-26 (DECISIONS.md 2026-10-26: the dispatcher guard + the cadence's stamped, recorded dispatch; the replay diff; pinned-first facts; the trail rule) — was `idea` (2026-10-26)
 Four rules from the prompt-building + memory-journal Lap-1 pass (2026-10-26), each measured with a
 throwaway test over the real reducer / builder. **(1)** the journal cadence is the app's slowest writer
 (a Flash call, then a second for the reflection) and every dispatch after its await — the entry, the

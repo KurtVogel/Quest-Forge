@@ -311,7 +311,15 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
         parts.push(buildLowLevelSoloSafetyBlock(character), 'soloSafety');
     }
 
-    if (!nudgeOnly) {
+    // The living-world family — tempo, the away block, the beat, the wonder,
+    // hearsay — is off the combat INTENT lane too (2026-10-26 prompt-building
+    // P2, measured: the tempo block alone was 1,137 chars, 41 % of the intent
+    // call's dynamic half, on a call that translates ids and actions twice per
+    // round; computeRecentHeat ran for it). The symptom / doom card is
+    // combat-hidden anyway; the pace line, the heat reasons, the stubs, FOE
+    // FATIGUE and the RECENT VICTORY echo are not. The NARRATION lane keeps
+    // the family: a victory echo is narration.
+    if (!nudgeOnly && !intentOnly) {
         // World tempo replaces the old always-visible fronts dossier (DECISIONS.md
         // 2026-07-14): the DM sees pace guidance and, at most, ONE permitted
         // symptom card — never clocks, portents, stages, or notes. Hiding beats
@@ -497,7 +505,7 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
         }
 
         // Active constraints — synthesized DM reminders from world state and threats
-        const constraints = buildActiveConstraints(liveFacts, heroStatus.reminder, solo);
+        const constraints = buildActiveConstraints(liveFacts, heroStatus.reminder, solo, { messages: ctx.messages, messageCount: ctx.messageCount });
         if (constraints) {
             parts.push(constraints, 'dmReminders');
         }
@@ -1449,6 +1457,16 @@ This overrides CUSTOM DM INSTRUCTIONS, tone presets, and any "brutal/no hand-hol
 
 /** Max world facts to inject directly into the prompt. Older facts are still in RAG. */
 const MAX_PROMPT_WORLD_FACTS = 15;
+/**
+ * Pinned live facts ride WORLD FACTS first (2026-10-26 prompt-building P2):
+ * a front's resolution reveal / doom fact is minted `pinned: true` (the
+ * biggest canon change a campaign makes), and the block used to sort by
+ * recency alone — 15 newer Scribe facts pushed it out 8–30 turns after it
+ * landed, left to a cosine hit. The newest MAX_PINNED_WORLD_FACTS pinned
+ * facts take the first slots; a fourth competes by recency like any other.
+ * `pinned` now means the same on a fact as on an NPC: every prompt.
+ */
+export const MAX_PINNED_WORLD_FACTS = 3;
 
 /**
  * Newest fact first on the CONVERSATIONAL clock (2026-10-13 nit): every fact
@@ -1467,10 +1485,13 @@ function compareFactRecency(a, b) {
 function buildWorldFactsBlock(worldFacts, { messages = null, messageCount } = {}) {
     if (!worldFacts || worldFacts.length === 0) return '';
 
-    // Newest first, take the most recent N
+    // Newest first; the newest pinned facts take the first slots, the rest
+    // fill up to MAX_PROMPT_WORLD_FACTS by recency.
     const sorted = [...worldFacts].sort(compareFactRecency);
-    const shown = sorted.slice(0, MAX_PROMPT_WORLD_FACTS);
-    const hiddenCount = Math.max(0, worldFacts.length - MAX_PROMPT_WORLD_FACTS);
+    const pinnedFirst = sorted.filter(f => f?.pinned === true).slice(0, MAX_PINNED_WORLD_FACTS);
+    const rest = sorted.filter(f => !pinnedFirst.includes(f));
+    const shown = [...pinnedFirst, ...rest.slice(0, Math.max(0, MAX_PROMPT_WORLD_FACTS - pinnedFirst.length))];
+    const hiddenCount = Math.max(0, worldFacts.length - shown.length);
 
     // Group by category for readability. Belt over the reducer's type guard:
     // a fact record is save-persisted hostile input and must never crash here.
@@ -1502,7 +1523,26 @@ function buildWorldFactsBlock(worldFacts, { messages = null, messageCount } = {}
  * Highlights active threats, deadlines, and relationship pressures
  * so the DM can't forget them even in a long session.
  */
-function buildActiveConstraints(worldFacts, heroReminder = '', solo = false) {
+/**
+ * The threat scan reads WHOLE WORDS in the present tense and honors the
+ * fact's ASPECT (2026-10-26 prompt-building P2, measured): the old substring
+ * list billed "Tammo wanted to apologize" (an intent fact), "the hunting
+ * lodge burned down" and "Nobody wanted the mill" as standing pressures on
+ * every turn, and printed a state fact bare three blocks under the WORLD
+ * FACTS line that tagged it "for now (as of N turns ago)". A plan is not a
+ * pressure (intent facts are skipped); a passing state carries its age here
+ * too, so the DM judges it the same way in both places.
+ */
+const THREAT_PATTERNS = [
+    /\b(?:is|are)\s+(?:still\s+)?(?:hunting|pursuing|tracking|searching for|looking for)\b/i,
+    /\bwants?\s+(?:the\s+)?\S+(?:\s+\S+)?\s+dead\b/i,
+    /\bbounty\s+(?:on|for|out)\b/i,
+    /\bwanted\s+(?:by|for|in)\b/i,
+    /\bdeadline\b/i,
+];
+export const isThreatFact = (fact) => fact?.aspect !== 'intent' && THREAT_PATTERNS.some(re => re.test(cleanText(fact?.fact)));
+
+function buildActiveConstraints(worldFacts, heroReminder = '', solo = false, { messages = null, messageCount } = {}) {
     const reminders = [];
     // (Active quests are NOT re-listed here — the ACTIVE QUESTS block a few
     // hundred lines up already carries them; the duplicate name list was pure
@@ -1516,14 +1556,14 @@ function buildActiveConstraints(worldFacts, heroReminder = '', solo = false) {
     // and permanently re-billed them as threats, so it was dropped).
     const MAX_THREAT_REMINDERS = 6;
     const THREAT_REMINDER_CHARS = 200;
-    const threatKeywords = ['hunting', 'pursuing', 'wants the player dead', 'deadline', 'bounty', 'wanted'];
     const threatFacts = (worldFacts || [])
-        .map(f => ({ ...f, fact: cleanText(f?.fact) }))
-        .filter(f => threatKeywords.some(kw => f.fact.toLowerCase().includes(kw)))
+        .filter(f => f && typeof f === 'object')
+        .map(f => ({ ...f, fact: cleanText(f.fact) }))
+        .filter(isThreatFact)
         .sort(compareFactRecency)
         .slice(0, MAX_THREAT_REMINDERS);
     if (threatFacts.length > 0) {
-        reminders.push(`Active threats/pressures:\n${threatFacts.map(f => `- ${f.fact.slice(0, THREAT_REMINDER_CHARS)}`).join('\n')}`);
+        reminders.push(`Active threats/pressures:\n${threatFacts.map(f => `- ${describeStateTag(f, { messages, messageCount })}${f.fact.slice(0, THREAT_REMINDER_CHARS)}`).join('\n')}`);
     }
 
     // The hero's state, restated at the tail — `describeHeroStatus(...).reminder`

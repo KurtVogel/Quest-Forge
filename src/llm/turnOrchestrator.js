@@ -232,7 +232,10 @@ export function createTurnRunner({
             // flushed on the sync path) — harmless since KEEP_TAIL: a
             // transcript one row short only ever keeps MORE tail.
             const cadenceState = getState();
-            const result = await maybeAutoSummarize(cadenceState, dispatch, summarizedBoundary(cadenceState), { getState });
+            // The cadence stamps and records its own writes (2026-10-26): a
+            // load between this read and the Flash reply drops them at the
+            // dispatcher instead of landing them in the campaign Continued.
+            const result = await maybeAutoSummarize(cadenceState, dispatch, summarizedBoundary(cadenceState));
             // A `fallback` entry ("Auto-summary was unavailable…") is honest
             // bookkeeping, not memory: never embed it (2026-09-06 P2 — the
             // mount seed skips it the same way).

@@ -848,7 +848,8 @@ describe('DM REMINDERS threat re-injection (2026-08-18 audit)', () => {
             id: `t-${i}`,
             timestamp: i,
             category: 'event',
-            fact: `Threat ${i}: a bounty stands on the hero. ${'x'.repeat(400)}`,
+            // Re-stated 2026-10-26: the scan reads whole present-tense phrases (`bounty on`), not the bare word.
+            fact: `Threat ${i}: a bounty on the hero stands. ${'x'.repeat(400)}`,
         }));
         const block = reminderBlock(prompt({ worldFacts }));
         const lines = block.split('\n').filter(line => line.startsWith('- Threat'));
