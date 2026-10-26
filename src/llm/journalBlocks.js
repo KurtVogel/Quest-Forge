@@ -13,6 +13,7 @@ import { LOCATION_NAME_MAX } from '../config/contentLimits.js';
 import { briefNpcFieldForPrompt, curateNpcsForPrompt, findCompanionRecord, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
 import { describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
 import { describeCurrentPlace, describeTravelLink, isSameLocation, listKnownWays } from '../engine/locationRegistry.js';
+import { describeRegionLine, findRegionProfile, regionOfPlace } from '../engine/regionProfile.js';
 
 /** KNOWN NPCs line opener budget — the party line's cap for the same fields. */
 export const KNOWN_NPC_NOTES_MAX = 300;
@@ -66,9 +67,15 @@ export function describeBondForPrompt(npc = {}, storyMemory = [], { messages = n
  * the fiction established, and the place's current state — plus the ways the
  * hero has actually traveled from here (geography as canon, 2026-09-14).
  */
-export function buildPlaceBlock(currentLocation, { locations = [] } = {}) {
+export function buildPlaceBlock(currentLocation, { locations = [], regions = null } = {}) {
     if (!currentLocation) return '';
     const lines = [`**Current location:** ${describeCurrentPlace(locations, currentLocation) || currentLocation}`];
+    // The land's face (WOW 2026-10-26): ONE line under the place — the
+    // region profile the regional director wrote, the record every new
+    // place, person, foe and name here is drawn from.
+    const region = regionOfPlace(locations, currentLocation);
+    const regionLine = region ? describeRegionLine(region, findRegionProfile(regions, region)) : '';
+    if (regionLine) lines.push(regionLine);
     // Consistency, not a map — an unlisted place is unmapped, never
     // nonexistent, so the DM stays free to invent roads not yet walked.
     const ways = listKnownWays(locations, currentLocation, { limit: 6 });
@@ -230,9 +237,9 @@ export function buildKnownNpcsBlock(npcs, currentLocation, { presentNames = null
  * The four blocks in order, as the prompt assembles them — `[{ name, text }]`
  * with the empty ones left out. The assembler pushes each as its own part.
  */
-export function buildJournalBlocks(journal, npcs, currentLocation, { presentNames = null, partyNames = [], messages = null, storyMemory = [], locations = [] } = {}) {
+export function buildJournalBlocks(journal, npcs, currentLocation, { presentNames = null, partyNames = [], messages = null, storyMemory = [], locations = [], regions = null } = {}) {
     return [
-        { name: 'place', text: buildPlaceBlock(currentLocation, { locations }) },
+        { name: 'place', text: buildPlaceBlock(currentLocation, { locations, regions }) },
         { name: 'sessionHistory', text: buildSessionHistoryBlock(journal) },
         { name: 'transitionHistory', text: buildTransitionHistoryBlock(journal, currentLocation) },
         { name: 'knownNpcs', text: buildKnownNpcsBlock(npcs, currentLocation, { presentNames, partyNames, messages, storyMemory }) },

@@ -51,6 +51,9 @@ import { bornStoryMemoryCard, findStoryMemoryMatch, normalizeStoryMemoryCard } f
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isDirectionEvidencedInText, isLocationEvidencedInText, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, linkLocations, normalizeTravelDirection, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
+import { findRegionProfile } from '../../engine/regionProfile.js';
+import { recordWorldMotifs } from '../../engine/worldMotifs.js';
+import { hasInterludedRegion, mintInterlude, rememberInterludedRegion } from '../../engine/interlude.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, findDriftTheaterFront, getFrontIntensityBand, isAbsenceDriftLocalNpc, isDriftTheaterFront } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
 import { isStaleCampaignAction, systemMessage, upsertNpc } from './shared.js';
@@ -115,12 +118,60 @@ function regionalSeedHasRoom(fronts) {
     return activeFronts < MAX_ACTIVE_FRONTS - 1;
 }
 
-function mintRegionalSeed(region, locationName, messages) {
+function mintRegionalSeed(region, locationName, messages, { profileOnly = false } = {}) {
     return {
-        key: `${region.toLowerCase()}|${(messages || []).length}`,
+        key: `${region.toLowerCase()}|${(messages || []).length}${profileOnly ? '|profile' : ''}`,
         region,
         locationName,
+        // The call writes the land's face and seeds no fronts (2026-10-26):
+        // the home region, a land met while the web was full, a pre-profile
+        // save's known land. The key is carried only when true, so a seed
+        // marker keeps the three-key shape PENDING_MARKER_KEYS pins.
+        ...(profileOnly && { profileOnly: true }),
     };
+}
+
+/** A face-only marker yields to a seed: the seed's call writes the face too. */
+function seedMayReplace(pending) {
+    return !pending || pending.profileOnly === true;
+}
+
+/**
+ * The interlude's REGION seam (WOW 2026-10-26): the hero stands in a land
+ * this story has not yet given its establishing shot. The home land (no other
+ * region known) is remembered without one — the opening scene is its
+ * establishing shot — and a land is remembered only when its shot was
+ * minted, so a cooldown or a fight defers it to the next classification or
+ * arrival rather than losing it.
+ */
+function openRegionInterlude(state, region) {
+    const name = typeof region === 'string' ? region.trim() : '';
+    if (!name || hasInterludedRegion(state.session?.interludedRegions, name)) return state;
+    const others = collectKnownRegions(state.locations).filter(known => !isSameRegion(known, name));
+    const remembered = rememberInterludedRegion(state.session?.interludedRegions, name);
+    if (others.length === 0) return { ...state, session: { ...state.session, interludedRegions: remembered } };
+    if (state.combat?.active) return state;
+    const session = mintInterlude(state.session, {
+        reason: 'region',
+        region: name,
+        messageCount: (state.messages || []).length,
+        messages: state.messages,
+    });
+    if (session === state.session) return state;
+    return { ...state, session: { ...session, interludedRegions: remembered } };
+}
+
+/**
+ * The durable variety tally's per-place feed (WOW 2026-10-26): a record's
+ * NEW archetype or motif keys count once — a re-classification that repeats
+ * what the record already holds adds nothing.
+ */
+function countPlaceMotifs(state, before, after) {
+    if (!after) return state;
+    const held = new Set([before?.archetype, ...(before?.motifs || [])].filter(Boolean));
+    const added = [after.archetype, ...(after.motifs || [])].filter(key => key && !held.has(key));
+    if (added.length === 0) return state;
+    return { ...state, worldMotifs: recordWorldMotifs(state.worldMotifs, added, { atMessage: (state.messages || []).length }) };
 }
 
 /** The deferred-region ledger (2026-10-15): lands met while the web was full, newest last, cap DEFERRED_REGIONS_CAP. */
@@ -436,7 +487,7 @@ export const handlers = {
             locations = linkLocations(locations, prevRecord.id, locations[destinationIdx].id, { atMessage: messageIndex });
         }
 
-        const next = { ...state, currentLocation: name, locations };
+        let next = { ...state, currentLocation: name, locations };
         if (!arrived) return next;
         if (destinationIdx === -1) return next;
 
@@ -444,7 +495,7 @@ export const handlers = {
         // next arrival in that land once a slot has freed (2026-10-15).
         const arrivalRegion = locations[destinationIdx].region;
         const deferred = (state.session?.deferredRegions || []).find(region => isSameRegion(region, arrivalRegion));
-        if (deferred && !state.session?.pendingRegionalFronts
+        if (deferred && seedMayReplace(state.session?.pendingRegionalFronts)
             && !(state.session?.seededRegions || []).some(known => isSameRegion(known, deferred))
             && regionalSeedHasRoom(state.fronts)) {
             next.session = {
@@ -453,6 +504,8 @@ export const handlers = {
                 pendingRegionalFronts: mintRegionalSeed(deferred, locations[destinationIdx].name, state.messages),
             };
         }
+        // Crossing into a land not yet given its establishing shot (2026-10-26).
+        next = openRegionInterlude(next, arrivalRegion);
 
         // Traveling rumor: deterministically pick which of the hero's deeds
         // could plausibly be talk of THIS place, once per (deed, place).
@@ -740,7 +793,10 @@ export const handlers = {
         }
         const profile = { ...rawProfile, region };
         const locations = upsertLocation(locationsBefore, name, profile);
-        const next = { ...state, locations };
+        let next = { ...state, locations };
+        // The tally's per-place feed (2026-10-26): the archetype / motifs the
+        // Scribe tagged on this place, counted once per record.
+        next = countPlaceMotifs(next, targetRecord, locations[findLocationRecord(locations, name)]);
 
         if (!region) return next;
         const hereIdx = findLocationRecord(locations, state.currentLocation);
@@ -749,10 +805,27 @@ export const handlers = {
         // The record's STORED region is authoritative (first value wins): a
         // re-classification that lost to an earlier canon region seeds nothing.
         if (!isSameRegion(locations[classifiedIdx].region, region)) return next;
-        if (priorRegions.length === 0) return next; // home region — never seeded
-        if (priorRegions.some(known => isSameRegion(known, region))) return next;
-        if ((state.session?.seededRegions || []).some(known => isSameRegion(known, region))) return next;
-        if (state.session?.pendingRegionalFronts) return next;
+        const here = locations[classifiedIdx];
+        // The land's face (WOW 2026-10-26): a region with no profile on
+        // record asks the regional director for one — beside its native
+        // pressures where the seed fires below, ALONE where the seed never
+        // fires (the home region, a known region from a pre-profile save, a
+        // land deferred for want of a front slot). One marker at a time.
+        const wantsProfile = !findRegionProfile(state.regions, region);
+        const mintProfileOnly = () => {
+            if (!wantsProfile || next.session?.pendingRegionalFronts) return;
+            next.session = { ...next.session, pendingRegionalFronts: mintRegionalSeed(region, here.name, state.messages, { profileOnly: true }) };
+        };
+        // The establishing shot (the interlude's REGION seam, 2026-10-26).
+        next = openRegionInterlude(next, region);
+        if (priorRegions.length === 0) { mintProfileOnly(); return next; } // home region — never seeded
+        if (priorRegions.some(known => isSameRegion(known, region))) { mintProfileOnly(); return next; }
+        if ((state.session?.seededRegions || []).some(known => isSameRegion(known, region))) { mintProfileOnly(); return next; }
+        // One seed at a time; a face-only marker (the home land's, usually
+        // seconds from landing) yields to a genuinely new land's seed — the
+        // seed's own call writes that land's face, and the home's face is
+        // asked for again on the next classification of a home place.
+        if (!seedMayReplace(next.session?.pendingRegionalFronts)) return next;
         // The installer only tops the web to MAX_ACTIVE_FRONTS - 1 (one slot
         // always stays free), so with no room below that line the marker would
         // only buy a wasted DM call. The region is DEFERRED (2026-10-15
@@ -761,14 +834,16 @@ export const handlers = {
         // in that land returned at "known region" and the promise to "trigger
         // later when a slot frees up" was never kept. A deferred region is
         // re-judged on the hero's next ARRIVAL at a place of that land
-        // (SET_LOCATION) — the seed needs the hero there.
+        // (SET_LOCATION) — the seed needs the hero there. Its FACE is not
+        // deferred: the profile-only call buys no front slot.
         if (!regionalSeedHasRoom(state.fronts)) {
             next.session = { ...next.session, deferredRegions: rememberDeferredRegion(state.session?.deferredRegions, region) };
+            mintProfileOnly();
             return next;
         }
         next.session = {
             ...next.session,
-            pendingRegionalFronts: mintRegionalSeed(region, locations[classifiedIdx].name, state.messages),
+            pendingRegionalFronts: mintRegionalSeed(region, here.name, state.messages),
         };
         return next;
     },

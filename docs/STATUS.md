@@ -6,7 +6,19 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-26 (the 10-26 strengthening queue cleared — 1 P1 + 6 P2 across memory-journal and prompt-building; the 10-25 clears, the 10-22 doom slice and the earlier sweeps below)_
+_Last updated: 2026-10-26 (night — the three "world has lands" WOW slices built and deployed; the 10-26 strengthening clear, the 10-25 clears, the 10-22 doom slice and the earlier sweeps below)_
+
+## 2026-10-26 (night) — WOW "The world has lands, not a name": all three slices built — the region PROFILE, the durable archetype + motif TALLY, the INTERLUDE — pushed AND deployed, live proof owed
+
+**Ruling: DECISIONS.md 2026-10-26 (night), nine numbered points.** Vesa, going to sleep: "Build ALL of the slices, push and deploy everything." The IDEAS entry had been written the same evening from his continent voyage (the new continent opened on the same mud, pines and eyeless ghoul). All three slices are built and pinned (+98 tests, 4,176 / 267, lint clean); none real-provider-playtested.
+
+**What a player can notice:** a land the Scribe names gets a FACE — terrain, people, how they build, what its dead and wilds are like, how names sound — written once by the regional director under a hard contrast rule against every other land on record, and the DM reads it on every turn as one `Region —` line under Current location (the painter gets the terrain and the built look too); the tempo block tells the DM plainly what this world has ALREADY SHOWN (`eyeless undead ×6, pine woods ×9 …`) from a campaign-level tally that never forgets, fed by the Scribe's plain-words archetype / motifs on each place and by every fight's foe families (the ten-fight FOE FATIGUE window is retired; a pre-tally save seeds from its ledger); and at five seams — crossing into a land not yet shown, a hidden front's stage crossing, a dozen rows after a front ends, a long rest, `OOC: interlude` — the DM opens its reply with one set-apart italic passage in the narrator's wide voice, drawn only from public material, never a clock or a reproach or a day count, then the ordinary turn.
+
+**What changed underneath:** `engine/regionProfile.js` + top-level `regions` + `buildRegionalPrompt` / `regionalCallWants` / `knownRegions` in `regionalFronts.js` + the `profileOnly` marker (minted for the home land, a pre-profile known land and a deferred land; it yields to a seed) + `INSTALL_REGIONAL_FRONTS` writing the face + the Region line in `buildPlaceBlock` + the painter's setting line; `engine/worldMotifs.js` + top-level `worldMotifs` + `archetype` / `motifs` on the location record and the Scribe schema + `countPlaceMotifs` / END_COMBAT feeds + `describeWornMotifs` in the tempo block + `seedWorldMotifsFromEncounters` at load; `engine/interlude.js` + `session.interlude` / `interludedRegions` / `lastInterludeMessage` + the five seams (`openRegionInterlude`, `afterClockMove`, `concludeFront`, TAKE_REST, `REQUEST_INTERLUDE`) + `buildInterludeBlock` as the `interlude` prompt part + consumption in ADD_MESSAGE; `engine/tableTalkIntent.js` (the OOC detector on the engine shelf). Size pins: `place` 2,400 (2,156), `interlude` 1,700 (1,516), the regional context 40,000 (36,625).
+
+**Not exercised live:** everything. The next session's smallest live proof is the IDEAS rubric — a scripted two-continent run on Flash: land B's arrival names ≥ 3 particulars that contradict land A's, B's first hostile site fields no archetype at ≥ 3, the interlude reads as report in 5/5. Vesa's own campaign: check the Places tab's region groups first (one group for both continents = the trigger never fired there).
+
+**Next:** the live proof above; the doom arm on Sol once the prepay is topped up; the WOW companion slice's live proof; the next grand run on Sol with the fight staging on; the commitment probe's multi-provider pass.
 
 ## 2026-10-26 — strengthening queue cleared: 1 P1 + 6 P2 across memory-journal + prompt-building (Lap 1) — pushed AND deployed
 

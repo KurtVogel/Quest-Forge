@@ -9,7 +9,9 @@ import { createInitialFronts, normalizeFront } from '../../engine/fronts.js';
 import { normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
 import { dedupeLocationRecords, normalizeLocationRecord, seedTravelLinksFromTrail } from '../../engine/locationRegistry.js';
 import { sanitizeRecentHearsay } from '../../engine/regionalHearsay.js';
-import { sanitizeRecentEncounters, sanitizeWorldTempo } from '../../engine/worldTempo.js';
+import { sanitizeRecentEncounters, sanitizeWorldTempo, seedWorldMotifsFromEncounters } from '../../engine/worldTempo.js';
+import { sanitizeRegions } from '../../engine/regionProfile.js';
+import { sanitizeWorldMotifs } from '../../engine/worldMotifs.js';
 import { sanitizeLivingWorldSession } from '../../engine/livingWorldSession.js';
 import { sanitizeHeroTells } from '../../engine/heroTells.js';
 import { buildHeroDeath, describeEpitaph } from '../../engine/heroDeath.js';
@@ -479,6 +481,15 @@ function validateSaveState(payload) {
         // Typed like every sibling ledger (2026-09-08 living-world P1): one null
         // entry crashed buildSystemPrompt on every turn after a clean load.
         recentEncounters: sanitizeRecentEncounters(payload.recentEncounters),
+        // The lands' faces (WOW 2026-10-26): typed profiles, stamps clamped.
+        regions: sanitizeRegions(payload.regions, { maxMessageCount: messageCount }),
+        // The durable variety tally (WOW 2026-10-26): typed; a pre-tally save
+        // seeds it from the encounter ledger's foe families so the
+        // "already shown" line knows what the ten-fight window knew.
+        worldMotifs: seedWorldMotifsFromEncounters(
+            sanitizeWorldMotifs(payload.worldMotifs, { maxMessageCount: messageCount }),
+            sanitizeRecentEncounters(payload.recentEncounters),
+        ),
         // The one front-adjacent field that loaded raw (2026-09-08 P2): a stored
         // directive's window and intensity label are re-bounded here and the
         // band is re-clamped against the live front at render.

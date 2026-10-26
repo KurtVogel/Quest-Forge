@@ -18,6 +18,7 @@ import { gameReducer } from '../gameReducer.js';
 import { isStaleCampaignAction, normalizeChronicleChapter, stampNpcRelationshipArcs, systemMessage } from './shared.js';
 import { rollHeroTellBeat } from './heroTells.js';
 import { rollDie } from '../../engine/dice.ts';
+import { mintInterlude } from '../../engine/interlude.js';
 import {
     WONDER_TIMING_DIE_SIDES,
     WONDER_WINDOW_MESSAGES,
@@ -368,6 +369,21 @@ export const handlers = {
     /** The player asked the DM for wonder out of character (the one exempt case). */
     REQUEST_WONDER(state, action) {
         const session = rollWonderRequest(state, { onDemand: action.payload?.onDemand !== false });
+        return session === state.session ? state : { ...state, session };
+    },
+
+    /**
+     * "OOC: interlude" (WOW 2026-10-26): the player asking for the wide shot
+     * is the one case the cooldown yields to. Opens at once; never in combat.
+     */
+    REQUEST_INTERLUDE(state) {
+        if (state.combat?.active) return state;
+        const session = mintInterlude(state.session, {
+            reason: 'demand',
+            onDemand: true,
+            messageCount: (state.messages || []).length,
+            messages: state.messages,
+        });
         return session === state.session ? state : { ...state, session };
     },
 

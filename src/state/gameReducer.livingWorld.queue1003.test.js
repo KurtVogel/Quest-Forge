@@ -180,7 +180,13 @@ describe('the director registry: install IS the give-up', () => {
             expect(action.type, name).toMatch(/^INSTALL_/);
             expect(action.payload.sessionId).toBe('campaign-1');
             expect(Object.values(action.payload)).toContain('key-1');
-            expect(Object.values(action.payload)).toContain(row.empty);
+            if (name === 'regionalFronts') {
+                // The regional call's result is `{ fronts, profile }` (2026-10-26)
+                // and its installer reads the two keys on the payload.
+                expect(action.payload).toMatchObject({ fronts: [], profile: null });
+            } else {
+                expect(Object.values(action.payload)).toContain(row.empty);
+            }
         }
     });
 

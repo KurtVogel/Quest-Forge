@@ -130,6 +130,17 @@ describe('companion look resolves through the roster record (2026-09-12)', () =>
         expect(userMessageOf()).not.toContain('harbour pilot in an oilskin');
     });
 
+    it('the land\'s face is the painter\'s setting line — terrain and the built look, right under the location (WOW 2026-10-26)', async () => {
+        sendMessage.mockResolvedValue('prompt');
+        const regionProfile = { terrain: 'Black shingle and sea ice', people: 'Sealers', built: 'Driftwood halls roofed in turf', dread: 'Drowned walkers', names: null };
+        await composeScenePrompt({ situation: 'x', currentLocation: 'Rime Quay', regionName: 'The Icebound Coast', regionProfile, settings });
+        expect(userMessageOf()).toContain('Location: Rime Quay\nSetting — The Icebound Coast: Black shingle and sea ice; Driftwood halls roofed in turf.\nCurrent situation: x');
+        // The people and the dread are the DM's, not the painter's.
+        expect(userMessageOf()).not.toContain('Sealers');
+        await composeScenePrompt({ situation: 'x', currentLocation: 'Rime Quay', regionName: 'The Icebound Coast', regionProfile: null, settings });
+        expect(userMessageOf(1)).not.toContain('Setting —');
+    });
+
     it('the art director is told skin tone, hair, build, and age are inviolable and to open with the locks', async () => {
         sendMessage.mockResolvedValue('prompt');
         await composeScenePrompt({ situation: 'x', character: { name: 'Vesa' }, settings });

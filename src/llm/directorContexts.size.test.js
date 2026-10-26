@@ -95,12 +95,19 @@ const worstCaseState = () => ({
         subject: fill(`subject ${i}`, 120), text: fill(`card ${i}`, 400),
     })),
     locations: [{ id: 'loc-a', name: 'Aldermill', type: 'settlement', danger: 'low', region: 'Home Vale', aliases: [], theaterFrontIds: ['front-a'] }],
+    // Every known land's face at its cap (2026-10-26): the regional lane's
+    // contrast list reads the newest MAX_CONTRAST_REGIONS of them.
+    regions: Object.fromEntries(Array.from({ length: 24 }, (_, i) => [
+        fill(`Land ${i}`, 60),
+        { terrain: fill('terrain', 120), people: fill('people', 120), built: fill('built', 120), dread: fill('dread', 120), names: fill('names', 120), atMessage: i },
+    ])),
     recentEncounters: Array.from({ length: 10 }, (_, i) => ({ enemies: fill('ghouls', 200), location: fill('place', 120), outcome: 'victory', messageIndex: 100 + i })),
     messages: Array.from({ length: 220 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: fill(`message ${i}`, 3000) })),
 });
 
 // Measured 2026-09-20 at this fixture: aftermath 68,954 (was ~85 KB), drift
-// 30,300, regional 28,481, wonder 24,559, campaign fronts 8,882.
+// 30,300, regional 28,481 (36,625 on 2026-10-26 with ten lands' faces in the
+// contrast list), wonder 24,559, campaign fronts 8,882.
 const size = context => JSON.stringify(context).length;
 
 describe('background director contexts — worst-case ceilings and key sets', () => {
@@ -142,7 +149,16 @@ describe('background director contexts — worst-case ceilings and key sets', ()
         for (const front of context.existingCampaignFronts) {
             expect(Object.keys(front).sort()).toEqual(['faction', 'goal', 'title']);
         }
-        expect(size(context)).toBeLessThan(32000);
+        // The contrast list (2026-10-26): the newest 10 lands' faces, five
+        // clamped fields each, and no journal once any land is on record.
+        expect(context.knownRegions).toHaveLength(10);
+        expect(context.knownRegions[0].name).toBe(fill('Land 23', 60));
+        for (const land of context.knownRegions) {
+            expect(Object.keys(land).sort()).toEqual(['built', 'dread', 'name', 'names', 'people', 'terrain']);
+        }
+        expect(context).not.toHaveProperty('journal');
+        expect(size(context.knownRegions)).toBeLessThan(7600);
+        expect(size(context)).toBeLessThan(40000); // 36,625 measured 2026-10-26 (28,481 before the contrast list)
     });
 
     it('wonder stays bounded', () => {

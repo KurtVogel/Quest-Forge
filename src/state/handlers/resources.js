@@ -7,6 +7,7 @@ import { getModifier, LONG_REST_CLEARS, normalizeConditionName } from '../../eng
 import { rollNotation, rollWithModifier } from '../../engine/dice.ts';
 import { applyArcaneRecovery, buildSpellSlots, isSpellcaster, refillSpellSlots, summarizeSpellSlots } from '../../engine/spellcasting.js';
 import { findExactSourceReplay, findNearbyReplay, rememberLedgerEntry } from '../../engine/replayLedger.js';
+import { mintInterlude } from '../../engine/interlude.js';
 import {
     appendRollHistory,
     clearSustainedSpellState,
@@ -427,6 +428,17 @@ export const handlers = {
                 key: restType,
                 messageIndex: restMessageIndex,
                 cap: RECENT_REST_LIMIT,
+            }),
+            // A night passed and the world did not stand still for it (WOW
+            // 2026-10-26): a long rest is one of the interlude's seams — the
+            // rest's own narration beat opens on the wide shot. The cooldown
+            // keeps it rare; a short rest is never one.
+            ...(isLong && {
+                session: mintInterlude(state.session, {
+                    reason: 'rest',
+                    messageCount: state.messages.length,
+                    messages: state.messages,
+                }),
             }),
         };
     },

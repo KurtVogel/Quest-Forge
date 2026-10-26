@@ -19,6 +19,7 @@ import { reconcileStartingCombatExchange } from '../../engine/combatWire.js';
 import { exchangeEventLines, mergeCharacterUpdates } from '../../engine/combatExchange.js';
 import { describeFightCost, recordExchangeCost, rememberFight, startFightTally } from '../../engine/fightTally.js';
 import { appendRecentEncounter, buildEncounterEntry, distanceSince } from '../../engine/worldTempo.js';
+import { recordWorldMotifs } from '../../engine/worldMotifs.js';
 import { HEARSAY_WINDOW_MESSAGES } from '../../engine/regionalHearsay.js';
 import { describeFightCause } from '../../engine/heroDeath.js';
 import { isStillAtPlace } from '../../engine/locationRegistry.js';
@@ -280,15 +281,17 @@ export const handlers = {
         // memories, the place's mark — is read off the tally ONCE, before the
         // envelope resets. Zero calls.
         const remembered = rememberFight(state.combat.fightTally, state, outcome);
+        const encounter = buildEncounterEntry(state, { ...(action.payload || {}), mark: remembered.mark });
         let next = {
             ...state,
             combat: { ...initialGameState.combat },
             // Variety-fatigue ledger: what was fought, where, and how it ended
             // (the mark is what regional hearsay repeats).
-            recentEncounters: appendRecentEncounter(
-                state.recentEncounters,
-                buildEncounterEntry(state, { ...(action.payload || {}), mark: remembered.mark }),
-            ),
+            recentEncounters: appendRecentEncounter(state.recentEncounters, encounter),
+            // The durable tally (WOW 2026-10-26): one sighting per foe family
+            // per fight — the head-noun key is the fight-time fallback for the
+            // Scribe's archetype on the hostile site's profile.
+            worldMotifs: recordWorldMotifs(state.worldMotifs, encounter.foeFamilies, { atMessage: (state.messages || []).length }),
         };
         next = recordFightDeath(state, next, outcome);
         next = reopenHearsayWindow(state, next);

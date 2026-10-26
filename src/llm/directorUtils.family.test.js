@@ -84,7 +84,16 @@ describe('baseDirectorContext — one default set, overrides stated at the call 
         for (const key of ['campaignPremise', 'hero', 'canonicalWorldFacts', 'activeQuests']) {
             expect(regional[key], key).toEqual(drift[key]);
         }
-        expect(regional).not.toHaveProperty('journal');
+        // The regional lane ships no journal for a land's PRESSURES; the one
+        // stated exception (2026-10-26) is the campaign's FIRST face — a
+        // profile wanted with no other land on record reads the journal,
+        // because that is where the home land's texture is.
+        expect(regional).toHaveProperty('journal');
+        expect(regional.wants).toEqual({ wantsFronts: true, wantsProfile: true });
+        const profiled = { ...state(), regions: { 'The Saltreach': { terrain: 't', people: 'p', built: null, dread: 'd', names: null, atMessage: 1 } } };
+        const regionalProfiled = buildRegionalFrontsContext(profiled);
+        expect(regionalProfiled).not.toHaveProperty('journal');
+        expect(regionalProfiled.wants).toEqual({ wantsFronts: true, wantsProfile: false });
         expect(aftermath.hero).toEqual(drift.hero);
         expect(aftermath.canonicalWorldFacts).toHaveLength(30);
         expect(aftermath.journal).toHaveLength(6);

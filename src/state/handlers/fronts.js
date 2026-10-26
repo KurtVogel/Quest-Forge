@@ -25,6 +25,8 @@ import { conversationalDistance } from '../../engine/replayLedger.js';
 import { DIRECTOR_MAX_ATTEMPTS, getDirectorFailure, RETRYABLE_DIRECTORS } from '../../engine/directorRetry.js';
 import { foldExperience, getFrontResolutionMilestoneXp, isHeroDown } from '../../engine/progression.js';
 import { findLocationRecord, isSameRegion, normalizeLocationRecord, upsertLocation } from '../../engine/locationRegistry.js';
+import { rememberRegionProfile } from '../../engine/regionProfile.js';
+import { detectFrontTurning, INTERLUDE_CONCLUSION_DELAY, mintInterlude } from '../../engine/interlude.js';
 import { namesMatch } from '../../engine/npcRoster.js';
 import { rollDie } from '../../engine/dice.ts';
 import { isRecord } from '../../engine/text.js';
@@ -64,6 +66,27 @@ function openDoomIfFull(state) {
         delayScenes: rollDie(DOOM_TIMING_DIE_SIDES) - 1,
     });
     return opened ? { ...state, fronts } : state;
+}
+
+/**
+ * After either clock lane moved (the cadence batch, a DM gain): the doom
+ * check above, then the interlude's TURNING seam (WOW 2026-10-26) — a
+ * hidden front's stage crossed, so a portent came to pass off-screen and
+ * the world's wide shot may say its public face. Never in combat; the
+ * interlude's own cooldown keeps it rare.
+ */
+function afterClockMove(before, after) {
+    const next = openDoomIfFull(after);
+    const turning = detectFrontTurning(before.fronts || [], next.fronts || []);
+    if (!turning || next.combat?.active) return next;
+    const session = mintInterlude(next.session, {
+        reason: 'turning',
+        frontId: turning.frontId,
+        material: turning.passed.at(-1) || null,
+        messageCount: (next.messages || []).length,
+        messages: next.messages,
+    });
+    return session === next.session ? next : { ...next, session };
 }
 
 /**
@@ -153,6 +176,21 @@ function concludeFront(state, idx, front, { outcome = null, note = '' } = {}) {
             at: Date.now(),
         },
     };
+    // The world exhales a dozen rows later (the interlude's CONCLUSION seam,
+    // WOW 2026-10-26): the title is public now (the 🕰️ line showed it), the
+    // outcome is canon, and the wide shot shows the world settling around
+    // it — never the signs, never a reproach.
+    if (!next.combat?.active) {
+        next.session = mintInterlude(next.session, {
+            reason: 'conclusion',
+            frontId: front.id,
+            title: concluded.title,
+            material: concluded.resolution || null,
+            delay: INTERLUDE_CONCLUSION_DELAY,
+            messageCount,
+            messages: next.messages,
+        });
+    }
     return gameReducer(next, {
         type: 'ADD_WORLD_FACTS',
         payload: [{ fact: buildFrontResolutionFact(concluded, prevailed ? '' : note), category: 'event', pinned: true }],
@@ -389,7 +427,7 @@ export const handlers = {
         if (!resolvingNow) {
             // A DM clock gain can fill the clock too (2026-10-22): the doom
             // opens on this lane exactly as on the cadence's.
-            return openDoomIfFull({
+            return afterClockMove(state, {
                 ...state,
                 fronts: fronts.map((front, i) => i === idx ? updatedFront : front),
             });
@@ -549,10 +587,22 @@ export const handlers = {
         const pending = state.session?.pendingRegionalFronts;
         if (!pending || typeof pending.key !== 'string' || !pending.key
             || payload.sessionId !== state.session?.id || payload.key !== pending.key) return state;
+        // The land's face (WOW 2026-10-26): re-validated here like every
+        // director reply, written once — a profile already on record stands.
+        const regions = rememberRegionProfile(state.regions, pending.region, payload.profile, {
+            atMessage: (state.messages || []).length,
+        });
+        // A profile-only marker (the home region, a land met while the web was
+        // full, a pre-profile save's known land) seeds nothing and marks
+        // nothing seeded: the fronts' own one-shot stays the installer's below.
+        if (pending.profileOnly === true) {
+            return { ...state, regions, session: { ...state.session, pendingRegionalFronts: null } };
+        }
         const seededRegions = [...(state.session?.seededRegions || []), pending.region].slice(-12);
         // A region seeded now leaves the deferred ledger (2026-10-15).
         const deferredRegions = (state.session?.deferredRegions || []).filter(region => !isSameRegion(region, pending.region));
         const session = { ...state.session, pendingRegionalFronts: null, seededRegions, deferredRegions };
+        state = { ...state, regions };
         const fronts = state.fronts || [];
         const activeCount = fronts.filter(f => (f.status || 'active') === 'active').length;
         // Like the aftermath installer, regional natives top the web up to
@@ -622,7 +672,7 @@ export const handlers = {
             previousCadenceId,
             advances: action.payload?.advances,
         });
-        return openDoomIfFull({
+        return afterClockMove(state, {
             ...state,
             fronts: result.fronts,
             session: {

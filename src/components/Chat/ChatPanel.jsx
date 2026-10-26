@@ -25,6 +25,7 @@ import { generateRegionalFronts, shouldGenerateRegionalFronts } from '../../llm/
 import { generateWonder, shouldGenerateWonder } from '../../llm/wonderDirector.js';
 import { isDirectorBackingOff, RETRYABLE_DIRECTORS } from '../../engine/directorRetry.js';
 import { isWonderRequest } from '../../engine/wonder.js';
+import { isInterludeRequest } from '../../engine/interlude.js';
 import { liveWorldFacts } from '../../engine/worldFacts.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRouting.js';
@@ -117,7 +118,7 @@ const BACKGROUND_DIRECTORS = [
     markerDirector('regionalFronts', {
         ready: shouldGenerateRegionalFronts,
         generate: generateRegionalFronts,
-        logSuccess: (s, key, fronts) => `[LivingWorld] Native pressures for ${s.session.pendingRegionalFronts?.region}: ${fronts.length} proposed.`,
+        logSuccess: (s, key, result) => `[LivingWorld] ${s.session.pendingRegionalFronts?.region}: ${(result?.fronts || []).length} native pressure(s) proposed${result?.profile ? ' + the land\'s face' : ''}.`,
         failureNote: '[LivingWorld] Regional front seeding failed; will retry:',
     }),
     // The wonder die (WOW 2026-09-18): something strange for a long lull.
@@ -730,6 +731,9 @@ export default function ChatPanel() {
         // "OOC: surprise me" — the player asking for wonder is the one case
         // where the lull detector's waiting is wrong (WOW 2026-09-18).
         if (tableTalkTurn && isWonderRequest(trimmed)) dispatch({ type: 'REQUEST_WONDER', payload: { onDemand: true } });
+        // "OOC: interlude" — the wide shot on demand (WOW 2026-10-26); it
+        // opens on the NEXT ordinary turn, the table-talk reply never spends it.
+        if (tableTalkTurn && isInterludeRequest(trimmed)) dispatch({ type: 'REQUEST_INTERLUDE' });
         const startedCombatIntent = !tableTalkTurn
             && stateRef.current.combat?.active
             && stateRef.current.combat.phase === COMBAT_PHASES.AWAITING_PLAYER;

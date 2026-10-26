@@ -14,6 +14,7 @@ import {
     computeFoeFatigue,
     foeFamilyKey,
     recentlyResolvedFronts,
+    seedWorldMotifsFromEncounters,
     tempoDirectiveDistances,
     FOE_FATIGUE_THRESHOLD,
     MAX_RECENT_ENCOUNTERS,
@@ -430,7 +431,7 @@ describe('foe fatigue (2026-08-03 "ichor ghouls in every dungeon")', () => {
         expect(entry.foeFamilies).toEqual(['ghoul', 'hound']);
     });
 
-    it('renders a FOE FATIGUE line when a family saturates the ledger', () => {
+    it('renders the "already shown" line from the durable tally when a key is worn (2026-10-26: the ten-fight FOE FATIGUE window is retired)', () => {
         const encounters = [
             { enemies: '2× ghoul', foeFamilies: ['ghoul'], messageIndex: 1, outcome: 'victory' },
             { enemies: 'ghoul', foeFamilies: ['ghoul'], messageIndex: 3, outcome: 'victory' },
@@ -438,9 +439,16 @@ describe('foe fatigue (2026-08-03 "ichor ghouls in every dungeon")', () => {
         ];
         const block = buildWorldTempoBlock({
             fronts: [front()], heat: { level: 'calm', reasons: [] }, messageCount: 10, recentEncounters: encounters,
+            worldMotifs: { ghoul: { count: 3, lastMessage: 5 }, 'pine woods': { count: 4, lastMessage: 9 }, bandit: { count: 1, lastMessage: 2 } },
         });
-        expect(block).toContain('FOE FATIGUE: ghoul-type foes in 3 of the last 3 fights');
-        expect(block).toContain('field something different');
+        expect(block).toContain('THIS WORLD HAS ALREADY SHOWN: pine woods ×4, ghoul ×3.');
+        expect(block).not.toContain('bandit ×');
+        expect(block).toContain('new species, new imagery');
+        expect(block).not.toContain('FOE FATIGUE');
+        // The ledger alone (no tally passed) renders nothing — the tally is the one source.
+        expect(buildWorldTempoBlock({
+            fronts: [front()], heat: { level: 'calm', reasons: [] }, messageCount: 10, recentEncounters: encounters,
+        })).not.toContain('ALREADY SHOWN');
     });
 
     it('stays silent below the threshold', () => {
@@ -450,8 +458,24 @@ describe('foe fatigue (2026-08-03 "ichor ghouls in every dungeon")', () => {
                 { enemies: 'ghoul', foeFamilies: ['ghoul'], messageIndex: 1, outcome: 'victory' },
                 { enemies: 'bandit', foeFamilies: ['bandit'], messageIndex: 3, outcome: 'victory' },
             ],
+            worldMotifs: { ghoul: { count: 2, lastMessage: 1 }, bandit: { count: 1, lastMessage: 3 } },
         });
-        expect(block).not.toContain('FOE FATIGUE');
+        expect(block).not.toContain('ALREADY SHOWN');
+    });
+
+    it('seeds an EMPTY tally from the ledger at load — one sighting per family per fight, legacy summaries parsed — and trusts a filled one', () => {
+        const encounters = [
+            { enemies: '2× ichor ghoul', foeFamilies: ['ghoul'], messageIndex: 4 },
+            { enemies: '3× Ghoul, Scarred Hound', messageIndex: 9 }, // legacy: parsed from the summary
+            { enemies: 'Ghoul Priest', foeFamilies: ['ghoul', 'ghoul'], messageIndex: 12 },
+        ];
+        expect(seedWorldMotifsFromEncounters({}, encounters)).toEqual({
+            ghoul: { count: 3, lastMessage: 12 },
+            hound: { count: 1, lastMessage: 9 },
+        });
+        const held = { reaver: { count: 5, lastMessage: 2 } };
+        expect(seedWorldMotifsFromEncounters(held, encounters)).toBe(held);
+        expect(seedWorldMotifsFromEncounters(null, [])).toEqual({});
     });
 });
 

@@ -20,6 +20,7 @@ import { sanitizeHeroTellBeat } from './heroTells.js';
 import { sanitizePendingWonder, sanitizeWonder } from './wonder.js';
 import { sanitizeDirectorFailures } from './directorRetry.js';
 import { sanitizeHeroDeath } from './heroDeath.js';
+import { sanitizeInterlude, sanitizeInterludedRegions } from './interlude.js';
 import { cleanText as text, isRecord } from './text.js';
 import { clampMessageStamp } from './replayLedger.js';
 
@@ -48,6 +49,9 @@ export const CHAPTER_CLOSE_REASONS = Object.freeze(['front', 'death']);
  */
 export const PENDING_MARKER_KEYS = Object.freeze({
     pendingAbsenceDrift: Object.freeze(['key', 'locationName', 'awayDistance', 'returnMessage']),
+    // A `profileOnly: true` rides beside these ONLY on a face-only marker
+    // (2026-10-26: the call writes the land's face and seeds no fronts); a
+    // seed marker keeps exactly this shape.
     pendingRegionalFronts: Object.freeze(['key', 'region', 'locationName']),
     pendingFrontAftermath: Object.freeze(['frontId', 'title']),
     pendingFrontDoom: Object.freeze(['frontId', 'title']),
@@ -117,7 +121,7 @@ export function sanitizePendingRegionalFronts(raw) {
     const region = text(raw.region, 120);
     const locationName = text(raw.locationName, 120);
     if (!key || !region || !locationName) return null;
-    return { key, region, locationName };
+    return { key, region, locationName, ...(raw.profileOnly === true && { profileOnly: true }) };
 }
 
 /**
@@ -196,14 +200,20 @@ export function sanitizeLivingWorldSession(session, { maxMessageCount } = {}) {
         ['wonder', sanitizeWonder],
         // The front director's marker (2026-10-02): readers' keys only.
         ['frontDirector', sanitizeFrontDirector],
+        // The interlude (WOW 2026-10-26): complete-or-null, stamps clamped.
+        ['interlude', sanitizeInterlude],
     ];
     // The three beat cooldowns clamp to the transcript (2026-09-24 sweep):
     // a stamp past the end (`1e9`) used to survive LOAD_GAME and silence
     // that beat forever, since `messageCount - last < cooldown` holds for
     // any negative difference.
-    for (const field of ['lastWonderMessage', 'lastHeroTellBeatMessage', 'lastRelationshipBeatMessage', 'lastAbsenceDriftMessage']) {
+    for (const field of ['lastWonderMessage', 'lastHeroTellBeatMessage', 'lastRelationshipBeatMessage', 'lastAbsenceDriftMessage', 'lastInterludeMessage']) {
         if (session[field] === undefined) continue;
         next[field] = clampMessageStamp(session[field], maxMessageCount);
+    }
+    // The lands already given their establishing shot (2026-10-26).
+    if (session.interludedRegions !== undefined) {
+        next.interludedRegions = sanitizeInterludedRegions(session.interludedRegions);
     }
     // The deferred-region ledger (2026-10-15): short strings, cap 6.
     if (session.deferredRegions !== undefined) {

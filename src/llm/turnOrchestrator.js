@@ -306,6 +306,10 @@ export function createTurnRunner({
             wonder: s.session?.wonder || null,
             heroTells: s.heroTells || [],
             heroTellBeat: s.session?.heroTellBeat || null,
+            // The lands' faces, the variety tally and the interlude (WOW 2026-10-26).
+            regions: s.regions || null,
+            worldMotifs: s.worldMotifs || null,
+            interlude: s.session?.interlude || null,
             recentRulings: pruneRecentRulings(s.recentRulings, {
                 messages: s.messages || [],
                 location: s.currentLocation,

@@ -8,6 +8,7 @@ import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { curateNpcsForPrompt } from '../engine/npcRoster.js';
 import { castNameTag, describeCastMember } from '../engine/castMember.js';
+import { describeRegionSetting } from '../engine/regionProfile.js';
 
 /**
  * One foe's state for the art director's cast list (2026-09-01 P2): combat
@@ -59,12 +60,16 @@ export function preserveSceneSituation(situation, maxLength = 1800) {
  *
  * @returns {Promise<string|null>} A finished image prompt, or null on failure.
  */
-export async function composeScenePrompt({ situation, character, party = [], npcs = [], combat, currentLocation, settings }) {
+export async function composeScenePrompt({ situation, character, party = [], npcs = [], combat, currentLocation, regionName = null, regionProfile = null, settings }) {
     const background = getBackgroundConfig(settings);
     if (!background.apiKey) return null;
 
     const lines = [];
     if (currentLocation) lines.push(`Location: ${currentLocation}`);
+    // The land's face (WOW 2026-10-26): the terrain and what is built in it,
+    // so the art changes continent when the hero does.
+    const setting = describeRegionSetting(regionName, regionProfile);
+    if (setting) lines.push(setting);
     if (situation) lines.push(`Current situation: ${preserveSceneSituation(situation)}`);
 
     // Every cast line is formatted from the one cast-member shelf

@@ -22,6 +22,8 @@ export const initialGameState = {
     party: [], // Companions currently traveling with the player
     currentLocation: null,
     locations: [], // Canonical location records (alias-folded) — profiles + front-theater membership for the tempo system
+    regions: {}, // A land's FACE per region name (terrain / people / built / dread / names) — written once by the regional director under a contrast rule (WOW 2026-10-26)
+    worldMotifs: {}, // Campaign-level count of creature archetypes and imagery motifs the world has shown — the durable variety source behind "THIS WORLD HAS ALREADY SHOWN" (WOW 2026-10-26)
     recentEncounters: [], // Last few closed fights (enemies/location/outcome) — variety fatigue + heat input
     worldTempo: null, // Engine-owned pacing state: the current cadence tempo directive (window, intensity, timing die)
     pendingRoleplayCheck: null, // Reload-safe out-of-combat check proposal; no dice exist yet

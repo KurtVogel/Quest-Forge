@@ -107,6 +107,10 @@ function maxedState({ messageCount = 400, live = 0, inCombat = false } = {}) {
         wonder: { id: 'w1', hook: { text: fill('wonder hook', 400), register: 'relic', standalone: true }, mintedAtMessage: messageCount - 5, opensAtMessage: messageCount - 2, closesAtMessage: messageCount + 10, residueCardId: 'card-mystery-0' },
         heroTells: Array.from({ length: 24 }, (_, i) => ({ id: `tell-${i}`, text: fill(`tell ${i}`, 200), kind: i % 4 ? 'manner' : 'intimate', status: 'active', witnesses: ['Companion 0', 'Notable Person 4'], sightings: [10, 60, 120], lastSeenMessage: 380, voicedCount: 1, voicedBy: ['Companion 0'], public: true })),
         heroTellBeat: { tellId: 'tell-1', mode: 'remark', mintedAtMessage: messageCount - 5, opensAtMessage: messageCount - 2, closesAtMessage: messageCount + 20 },
+        // The land's face, the variety tally and an open interlude (WOW 2026-10-26).
+        regions: { 'the Toll Country': { terrain: fill('terrain', 120), people: fill('people', 120), built: fill('built', 120), dread: fill('dread', 120), names: fill('names', 120), atMessage: 2 } },
+        worldMotifs: Object.fromEntries(Array.from({ length: 40 }, (_, i) => [fill(`motif ${i}`, 40), { count: 3 + i, lastMessage: i }])),
+        interlude: { key: `region|${messageCount - 1}`, reason: 'region', mintedAtMessage: messageCount - 1, opensAtMessage: messageCount - 1, region: 'the Toll Country', frontId: null, title: null, material: fill('material', 300) },
         messages,
         messageCount,
     };
@@ -143,14 +147,15 @@ const DYNAMIC_CEILINGS = {
     recentRolls: 1000,     // 744
     recentRulings: 1000,   // 876
     worldFacts: 6500,      // 5,631 — 15 lines
-    place: 1500,           // the place card + 6 known ways
+    place: 2400,           // 2,156 — the place card + 6 known ways + the Region line (2026-10-26: five 120-char faces + the rule)
+    interlude: 1700,       // 1,516 — the region seam at its fullest: the land's face, the places elsewhere, the rules (2026-10-26)
     sessionHistory: 8500,  // 3 × (2,000 + 3 × 150) + headers
     transitionHistory: 900, // two referenced entries or two clamped 300-char summaries
     knownNpcs: 28000,      // 8 maxed KNOWN NPCs lines + the header (2026-10-14: four parts, four ceilings)
     heroTells: 3000,       // 2,344 — HERO_TELLS_BLOCK_CHAR_CEILING is the block's own belt
     storyMemory: 6000,     // 5,501 — 5 cards with their age and speakers (2026-10-14)
     retrievedMemories: 9500, // 8,378 — RETRIEVED_MEMORIES_CHAR_CEILING 8,000 + header
-    worldTempo: 6000,      // pinned at 5,200 by worldTempo's own test; 1,638 here
+    worldTempo: 6000,      // pinned at 5,200 by worldTempo's own test; 3,728 here (2026-10-26: + the 8-key "already shown" line, ~600)
     relationshipBeat: 1500, // 862
     regionalHearsay: 1600, // the block's own pin (regionalHearsay.test); 1,528 since the header names a doom too (2026-10-22)
     absenceDrift: 2200,    // 2 developments × 300 + a 300-char fact + a 240-char symptom (yields under a tempo window — staged closed here)

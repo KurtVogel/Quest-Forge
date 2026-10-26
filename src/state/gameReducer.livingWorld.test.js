@@ -494,7 +494,8 @@ describe('backstory-region guard (2026-08-06 live playtest #3)', () => {
         const weirs = poisoned.locations.find(r => r.name === 'Blackwater Weirs');
         expect(weirs.region ?? null).toBeNull();
         expect(weirs.type).toBe('frontier'); // rest of the profile still lands
-        expect(poisoned.session.pendingRegionalFronts).toBeUndefined();
+        // The only marker is the HOME land's face-only call (2026-10-26) — no seed.
+        expect(poisoned.session.pendingRegionalFronts).toMatchObject({ region: 'the Vale of Reeds', profileOnly: true });
 
         // The same arrival with a genuinely new, non-backstory region still
         // seeds — here evidenced by the turn's own text (the Scribe dispatch
@@ -508,6 +509,8 @@ describe('backstory-region guard (2026-08-06 live playtest #3)', () => {
             },
         });
         expect(real.session.pendingRegionalFronts).toMatchObject({ region: 'the Rimefell Marches' });
+        // A seed, not a face-only call: the home's face-only marker yielded to it.
+        expect(real.session.pendingRegionalFronts.profileOnly).toBeUndefined();
     });
 });
 
@@ -540,7 +543,8 @@ describe('first-seen region evidence gate + cluster inheritance (queue P2, playt
         const fort = next.locations.find(r => r.name === 'Fort Halla');
         expect(fort.region ?? null).toBeNull();
         expect(fort.type).toBe('frontier'); // the rest of the profile still lands
-        expect(next.session.pendingRegionalFronts).toBeUndefined();
+        // No seed — the home land's face-only marker is the only one pending.
+        expect(next.session.pendingRegionalFronts).toMatchObject({ region: 'the Harchwold', profileOnly: true });
     });
 
     it('accepts the same region when the turn text names it', () => {
@@ -585,7 +589,7 @@ describe('first-seen region evidence gate + cluster inheritance (queue P2, playt
         // The quarter sits in Weatherby, and Weatherby sits in the Harchwold —
         // a novel (even evidenced) region for a related record is the phantom class.
         expect(next.locations.find(r => r.name === 'Guild Quarter, Weatherby').region).toBe('the Harchwold');
-        expect(next.session.pendingRegionalFronts).toBeUndefined();
+        expect(next.session.pendingRegionalFronts).toMatchObject({ region: 'the Harchwold', profileOnly: true }); // the home's face-only call, no seed
     });
 });
 
@@ -623,7 +627,7 @@ describe('place-named region translation in UPDATE_LOCATION_PROFILE (2026-08-20 
         });
         const archives = next.locations.find(r => r.name === 'The Guildhall archives');
         expect(archives.region).toBe('Veyrmoor');
-        expect(next.session.pendingRegionalFronts).toBeUndefined(); // known region, no phantom seeding
+        expect(next.session.pendingRegionalFronts).toMatchObject({ region: 'Veyrmoor', profileOnly: true }); // known region: its face-only call, no phantom seeding
     });
 
     it('a region naming a region-less settlement resolves to nothing rather than a phantom land', () => {
@@ -778,9 +782,12 @@ describe('regional front seeding', () => {
         return state;
     };
 
+    // The home land asks for its FACE (a profile-only call, 2026-10-26) and never a seed.
+    const homeFaceOnly = { region: 'the Riverlands', locationName: 'Aldermill', profileOnly: true };
+
     it('never seeds the first-ever region (home), and seeds a genuinely new one', () => {
         let state = traveled();
-        expect(state.session.pendingRegionalFronts).toBeUndefined();
+        expect(state.session.pendingRegionalFronts).toMatchObject(homeFaceOnly);
 
         state = gameReducer(state, {
             type: 'UPDATE_LOCATION_PROFILE',
@@ -790,23 +797,24 @@ describe('regional front seeding', () => {
             region: 'the Icebound Coast',
             locationName: 'Fort Halla',
         });
+        expect(state.session.pendingRegionalFronts.profileOnly).toBeUndefined();
     });
 
     it('does not seed for a known region, from afar, or past the active-front cap', () => {
         let state = traveled();
-        // Same region as home → no marker.
+        // Same region as home → no seed (the home's face-only marker stands).
         const sameRegion = gameReducer(state, {
             type: 'UPDATE_LOCATION_PROFILE',
             payload: { name: 'Fort Halla', profile: { region: 'the Riverlands' } },
         });
-        expect(sameRegion.session.pendingRegionalFronts).toBeUndefined();
+        expect(sameRegion.session.pendingRegionalFronts).toMatchObject(homeFaceOnly);
 
         // Classifying a place the hero is NOT at → no marker.
         const elsewhere = gameReducer(state, {
             type: 'UPDATE_LOCATION_PROFILE',
             payload: { name: 'Aldermill', profile: { region: 'the Riverlands' } },
         });
-        expect(elsewhere.session.pendingRegionalFronts).toBeUndefined();
+        expect(elsewhere.session.pendingRegionalFronts).toMatchObject(homeFaceOnly);
 
         // Full front web → no marker.
         const full = {
@@ -817,7 +825,8 @@ describe('regional front seeding', () => {
             type: 'UPDATE_LOCATION_PROFILE',
             payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } },
         });
-        expect(capped.session.pendingRegionalFronts).toBeUndefined();
+        expect(capped.session.pendingRegionalFronts).toMatchObject(homeFaceOnly);
+        expect(capped.session.deferredRegions).toEqual(['the Icebound Coast']);
 
         // One-slot reserve (2026-08-06): at MAX_ACTIVE_FRONTS - 1 the installer
         // has no room either, so the marker isn't raised — the region stays
@@ -830,7 +839,7 @@ describe('regional front seeding', () => {
             type: 'UPDATE_LOCATION_PROFILE',
             payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } },
         });
-        expect(reserved.session.pendingRegionalFronts).toBeUndefined();
+        expect(reserved.session.pendingRegionalFronts).toMatchObject(homeFaceOnly);
     });
 
     it('regional installs never fill the last front slot (2026-08-06 one-slot reserve)', () => {
@@ -866,10 +875,18 @@ describe('regional front seeding', () => {
 
         const installed = gameReducer(state, {
             type: 'INSTALL_REGIONAL_FRONTS',
-            payload: { sessionId: 'campaign-1', key, fronts: [proposal('The Sled Toll', 'Kettu Syndicate'), { title: 'Junk' }] },
+            payload: {
+                sessionId: 'campaign-1',
+                key,
+                fronts: [proposal('The Sled Toll', 'Kettu Syndicate'), { title: 'Junk' }],
+                // The land's face rides the same reply (2026-10-26).
+                profile: { terrain: 'Black shingle and sea ice', people: 'Sealers and salt-boilers', dread: 'Drowned things that walk under the ice', junk: 'x' },
+            },
         });
         expect(installed.session.pendingRegionalFronts).toBeNull();
         expect(installed.session.seededRegions).toContain('the Icebound Coast');
+        expect(installed.regions['the Icebound Coast']).toMatchObject({ terrain: 'Black shingle and sea ice', dread: 'Drowned things that walk under the ice', built: null, names: null, atMessage: 20 });
+        expect(installed.regions['the Icebound Coast'].junk).toBeUndefined();
         const regional = installed.fronts.find(f => f.title === 'The Sled Toll');
         expect(regional.clock).toBe(0);
         const halla = installed.locations.find(r => r.name === 'Fort Halla');
@@ -881,7 +898,8 @@ describe('regional front seeding', () => {
             payload: { sessionId: 'campaign-1', key, fronts: [proposal('Again', 'Again Clan')] },
         })).toBe(installed);
 
-        // A region that was seeded (even emptily) never re-triggers.
+        // A region that was seeded (even emptily) never re-triggers — and
+        // with its face on record it asks for nothing at all.
         const again = gameReducer(installed, {
             type: 'UPDATE_LOCATION_PROFILE',
             payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } },

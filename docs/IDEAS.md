@@ -11,7 +11,7 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
-### [wow] The world has lands, not a name: region profiles, a durable bestiary tally, and the interlude that reads them — status: `idea` (2026-10-26, Vesa's continent voyage)
+### [wow] The world has lands, not a name: region profiles, a durable bestiary tally, and the interlude that reads them — status: all three slices `shipped` (2026-10-26 night, same day as proposed — DECISIONS.md 2026-10-26 (night), nine points; `engine/regionProfile.js` / `worldMotifs.js` / `interlude.js`; built + pinned, the live proof below OWED — the next session's smallest live proof)
 Vesa, from the long campaign: he travelled south for turns on end through "muddy pine woods" and
 "mouthless blind undead scavengers" in every dungeon, took a ship to ANOTHER CONTINENT to see
 something else — and the new land opened on a muddy timber outpost, pine woods, and "an eyeless,

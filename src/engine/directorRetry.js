@@ -51,8 +51,18 @@ export const RETRYABLE_DIRECTORS = {
     },
     regionalFronts: {
         pendingKey: session => session?.pendingRegionalFronts?.key,
-        install: (sessionId, key, fronts) => ({ type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId, key, fronts } }),
-        empty: [],
+        // The call returns `{ fronts, profile }` since 2026-10-26 (the land's
+        // face rides beside its native pressures); a bare list is the old shape.
+        install: (sessionId, key, result) => ({
+            type: 'INSTALL_REGIONAL_FRONTS',
+            payload: {
+                sessionId,
+                key,
+                fronts: Array.isArray(result) ? result : (result?.fronts || []),
+                profile: Array.isArray(result) ? null : (result?.profile || null),
+            },
+        }),
+        empty: { fronts: [], profile: null },
     },
     wonder: {
         pendingKey: session => session?.pendingWonder?.key,

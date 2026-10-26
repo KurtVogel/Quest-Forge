@@ -166,12 +166,13 @@ describe('a region met at a full web is deferred and seeded on the next arrival 
 
     it('defers at a full web, then seeds when the hero next arrives in that land with a slot free', () => {
         let state = gameReducer(traveled(), { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Fort Halla', profile: { type: 'frontier', danger: 'moderate', region: 'the Icebound Coast' }, evidenceText: 'Fort Halla, on the Icebound Coast.' } });
-        expect(state.session.pendingRegionalFronts).toBeUndefined();
+        // No SEED — the only marker is the home land's face-only call (2026-10-26).
+        expect(state.session.pendingRegionalFronts).toMatchObject({ region: 'the Riverlands', profileOnly: true });
         expect(state.session.deferredRegions).toEqual(['the Icebound Coast']);
-        // A second Coast place while still full: still deferred, no marker.
+        // A second Coast place while still full: still deferred, no seed.
         state = gameReducer(atMessages(state, 30), { type: 'SET_LOCATION', payload: 'Rime Quay' });
         state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Rime Quay', profile: { region: 'the Icebound Coast' }, evidenceText: 'Rime Quay, on the Icebound Coast.' } });
-        expect(state.session.pendingRegionalFronts).toBeUndefined();
+        expect(state.session.pendingRegionalFronts).toMatchObject({ region: 'the Riverlands', profileOnly: true });
         // A front resolves, the hero arrives at a Coast place: seeded, the ledger cleared.
         state = { ...state, fronts: state.fronts.map((f, i) => (i === 0 ? { ...f, status: 'resolved' } : f)) };
         state = gameReducer(atMessages(state, 40), { type: 'SET_LOCATION', payload: 'Fort Halla' });

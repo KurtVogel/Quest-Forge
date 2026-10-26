@@ -9,14 +9,10 @@
  * detector forces a dedicated response mode for explicitly marked table talk.
  */
 
-// Explicit markers only — a message must START as table talk. In-scene sentences
-// that merely mention a "dm"/"ooc" substring never match.
-const TABLE_TALK_PREFIX = /^\s*(?:[([]\s*ooc\b|\/?ooc\b|(?:hey\s+|hi\s+)?(?:dm|gm|dungeon\s+master|game\s+master)\s*[:,])/i;
-
-/** True when the player message is explicitly addressed to the DM out of character. */
-export function isTableTalkMessage(text) {
-    return TABLE_TALK_PREFIX.test(String(text || ''));
-}
+// The detector itself lives on the engine shelf since 2026-10-26 (the
+// ADD_MESSAGE handler reads it and handlers never import from llm/).
+import { isTableTalkMessage } from '../engine/tableTalkIntent.js';
+export { isTableTalkMessage };
 
 /**
  * "Ask the DM for a recap" (WOW 2026-09-15, session-return W2): the one

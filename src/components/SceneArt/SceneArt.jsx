@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useGame } from '../../state/GameContext.jsx';
 import { generatePortraitImageDetailed, generateSceneImageDetailed, imageRequestOptions, peekCachedImage } from '../../llm/providers/imageGen.js';
 import { isSameLocation } from '../../engine/locationRegistry.js';
+import { findRegionProfile, regionOfPlace } from '../../engine/regionProfile.js';
 import { composeScenePrompt } from '../../llm/sceneDirector.js';
 import {
     buildCustomPrompt,
@@ -131,6 +132,9 @@ export default function SceneArt() {
                 npcs: state.npcs || [],
                 combat: state.combat,
                 currentLocation: location,
+                // The land's face (WOW 2026-10-26): the painter's setting line.
+                regionName: regionOfPlace(state.locations || [], location),
+                regionProfile: findRegionProfile(state.regions, regionOfPlace(state.locations || [], location)),
                 settings: state.settings,
             });
             // The compose call is not abortable; honor a Cancel pressed during it.

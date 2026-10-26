@@ -11,7 +11,9 @@ vi.mock('./adapter.js', () => ({ sendMessage: sendMessageMock }));
 
 const {
     buildRegionalFrontsContext,
+    buildRegionalPrompt,
     generateRegionalFronts,
+    regionalCallWants,
     shouldGenerateRegionalFronts,
 } = await import('./regionalFronts.js');
 
@@ -106,15 +108,17 @@ describe('generateRegionalFronts', () => {
     it('extracts and sanitizes native pressures from a chatty response', async () => {
         sendMessageMock.mockResolvedValue(`The Harchwold's own troubles:\n${JSON.stringify({ aftermath_fronts: [proposal()] })}`);
         const result = await generateRegionalFronts(baseState());
-        expect(result).toHaveLength(1);
-        expect(result[0].title).toBe('The Brine Compact');
+        expect(result.fronts).toHaveLength(1);
+        expect(result.fronts[0].title).toBe('The Brine Compact');
+        // The face was asked for (no profile on record) and the reply carried none.
+        expect(result.profile).toBeNull();
     });
 
     it('repairs a trailing-comma response instead of failing it', async () => {
         const broken = JSON.stringify({ aftermath_fronts: [proposal()] }).replace(']}', '],}');
         sendMessageMock.mockResolvedValue(broken);
         const result = await generateRegionalFronts(baseState());
-        expect(result).toHaveLength(1);
+        expect(result.fronts).toHaveLength(1);
     });
 
     it('throws when the response has no aftermath_fronts JSON at all', async () => {
@@ -126,11 +130,76 @@ describe('generateRegionalFronts', () => {
         // Same shared repair path as frontAftermath: braces closed, goal-less
         // fragment dropped by sanitation — truncation installs nothing.
         sendMessageMock.mockResolvedValue('{"aftermath_fronts": [{"title": "Broken');
-        await expect(generateRegionalFronts(baseState())).resolves.toEqual([]);
+        await expect(generateRegionalFronts(baseState())).resolves.toEqual({ fronts: [], profile: null });
     });
 
     it('throws when the JSON is malformed beyond repair', async () => {
         sendMessageMock.mockResolvedValue('{"aftermath_fronts": oops}');
         await expect(generateRegionalFronts(baseState())).rejects.toThrow('malformed');
+    });
+});
+
+describe('the land\'s face (WOW 2026-10-26, slice 1)', () => {
+    const profile = { terrain: 'Salt flats to a grey horizon', people: 'Salt-boilers and grudge-keepers', built: 'Brine-bleached boards', dread: 'Things that crawl up the pans at night', names: 'Harsh and short — Grell, Mott' };
+
+    it('asks for the profile beside the fronts when the land has none on record, and types it from the reply', async () => {
+        sendMessageMock.mockResolvedValue(JSON.stringify({ aftermath_fronts: [proposal()], region_profile: { ...profile, junk: 'x', terrain: 42 } }));
+        const result = await generateRegionalFronts(baseState());
+        expect(result.fronts).toHaveLength(1);
+        // A number is not a face: the required terrain is missing → no profile.
+        expect(result.profile).toBeNull();
+        sendMessageMock.mockResolvedValue(JSON.stringify({ aftermath_fronts: [], region_profile: profile }));
+        const typed = await generateRegionalFronts(baseState());
+        expect(typed.profile).toEqual(profile);
+        const system = sendMessageMock.mock.calls.at(-1)[0].systemPrompt;
+        expect(system).toContain('"aftermath_fronts"');
+        expect(system).toContain('"region_profile"');
+        expect(system).toContain('CONTRAST IS MANDATORY');
+        expect(system).toContain('and write the land\'s own face beside them');
+    });
+
+    it('a profileOnly marker asks for the face alone: no fronts schema, the profile anchor, an empty fronts list', async () => {
+        const state = baseState();
+        state.session.pendingRegionalFronts = { ...state.session.pendingRegionalFronts, profileOnly: true };
+        sendMessageMock.mockResolvedValue(`Here:\n${JSON.stringify({ region_profile: profile })}`);
+        const result = await generateRegionalFronts(state);
+        expect(result).toEqual({ fronts: [], profile });
+        const system = sendMessageMock.mock.calls.at(-1)[0].systemPrompt;
+        expect(system).not.toContain('"aftermath_fronts"');
+        expect(system).toContain('whose face this campaign has not yet written down');
+        expect(regionalCallWants(state)).toEqual({ wantsFronts: false, wantsProfile: true });
+        // A prose reply with no profile is "missing", like a fronts reply without its list.
+        sendMessageMock.mockResolvedValue('A lovely land.');
+        await expect(generateRegionalFronts(state)).rejects.toThrow('did not contain region_profile');
+    });
+
+    it('a land already on record asks for no profile; the contrast list carries every OTHER land\'s face, newest first', async () => {
+        const state = baseState();
+        state.regions = {
+            'The Harchwold': { ...profile, atMessage: 5 },
+            'The Riverlands': { ...profile, terrain: 'Reed and slow water', atMessage: 2 },
+            'The Icebound Coast': { ...profile, terrain: 'Sea ice', atMessage: 9 },
+        };
+        const context = buildRegionalFrontsContext(state);
+        expect(context.wants).toEqual({ wantsFronts: true, wantsProfile: false });
+        expect(context.knownRegions.map(land => land.name)).toEqual(['The Icebound Coast', 'The Riverlands']);
+        expect(context.knownRegions[0]).toEqual({ name: 'The Icebound Coast', ...profile, terrain: 'Sea ice' });
+        expect(context).not.toHaveProperty('journal');
+        sendMessageMock.mockResolvedValue(JSON.stringify({ aftermath_fronts: [proposal()], region_profile: { ...profile, terrain: 'An unasked rewrite' } }));
+        const result = await generateRegionalFronts(state);
+        expect(result.profile).toBeNull();
+        expect(sendMessageMock.mock.calls.at(-1)[0].systemPrompt).not.toContain('"region_profile"');
+    });
+
+    it('buildRegionalPrompt composes the two schemas and rule sets by what the call wants', () => {
+        const both = buildRegionalPrompt({ wantsFronts: true, wantsProfile: true });
+        expect(both).toContain('"aftermath_fronts"');
+        expect(both).toContain('"region_profile"');
+        expect(both).toContain('FLAVOR DIVERGENCE IS MANDATORY');
+        expect(both).toContain('CONTRAST IS MANDATORY');
+        const faceOnly = buildRegionalPrompt({ wantsFronts: false, wantsProfile: true });
+        expect(faceOnly).not.toContain('FLAVOR DIVERGENCE');
+        expect(faceOnly).toContain('"dread"');
+        expect(buildRegionalPrompt({ wantsFronts: true, wantsProfile: false })).not.toContain('CONTRAST IS MANDATORY');
     });
 });

@@ -4,7 +4,7 @@
  * promptBuilder.*.test.js files (fronts, story memory, action surge, combat pacing).
  */
 import { describe, expect, it } from 'vitest';
-import { buildSystemPrompt, PROMPT_CHAR_BUDGET } from './promptBuilder.js';
+import { buildSystemPrompt, buildSystemPromptParts, PROMPT_CHAR_BUDGET } from './promptBuilder.js';
 
 function makeCharacter(overrides = {}) {
     return {
@@ -54,6 +54,7 @@ function prompt(overrides = {}) {
         messages: overrides.messages ?? [],
         messageCount: overrides.messageCount ?? (overrides.messages ?? []).length,
         relationshipBeat: overrides.relationshipBeat ?? null,
+        regions: overrides.regions ?? null,
     });
 }
 
@@ -1159,6 +1160,36 @@ describe('the place card rides the Current location line (WOW 2026-09-16, explor
         expect(prompt({ currentLocation: 'Rimehollow', locations }))
             .toContain('**Current location:** Rimehollow — the mill wheel that turns though the river is dry. Now: half-burned; the mill silent.');
         expect(prompt({ currentLocation: 'Jewelglade' })).toContain('**Current location:** Jewelglade\n');
+    });
+
+    it('the land\'s face rides ONE Region line under the place when the record\'s region has a profile (WOW 2026-10-26, slice 1)', () => {
+        const locations = [{ id: 'l1', name: 'Rime Quay', region: 'The Icebound Coast', aliases: [], links: [] }];
+        const regions = { 'The Icebound Coast': { terrain: 'Black shingle and sea ice', people: 'Sealers who pay in oil', built: null, dread: 'The drowned walk under the ice', names: 'Kettu, Isk', atMessage: 3 } };
+        const text = prompt({ currentLocation: 'Rime Quay', locations, regions });
+        expect(text).toContain('**Current location:** Rime Quay\n**Region — The Icebound Coast** (this land\'s own face; every new place, person, foe and name here is drawn from it, never from another land\'s): the land: Black shingle and sea ice; its people: Sealers who pay in oil; its dead and wilds: The drowned walk under the ice; names here: Kettu, Isk.');
+        // No profile on record, or no region on the record: no line.
+        expect(prompt({ currentLocation: 'Rime Quay', locations })).not.toContain('**Region —');
+        expect(prompt({ currentLocation: 'Rime Quay', locations: [{ id: 'l1', name: 'Rime Quay', aliases: [], links: [] }], regions })).not.toContain('**Region —');
+    });
+});
+
+describe('the interlude block (WOW 2026-10-26, slice 3)', () => {
+    const messages = Array.from({ length: 41 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `m${i}` }));
+    const interlude = { key: 'rest|40', reason: 'rest', mintedAtMessage: 40, opensAtMessage: 40, region: null, frontId: null, title: null, material: null };
+
+    it('rides as its own part while open, and not in combat, under a response mode, or on the lean lanes', () => {
+        const parts = buildSystemPromptParts({ character: makeCharacter(), currentLocation: 'Jewelglade', messages, messageCount: 41, interlude, preset: 'classicFantasy', ruleset: 'simplified5e' });
+        const part = parts.find(p => p.name === 'interlude');
+        expect(part?.text).toContain('## AN INTERLUDE — THE WORLD TURNS (PRIVATE)');
+        expect(part.text).toContain('A night has passed');
+        // After the tempo family, before the character block.
+        expect(parts.findIndex(p => p.name === 'interlude')).toBeLessThan(parts.findIndex(p => p.name === 'character'));
+        const names = flags => buildSystemPromptParts({ character: makeCharacter(), currentLocation: 'Jewelglade', messages, messageCount: 41, interlude, preset: 'classicFantasy', ruleset: 'simplified5e', ...flags }).map(p => p.name);
+        expect(names({ combat: { active: true, enemies: [], turnOrder: [], round: 1 } })).not.toContain('interlude');
+        expect(names({ mode: 'tableTalk' })).not.toContain('interlude');
+        expect(names({ intentOnly: true })).not.toContain('interlude');
+        expect(names({ nudgeOnly: true })).not.toContain('interlude');
+        expect(names({ interlude: null })).not.toContain('interlude');
     });
 });
 

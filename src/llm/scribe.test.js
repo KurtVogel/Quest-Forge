@@ -1990,6 +1990,17 @@ describe('Scribe dispatcher shapes (2026-09-01 scribe test depth)', () => {
         });
     });
 
+    it('location_profile carries the archetype and the motifs to the reducer (the variety tally\'s feed, WOW 2026-10-26)', async () => {
+        sendMessage.mockResolvedValue(JSON.stringify({
+            world_facts: [], npc_updates: [], story_memory: [], location: null,
+            location_profile: { name: 'The Sunken Barrow', type: 'hostile_site', danger: 'high', archetype: 'Eyeless Undead', motifs: ['black ichor', 'bone-piles', 'a third'] },
+        }));
+        const dispatch = vi.fn();
+        await runScribe({ playerMessage: 'I enter the barrow.', dmNarrative: 'Bone-piles and black ichor.', settings, dispatch });
+        const update = dispatch.mock.calls.find(([a]) => a.type === 'UPDATE_LOCATION_PROFILE')?.[0];
+        expect(update.payload.profile).toMatchObject({ archetype: 'Eyeless Undead', motifs: ['black ichor', 'bone-piles', 'a third'] });
+    });
+
     it('ignores a location_profile without a name', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({
             world_facts: [], npc_updates: [], story_memory: [], location: null,

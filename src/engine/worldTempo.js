@@ -25,6 +25,7 @@ import { findLocationRecord, getCurrentLocationRecord, isSameLocation } from './
 import { conversationalDistance } from './replayLedger.js';
 import { DEFAULT_MAX_CLOCK, DOOM_WINDOW_MESSAGES, describeAvertedPortent, describeFrontDoom, describeFrontPortents } from './fronts.js';
 import { cleanText as typedText } from './text.js';
+import { describeWornMotifs, recordWorldMotifs } from './worldMotifs.js';
 
 export const INTENSITY_LEVELS = ['whispers', 'indirect', 'presence', 'confrontation'];
 export const PACE_DIALS = ['slow-burn', 'standard', 'breakneck'];
@@ -327,6 +328,25 @@ export function computeFoeFatigue(recentEncounters = []) {
         .map(([family, count]) => ({ family, count }));
 }
 
+/**
+ * Load heal for a pre-tally save (2026-10-26): an EMPTY world-motif tally
+ * learns what the encounter ledger knew — one sighting per foe family per
+ * ledger fight — so the "already shown" line does not start from zero on
+ * the day the window it replaces was retired. A tally with any entry is
+ * trusted as is (the ledger's fights are already in it).
+ */
+export function seedWorldMotifsFromEncounters(tally, recentEncounters = []) {
+    const base = tally && typeof tally === 'object' && !Array.isArray(tally) ? tally : {};
+    if (Object.keys(base).length > 0) return base;
+    let next = base;
+    for (const entry of Array.isArray(recentEncounters) ? recentEncounters : []) {
+        next = recordWorldMotifs(next, [...new Set(entryFoeFamilies(entry))], {
+            atMessage: Number.isFinite(entry?.messageIndex) ? entry.messageIndex : 0,
+        });
+    }
+    return next;
+}
+
 /** Fronts whose resolution is recent enough that the DM should still show the aftermath. */
 export function recentlyResolvedFronts(fronts = [], messageCount = 0, messages = null) {
     return (Array.isArray(fronts) ? fronts : [])
@@ -612,6 +632,7 @@ export function buildWorldTempoBlock({
     solo = false,
     locations = [],
     currentLocation = null,
+    worldMotifs = null,
 } = {}) {
     const activeFronts = (Array.isArray(fronts) ? fronts : []).filter(f => f && (f.status || 'active') === 'active');
     const resolvedEchoes = recentlyResolvedFronts(fronts, messageCount, messages);
@@ -728,12 +749,15 @@ export function buildWorldTempoBlock({
             .map(entry => `${cleanText(entry.enemies, 60)} (${entry.location ? `${cleanText(entry.location, 40)}, ` : ''}${entry.outcome})`)
             .join('; ');
         lines.push(`Recent fights: ${recent}. Do not repeat near-identical encounters — vary, escalate, or let places stay cleared once won.`);
-        const fatigue = computeFoeFatigue(encounters);
-        if (fatigue.length > 0) {
-            const list = fatigue.map(({ family, count }) => `${family}-type foes in ${count} of the last ${encounters.length} fights`).join('; ');
-            lines.push(`FOE FATIGUE: ${list}. This bestiary is exhausted — unless the player deliberately hunts them or established canon requires them in THIS exact place, field something different: new species, new imagery, new tactics, new mood. Distant locations must not share one monster ecology.`);
-        }
     }
+    // The durable variety line (WOW 2026-10-26): the campaign-level tally of
+    // creature archetypes and imagery motifs replaces the ten-fight FOE
+    // FATIGUE window — four names for one eyeless ghoul were four families to
+    // the head-noun key, and a trope reached for every fourth dungeon never
+    // tripped a window of ten. A pre-tally save seeds it from the ledger at
+    // load (seedWorldMotifsFromEncounters).
+    const worn = describeWornMotifs(worldMotifs);
+    if (worn) lines.push(worn);
 
     if (solo) {
         lines.push('The player is currently alone. When a pressure symptom or local scene naturally involves people, some may be potential companions (prisoners, rivals, guides, deserters, witnesses); never force them into the party — if the player earns or accepts their help, emit add_companions with compact combat stats.');

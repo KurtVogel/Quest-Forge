@@ -18,6 +18,7 @@
 import { containment, coverage, tokenSet } from './textMatch.js';
 import { conversationalDistance } from './replayLedger.js';
 import { cleanText as typedText } from './text.js';
+import { normalizeMotifKey, normalizeMotifList } from './worldMotifs.js';
 
 export const LOCATION_TYPES = ['haven', 'settlement', 'wilderness', 'frontier', 'hostile_site'];
 export const DANGER_LEVELS = ['none', 'low', 'moderate', 'high', 'deadly'];
@@ -403,6 +404,12 @@ export function normalizeLocationRecord(rawRecord = {}, existing = null) {
         // load twin (LOAD_GAME re-runs every record through it).
         signature: mergePlaceSignature(existing?.signature, record.signature),
         lastState: cleanText(record.lastState, LOCATION_STATE_MAX) || cleanText(existing?.lastState, LOCATION_STATE_MAX) || null,
+        // The durable variety tally's per-place sources (WOW 2026-10-26):
+        // the creature kind met here (current-state replace) and up to two
+        // imagery motifs (first-stated union, capped). Typed keys, so the
+        // tally counts a key once per record.
+        archetype: normalizeMotifKey(record.archetype) || normalizeMotifKey(existing?.archetype) || null,
+        motifs: normalizeMotifList([...(Array.isArray(existing?.motifs) ? existing.motifs : []), ...(Array.isArray(record.motifs) ? record.motifs : (record.motifs === undefined || record.motifs === null ? [] : [record.motifs]))]),
         // In-fiction arrival count: SET_LOCATION passes the incremented value
         // on a genuine arrival; every other upsert keeps the stored count.
         visitCount: toVisitCount(record.visitCount) ?? toVisitCount(existing?.visitCount) ?? 0,
@@ -1017,6 +1024,8 @@ export function dedupeLocationRecords(locations = []) {
             lastState: (record.lastVisitedAt || 0) > (kept.lastVisitedAt || 0)
                 ? (record.lastState || kept.lastState)
                 : (kept.lastState || record.lastState),
+            archetype: kept.archetype || record.archetype,
+            motifs: [...(kept.motifs || []), ...(record.motifs || [])],
             visitCount: (toVisitCount(kept.visitCount) || 0) + (toVisitCount(record.visitCount) || 0),
         }, kept);
     };

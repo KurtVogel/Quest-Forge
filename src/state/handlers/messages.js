@@ -11,7 +11,20 @@ import {
 } from '../../engine/roleplayCheck.js';
 import { appendRollHistory, reviveCharacter, systemMessage } from './shared.js';
 import { isLiveFact } from '../../engine/worldFacts.js';
+import { consumeInterlude } from '../../engine/interlude.js';
+import { isTableTalkMessage } from '../../engine/tableTalkIntent.js';
 import { gameReducer } from '../gameReducer.js';
+
+/** Is the DM row being added the answer to an OOC table-talk line (the newest player row)? */
+function isTableTalkReply(messages) {
+    for (let i = (messages || []).length - 1; i >= 0; i -= 1) {
+        const m = messages[i];
+        if (!m || m.hidden || m.deleted) continue;
+        if (m.role === 'user') return typeof m.content === 'string' && isTableTalkMessage(m.content);
+        if (m.role === 'assistant') return false;
+    }
+    return false;
+}
 
 export const handlers = {
     ADD_MESSAGE(state, action) {
@@ -57,6 +70,15 @@ export const handlers = {
         if (role === 'user' && !action.payload?.hidden
             && (next.fronts || []).some(front => Number.isFinite(front?.doomAtMessage) && (front.status || 'active') === 'active')) {
             return gameReducer(next, { type: 'SETTLE_DOOMS' });
+        }
+        // The interlude is spent by the narrative DM row that could carry it
+        // (WOW 2026-10-26): never by a table-talk reply (the OOC request for
+        // one is answered at the table; the wide shot opens the NEXT turn),
+        // a hidden row, or a combat row (the block never renders in a fight).
+        if (role === 'assistant' && next.session?.interlude && !action.payload?.hidden && !next.combat?.active
+            && !isTableTalkReply(state.messages)) {
+            const session = consumeInterlude(next.session, { messageCount: state.messages.length, messages: state.messages });
+            if (session !== next.session) next.session = session;
         }
         return next;
     },

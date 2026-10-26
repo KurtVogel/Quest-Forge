@@ -10,6 +10,7 @@ import { getDmBonusXpCap, getExperienceThreshold, isMaxLevel } from '../engine/p
 import { buildJournalBlocks, describeBondForPrompt } from './journalBlocks.js';
 import { findSubjectsInText } from '../engine/textMatch.js';
 import { buildWonderBlock } from '../engine/wonder.js';
+import { buildInterludeBlock } from '../engine/interlude.js';
 import { buildPresenceText } from './narrativeMessages.js';
 import { buildStoryMemoryPromptBlock, formatSecrecyTag } from '../engine/storyMemory.js';
 import { describeCatalogForPrompt } from '../data/items.js';
@@ -161,7 +162,7 @@ export function buildSystemPromptSplit(options) {
  * every dynamic block has a ceiling from its inputs' caps, and a test that can
  * read the blocks by name can pin each one instead of only the total.
  */
-export function buildSystemPromptParts({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, narrationOnly = false, intentOnly = false, nudgeOnly = false, mode = null, storyMemoryPool = null }) {
+export function buildSystemPromptParts({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, regions = null, worldMotifs = null, interlude = null, narrationOnly = false, intentOnly = false, nudgeOnly = false, mode = null, storyMemoryPool = null }) {
     // `intentOnly` (2026-09-30 prompt-building Lap-3 P2): the combat INTENT
     // call translates one committed action into a bounded combat_exchange
     // whose targets are enemy ids and whose actions are the slot whitelist —
@@ -346,9 +347,29 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
             // arrives as news (2026-10-22).
             locations: ctx.locations,
             currentLocation,
+            // The durable variety line (WOW 2026-10-26).
+            worldMotifs,
         });
         if (tempoBlock) {
             parts.push(tempoBlock, 'worldTempo');
+        }
+        // The interlude (WOW 2026-10-26): the narrator's rare wide shot at an
+        // engine seam, rendered only while its window is open, never in
+        // combat, never under a response MODE (table talk / the epilogue
+        // have their own contract). Sourced from public material only.
+        if (!mode) {
+            const interludeBlock = buildInterludeBlock(interlude, {
+                messageCount: ctx.messageCount,
+                messages: ctx.messages,
+                combatActive: ctx.combatActive,
+                regions,
+                locations: ctx.locations,
+                currentLocation,
+                fronts: ctx.fronts,
+            });
+            if (interludeBlock) {
+                parts.push(interludeBlock, 'interlude');
+            }
         }
 
         // Living world (DECISIONS.md 2026-08-05): a long-absence return surfaces
@@ -475,6 +496,8 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
             messages: ctx.messages,
             storyMemory: threadPool,
             locations: ctx.locations,
+            // The land's face rides the place line (WOW 2026-10-26).
+            regions,
         });
         for (const block of blocks) parts.push(block.text, block.name);
     }
