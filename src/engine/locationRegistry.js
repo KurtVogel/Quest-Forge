@@ -552,7 +552,19 @@ export function sanitizeRegionName(value, placeName = '') {
     if (!region || JUNK_LOCATION_RE.test(region)) return null;
     const tokens = locationTokens(region);
     if (tokens.size === 0 || tokens.size > 4) return null;
-    if (placeName && isSameLocation(region, placeName)) return null;
+    // The region must not BE the place (2026-08-20: "Ashford" for Ashford) —
+    // but a place named "<place>, <Region>" ("The Docks of Odrana, Saffron
+    // Coast", the DM's own way of saying where a place lies) must keep its
+    // land: the old containment test read the region's tokens inside the
+    // place name as "the same location" and refused every such record its
+    // region, which is why the far land of the 2026-10-27 live proof was
+    // named by the Scribe and stored by nobody. The place is the region only
+    // when the PLACE's own tokens fit inside the region's.
+    if (placeName) {
+        const placeTokens = locationTokens(placeName);
+        // One direction only (containment() measures against the SMALLER set).
+        if (placeTokens.size > 0 && [...placeTokens].every(token => tokens.has(token))) return null;
+    }
     if ([...tokens].every(token => GENERIC_PLACE_TOKENS.has(token))) return null;
     // A region never ends in a street-level subdivision noun — "the Chandlers'
     // quarter" is a locality inside a town, whatever its capitalization.

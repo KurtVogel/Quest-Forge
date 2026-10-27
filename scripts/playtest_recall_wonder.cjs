@@ -148,6 +148,8 @@ const captured = [];      // { t, kind: 'dm'|'director'|'machinery', model, sys 
 const directorOutputs = []; // raw director responses (all hooks)
 const consoleLines = [];  // { t, text }
 const directorRequests = new WeakSet();
+const scribeRequests = new WeakSet(); // the per-turn Scribe's calls (PROBE 9, 2026-10-27: the hostile-site profile that never landed)
+const scribeOutputs = []; // { t, text }
 
 function attachCapture(page) {
     page.on('request', async (req) => {
@@ -174,6 +176,7 @@ function attachCapture(page) {
             const director = /private wonder director/i.test(sys);
             const kind = director ? 'director' : (reqModel === model ? 'dm' : 'machinery');
             if (director) directorRequests.add(req);
+            if (/location_profile/.test(sys) && /KNOWN PLACES|KNOWN LANDS|KNOWN APPEARANCES/.test(JSON.stringify(body))) scribeRequests.add(req);
             // The history rows the provider received (grand probe: the journal tail, the
             // pending-line-once rule, XP receipts in the window — 2026-10-01/02).
             const rows = isGemini
@@ -184,7 +187,8 @@ function attachCapture(page) {
     });
     page.on('response', async (resp) => {
         try {
-            if (!directorRequests.has(resp.request())) return;
+            const isScribe = scribeRequests.has(resp.request());
+            if (!directorRequests.has(resp.request()) && !isScribe) return;
             const text = await resp.text();
             let inner = text;
             try {
@@ -192,7 +196,7 @@ function attachCapture(page) {
                 inner = j.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('')
                     || j.choices?.[0]?.message?.content || text;
             } catch { /* keep raw */ }
-            directorOutputs.push({ t: Date.now(), text: String(inner).slice(0, 6000) });
+            (isScribe ? scribeOutputs : directorOutputs).push({ t: Date.now(), text: String(inner).slice(0, 6000) });
         } catch { /* best-effort */ }
     });
     page.on('console', (msg) => {
@@ -2591,6 +2595,8 @@ async function runDoomProbe(page) {
 const LANDS_HOME = 'the Mirkfell Marches';
 const LANDS_FAR = 'the Saffron Coast';
 const LANDS_PREMISE = `${HERO_NAME} keeps the palisade gate at Pine Hollow, a timber village deep in the Mirkfell Marches: muddy pine woods, a timber palisade, and the old barrow mounds where eyeless, lanky undead walk at night. Everyone in the Marches knows the land: mud, pines, and the barrow-ghouls. Old Vesta the gatekeeper has watched the gate for thirty years. Far across the Sundering Sea lies the Saffron Coast, a land ${HERO_NAME} has only heard of from sailors; a ship for it leaves the river mouth at Gullmark every month.`;
+const LANDS_START = process.env.QF_LANDS_START || 'village';
+const LANDS_PREMISE_PORT = `${HERO_NAME} kept the palisade gate at Pine Hollow, a timber village deep in the Mirkfell Marches: muddy pine woods, a timber palisade, and the old barrow mounds where eyeless, lanky undead walk at night. Everyone in the Marches knows the land: mud, pines, and the barrow-ghouls. Today ${HERO_NAME} stands on the stone quay at Gullmark, the river-mouth port of the Mirkfell Marches, with passage already paid on the carrack that sails across the Sundering Sea to the Saffron Coast on this evening's tide — a land ${HERO_NAME} has only heard of from sailors. The bosun has the tally-stick; the hold is loading.`;
 const WORN_SEED = {
     archetype: 'eyeless undead',
     motifs: ['pine woods', 'timber palisade'],
@@ -2641,7 +2647,8 @@ function dmSysSince(t0) {
 /** The Scribe names a land when the fiction does; when it did not, the harness classifies the current place itself (noted). */
 async function ensureRegion(page, region, evidenceText) {
     const s = await landsSnap(page);
-    const here = s.places.find(p => p.name && s.location && (p.name.toLowerCase() === String(s.location).toLowerCase()));
+    const loc = String(s.location || '').toLowerCase();
+    const here = s.places.find(p => p.name && loc && (p.name.toLowerCase() === loc || loc.includes(p.name.toLowerCase()) || p.name.toLowerCase().includes(loc)));
     if (here?.region) return { forced: false, region: here.region, place: here.name };
     const placeName = here?.name || s.location;
     if (!placeName) return { forced: false, region: null, place: null };
@@ -2754,11 +2761,18 @@ async function landsTurn(page, label, action, { settle = {} } = {}) {
 }
 
 async function runLandsProbe(page) {
-    await bootAndCreateHero(page, { premiseMode: 'text', premiseText: LANDS_PREMISE });
+    const port = LANDS_START === 'port';
+    await bootAndCreateHero(page, { premiseMode: 'text', premiseText: port ? LANDS_PREMISE_PORT : LANDS_PREMISE });
     const opening = await lastDmMessage(page);
-    const home1 = await landsTurn(page, 'home-1', 'I walk the palisade at dusk and ask old Vesta what the night has brought to the gate.');
-    const fight1 = await landsTurn(page, 'home-fight', 'I take a torch out to the old barrow mounds to clear out the eyeless things the village fears. Longsword drawn, I attack the first barrow-ghoul I find.');
-    const home2 = await landsTurn(page, 'home-2', 'I come back to Pine Hollow, bind my cuts at the gate, and tell Vesta what I killed in the barrow.');
+    const home1 = await landsTurn(page, 'home-1', port
+        ? 'I look down the quay at the carrack and ask the bosun when we sail, and what the Marches have sent down the river this season.'
+        : 'I walk the palisade at dusk and ask old Vesta what the night has brought to the gate.');
+    const fight1 = port
+        ? { dm: '' }
+        : await landsTurn(page, 'home-fight', 'I take a torch out to the old barrow mounds to clear out the eyeless things the village fears. Longsword drawn, I attack the first barrow-ghoul I find.');
+    const home2 = await landsTurn(page, 'home-2', port
+        ? 'I tell the bosun I have had my fill of mud and pines and barrow-ghouls, and ask him what the Saffron Coast is like.'
+        : 'I come back to Pine Hollow, bind my cuts at the gate, and tell Vesta what I killed in the barrow.');
     const homeNamed = await ensureRegion(page, LANDS_HOME, [opening, home1.dm, home2.dm].join('\n'));
     results.push({ check: 'home-region-named', pass: !!homeNamed.region, forcedByHarness: homeNamed.forced, region: homeNamed.region, place: homeNamed.place });
     const homeFace = await waitForFace(page, LANDS_HOME, { maxMs: 180000 });
@@ -2774,8 +2788,19 @@ async function runLandsProbe(page) {
     // the first run's "landfall" line was answered with eighty miles of bog),
     // so the harness keeps travelling until the fiction lands the hero.
     const homePlaces = new Set((await landsSnap(page)).places.map(p => p.name));
-    await landsTurn(page, 'voyage', `I leave Pine Hollow for good: three days down the River Way to Gullmark at the river mouth, where I pay my passage and board the monthly ship across the Sundering Sea to ${LANDS_FAR}. I want to see something other than mud and pines.`);
+    await landsTurn(page, 'voyage', port
+        ? `I board the carrack as the tide turns and we sail for ${LANDS_FAR}. I want to see something other than mud and pines.`
+        : `I leave Pine Hollow for good: three days down the River Way to Gullmark at the river mouth, where I pay my passage and board the monthly ship across the Sundering Sea to ${LANDS_FAR}. I want to see something other than mud and pines.`);
     let landfall = null;
+    // The DM honors THE ROAD IS A SCENE and the hero's own state (run 4: five
+    // "I step ashore" lines were answered with a flooded ford and 1 HP), so the
+    // voyage is played by the adaptive player agent: each line answers what
+    // the DM just asked and moves toward the ship and the far shore. A short
+    // rest first (never a long one: that would mint the REST interlude and its
+    // cooldown would block the REGION seam this probe measures).
+    await page.evaluate(() => { window.__QF_DISPATCH__?.({ type: 'TAKE_REST', payload: 'short' }); });
+    await delay(500);
+    const VOYAGE_INTENT = `Get to the sea and across it: reach Gullmark at the river mouth, pay for passage on the ship across the Sundering Sea to ${LANDS_FAR}, make the crossing, and step ashore at the first port of ${LANDS_FAR}. Answer whatever the DM just asked in whatever way moves toward the ship and that far shore — pay, wade, take the raft, take the plank, board, sail.`;
     const voyageLines = [
         `I keep going without stopping to Gullmark, pay the bosun whatever he asks, and board the ship for ${LANDS_FAR}.`,
         `I stay aboard. The ship clears the sandbars and sails south across the Sundering Sea for ${LANDS_FAR}; I keep to the rail and wait out the crossing.`,
@@ -2783,8 +2808,12 @@ async function runLandsProbe(page) {
         `I step ashore onto ${LANDS_FAR} and look around at the port.`,
         `I am on ${LANDS_FAR} now, on its quay. I look around.`,
     ];
-    for (let i = 1; i <= voyageLines.length; i += 1) {
-        landfall = await landsTurn(page, `landfall-${i}`, voyageLines[i - 1]);
+    for (let i = 1; i <= (port ? 14 : 12); i += 1) {
+        const sBefore = await snap(page);
+        const adapted = await adaptLine(page, 'travel', VOYAGE_INTENT, { location: sBefore?.location, hero: { hp: sBefore?.hp, maxHp: sBefore?.maxHp } });
+        const line = adapted?.line || voyageLines[Math.min(i, voyageLines.length) - 1];
+        note('lands', `voyage line ${i} (${adapted?.status || 'scripted'}): ${line.slice(0, 200)}`);
+        landfall = await landsTurn(page, `landfall-${i}`, line);
         const s = await landsSnap(page);
         const homeSide = /gullmark|river way|pine hollow|mirkfell|barrow|skell|sundering sea|aboard|deck|carrack|ship/i.test(String(s.location || ''));
         const newPlace = s.location && !homePlaces.has(s.location) && !homeSide;
@@ -2878,6 +2907,7 @@ async function run() {
     } finally {
         fs.writeFileSync(path.join(OUT_DIR, 'transcript.json'), JSON.stringify(await page.evaluate(() => (window.__QF_STATE__?.messages || []).map(m => ({ role: m.role, kind: m.kind || null, hidden: !!m.hidden, content: m.content }))).catch(() => []), null, 2));
         fs.writeFileSync(path.join(OUT_DIR, 'director-outputs.json'), JSON.stringify(directorOutputs, null, 2));
+        fs.writeFileSync(path.join(OUT_DIR, 'scribe-outputs.json'), JSON.stringify(scribeOutputs, null, 2));
         await shot(page, 'final');
         saveAll();
         await browser.close();

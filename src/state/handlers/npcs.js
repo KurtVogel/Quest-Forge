@@ -138,18 +138,24 @@ function seedMayReplace(pending) {
 
 /**
  * The interlude's REGION seam (WOW 2026-10-26): the hero stands in a land
- * this story has not yet given its establishing shot. The home land (no other
- * region known) is remembered without one — the opening scene is its
- * establishing shot — and a land is remembered only when its shot was
- * minted, so a cooldown or a fight defers it to the next classification or
- * arrival rather than losing it.
+ * this story has not yet given its establishing shot. The HOME land is
+ * remembered without one — the opening scene is its establishing shot — and
+ * a land is remembered only when its shot was minted, so a cooldown or a
+ * fight defers it to the next classification or arrival rather than losing
+ * it. Home is the land of the campaign's FIRST place record (the 2026-10-27
+ * live proof, run 7: the hero sailed from an unnamed Gullmark and the far
+ * coast was the first land ever named — "no other land known" called it home
+ * and the crossing got no shot); any other first-named land was reached by
+ * travel and gets its shot.
  */
-function openRegionInterlude(state, region) {
+function openRegionInterlude(state, region, { recordId = null } = {}) {
     const name = typeof region === 'string' ? region.trim() : '';
     if (!name || hasInterludedRegion(state.session?.interludedRegions, name)) return state;
     const others = collectKnownRegions(state.locations).filter(known => !isSameRegion(known, name));
     const remembered = rememberInterludedRegion(state.session?.interludedRegions, name);
-    if (others.length === 0) return { ...state, session: { ...state.session, interludedRegions: remembered } };
+    const openingRecord = (state.locations || [])[0] || null;
+    const isHome = others.length === 0 && (!recordId || !openingRecord?.id || openingRecord.id === recordId);
+    if (isHome) return { ...state, session: { ...state.session, interludedRegions: remembered } };
     if (state.combat?.active) return state;
     const session = mintInterlude(state.session, {
         reason: 'region',
@@ -505,7 +511,7 @@ export const handlers = {
             };
         }
         // Crossing into a land not yet given its establishing shot (2026-10-26).
-        next = openRegionInterlude(next, arrivalRegion);
+        next = openRegionInterlude(next, arrivalRegion, { recordId: locations[destinationIdx].id });
 
         // Traveling rumor: deterministically pick which of the hero's deeds
         // could plausibly be talk of THIS place, once per (deed, place).
@@ -817,7 +823,7 @@ export const handlers = {
             next.session = { ...next.session, pendingRegionalFronts: mintRegionalSeed(region, here.name, state.messages, { profileOnly: true }) };
         };
         // The establishing shot (the interlude's REGION seam, 2026-10-26).
-        next = openRegionInterlude(next, region);
+        next = openRegionInterlude(next, region, { recordId: here.id });
         if (priorRegions.length === 0) { mintProfileOnly(); return next; } // home region — never seeded
         if (priorRegions.some(known => isSameRegion(known, region))) { mintProfileOnly(); return next; }
         if ((state.session?.seededRegions || []).some(known => isSameRegion(known, region))) { mintProfileOnly(); return next; }

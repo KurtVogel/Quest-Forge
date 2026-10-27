@@ -36,6 +36,11 @@ describe('place-named regions (2026-08-20 playtest §5c: districts tagged region
         expect(sanitizeRegionName('the Old Ford')).toBeNull();
         // Geographic heads stay legal regions.
         expect(sanitizeRegionName('the Sundered Coast')).toBe('the Sundered Coast');
+        // A place named "<place>, <Region>" keeps its land; a region that IS the place does not (2026-10-27 live proof).
+        expect(sanitizeRegionName('Saffron Coast', 'The Docks of Odrana, Saffron Coast')).toBe('Saffron Coast');
+        expect(sanitizeRegionName('Mirkfell Marches', 'The River Way, Mirkfell Marches')).toBe('Mirkfell Marches');
+        expect(sanitizeRegionName('Ashford', 'Ashford')).toBeNull();
+        expect(sanitizeRegionName('the Ashford', 'Ashford')).toBeNull();
         expect(sanitizeRegionName('the Whispering Hills')).toBe('the Whispering Hills');
     });
 

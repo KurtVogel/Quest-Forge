@@ -126,6 +126,18 @@ describe('slice 1 — the face-only marker and the installer', () => {
     });
 });
 
+describe('a place named "<place>, <Region>" keeps its land (the 2026-10-27 live proof, run 5)', () => {
+    it('UPDATE_LOCATION_PROFILE stores the region the DM wrote into the place name itself, and the seed fires on it', () => {
+        let state = traveled();
+        state = gameReducer(atMessages(state, 30), { type: 'SET_LOCATION', payload: 'The Docks of Odrana, Saffron Coast' });
+        state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'The Docks of Odrana, Saffron Coast', profile: { type: 'settlement', region: 'Saffron Coast' }, evidenceText: 'The quay of Odrana, on the Saffron Coast.' } });
+        const docks = state.locations.find(r => r.name === 'The Docks of Odrana, Saffron Coast');
+        expect(docks.region).toBe('Saffron Coast');
+        expect(state.session.pendingRegionalFronts).toMatchObject({ region: 'Saffron Coast', locationName: 'The Docks of Odrana, Saffron Coast' });
+        expect(state.session.interlude).toMatchObject({ reason: 'region', region: 'Saffron Coast' });
+    });
+});
+
 describe('slice 2 — the variety tally\'s feeds', () => {
     it('a place\'s archetype and motifs count ONCE per record; a re-classification repeating them adds nothing', () => {
         let state = traveled();
@@ -171,6 +183,27 @@ describe('slice 3 — the interlude\'s seams', () => {
         let later = gameReducer(atMessages(spent, 200), { type: 'SET_LOCATION', payload: 'Rime Quay' });
         later = gameReducer(later, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Rime Quay', profile: { region: 'the Icebound Coast' } } });
         expect(later.session.interlude ?? null).toBeNull();
+    });
+
+    it('REGION: the FIRST land ever named gets its shot when it was reached by travel — home is the land of the opening record (2026-10-27, run 7)', () => {
+        let state = {
+            ...initialGameState,
+            session: { ...initialGameState.session, id: 'campaign-1', premise: 'Passage paid at Gullmark for the Saffron Coast.' },
+            character: hero(),
+            messages: msgs(10),
+        };
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Quayside, Gullmark' }); // the opening record, never tagged
+        state = gameReducer(atMessages(state, 14), { type: 'SET_LOCATION', payload: 'Aboard the Carrack, Sundering Sea' });
+        state = gameReducer(atMessages(state, 18), { type: 'SET_LOCATION', payload: 'Quayside, Khor-Sabir' });
+        state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Quayside, Khor-Sabir', profile: { type: 'settlement', region: 'Saffron Coast' }, evidenceText: 'The quays of Khor-Sabir, first port of the Saffron Coast.' } });
+        expect(state.session.interlude).toMatchObject({ reason: 'region', region: 'Saffron Coast' });
+        expect(state.session.interludedRegions).toEqual(['Saffron Coast']);
+        // The opening record's own land is still home: no shot.
+        let home = { ...initialGameState, session: { ...initialGameState.session, id: 'campaign-1', premise: 'Pine Hollow in the Mirkfell Marches.' }, character: hero(), messages: msgs(10) };
+        home = gameReducer(home, { type: 'SET_LOCATION', payload: 'Pine Hollow' });
+        home = gameReducer(home, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Pine Hollow', profile: { region: 'the Mirkfell Marches' } } });
+        expect(home.session.interlude ?? null).toBeNull();
+        expect(home.session.interludedRegions).toEqual(['the Mirkfell Marches']);
     });
 
     it('REGION: an arrival at a record already in a new land mints it too, and a fight defers it without spending the land', () => {
