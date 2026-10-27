@@ -1167,9 +1167,16 @@ describe('the place card rides the Current location line (WOW 2026-09-16, explor
         const regions = { 'The Icebound Coast': { terrain: 'Black shingle and sea ice', people: 'Sealers who pay in oil', built: null, dread: 'The drowned walk under the ice', names: 'Kettu, Isk', atMessage: 3 } };
         const text = prompt({ currentLocation: 'Rime Quay', locations, regions });
         expect(text).toContain('**Current location:** Rime Quay\n**Region — The Icebound Coast** (this land\'s own face; every new place, person, foe and name here is drawn from it, never from another land\'s): the land: Black shingle and sea ice; its people: Sealers who pay in oil; its dead and wilds: The drowned walk under the ice; names here: Kettu, Isk.');
-        // No profile on record, or no region on the record: no line.
+        // No profile on record, or no land known at all: no line.
         expect(prompt({ currentLocation: 'Rime Quay', locations })).not.toContain('**Region —');
         expect(prompt({ currentLocation: 'Rime Quay', locations: [{ id: 'l1', name: 'Rime Quay', aliases: [], links: [] }], regions })).not.toContain('**Region —');
+        // An untagged place inherits the land last visited, with the crossing hedge (2026-10-27 live proof).
+        const untagged = [
+            { id: 'l1', name: 'Rime Quay', region: 'The Icebound Coast', aliases: [], links: [], lastVisitedMessage: 30 },
+            { id: 'l2', name: 'The Cistern', aliases: [], links: [], lastVisitedMessage: 34 },
+        ];
+        expect(prompt({ currentLocation: 'The Cistern', locations: untagged, regions }))
+            .toContain('**Region — The Icebound Coast** (the land last named for the hero — if the fiction has since crossed into another land');
     });
 });
 

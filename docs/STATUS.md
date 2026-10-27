@@ -6,7 +6,19 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-26 (night — the three "world has lands" WOW slices built and deployed; the 10-26 strengthening clear, the 10-25 clears, the 10-22 doom slice and the earlier sweeps below)_
+_Last updated: 2026-10-27 (the "world has lands" slices proved live on Flash — three runs, two proof-found fixes in; the 10-26 night build, the 10-26 strengthening clear and the earlier sweeps below)_
+
+## 2026-10-27 — "The world has lands" proved live on Flash (three runs) — two fixes the proof found are in, two made after it are owed a run — pushed AND deployed
+
+**Ruling: DECISIONS.md 2026-10-27, four numbered points; the write-up is `docs/LANDS_PLAYTEST_2026-10-27.md`.** Vesa: run the smallest live proof and write it up. PROBE 9 `lands` (`scripts/playtest_recall_wonder.cjs lands <label> gemini gemini-3.8-flash`): a Vesa-shaped home land, the tally seeded worn, a ship to a far land. Run 3 is the proof — the home land named by the Scribe on its own, the far face written under contrast (5 / 5 differ), the Region line on every far-land turn, the worn line on every turn after the seed, the first turn under the far face contradicting the home on 9 particulars with no genuine repeat, both interludes an italic 3-sentence report spent once.
+
+**What a player can notice:** the land's face no longer vanishes when the hero steps into an untagged cistern or tavern (the line inherits the land last visited, hedged for a crossing), and a land gets its NAME from the premise on the first classification instead of waiting for the DM to say it in prose (which Flash does once a campaign).
+
+**What changed underneath:** `regionForPrompt` + the inherited hedge in `describeRegionLine` / `buildPlaceBlock`; `buildKnownLands` (+ `KNOWN_LANDS_PREMISE_MAX`) in `scribe.js` as a `buildScribeContext` key with the KNOWN LANDS context line and the loosened `region` schema; after run 3 and unproved: the face's `dread` field no longer presupposes the dead (the far land's first dungeon was a salt-mummy — a new key, the same class) and the KNOWN LANDS rule names a land the hero has ARRIVED in. +2 tests (4,178 / 267), lint clean.
+
+**Not exercised live:** the two post-run-3 wordings (one more arrival on Flash); the Scribe's hostile-site profile after a fight (0 of 2 landed, cause uncaptured — the probe should capture the Scribe's raw replies).
+
+**Next:** one more `lands` arrival on Flash for the two unproved wordings; the doom arm on Sol once the prepay is topped up; the WOW companion slice's live proof; the next grand run on Sol with the fight staging on; the commitment probe's multi-provider pass.
 
 ## 2026-10-26 (night) — WOW "The world has lands, not a name": all three slices built — the region PROFILE, the durable archetype + motif TALLY, the INTERLUDE — pushed AND deployed, live proof owed
 

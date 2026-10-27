@@ -136,6 +136,31 @@ export function regionOfPlace(locations, currentLocation) {
     return cleanText(locations[idx]?.region, REGION_NAME_MAX) || null;
 }
 
+/**
+ * The land the DM should read for the hero's place (the 2026-10-27 live
+ * proof): the current record's own region, else the region of the most
+ * recently VISITED record that has one — most places in a land are never
+ * tagged by the Scribe (a cistern, a road, a tavern), and the face vanished
+ * from the prompt on three of the four far-land turns. `inherited` marks the
+ * fallback so the line can hedge: between a crossing and the Scribe naming
+ * the new land, the last land's face is the wrong one, and the hedge says so.
+ */
+export function regionForPrompt(locations, currentLocation) {
+    const own = regionOfPlace(locations, currentLocation);
+    if (own) return { name: own, inherited: false };
+    const list = Array.isArray(locations) ? locations : [];
+    const hereIdx = findLocationRecord(list, currentLocation);
+    let best = null;
+    for (let i = 0; i < list.length; i += 1) {
+        if (i === hereIdx) continue;
+        const record = list[i];
+        const region = cleanText(record?.region, REGION_NAME_MAX);
+        if (!region || !Number.isFinite(record.lastVisitedMessage)) continue;
+        if (!best || record.lastVisitedMessage > best.lastVisitedMessage) best = { name: region, lastVisitedMessage: record.lastVisitedMessage };
+    }
+    return best ? { name: best.name, inherited: true } : null;
+}
+
 /** The faces as `label: text` clauses, in render order, empty faces skipped. */
 function faceClauses(profile) {
     return REGION_PROFILE_FIELDS
@@ -148,12 +173,15 @@ function faceClauses(profile) {
  * writes the particulars; the prompt tells the DM what they are FOR: this
  * is the land every new place, person, foe and name here is drawn from.
  */
-export function describeRegionLine(name, profile) {
+export function describeRegionLine(name, profile, { inherited = false } = {}) {
     const region = cleanText(name, REGION_NAME_MAX);
     if (!region || !profile) return '';
     const clauses = faceClauses(profile);
     if (clauses.length === 0) return '';
-    return `**Region — ${region}** (this land's own face; every new place, person, foe and name here is drawn from it, never from another land's): ${clauses.join('; ')}.`;
+    const standing = inherited
+        ? 'the land last named for the hero — if the fiction has since crossed into another land, that land\'s face is not yet on record and this one must NOT be reused for it'
+        : 'this land\'s own face';
+    return `**Region — ${region}** (${standing}; every new place, person, foe and name here is drawn from it, never from another land's): ${clauses.join('; ')}.`;
 }
 
 /** The scene director's setting line: the land and what is built in it, for the painter. */

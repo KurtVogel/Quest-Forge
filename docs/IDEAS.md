@@ -11,7 +11,7 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
-### [wow] The world has lands, not a name: region profiles, a durable bestiary tally, and the interlude that reads them — status: all three slices `shipped` (2026-10-26 night, same day as proposed — DECISIONS.md 2026-10-26 (night), nine points; `engine/regionProfile.js` / `worldMotifs.js` / `interlude.js`; built + pinned, the live proof below OWED — the next session's smallest live proof)
+### [wow] The world has lands, not a name: region profiles, a durable bestiary tally, and the interlude that reads them — status: all three slices `shipped` (2026-10-26 night, same day as proposed — DECISIONS.md 2026-10-26 (night), nine points; `engine/regionProfile.js` / `worldMotifs.js` / `interlude.js`; built + pinned; the live proof RUN 2026-10-27 on Flash — three runs, `docs/LANDS_PLAYTEST_2026-10-27.md`, DECISIONS 2026-10-27: slice 1 and slice 3 proved, slice 2 half-proved (the worn KEY avoided, the CLASS not — the face's `dread` field is reworded, owed a run); the Region line inherits the land last visited and the Scribe reads KNOWN LANDS + the premise as the proof's two fixes)
 Vesa, from the long campaign: he travelled south for turns on end through "muddy pine woods" and
 "mouthless blind undead scavengers" in every dungeon, took a ship to ANOTHER CONTINENT to see
 something else — and the new land opened on a muddy timber outpost, pine woods, and "an eyeless,

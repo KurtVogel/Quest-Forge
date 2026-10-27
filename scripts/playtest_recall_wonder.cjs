@@ -13,6 +13,8 @@
  *   node scripts/playtest_recall_wonder.cjs tells terra openai gpt-5.6-terra
  *   node scripts/playtest_recall_wonder.cjs proof pro   gemini gemini-3.8-flash (PROBE 5: place-card return visit + wound callback + recap taps)
  *   node scripts/playtest_recall_wonder.cjs doom  flash gemini gemini-3.8-flash (PROBE 8, 2026-10-22: a full clock is a doom — the window as a scene,
+ *   node scripts/playtest_recall_wonder.cjs lands flash gemini gemini-3.8-flash (PROBE 9, 2026-10-27: the world has lands — the far land's face under the
+ *                                                                               contrast rule, the worn tally, the interlude at the region seam and on demand)
  *                                                                               the prevailed landing; QF_DOOM_ARM=ignore (default) | fight)
  *
  * Never the xAI/Grok DM (Vesa, 2026-09-14) — Gemini Flash and GPT Sol only (Pro retired 2026-10-11).
@@ -69,8 +71,8 @@ const PROBE = process.argv[2];
 const runLabel = process.argv[3];
 const provider = process.argv[4];
 const model = process.argv[5];
-if (!['recall', 'wonder', 'full', 'tells', 'proof', 'grand', 'death', 'doom'].includes(PROBE) || !runLabel || !provider || !model) {
-    console.error('Usage: node scripts/playtest_recall_wonder.cjs <recall|wonder|full|tells|proof|grand|death|doom> <label> <provider> <model>');
+if (!['recall', 'wonder', 'full', 'tells', 'proof', 'grand', 'death', 'doom', 'lands'].includes(PROBE) || !runLabel || !provider || !model) {
+    console.error('Usage: node scripts/playtest_recall_wonder.cjs <recall|wonder|full|tells|proof|grand|death|doom|lands> <label> <provider> <model>');
     process.exit(1);
 }
 if (provider === 'xai') {
@@ -2577,6 +2579,280 @@ async function runDoomProbe(page) {
     saveAll();
 }
 
+// ---------------------------------------------------------------------------
+// PROBE 9 — the world has lands, not a name (WOW 2026-10-26). A home land that
+// IS Vesa's complaint (mud, pines, a timber palisade, eyeless barrow-undead),
+// the tally seeded worn, then a ship to a far land: does the far land's FACE
+// land under the contrast rule, does the DM's first turn there contradict the
+// home's face on ≥ 3 particulars, does the far land's first hostile site field
+// something other than the worn archetype, and does the interlude read as
+// report? Deterministic where the record allows, a Flash judge for prose.
+// ---------------------------------------------------------------------------
+const LANDS_HOME = 'the Mirkfell Marches';
+const LANDS_FAR = 'the Saffron Coast';
+const LANDS_PREMISE = `${HERO_NAME} keeps the palisade gate at Pine Hollow, a timber village deep in the Mirkfell Marches: muddy pine woods, a timber palisade, and the old barrow mounds where eyeless, lanky undead walk at night. Everyone in the Marches knows the land: mud, pines, and the barrow-ghouls. Old Vesta the gatekeeper has watched the gate for thirty years. Far across the Sundering Sea lies the Saffron Coast, a land ${HERO_NAME} has only heard of from sailors; a ship for it leaves the river mouth at Gullmark every month.`;
+const WORN_SEED = {
+    archetype: 'eyeless undead',
+    motifs: ['pine woods', 'timber palisade'],
+    places: ['Hollow Barrow', 'Rotmire Stockade', 'Grey Pine Warren'],
+};
+const HEAD_RX = /\s+\d+$/;
+function headNoun(name) {
+    const words = String(name || '').toLowerCase().replace(HEAD_RX, '').split(/\s+/).filter(Boolean);
+    let head = words[words.length - 1] || '';
+    if (head.length > 3 && head.endsWith('s') && !head.endsWith('ss')) head = head.slice(0, -1);
+    return head;
+}
+
+async function landsSnap(page) {
+    return await page.evaluate(() => {
+        const s = window.__QF_STATE__;
+        if (!s) return null;
+        return {
+            msgCount: (s.messages || []).length,
+            location: s.currentLocation,
+            regions: s.regions || {},
+            worldMotifs: s.worldMotifs || {},
+            interlude: s.session?.interlude || null,
+            interludedRegions: s.session?.interludedRegions || [],
+            lastInterludeMessage: s.session?.lastInterludeMessage ?? null,
+            pendingRegionalFronts: s.session?.pendingRegionalFronts || null,
+            seededRegions: s.session?.seededRegions || [],
+            places: (s.locations || []).map(r => ({ name: r.name, region: r.region || null, type: r.type || null, archetype: r.archetype || null, motifs: r.motifs || [], lastVisitedMessage: r.lastVisitedMessage ?? null })),
+            frontTitles: (s.fronts || []).map(f => f.title).filter(Boolean),
+            encounters: (s.recentEncounters || []).map(e => ({ enemies: e.enemies, foeFamilies: e.foeFamilies || [], location: e.location })),
+            combat: s.combat?.active ? { enemies: (s.combat.enemies || []).map(e => e.name) } : null,
+        };
+    }).catch(() => null);
+}
+
+function faceOf(snapshot, region) {
+    const key = Object.keys(snapshot?.regions || {}).find(k => k.toLowerCase() === region.toLowerCase())
+        || Object.keys(snapshot?.regions || {}).find(k => k.toLowerCase().includes(region.toLowerCase().replace(/^the /, '')));
+    return key ? { name: key, ...snapshot.regions[key] } : null;
+}
+
+/** The DM's own prompt since t0, found by its tempo block (the doom probe's rule). */
+function dmSysSince(t0) {
+    const dmCalls = captured.filter(c => c.t >= t0 && c.sys.includes('## WORLD TEMPO'));
+    return dmCalls.length ? dmCalls[dmCalls.length - 1].sys : '';
+}
+
+/** The Scribe names a land when the fiction does; when it did not, the harness classifies the current place itself (noted). */
+async function ensureRegion(page, region, evidenceText) {
+    const s = await landsSnap(page);
+    const here = s.places.find(p => p.name && s.location && (p.name.toLowerCase() === String(s.location).toLowerCase()));
+    if (here?.region) return { forced: false, region: here.region, place: here.name };
+    const placeName = here?.name || s.location;
+    if (!placeName) return { forced: false, region: null, place: null };
+    // The harness never puts the hero in a land the fiction did not name on
+    // this very turn (the first run classified a Mirkfell bog road as the far
+    // coast because the DM, rightly, had not let the hero skip the voyage).
+    const bare = region.replace(/^the\s+/i, '').split(/\s+/)[0];
+    if (/gullmark|river way|pine hollow|mirkfell|barrow|skell/i.test(String(placeName)) && region === LANDS_FAR) {
+        note('lands', `"${placeName}" is a home-side place — the far land is NOT forced onto it.`);
+        return { forced: false, region: null, place: placeName, fictionNamedIt: false };
+    }
+    if (!new RegExp(bare, 'i').test(String(evidenceText || ''))) {
+        note('lands', `Scribe had not named the land of "${placeName}" and the DM's reply never names ${region} — NOT forced.`);
+        return { forced: false, region: null, place: placeName, fictionNamedIt: false };
+    }
+    await page.evaluate(({ placeName, region, evidenceText }) => {
+        window.__QF_DISPATCH__?.({ type: 'UPDATE_LOCATION_PROFILE', payload: { name: placeName, profile: { region }, evidenceText } });
+    }, { placeName, region, evidenceText: `${evidenceText}\n${LANDS_PREMISE}` });
+    await delay(300);
+    const after = await landsSnap(page);
+    const now = after.places.find(p => p.name === placeName);
+    note('lands', `Scribe had not named the land of "${placeName}" — classified it as ${region} by the harness (stored: ${now?.region || 'nothing'}).`);
+    return { forced: true, region: now?.region || null, place: placeName };
+}
+
+async function waitForFace(page, region, { maxMs = 240000 } = {}) {
+    const start = Date.now();
+    while (Date.now() - start < maxMs) {
+        const s = await landsSnap(page);
+        const face = faceOf(s, region);
+        if (face) return face;
+        await delay(4000);
+    }
+    return null;
+}
+
+/** Worn by construction: three home places carrying the archetype and motifs, counted once each. */
+async function seedWornTally(page, homePlace) {
+    for (const name of WORN_SEED.places) {
+        await page.evaluate(({ name, archetype, motifs }) => {
+            window.__QF_DISPATCH__?.({ type: 'SET_LOCATION', payload: name });
+            window.__QF_DISPATCH__?.({ type: 'UPDATE_LOCATION_PROFILE', payload: { name, profile: { type: 'hostile_site', danger: 'high', archetype, motifs } } });
+        }, { name, archetype: WORN_SEED.archetype, motifs: WORN_SEED.motifs });
+        await delay(250);
+    }
+    await page.evaluate((name) => { window.__QF_DISPATCH__?.({ type: 'SET_LOCATION', payload: name }); }, homePlace);
+    await delay(400);
+    const s = await landsSnap(page);
+    const worn = Object.entries(s.worldMotifs).filter(([, e]) => e.count >= 3).map(([k, e]) => `${k} ×${e.count}`);
+    note('lands', `Tally after the seed: ${worn.join(', ') || 'nothing worn'} (all: ${JSON.stringify(s.worldMotifs).slice(0, 300)})`);
+    return s;
+}
+
+function faceLines(face) {
+    return ['terrain', 'people', 'built', 'dread', 'names'].map(k => `${k}: ${face?.[k] || '(none)'}`).join('\n');
+}
+
+async function judgeFaceDiffers(faceA, faceB) {
+    return await flash(`Two fantasy lands, each described in five faces. Judge, face by face, whether land B's face genuinely DIFFERS from land A's (a different terrain and climate, a different people and trade, different building and dress, a different kind of dead or monster, names that sound different) or merely rewords it.
+LAND A (${faceA.name}):
+${faceLines(faceA)}
+LAND B (${faceB.name}):
+${faceLines(faceB)}
+Answer JSON: {"differs": ["terrain", ...the faces that genuinely differ], "same": ["...the faces that are the same thing reworded"], "note": "one sentence"}`);
+}
+
+async function judgeContrast(faceA, reply) {
+    return await flash(`You judge one turn of a text RPG. The hero has just arrived in a NEW land. The land they came from has this face:
+${faceLines(faceA)}
+The Dungeon Master's reply on arrival:
+"""
+${String(reply).slice(0, 6000)}
+"""
+List the concrete particulars in the reply — terrain or weather, people or their trade, buildings or dress, creatures or what is feared, the sound of names — that CONTRADICT the old land's face (a different kind of thing, not merely a different sentence), and the particulars that REPEAT it (mud, pines, timber palisades, eyeless or lanky undead, barrow mounds, and the like placed IN the new land). Never count as a repeat the hero's own gear or body (northern mail, iron boots, a notched ear) or a sentence that explicitly CONTRASTS the old land with the new ("the pines of the north are far behind") — those are not the old land leaking into the new one.
+Answer JSON: {"contradictions": ["verbatim phrase — which face it contradicts", ...], "repeats": ["verbatim phrase", ...], "feelsLikeADifferentLand": true|false}`);
+}
+
+async function judgeArchetype(wornKeys, foeNames, archetype, reply) {
+    return await flash(`A fantasy world has ALREADY SHOWN these creature kinds and motifs too often: ${wornKeys.join(', ')}.
+In a new land the hero's first dangerous place fielded these foes: ${foeNames.join(', ') || '(no fight)'}; the engine's classifier tagged the place's creature kind as: ${archetype || '(none)'}.
+The scene as narrated:
+"""
+${String(reply).slice(0, 5000)}
+"""
+Is the creature fielded here the SAME KIND of thing as any worn key (an eyeless or blind undead under another name, lanky ghouls, barrow-dead) — or a genuinely different kind of threat?
+Answer JSON: {"sameKind": true|false, "matchedKey": "the worn key it repeats, or empty", "kind": "what the foe actually is, in plain words", "quote": "the sentence that shows it, verbatim"}`);
+}
+
+async function judgeInterlude(reply, frontTitles) {
+    return await flash(`You judge one turn of a text RPG. The engine privately asked the Dungeon Master to OPEN this reply with ONE set-apart passage in italics (3–5 sentences) in the narrator's wide voice — the land, the weather, the talk on the roads, what the world is doing — then a blank line and the ordinary scene. The passage must read as REPORT: no hidden pressure named by title, no clocks or secret motives, no "you could have" toward the hero, and no count of days.
+Hidden pressure titles the DM must never name: ${frontTitles.map(t => `"${t}"`).join(', ') || '(none)'}.
+The DM's reply:
+"""
+${String(reply).slice(0, 6000)}
+"""
+Answer JSON: {"opensWithPassage": true|false (does the reply OPEN with a set-apart wide-voice passage before the scene?), "italic": true|false (is that passage marked in italics, e.g. *…* or _…_?), "sentences": <number of sentences in the passage>, "readsAsReport": true|false (the wider world, as people would hear of it — not the hero's scene), "namesHiddenTitle": true|false, "reproach": true|false, "dayCount": true|false (does it count days, weeks or seasons as a number?), "sceneFollows": true|false (does an ordinary scene with a live ask follow the passage?), "quote": "the passage's first sentence, verbatim"}`);
+}
+
+async function landsTurn(page, label, action, { settle = {} } = {}) {
+    const t0 = Date.now();
+    const { dm, record } = await playTurn(page, label, action, { settle: { quietMs: 6000, maxMs: 45000, ...settle } });
+    const sys = dmSysSince(t0);
+    const regionLine = (sys.match(/\*\*Region — [^\n]+/) || [''])[0];
+    const wornLine = (sys.match(/THIS WORLD HAS ALREADY SHOWN:[^\n]+/) || [''])[0];
+    const interludeLive = sys.includes('## AN INTERLUDE');
+    record.lands = { regionLine: regionLine.slice(0, 400), wornLine: wornLine.slice(0, 300), interludeLive };
+    note('lands', `${label}: region-line=${regionLine ? 'yes' : 'no'} worn-line=${wornLine ? 'yes' : 'no'} interlude=${interludeLive}`);
+    saveAll();
+    return { dm, sys, regionLine, wornLine, interludeLive, record };
+}
+
+async function runLandsProbe(page) {
+    await bootAndCreateHero(page, { premiseMode: 'text', premiseText: LANDS_PREMISE });
+    const opening = await lastDmMessage(page);
+    const home1 = await landsTurn(page, 'home-1', 'I walk the palisade at dusk and ask old Vesta what the night has brought to the gate.');
+    const fight1 = await landsTurn(page, 'home-fight', 'I take a torch out to the old barrow mounds to clear out the eyeless things the village fears. Longsword drawn, I attack the first barrow-ghoul I find.');
+    const home2 = await landsTurn(page, 'home-2', 'I come back to Pine Hollow, bind my cuts at the gate, and tell Vesta what I killed in the barrow.');
+    const homeNamed = await ensureRegion(page, LANDS_HOME, [opening, home1.dm, home2.dm].join('\n'));
+    results.push({ check: 'home-region-named', pass: !!homeNamed.region, forcedByHarness: homeNamed.forced, region: homeNamed.region, place: homeNamed.place });
+    const homeFace = await waitForFace(page, LANDS_HOME, { maxMs: 180000 });
+    results.push({ check: 'home-face-written', pass: !!homeFace, face: homeFace });
+    note('lands', homeFace ? `Home face: ${JSON.stringify(homeFace).slice(0, 600)}` : 'The home land has no face on record after 180 s.');
+    const homePlace = (await landsSnap(page)).location || 'Pine Hollow';
+    const seeded = await seedWornTally(page, homePlace);
+    const wornKeys = Object.entries(seeded.worldMotifs).filter(([, e]) => e.count >= 3).map(([k]) => k);
+    results.push({ check: 'tally-worn-by-seed', pass: wornKeys.includes(WORN_SEED.archetype), worn: wornKeys, fightFamilies: seeded.encounters.map(e => e.foeFamilies), fightReply: fight1.dm.slice(0, 600) });
+    fs.writeFileSync(path.join(OUT_DIR, 'lands-state-home.json'), JSON.stringify(seeded, null, 2));
+
+    // The voyage: the road is a scene (the DM will not let the hero skip it —
+    // the first run's "landfall" line was answered with eighty miles of bog),
+    // so the harness keeps travelling until the fiction lands the hero.
+    const homePlaces = new Set((await landsSnap(page)).places.map(p => p.name));
+    await landsTurn(page, 'voyage', `I leave Pine Hollow for good: three days down the River Way to Gullmark at the river mouth, where I pay my passage and board the monthly ship across the Sundering Sea to ${LANDS_FAR}. I want to see something other than mud and pines.`);
+    let landfall = null;
+    const voyageLines = [
+        `I keep going without stopping to Gullmark, pay the bosun whatever he asks, and board the ship for ${LANDS_FAR}.`,
+        `I stay aboard. The ship clears the sandbars and sails south across the Sundering Sea for ${LANDS_FAR}; I keep to the rail and wait out the crossing.`,
+        `Weeks at sea pass. The lookout calls ${LANDS_FAR}. We put in at its first port and I walk down the gangplank onto the quay of this new land.`,
+        `I step ashore onto ${LANDS_FAR} and look around at the port.`,
+        `I am on ${LANDS_FAR} now, on its quay. I look around.`,
+    ];
+    for (let i = 1; i <= voyageLines.length; i += 1) {
+        landfall = await landsTurn(page, `landfall-${i}`, voyageLines[i - 1]);
+        const s = await landsSnap(page);
+        const homeSide = /gullmark|river way|pine hollow|mirkfell|barrow|skell|sundering sea|aboard|deck|carrack|ship/i.test(String(s.location || ''));
+        const newPlace = s.location && !homePlaces.has(s.location) && !homeSide;
+        const named = new RegExp(LANDS_FAR.replace(/^the\s+/i, '').split(/\s+/)[0], 'i').test(landfall.dm);
+        note('lands', `landfall-${i}: location="${s.location}" ashore-in-far-land=${newPlace} reply-names-coast=${named}`);
+        if (newPlace && named) break;
+    }
+    const farNamed = await ensureRegion(page, LANDS_FAR, landfall.dm);
+    results.push({ check: 'far-region-named', pass: !!farNamed.region, forcedByHarness: farNamed.forced, region: farNamed.region, place: farNamed.place });
+    const farFace = await waitForFace(page, LANDS_FAR, { maxMs: 240000 });
+    const afterFace = await landsSnap(page);
+    results.push({ check: 'far-face-written', pass: !!farFace, face: farFace, seededRegions: afterFace.seededRegions, pending: afterFace.pendingRegionalFronts, interlude: afterFace.interlude });
+    note('lands', farFace ? `Far face: ${JSON.stringify(farFace).slice(0, 600)}` : 'The far land has no face on record after 240 s.');
+    if (homeFace && farFace) {
+        const differs = await judgeFaceDiffers(homeFace, farFace);
+        results.push({ check: 'faces-differ-judged', pass: (differs?.differs || []).length >= 3, verdict: differs });
+    }
+    fs.writeFileSync(path.join(OUT_DIR, 'lands-state-landfall.json'), JSON.stringify(afterFace, null, 2));
+
+    // The first turn the DM reads the far land's face — and the establishing shot.
+    const first = await landsTurn(page, 'far-1', 'I walk up from the quay into the town and take it in: the people, the buildings, the smell of the place, the talk.');
+    results.push({ check: 'region-line-reached-dm', pass: !!first.regionLine && new RegExp(LANDS_FAR.replace(/^the /i, ''), 'i').test(first.regionLine), line: first.regionLine });
+    results.push({ check: 'worn-line-reached-dm', pass: /eyeless undead/.test(first.wornLine), line: first.wornLine });
+    if (homeFace) {
+        const contrast = await judgeContrast(homeFace, first.dm);
+        results.push({ check: 'arrival-contradicts-home-face', pass: (contrast?.contradictions || []).length >= 3 && (contrast?.repeats || []).length === 0, verdict: contrast, reply: first.dm.slice(0, 1500) });
+    }
+    const afterFirst = await landsSnap(page);
+    results.push({ check: 'interlude-region-seam', pass: first.interludeLive, interludeBefore: afterFace.interlude, interludeAfter: afterFirst.interlude, interludedRegions: afterFirst.interludedRegions });
+    if (first.interludeLive) {
+        const verdict = await judgeInterlude(first.dm, afterFirst.frontTitles);
+        results.push({ check: 'interlude-reads-as-report', pass: !!verdict?.opensWithPassage && !!verdict?.readsAsReport && !verdict?.namesHiddenTitle && !verdict?.reproach && !verdict?.dayCount, verdict, reply: first.dm.slice(0, 1500) });
+        results.push({ check: 'interlude-consumed', pass: afterFirst.interlude === null });
+    }
+
+    // The far land's first hostile site.
+    const danger = await landsTurn(page, 'far-danger', 'I ask at the harbor tavern where the nearest dangerous place is — a ruin, a cave, a haunt the locals avoid — and I go there at once, longsword drawn, to fight whatever lives in it.');
+    let foeNames = (await landsSnap(page)).encounters.slice(-1)[0]?.enemies || '';
+    const fightSnap = await landsSnap(page);
+    const lastEncounter = fightSnap.encounters.slice(-1)[0];
+    const farPlaces = fightSnap.places.filter(p => p.region && p.region.toLowerCase().includes('saffron'));
+    const hostile = farPlaces.find(p => p.type === 'hostile_site' || p.archetype) || null;
+    const families = lastEncounter?.foeFamilies || [];
+    const foeList = String(lastEncounter?.enemies || foeNames || '').split(',').map(s => s.trim()).filter(Boolean);
+    const wornHit = families.find(f => wornKeys.includes(f)) || (hostile?.archetype && wornKeys.includes(hostile.archetype) ? hostile.archetype : null);
+    const archetypeVerdict = await judgeArchetype(wornKeys, foeList, hostile?.archetype, danger.dm);
+    results.push({
+        check: 'far-hostile-site-not-worn',
+        pass: !wornHit && !archetypeVerdict?.sameKind,
+        foes: foeList, families, hostileSite: hostile, wornKeys, deterministicWornHit: wornHit || null, verdict: archetypeVerdict, reply: danger.dm.slice(0, 1500),
+        fought: !!lastEncounter && fightSnap.encounters.length > seeded.encounters.length,
+    });
+
+    // On demand: the player asks for the wide shot; the OOC reply never spends it, the next turn carries it.
+    await landsTurn(page, 'ooc-interlude', 'OOC: interlude — give me the bigger picture of this coast.');
+    const afterOoc = await landsSnap(page);
+    results.push({ check: 'ooc-request-minted-not-spent', pass: !!afterOoc.interlude && afterOoc.interlude.reason === 'demand', interlude: afterOoc.interlude });
+    const demand = await landsTurn(page, 'far-2', 'I walk back toward the harbor, listening to the talk in the streets.');
+    const afterDemand = await landsSnap(page);
+    results.push({ check: 'interlude-demand-seam', pass: demand.interludeLive, interludeAfter: afterDemand.interlude });
+    if (demand.interludeLive) {
+        const verdict = await judgeInterlude(demand.dm, afterDemand.frontTitles);
+        results.push({ check: 'interlude-demand-reads-as-report', pass: !!verdict?.opensWithPassage && !!verdict?.readsAsReport && !verdict?.namesHiddenTitle && !verdict?.reproach && !verdict?.dayCount, verdict, reply: demand.dm.slice(0, 1500) });
+    }
+    fs.writeFileSync(path.join(OUT_DIR, 'lands-state-final.json'), JSON.stringify(afterDemand, null, 2));
+    saveAll();
+}
+
 async function run() {
     fs.rmSync(PROFILE_DIR, { recursive: true, force: true });
     const browser = await puppeteer.launch({
@@ -2597,6 +2873,7 @@ async function run() {
         else if (PROBE === 'grand') await runGrandProbe(page);
         else if (PROBE === 'death') await runDeathProbe(page);
         else if (PROBE === 'doom') await runDoomProbe(page);
+        else if (PROBE === 'lands') await runLandsProbe(page);
         else await runWonderProbe(page);
     } finally {
         fs.writeFileSync(path.join(OUT_DIR, 'transcript.json'), JSON.stringify(await page.evaluate(() => (window.__QF_STATE__?.messages || []).map(m => ({ role: m.role, kind: m.kind || null, hidden: !!m.hidden, content: m.content }))).catch(() => []), null, 2));

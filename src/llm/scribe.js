@@ -16,7 +16,8 @@ import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { conversationalGap } from '../engine/replayLedger.js';
 import { BOND_SCENE_WINDOW_MESSAGES, bondKindLabel, curateNpcsForPrompt, dispatchClassifiedNpcUpdate, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
-import { isLocationEvidencedInText, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
+import { collectKnownRegions, isLocationEvidencedInText, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
+import { regionOfPlace } from '../engine/regionProfile.js';
 import { tryParseDirectorJson } from './directorUtils.js';
 import { captureReflection, captureScribePass, captureUsage } from '../debug/memoryInspectorStore.js';
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
@@ -94,7 +95,7 @@ Output ONLY valid JSON:
   ],
   "player_appearance": "concrete physical/visual description of the PLAYER's character, only if newly described this turn — otherwise omit",
   "location": "The place the hero PHYSICALLY STANDS at the END of this narrative, only if it changed — NEVER a place that is merely mentioned, discussed, remembered, watched from afar, or being left behind; null if unchanged",
-  "location_profile": { "name": "place name exactly as the narrative calls it", "type": "haven|settlement|wilderness|frontier|hostile_site", "danger": "none|low|moderate|high|deadly", "region": "the broad NAMED land or realm containing many settlements that THIS PLACE ITSELF lies in, ONLY as the fiction has explicitly stated it — a capitalized proper name, NEVER a town, district, quarter, dock, street, building, or generic feature like 'the coast', and NEVER a distant land that is merely mentioned, discussed, or named as a destination in the scene. Omit unless the narrative has actually NAMED the land this place lies in — never invent one, never guess one, and never reuse a name from these instructions", "signature": "the ONE concrete particular that IS this place — what a traveler would remember it by ('the mill wheel that turns though the river is dry'), in the narrative's own details, under 160 characters; ONLY when the narrative first meaningfully establishes the place — omit otherwise", "last_state": "what this place is like NOW as the narrative leaves it ('half-burned; the mill silent; the market empty since the levy'), under 200 characters; ONLY when this exchange first shows the place or visibly changes it — omit if unchanged", "archetype": "for a hostile_site or wilderness only: the KIND of creature or threat this place holds, in two or three plain lowercase words ('eyeless undead', 'pine-wood bandits', 'marsh leeches') — the thing a traveler would warn of; omit for a town or a haven", "motifs": ["up to 2 imagery particulars that stamp this place's look, two or three plain lowercase words each ('timber palisade', 'black ichor', 'bone-piles') — omit when the narrative shows none"] },
+  "location_profile": { "name": "place name exactly as the narrative calls it", "type": "haven|settlement|wilderness|frontier|hostile_site", "danger": "none|low|moderate|high|deadly", "region": "the broad NAMED land or realm containing many settlements that THIS PLACE ITSELF lies in, as the fiction has stated it — in this scene, in an earlier scene, or in the campaign premise (see KNOWN LANDS) — a capitalized proper name, NEVER a town, district, quarter, dock, street, building, or generic feature like 'the coast', and NEVER a distant land that is merely mentioned, discussed, or named as a destination in the scene. Omit unless the fiction has actually NAMED the land this place lies in — never invent one, never guess one, and never reuse a name from these instructions", "signature": "the ONE concrete particular that IS this place — what a traveler would remember it by ('the mill wheel that turns though the river is dry'), in the narrative's own details, under 160 characters; ONLY when the narrative first meaningfully establishes the place — omit otherwise", "last_state": "what this place is like NOW as the narrative leaves it ('half-burned; the mill silent; the market empty since the levy'), under 200 characters; ONLY when this exchange first shows the place or visibly changes it — omit if unchanged", "archetype": "for a hostile_site or wilderness only: the KIND of creature or threat this place holds, in two or three plain lowercase words ('eyeless undead', 'pine-wood bandits', 'marsh leeches') — the thing a traveler would warn of; omit for a town or a haven", "motifs": ["up to 2 imagery particulars that stamp this place's look, two or three plain lowercase words each ('timber palisade', 'black ichor', 'bone-piles') — omit when the narrative shows none"] },
   "travel": { "from": "the named place the hero DEPARTED, exactly as the narrative calls it", "to": "the named place the hero ARRIVED at, exactly as the narrative calls it", "direction": "north|northeast|east|southeast|south|southwest|west|northwest|up|down|upriver|downriver — ONLY if the narrative states the bearing; omit otherwise", "travel_time": "how long the journey took, in the narrative's own words ('half a day', 'three days by cart') — ONLY if stated; omit otherwise", "route": "the NAMED road, river, pass, or ferry taken ('the Coast Road') — ONLY if the narrative names it; omit otherwise" }
 }
 
@@ -232,6 +233,36 @@ export function buildKnownLocations({ locations = [] } = {}) {
         .slice(0, 12)
         .map(record => record.name);
     return names.length > 0 ? names.join('; ') : null;
+}
+
+/** The premise rides the Scribe only until the first land is named — the opening scenes. */
+export const KNOWN_LANDS_PREMISE_MAX = 1200;
+
+/**
+ * The lands the world already has, and where the hero's place stands among
+ * them (the 2026-10-27 live proof): the `region` rule asked the Scribe to
+ * name a land ONLY when this turn's narrative named it, and Flash's narration
+ * almost never says the land's name — "the Mirkfell" once in an opening,
+ * then pines and mud for the rest of the campaign. Two runs, four turns at
+ * home each, and the home land never got a name, so nothing downstream of
+ * the name (the land's face, the contrast, the establishing shot) could
+ * fire. The Scribe now reads the lands on record and, until the first land
+ * is named, the campaign premise — the player's own canon, which names the
+ * hero's starting land in nearly every premise written.
+ */
+export function buildKnownLands({ locations = [], currentLocation = null, session = null } = {}) {
+    const known = collectKnownRegions(locations);
+    const here = regionOfPlace(locations, currentLocation);
+    const premise = known.length === 0 ? cleanText(session?.premise, KNOWN_LANDS_PREMISE_MAX) : '';
+    if (known.length === 0 && !premise) return null;
+    const lines = [];
+    if (known.length > 0) {
+        lines.push(`Lands on record: ${known.join('; ')}. The current place lies in ${here ? `"${here}"` : 'NO land on record yet'}.`);
+    } else {
+        lines.push('No land is on record yet.');
+    }
+    if (premise) lines.push(`CAMPAIGN PREMISE (the player's own canon — the lands and places it names are real, and the hero's starting place lies in the land it says): ${premise}`);
+    return lines.join('\n');
 }
 
 /**
@@ -393,6 +424,7 @@ export function buildScribeContext(state, ...texts) {
         knownOpenPlans: buildKnownOpenPlans(state),
         knownHeroTells: buildKnownHeroTells(state),
         knownLocations: buildKnownLocations(state),
+        knownLands: buildKnownLands(state),
         // The record the Scribe's facts are judged against before they embed
         // live (2026-10-11): the facts, the transcript length, the place —
         // and since 2026-10-22 the roster (the classifier gate reads it) and
@@ -519,7 +551,7 @@ export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'story_memor
  */
 export const RECALL_TURN_RULE = 'RECALL TURN: the player asked about the PAST and the DM answered from the engine\'s own record of this campaign. Extract NOTHING new from the answer — no world_facts, no story cards, no location change, no loot, no payment, no appearance — everything it recounts is already on record. The ONE exception: if the remembering itself visibly moved someone (warmth, grief, a grudge surfacing), report that as an npc_updates bondMoment or stanceToPlayer for that person. Emit "world_facts": [] and leave every other field empty.';
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch: commit, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownHeroTells = null, knownLocations = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch: commit, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownHeroTells = null, knownLocations = null, knownLands = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null }) {
     // Campaign-stamped writes (2026-10-26, the cadence's rule): when the
     // context names the campaign this pass read, every dispatch below carries
     // it and the dispatcher drops the lot once another campaign is live. A
@@ -588,6 +620,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     : null,
                 knownLocations
                     ? `KNOWN PLACES (canonical place names the game already tracks): ${knownLocations}\nWhen this turn's location is one of these places under ANY phrasing — "the back room of the chandlery" IS the chandlery — report "location" as the canonical name verbatim. A distinct named place not on this list (a particular shop, street, or site, even inside a known town) keeps its own proper name.`
+                    : null,
+                knownLands
+                    ? `KNOWN LANDS (the broad named lands of this world):\n${knownLands}\nReport location_profile.region for THIS turn's place when the campaign premise or the narrative — this scene or an earlier one — places it in a named land: a land on record under any phrasing is reported by its exact name above; a land the premise names as the hero's home is that place's land until the fiction carries the hero somewhere else, and a land the hero has now ARRIVED in (the narrative lands them on its shore or at its gate) is that place's land even if earlier scenes named it only as a destination. Never a land merely mentioned, discussed, or still ahead as a destination; never an invented one.`
                     : null,
                 lootAudit
                     ? `EVENTS ALREADY APPLIED BY THE ENGINE THIS TURN (the engine reconciles narrated_loot/narrated_payment against these itself — for the gear-handoff audit, anything listed here is NOT missing): ${describeAppliedLoot(lootAudit.appliedEvents)}`

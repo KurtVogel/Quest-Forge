@@ -14,6 +14,7 @@ import {
     findRegionProfile,
     listRegionProfiles,
     normalizeRegionProfile,
+    regionForPrompt,
     regionOfPlace,
     rememberRegionProfile,
     sanitizeRegions,
@@ -107,6 +108,24 @@ describe('the readers', () => {
         expect(regionOfPlace(locations, 'Rime Quay')).toBe('The Icebound Coast');
         expect(regionOfPlace(locations, 'Aldermill')).toBeNull();
         expect(regionOfPlace(locations, 'Nowhere')).toBeNull();
+    });
+
+    it('regionForPrompt falls back to the most recently VISITED record\'s land, marked inherited (the 2026-10-27 live proof)', () => {
+        const locations = [
+            { id: 'l1', name: 'Rime Quay', aliases: [], region: 'The Icebound Coast', lastVisitedMessage: 40 },
+            { id: 'l2', name: 'Aldermill', aliases: [], region: 'The Riverlands', lastVisitedMessage: 10 },
+            { id: 'l3', name: 'The Cistern', aliases: [], lastVisitedMessage: 44 },
+            { id: 'l4', name: 'Old Road', aliases: [], region: 'The Marches' }, // no visit stamp: never a fallback
+        ];
+        expect(regionForPrompt(locations, 'Rime Quay')).toEqual({ name: 'The Icebound Coast', inherited: false });
+        expect(regionForPrompt(locations, 'The Cistern')).toEqual({ name: 'The Icebound Coast', inherited: true });
+        expect(regionForPrompt(locations, 'Nowhere Yet')).toEqual({ name: 'The Icebound Coast', inherited: true });
+        expect(regionForPrompt([{ id: 'l3', name: 'The Cistern', aliases: [] }], 'The Cistern')).toBeNull();
+        expect(regionForPrompt([], null)).toBeNull();
+        const inherited = describeRegionLine('The Icebound Coast', regions['The Icebound Coast'], { inherited: true });
+        expect(inherited).toContain('the land last named for the hero');
+        expect(inherited).toContain('must NOT be reused for it');
+        expect(describeRegionLine('The Icebound Coast', regions['The Icebound Coast'])).toContain("this land's own face");
     });
 
     it('describeRegionLine is ONE prompt line with every face and the rule it is for', () => {

@@ -13,7 +13,7 @@ import { LOCATION_NAME_MAX } from '../config/contentLimits.js';
 import { briefNpcFieldForPrompt, curateNpcsForPrompt, findCompanionRecord, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
 import { describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
 import { describeCurrentPlace, describeTravelLink, isSameLocation, listKnownWays } from '../engine/locationRegistry.js';
-import { describeRegionLine, findRegionProfile, regionOfPlace } from '../engine/regionProfile.js';
+import { describeRegionLine, findRegionProfile, regionForPrompt } from '../engine/regionProfile.js';
 
 /** KNOWN NPCs line opener budget — the party line's cap for the same fields. */
 export const KNOWN_NPC_NOTES_MAX = 300;
@@ -73,8 +73,11 @@ export function buildPlaceBlock(currentLocation, { locations = [], regions = nul
     // The land's face (WOW 2026-10-26): ONE line under the place — the
     // region profile the regional director wrote, the record every new
     // place, person, foe and name here is drawn from.
-    const region = regionOfPlace(locations, currentLocation);
-    const regionLine = region ? describeRegionLine(region, findRegionProfile(regions, region)) : '';
+    // The current record's own land, else the land last visited (most places
+    // are never tagged — the 2026-10-27 live proof lost the face on three of
+    // four far-land turns); the inherited line hedges for the crossing.
+    const region = regionForPrompt(locations, currentLocation);
+    const regionLine = region ? describeRegionLine(region.name, findRegionProfile(regions, region.name), { inherited: region.inherited }) : '';
     if (regionLine) lines.push(regionLine);
     // Consistency, not a map — an unlisted place is unmapped, never
     // nonexistent, so the DM stays free to invent roads not yet walked.

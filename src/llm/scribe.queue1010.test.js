@@ -11,7 +11,9 @@ import {
     SCRIBE_SYSTEM_PROMPT,
     buildKnownAppearances,
     buildKnownHeroTells,
+    buildKnownLands,
     buildKnownLocations,
+    KNOWN_LANDS_PREMISE_MAX,
     buildKnownOpenPlans,
     buildKnownStances,
     buildKnownStoryCards,
@@ -40,7 +42,7 @@ describe('buildScribeContext (scribe P2, 2026-10-10)', () => {
         const texts = ['I ask Mira about the ribbon.', 'Mira wipes her hands. "Not yet," she says.'];
         const context = buildScribeContext(state, ...texts);
         expect(Object.keys(context).sort()).toEqual([
-            'knownAppearances', 'knownHeroTells', 'knownLocations', 'knownOpenPlans', 'knownStances', 'knownStoryCards', 'memoryContext',
+            'knownAppearances', 'knownHeroTells', 'knownLands', 'knownLocations', 'knownOpenPlans', 'knownStances', 'knownStoryCards', 'memoryContext',
         ]);
         expect(context).toEqual({
             knownAppearances: buildKnownAppearances(state, ...texts),
@@ -49,11 +51,32 @@ describe('buildScribeContext (scribe P2, 2026-10-10)', () => {
             knownOpenPlans: buildKnownOpenPlans(state),
             knownHeroTells: buildKnownHeroTells(state),
             knownLocations: buildKnownLocations(state),
+            knownLands: buildKnownLands(state),
             memoryContext: { worldFacts: state.worldFacts, messageCount: 0, location: null, npcs: state.npcs, storyMemory: state.storyMemory, campaign: { sessionId: null, loadNonce: 0 } },
         });
+        // No land on record and no premise: the lands line is absent.
+        expect(context.knownLands).toBeNull();
         expect(context.knownAppearances).toContain('Mira');
         expect(context.knownAppearances).not.toContain('Tammo');
         expect(context.knownStoryCards).toContain('card-1');
+    });
+
+    it('KNOWN LANDS: the lands on record and where the place stands; the premise rides only until the first land is named (2026-10-27 live proof)', () => {
+        const premise = `${'Aino keeps the gate at Pine Hollow in the Mirkfell Marches. '.repeat(40)}`;
+        const fresh = buildKnownLands({ locations: [{ name: 'Pine Hollow' }], currentLocation: 'Pine Hollow', session: { premise } });
+        expect(fresh).toContain('No land is on record yet.');
+        expect(fresh).toContain('CAMPAIGN PREMISE');
+        expect(fresh.length).toBeLessThan(KNOWN_LANDS_PREMISE_MAX + 300);
+        const named = buildKnownLands({
+            locations: [{ name: 'Pine Hollow', region: 'the Mirkfell Marches' }, { name: 'Port Mirabat', region: 'the Saffron Coast' }, { name: 'The Cistern' }],
+            currentLocation: 'The Cistern',
+            session: { premise },
+        });
+        expect(named).toContain('Lands on record: the Mirkfell Marches; the Saffron Coast.');
+        expect(named).toContain('lies in NO land on record yet');
+        expect(named).not.toContain('CAMPAIGN PREMISE');
+        expect(buildKnownLands({ locations: [{ name: 'Port Mirabat', region: 'the Saffron Coast' }], currentLocation: 'Port Mirabat' })).toContain('lies in "the Saffron Coast"');
+        expect(buildKnownLands({})).toBeNull();
     });
 
     it('the combat beat\'s assembly: narrative only, presence judged from that one text', () => {

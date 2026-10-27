@@ -60,7 +60,7 @@ const PROFILE_SCHEMA = `  "region_profile": {
     "terrain": "the land and its climate in concrete particulars (under ${REGION_PROFILE_FIELD_MAX} characters)",
     "people": "who lives here and what they live by — trade, crop, craft, faith, rule",
     "built": "how they build and what they wear — materials, shapes, colors, the look of a street and a doorway",
-    "dread": "what THIS land's dead, wilds and monsters are like — the creature kinds a traveler fears here, specific and unlike any other land's",
+    "dread": "what haunts THIS land's wilds, ruins and waters — the particular creature kinds and dangers a traveler fears here, specific and unlike any other land's; they need not be undead or the dead at all (a land of beasts, of weather, of people who prey, of things that are not dead is as true a land)",
     "names": "how names sound here — the phonetics and ornament of people's and places' names, with two or three examples"
   }`;
 
@@ -71,7 +71,7 @@ const FRONTS_RULES = `- ONE or TWO pressures, native to THIS region: rooted in i
 
 const PROFILE_RULES = `- The region_profile is the land's FACE, written once and kept for the whole campaign: every later place, person, foe and name in this land is drawn from it. Each field is one concrete line under ${REGION_PROFILE_FIELD_MAX} characters, in the fiction's own particulars where the narrative has shown them, extrapolated from the land's established nature where it has not.
 - CONTRAST IS MANDATORY: "knownRegions" lists every land this world already has, with its profile. This land must differ from EACH of them on EVERY line — a different terrain and climate, a different people and trade, different building and dress, a different kind of dead and wild thing, names that sound different. The new land is not the old land with a new name. If the narration since arrival already repeats an old land's look, the profile corrects it, not confirms it.
-- "dread" names creature KINDS specific to this land (what haunts its barrows, its woods, its water), never a generic undead or beast another land already fields.`;
+- "dread" names creature KINDS specific to this land (what haunts its woods, its water, its ruins), never a generic undead or beast another land already fields — and not every land's dread is the dead: if a known land's dread is undead, this land's is something else entirely.`;
 
 const COMMON_RULES = `- Ground every field in supplied canon where it exists (named places, peoples, facts from the narrative); where canon is thin, extrapolate from the region's established nature — never contradict anything supplied.
 - Do not alter HP, XP, inventory, quests, combat, conditions, abilities, or any other mechanics.
