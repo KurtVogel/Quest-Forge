@@ -3937,3 +3937,28 @@ list its readers; a flag read by one lane is named for that lane. **(4)** LOCATI
 backward scan keeps walking while nothing matches, so on a return before the next cadence it shows
 the previous visit's arrival as this one's. Rule: a trail block renders only when the trail's last step
 is the present.
+
+### [strengthening] Two lanes bounded alone meet unbounded at the moment the prompt names for both; a give-up on a marker that regenerates is no give-up; a shot that reads a record must wait for the record; a tally's counting unit is a decision — status: `idea` (2026-10-27)
+Four rules from the progression (Lap 1) + living-world (Lap 2, hostile input) pass of 2026-10-27, each
+reproduced with a throwaway test over the real reducer and `applyEvents`. **(1)** the 09-07 ruling
+capped `level_up` (the front tier) and `exp_awarded` (the quest tier) each; the LEVELING line then tells
+the DM to emit `level_up` for "an arc closed" — the exact moment the resolution lane pays the same tier —
+and `applyEvents` guards `exp_awarded` beside a quest completion only. One reply with
+`front_updates: resolved` + `level_up: true` at L1 is 338 XP: a whole level, from the two lanes that
+were each forbidden to pay one. Rule: when the prompt describes ONE moment for two XP lanes, the engine
+judges them together at the response, never per dispatch. **(2)** the 09-20 director give-up tallies
+failures by the marker's key and consumes the marker at three; the 10-26 face-only marker is re-minted
+on every classification of a faceless land with a NEW key, and an incomplete `region_profile` clears
+it with no tally at all — a deterministic failure is up to three hidden DM-model calls per classified
+place, forever. Rule: a retry ledger is keyed by the THING asked (the region), never by the marker
+that asks, and a quiet result that leaves the thing unasked counts as an attempt. **(3)** the region
+interlude is minted by the classification that REQUESTS the face and spent by the next DM row, while
+the face lands from a background call later; the shot built to read the profile renders its fallback
+on every first crossing and the land is remembered as shot. Rule: an engine seam whose material a
+background lane writes opens where that lane LANDS. **(4)** the variety tally counts a motif once per
+location record toward a threshold of three, and the registry keeps a settlement's districts as
+separate records by its own no-fold rule — one timber town is `timber palisade ×4 … NONE of these`
+while the hero stands in it. Rule: a new tally that reads an existing store states its unit against
+that store's known fragmentation before it picks a threshold. Payoff: a level earned once, a faceless
+land that costs a bounded number of calls, an establishing shot that shows the face it was built for,
+and a variety line that forbids the OTHER land's look, not this town's.
