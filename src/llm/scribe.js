@@ -235,7 +235,7 @@ export function buildKnownLocations({ locations = [] } = {}) {
     return names.length > 0 ? names.join('; ') : null;
 }
 
-/** The premise rides the Scribe only until the first land is named — the opening scenes. */
+/** The premise rides the Scribe while the hero's place lies in no land on record (the clamp). */
 export const KNOWN_LANDS_PREMISE_MAX = 1200;
 
 /**
@@ -249,11 +249,19 @@ export const KNOWN_LANDS_PREMISE_MAX = 1200;
  * fire. The Scribe now reads the lands on record and, until the first land
  * is named, the campaign premise — the player's own canon, which names the
  * hero's starting land in nearly every premise written.
+ *
+ * The premise rides whenever the CURRENT place lies in no land on record, not
+ * only before the first land (2026-10-27 Opus playtest, measured): the
+ * premise named the far land ("bound south for the Amber Reach"), the DM's
+ * landfall narration never did, and with Grey Fells already on record the
+ * Scribe had no evidence — twenty far-land turns passed with the land
+ * unnamed, the home land's face inherited in its place, and the home land's
+ * names (a bailiff, a warden, a drowned uncle) walking the far port.
  */
 export function buildKnownLands({ locations = [], currentLocation = null, session = null } = {}) {
     const known = collectKnownRegions(locations);
     const here = regionOfPlace(locations, currentLocation);
-    const premise = known.length === 0 ? cleanText(session?.premise, KNOWN_LANDS_PREMISE_MAX) : '';
+    const premise = known.length === 0 || !here ? cleanText(session?.premise, KNOWN_LANDS_PREMISE_MAX) : '';
     if (known.length === 0 && !premise) return null;
     const lines = [];
     if (known.length > 0) {

@@ -61,7 +61,7 @@ describe('buildScribeContext (scribe P2, 2026-10-10)', () => {
         expect(context.knownStoryCards).toContain('card-1');
     });
 
-    it('KNOWN LANDS: the lands on record and where the place stands; the premise rides only until the first land is named (2026-10-27 live proof)', () => {
+    it('KNOWN LANDS: the lands on record and where the place stands; the premise rides while the place lies in no land on record (2026-10-27 live proof + the Opus playtest)', () => {
         const premise = `${'Aino keeps the gate at Pine Hollow in the Mirkfell Marches. '.repeat(40)}`;
         const fresh = buildKnownLands({ locations: [{ name: 'Pine Hollow' }], currentLocation: 'Pine Hollow', session: { premise } });
         expect(fresh).toContain('No land is on record yet.');
@@ -74,7 +74,11 @@ describe('buildScribeContext (scribe P2, 2026-10-10)', () => {
         });
         expect(named).toContain('Lands on record: the Mirkfell Marches; the Saffron Coast.');
         expect(named).toContain('lies in NO land on record yet');
-        expect(named).not.toContain('CAMPAIGN PREMISE');
+        // An untagged place keeps the premise as evidence (the Opus playtest: the
+        // far land the premise named stayed nameless for twenty turns).
+        expect(named).toContain('CAMPAIGN PREMISE');
+        // A place whose land is on record needs no premise.
+        expect(buildKnownLands({ locations: [{ name: 'Pine Hollow', region: 'the Mirkfell Marches' }], currentLocation: 'Pine Hollow', session: { premise } })).not.toContain('CAMPAIGN PREMISE');
         expect(buildKnownLands({ locations: [{ name: 'Port Mirabat', region: 'the Saffron Coast' }], currentLocation: 'Port Mirabat' })).toContain('lies in "the Saffron Coast"');
         expect(buildKnownLands({})).toBeNull();
     });

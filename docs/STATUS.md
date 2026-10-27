@@ -6,7 +6,19 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-27 evening (the 10-27 strengthening queue cleared — 10 P2 across progression + living-world; the "world has lands" live proof, the 10-26 night build and the earlier sweeps below)_
+_Last updated: 2026-10-28 (the Opus-played playtest on Flash + five fixes from it; the 10-27 strengthening clear, the "world has lands" live proof and the earlier sweeps below)_
+
+## 2026-10-28 — the Opus-played playtest: Claude plays, Flash DMs (66 turns) — five fixes in, pushed AND deployed
+
+**Ruling: DECISIONS.md 2026-10-28; the write-up with the rubric and every column is `docs/OPUS_PLAYTEST_2026-10-27.md`.** New tool: `scripts/playtest_opus_driver.cjs` — a persistent Puppeteer session over the production build behind a localhost HTTP API, so an outside player (Claude) writes every line, rolls or challenges every check and fights every round; `QF_CONTINUE=1` resumes the autosave; every DM prompt is captured per turn.
+
+**What held:** player authority (a bystander played straight, routine competence diceless, a challenged check withdrawn, failures delivering exactly the card's stakes), the fight (telegraphs honored, foes broke), the companion's wants on his line and in his mouth, Continue, OOC and the interlude on demand, the economy's receipts.
+
+**What the run found and tonight fixed:** the far land was never NAMED (the premise named it, the DM never did) so the home land's face — and its NAMES: a bailiff "Hanno Kjell", a master "Marno" — walked the far port; the home land got an establishing shot; a purchase was granted twice by the loot audit; Flash failed the central promise quest because its route changed. Fixes: the premise rides KNOWN LANDS in any untagged place, an inherited Region line drops `names here`, home is the opening record's settlement, the N-for-N loot pairing, the `failed` rule in QUEST TRACKING. +5 tests (4,196 / 268), lint clean.
+
+**For Vesa:** Flash's length — 5 / 53 ordinary turns in the 60–180 band, median 225 (DECISIONS 2026-10-03 left it your call; Flash is now the only DM in practice), and 9 / 53 turns end on a "Do you X, or Y?" menu.
+
+**Next:** a second Opus run that lands in a far land again — the naming fix's proof (the far land named, its face, the shot carrying it); then the five new P2s in the Strengthening queue.
 
 ## 2026-10-27 (evening) — strengthening queue cleared: 10 P2 across progression (Lap 1) + living-world (Lap 2) — pushed AND deployed
 

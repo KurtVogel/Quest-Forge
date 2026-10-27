@@ -178,7 +178,13 @@ function faceClauses(profile) {
 export function describeRegionLine(name, profile, { inherited = false } = {}) {
     const region = cleanText(name, REGION_NAME_MAX);
     if (!region || !profile) return '';
-    const clauses = faceClauses(profile);
+    // An INHERITED face carries no `names` (2026-10-27 Opus playtest,
+    // measured): after a crossing the far port's bailiff became "Hanno Kjell",
+    // its warden "Halm's", its next ship's master "Marno" — the inherited
+    // line's own "names here: Hanno, Sanna, Marno, Kjell" list, read as a
+    // pool despite the hedge. A name list is the one face that cannot be
+    // hedged; the land's look still helps an untagged tavern at home.
+    const clauses = faceClauses(inherited ? { ...profile, names: null } : profile);
     if (clauses.length === 0) return '';
     const standing = inherited
         ? 'the land last named for the hero — if the fiction has since crossed into another land, that land\'s face is not yet on record and this one must NOT be reused for it'

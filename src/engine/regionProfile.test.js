@@ -125,6 +125,10 @@ describe('the readers', () => {
         const inherited = describeRegionLine('The Icebound Coast', regions['The Icebound Coast'], { inherited: true });
         expect(inherited).toContain('the land last named for the hero');
         expect(inherited).toContain('must NOT be reused for it');
+        // An inherited face carries no name list (the 2026-10-27 Opus playtest:
+        // the far port's bailiff became the home land's "Hanno Kjell").
+        expect(inherited).not.toContain('names here');
+        expect(describeRegionLine('The Icebound Coast', regions['The Icebound Coast'])).toContain('names here');
         expect(describeRegionLine('The Icebound Coast', regions['The Icebound Coast'])).toContain("this land's own face");
     });
 

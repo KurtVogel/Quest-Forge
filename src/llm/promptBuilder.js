@@ -802,7 +802,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 
 ## QUEST TRACKING INSTRUCTIONS
 - The Quests panel only shows what you emit — whenever the hero ACCEPTS a job, deal, debt, errand, hunt, or investigation (even an informal handshake like "clear the rats and the room is yours"), emit \`quest_updates\` with \`status: "new"\`, a short name, and what was agreed (task, payment/stakes, who asked).
-- When an objective meaningfully changes, emit \`status: "updated"\` with the new situation; when it is fulfilled or becomes impossible, emit \`status: "completed"\` or \`status: "failed"\` in the same response that narrates it.
+- When an objective meaningfully changes, emit \`status: "updated"\` with the new situation; when it is fulfilled or becomes impossible, emit \`status: "completed"\` or \`status: "failed"\` in the same response that narrates it. \`failed\` means the GOAL itself can no longer be reached — never a quest whose route changed (a lost ship, a new plan, a different road to the same promise): that is \`updated\` with the new route, never a failed quest beside a new one.
 - Completing a quest pays engine-computed XP automatically (a visible system line confirms it). NEVER emit \`exp_awarded\` for a quest completion — that double-pays. Failed quests pay nothing.
 - One quest per actual agreement — don't open quests for vague rumors, mere invitations, or things the hero declined.
 - A patron is NOT required: when the hero TAKES UP a pursuit on their own initiative and acts on it — investigating a disappearance, hunting a beast, tracking a debt — open the quest the moment they act on it (a full missing-family investigation with no quest entry is the failure mode; a passing question is not a quest).

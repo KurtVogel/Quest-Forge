@@ -479,6 +479,19 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
         console.warn(`[Scribe] Narrated item "${missingItems[0].name}" is the event path's lone "${unpairedAppliedNames[0]}" under another name; skipping.`);
         missingItems.length = 0;
     }
+    // The same evidence at TWO or more (2026-10-27 Opus playtest, measured): a
+    // chandler's purchase evented as the catalog Healer's Kit, Coil of Silk
+    // Thread and Flask of Oil and narrated as "a leather roll packed with
+    // linen, splints and horn needles", "a spool of waxed silk" and "a flask
+    // of seal-oil" — the oil paired, the other two were granted a second time.
+    // N unmatched narrated items beside exactly N unmatched event grants is
+    // one purchase under two vocabularies; two-for-two is stronger evidence
+    // than the one-for-one above, so no token test overrules it. Over-matching
+    // only ever skips a grant.
+    if (missingItems.length >= 2 && unpairedAppliedNames.length === missingItems.length) {
+        console.warn(`[Scribe] ${missingItems.length} narrated items (${missingItems.map(item => `"${item.name}"`).join(', ')}) are the event path's ${unpairedAppliedNames.length} unmatched grants under other names; skipping.`);
+        missingItems.length = 0;
+    }
 
     // Coins route through the replay-guarded grant so a reward the DM re-narrates on a
     // later turn (already suppressed on the event path) cannot re-enter via the audit.

@@ -147,6 +147,18 @@ export function consumeInterlude(session, { messageCount = 0, messages = null } 
     return session;
 }
 
+/** The settlement a place name sits in: the part after its last comma, else the whole name. */
+function settlementOf(name) {
+    const text = typeof name === 'string' ? name : '';
+    const at = text.lastIndexOf(',');
+    return (at === -1 ? text : text.slice(at + 1)).trim().toLowerCase().replace(/^the\s+/, '');
+}
+
+function sameSettlement(a, b) {
+    const one = settlementOf(a?.name);
+    return !!one && one === settlementOf(b?.name);
+}
+
 /**
  * The interlude's REGION seam (WOW 2026-10-26): the hero stands in a land
  * this story has not yet given its establishing shot. The HOME land is
@@ -175,7 +187,15 @@ export function openRegionInterlude(state, region, { recordId = null } = {}) {
     const others = collectKnownRegions(state.locations).filter(known => !isSameRegion(known, name));
     const remembered = rememberInterludedRegion(state.session?.interludedRegions, name);
     const openingRecord = (state.locations || [])[0] || null;
-    const isHome = others.length === 0 && (!recordId || !openingRecord?.id || openingRecord.id === recordId);
+    // A place of the opening record's own settlement is home too (2026-10-27
+    // Opus playtest, measured): the opening 'Harbor Shrine, Tervola' was never
+    // tagged, the land's first tag landed on 'The Quay, Tervola', and the
+    // home land got an establishing shot on turn five. One settlement means
+    // the same name after the last comma — never a shared generic word
+    // ("Quayside, Gullmark" and "Quayside, Khor-Sabir" are two lands).
+    const record = recordId ? (state.locations || []).find(entry => entry?.id === recordId) : null;
+    const isHome = others.length === 0 && (!recordId || !openingRecord?.id || openingRecord.id === recordId
+        || (record && sameSettlement(openingRecord, record)));
     if (isHome) return { ...state, session: { ...state.session, interludedRegions: remembered } };
     if (state.combat?.active) return state;
     if (isRegionFaceComing(state, name)) return state;

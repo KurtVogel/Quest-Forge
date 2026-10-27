@@ -406,3 +406,20 @@ describe('the region family after the 2026-10-27 audit', () => {
         expect(() => gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } } })).not.toThrow();
     });
 });
+
+describe('home is the opening record\'s settlement (the 2026-10-27 Opus playtest)', () => {
+    it('a sibling place of the untagged opening record carries the home land: no establishing shot', () => {
+        let state = { ...initialGameState, session: { ...initialGameState.session, id: 'campaign-1', premise: 'Tervola, a fishing town in the Grey Fells.' }, character: hero(), messages: msgs(8) };
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Harbor Shrine, Tervola' }); // the opening record, never tagged
+        state = gameReducer(atMessages(state, 9), { type: 'SET_LOCATION', payload: 'The Quay, Tervola' });
+        state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'The Quay, Tervola', profile: { type: 'settlement', region: 'Grey Fells' }, evidenceText: 'Tervola, in the Grey Fells.' } });
+        state = installHomeFace(state);
+        expect(state.session.interlude ?? null).toBeNull();
+        expect(state.session.interludedRegions).toEqual(['Grey Fells']);
+    });
+});
+
+function installHomeFace(state) {
+    const key = state.session.pendingRegionalFronts?.key;
+    return key ? gameReducer(state, { type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId: 'campaign-1', key, fronts: [], profile: face() } }) : state;
+}

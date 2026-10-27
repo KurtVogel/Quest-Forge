@@ -1163,6 +1163,18 @@ describe('Scribe loot persistence audit', () => {
             expect(await auditWith(['Potion of Healing'], ['Restorative Draft', 'bone whistle'])).toEqual(['Restorative Draft', 'bone whistle']);
         });
 
+        it('N unmatched narrated items beside exactly N unmatched evented items are one purchase under two vocabularies (Opus playtest, 2026-10-27)', async () => {
+            expect(await auditWith(
+                ["Healer's Kit", 'Coil of Silk Thread', 'Flask of Oil'],
+                ['leather roll packed with clean linen rolls, wooden splints, and horn needles', 'spool of waxed silk', 'clay flask of seal-oil'],
+            )).toEqual([]);
+            // a count mismatch says nothing: three strangers beside two grants are all granted
+            expect(await auditWith(
+                ["Healer's Kit", 'Coil of Silk Thread'],
+                ['leather roll of needles', 'spool of waxed silk', 'bone whistle'],
+            )).toEqual(['leather roll of needles', 'spool of waxed silk', 'bone whistle']);
+        });
+
         it('pairs one event item with one narrated item — a second same-kind object is still granted', async () => {
             const granted = await auditWith(
                 ['Brass toll-token'],
