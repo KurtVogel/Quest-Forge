@@ -744,11 +744,19 @@ export function isRegionNameOnly(locations, name) {
     });
 }
 
+/**
+ * The one clamp a READER applies to a region name (2026-10-27 living-world
+ * nit: the contrast context and this list read 60 while the profile record,
+ * the marker and the interlude read 120). The registry's own write stays
+ * the tighter `sanitizeRegionName` gate (60).
+ */
+export const REGION_NAME_MAX = 120;
+
 /** Distinct region names known to the registry (first occurrence wins). */
 export function collectKnownRegions(locations = []) {
     const regions = [];
     for (const record of locations || []) {
-        const region = cleanText(record?.region, 60);
+        const region = cleanText(record?.region, REGION_NAME_MAX);
         if (region && !regions.some(known => isSameRegion(known, region))) regions.push(region);
     }
     return regions;

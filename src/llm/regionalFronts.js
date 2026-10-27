@@ -26,13 +26,14 @@
  */
 import { baseDirectorContext, cleanText, compactMessage, DIRECTOR_CONTEXT_DEFAULTS, isDirectorReady, runDirector } from './directorUtils.js';
 import { sanitizeAftermathProposals } from './frontAftermath.js';
-import { findLocationRecord } from '../engine/locationRegistry.js';
+import { findLocationRecord, isSameRegion } from '../engine/locationRegistry.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 import {
     findRegionProfile,
     listRegionProfiles,
     MAX_CONTRAST_REGIONS,
     normalizeRegionProfile,
+    REGION_NAME_MAX,
     REGION_PROFILE_FIELD_MAX,
 } from '../engine/regionProfile.js';
 
@@ -117,7 +118,7 @@ export function buildRegionalFrontsContext(state) {
     const record = idx === -1 ? null : locations[idx];
     const wants = regionalCallWants(state);
     const knownRegions = listRegionProfiles(state.regions, { limit: MAX_CONTRAST_REGIONS })
-        .filter(profile => profile.name.toLowerCase() !== String(pending.region || '').toLowerCase())
+        .filter(profile => !isSameRegion(profile.name, pending.region))
         .map(({ name, terrain, people, built, dread, names }) => ({ name, terrain, people, built, dread, names }));
     // No journal for a new land's pressures: they are grounded in the
     // region's own nature and the narration since arrival, not in the home
@@ -126,7 +127,7 @@ export function buildRegionalFrontsContext(state) {
     const base = baseDirectorContext(state, { journal: wants.wantsProfile && knownRegions.length === 0 ? DIRECTOR_CONTEXT_DEFAULTS.journal : 0 });
     return {
         newRegion: {
-            name: cleanText(pending.region, 60),
+            name: cleanText(pending.region, REGION_NAME_MAX),
             arrivedAt: cleanText(pending.locationName, 120),
             arrivalPlaceType: record?.type || null,
             arrivalPlaceDanger: record?.danger || null,
@@ -156,14 +157,24 @@ export async function generateRegionalFronts(state) {
         throw new Error('No new region is awaiting front seeding.');
     }
     const wants = regionalCallWants(state);
+    // A face-only marker whose face landed meanwhile wants nothing: the quiet
+    // answer, no DM-model call (2026-10-27 living-world P2).
+    if (!wants.wantsFronts && !wants.wantsProfile) return { fronts: [], profile: null };
+    // Both anchors when both lists are wanted (2026-10-27 P2): anchored on
+    // `aftermath_fronts` alone, a reply carrying the face without the list
+    // was a FAILURE that discarded the face. A missing list beside a present
+    // face is an empty seed.
+    const anchor = wants.wantsFronts && wants.wantsProfile
+        ? ['aftermath_fronts', 'region_profile']
+        : (wants.wantsFronts ? 'aftermath_fronts' : 'region_profile');
     const parsed = await runDirector(state, {
         prompt: buildRegionalPrompt(wants),
         context: buildRegionalFrontsContext(state),
-        anchor: wants.wantsFronts ? 'aftermath_fronts' : 'region_profile',
+        anchor,
         label: 'regional-front',
     });
     return {
-        fronts: wants.wantsFronts ? sanitizeAftermathProposals(parsed.aftermath_fronts) : [],
+        fronts: wants.wantsFronts && Array.isArray(parsed.aftermath_fronts) ? sanitizeAftermathProposals(parsed.aftermath_fronts) : [],
         profile: wants.wantsProfile ? normalizeRegionProfile(parsed.region_profile) : null,
     };
 }

@@ -25,8 +25,8 @@ import { conversationalDistance } from '../../engine/replayLedger.js';
 import { DIRECTOR_MAX_ATTEMPTS, getDirectorFailure, RETRYABLE_DIRECTORS } from '../../engine/directorRetry.js';
 import { foldExperience, getFrontResolutionMilestoneXp, isHeroDown } from '../../engine/progression.js';
 import { findLocationRecord, isSameRegion, normalizeLocationRecord, upsertLocation } from '../../engine/locationRegistry.js';
-import { rememberRegionProfile } from '../../engine/regionProfile.js';
-import { detectFrontTurning, INTERLUDE_CONCLUSION_DELAY, mintInterlude } from '../../engine/interlude.js';
+import { findRegionProfile, recordRegionFaceAttempt, rememberRegionProfile } from '../../engine/regionProfile.js';
+import { detectFrontTurning, INTERLUDE_CONCLUSION_DELAY, mintInterlude, openRegionInterlude } from '../../engine/interlude.js';
 import { namesMatch } from '../../engine/npcRoster.js';
 import { rollDie } from '../../engine/dice.ts';
 import { isRecord } from '../../engine/text.js';
@@ -195,6 +195,20 @@ function concludeFront(state, idx, front, { outcome = null, note = '' } = {}) {
         type: 'ADD_WORLD_FACTS',
         payload: [{ fact: buildFrontResolutionFact(concluded, prevailed ? '' : note), category: 'event', pinned: true }],
     });
+}
+
+/**
+ * The establishing shot opens where the face LANDS (2026-10-27 living-world
+ * P2): the classification defers it while a face is coming, and the call
+ * that resolves (a face, or the attempt that leaves the land faceless) opens
+ * it here — when the hero still stands at a place of that land.
+ */
+function openRegionShotIfHere(state, region) {
+    const locations = state.locations || [];
+    const idx = findLocationRecord(locations, state.currentLocation);
+    const here = idx === -1 ? null : locations[idx];
+    if (!here || !isSameRegion(here.region, region)) return state;
+    return openRegionInterlude(state, region, { recordId: here.id });
 }
 
 export const handlers = {
@@ -589,20 +603,27 @@ export const handlers = {
             || payload.sessionId !== state.session?.id || payload.key !== pending.key) return state;
         // The land's face (WOW 2026-10-26): re-validated here like every
         // director reply, written once — a profile already on record stands.
+        const wantedFace = !findRegionProfile(state.regions, pending.region);
         const regions = rememberRegionProfile(state.regions, pending.region, payload.profile, {
             atMessage: (state.messages || []).length,
         });
+        // A call that was asked for the face and brought none (an incomplete
+        // reply, a give-up) counts against the LAND (2026-10-27 P2): it used to
+        // clear the marker with no tally at all.
+        const faceSession = wantedFace && !findRegionProfile(regions, pending.region)
+            ? { ...state.session, regionFaceAttempts: recordRegionFaceAttempt(state.session?.regionFaceAttempts, pending.region, { atMessage: (state.messages || []).length }) }
+            : state.session;
         // A profile-only marker (the home region, a land met while the web was
         // full, a pre-profile save's known land) seeds nothing and marks
         // nothing seeded: the fronts' own one-shot stays the installer's below.
         if (pending.profileOnly === true) {
-            return { ...state, regions, session: { ...state.session, pendingRegionalFronts: null } };
+            return openRegionShotIfHere({ ...state, regions, session: { ...faceSession, pendingRegionalFronts: null } }, pending.region);
         }
         const seededRegions = [...(state.session?.seededRegions || []), pending.region].slice(-12);
         // A region seeded now leaves the deferred ledger (2026-10-15).
         const deferredRegions = (state.session?.deferredRegions || []).filter(region => !isSameRegion(region, pending.region));
-        const session = { ...state.session, pendingRegionalFronts: null, seededRegions, deferredRegions };
-        state = { ...state, regions };
+        const session = { ...faceSession, pendingRegionalFronts: null, seededRegions, deferredRegions };
+        state = openRegionShotIfHere({ ...state, regions, session }, pending.region);
         const fronts = state.fronts || [];
         const activeCount = fronts.filter(f => (f.status || 'active') === 'active').length;
         // Like the aftermath installer, regional natives top the web up to
@@ -612,13 +633,13 @@ export const handlers = {
         // the region the hero actually travels to next.
         const room = Math.min(2, Math.max(0, (MAX_ACTIVE_FRONTS - 1) - activeCount));
         const additions = buildProposedFrontAdditions(fronts, payload.fronts, room, 'front-region');
-        if (additions.length === 0) return { ...state, session };
+        if (additions.length === 0) return state;
         let locations = state.locations || [];
         for (const front of additions) {
             locations = upsertLocation(locations, pending.locationName, { theaterFrontIds: [front.id] });
         }
         // Private like every front: no system line, the player only ever feels it.
-        return { ...state, session, fronts: [...fronts, ...additions], locations };
+        return { ...state, fronts: [...fronts, ...additions], locations };
     },
 
     /**
@@ -639,6 +660,14 @@ export const handlers = {
         const director = RETRYABLE_DIRECTORS[name];
         if (director.pendingKey(state.session) !== key) return state;
         const attempts = (getDirectorFailure(state.session, name, key)?.attempts || 0) + 1;
+        // A failed regional call that was asked for a land's face counts
+        // against that LAND (2026-10-27 P2): the marker's key is new per mint,
+        // so the per-key tally alone let a deterministic failure buy three calls
+        // per classified place for the whole campaign.
+        const pendingRegion = name === 'regionalFronts' ? state.session?.pendingRegionalFronts?.region : null;
+        if (pendingRegion && !findRegionProfile(state.regions, pendingRegion)) {
+            state = { ...state, session: { ...state.session, regionFaceAttempts: recordRegionFaceAttempt(state.session?.regionFaceAttempts, pendingRegion, { atMessage: (state.messages || []).length }) } };
+        }
         const failures = { ...(state.session?.directorFailures || {}) };
         if (attempts < DIRECTOR_MAX_ATTEMPTS) {
             failures[name] = { key, attempts, atMessage: (state.messages || []).length };

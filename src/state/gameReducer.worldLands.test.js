@@ -22,6 +22,7 @@ vi.mock('../engine/dice.ts', async () => {
 
 const { gameReducer, initialGameState } = await import('./gameReducer.js');
 const { INTERLUDE_CONCLUSION_DELAY, INTERLUDE_COOLDOWN_MESSAGES } = await import('../engine/interlude.js');
+const { sanitizeLivingWorldSession } = await import('../engine/livingWorldSession.js');
 
 const msgs = n => Array.from({ length: n }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `m${i}` }));
 const atMessages = (state, n) => ({ ...state, messages: msgs(n) });
@@ -134,7 +135,10 @@ describe('a place named "<place>, <Region>" keeps its land (the 2026-10-27 live 
         const docks = state.locations.find(r => r.name === 'The Docks of Odrana, Saffron Coast');
         expect(docks.region).toBe('Saffron Coast');
         expect(state.session.pendingRegionalFronts).toMatchObject({ region: 'Saffron Coast', locationName: 'The Docks of Odrana, Saffron Coast' });
-        expect(state.session.interlude).toMatchObject({ reason: 'region', region: 'Saffron Coast' });
+        // The shot waits for the face, and opens where it lands (2026-10-27 P2).
+        expect(state.session.interlude ?? null).toBeNull();
+        const landed = gameReducer(state, { type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId: 'campaign-1', key: state.session.pendingRegionalFronts.key, fronts: [], profile: face() } });
+        expect(landed.session.interlude).toMatchObject({ reason: 'region', region: 'Saffron Coast' });
     });
 });
 
@@ -176,6 +180,11 @@ describe('slice 3 — the interlude\'s seams', () => {
         expect(state.session.interludedRegions).toEqual(['the Riverlands']);
         expect(state.session.interlude ?? null).toBeNull();
         state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } } });
+        // The classification asks for the face and DEFERS the shot (2026-10-27
+        // P2: minted here, it was spent before the face landed).
+        expect(state.session.interlude ?? null).toBeNull();
+        expect(state.session.interludedRegions).toEqual(['the Riverlands']);
+        state = gameReducer(state, { type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId: 'campaign-1', key: state.session.pendingRegionalFronts.key, fronts: [], profile: face() } });
         expect(state.session.interlude).toMatchObject({ reason: 'region', region: 'the Icebound Coast', mintedAtMessage: 20, opensAtMessage: 20 });
         expect(state.session.interludedRegions).toEqual(['the Riverlands', 'the Icebound Coast']);
         // Arriving at another Coast place later mints nothing new.
@@ -196,6 +205,7 @@ describe('slice 3 — the interlude\'s seams', () => {
         state = gameReducer(atMessages(state, 14), { type: 'SET_LOCATION', payload: 'Aboard the Carrack, Sundering Sea' });
         state = gameReducer(atMessages(state, 18), { type: 'SET_LOCATION', payload: 'Quayside, Khor-Sabir' });
         state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Quayside, Khor-Sabir', profile: { type: 'settlement', region: 'Saffron Coast' }, evidenceText: 'The quays of Khor-Sabir, first port of the Saffron Coast.' } });
+        state = gameReducer(state, { type: 'INSTALL_REGIONAL_FRONTS', payload: { sessionId: 'campaign-1', key: state.session.pendingRegionalFronts.key, fronts: [], profile: face() } });
         expect(state.session.interlude).toMatchObject({ reason: 'region', region: 'Saffron Coast' });
         expect(state.session.interludedRegions).toEqual(['Saffron Coast']);
         // The opening record's own land is still home: no shot.
@@ -209,7 +219,8 @@ describe('slice 3 — the interlude\'s seams', () => {
     it('REGION: an arrival at a record already in a new land mints it too, and a fight defers it without spending the land', () => {
         let state = traveled();
         state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } } });
-        state = { ...state, session: { ...state.session, interlude: null, interludedRegions: ['the Riverlands'], lastInterludeMessage: undefined } };
+        // The coast's face is on record: an arrival opens the shot at once.
+        state = { ...state, regions: { 'the Icebound Coast': { ...face(), atMessage: 20 } }, session: { ...state.session, interlude: null, interludedRegions: ['the Riverlands'], lastInterludeMessage: undefined } };
         const inFight = gameReducer({ ...state, combat: { ...state.combat, active: true } }, { type: 'SET_LOCATION', payload: 'Aldermill' });
         const crossing = gameReducer({ ...inFight, combat: { ...inFight.combat, active: true } }, { type: 'SET_LOCATION', payload: 'Fort Halla' });
         expect(crossing.session.interlude ?? null).toBeNull();
@@ -319,5 +330,79 @@ describe('slice 3 — consumption and load', () => {
         expect(seeded.worldMotifs).toEqual({ ghoul: { count: 1, lastMessage: 4 } });
         expect(seeded.regions).toEqual({});
         expect(seeded.session.interlude).toBeUndefined();
+    });
+});
+
+/**
+ * The 2026-10-27 living-world audit (Lap 2, hostile input): the face-only
+ * marker's cost, the shot that never saw its face, the per-record tally and
+ * the seed ledger's missing load twin.
+ */
+describe('the region family after the 2026-10-27 audit', () => {
+
+    const installFace = (state, profile) => gameReducer(state, {
+        type: 'INSTALL_REGIONAL_FRONTS',
+        payload: { sessionId: 'campaign-1', key: state.session.pendingRegionalFronts.key, fronts: [], profile },
+    });
+    const classify = (state, n, name = 'Fort Halla', region = 'the Riverlands') => gameReducer(atMessages(state, n), {
+        type: 'UPDATE_LOCATION_PROFILE', payload: { name, profile: { region } },
+    });
+
+    it('a call that brings no face counts against the LAND: backoff, then faceless after three', () => {
+        let state = installFace(traveled(), { terrain: 'only' }); // incomplete: a required face missing
+        expect(state.session.regionFaceAttempts).toEqual([{ region: 'the Riverlands', attempts: 1, atMessage: 20 }]);
+        // Inside the backoff the next classification buys nothing.
+        expect(classify(state, 22).session.pendingRegionalFronts ?? null).toBeNull();
+        state = classify(state, 30);
+        expect(state.session.pendingRegionalFronts).toMatchObject({ region: 'the Riverlands', profileOnly: true });
+        state = installFace(state, null);
+        state = installFace(classify(state, 40), null);
+        expect(state.session.regionFaceAttempts[0].attempts).toBe(3);
+        // Faceless by decision: no more calls, however often the land is classified.
+        expect(classify(state, 80).session.pendingRegionalFronts ?? null).toBeNull();
+        expect(classify(state, 200).session.pendingRegionalFronts ?? null).toBeNull();
+    });
+
+    it('a failed regional call that was asked for a face counts each failure against the land', () => {
+        const state = traveled();
+        const failed = gameReducer(state, { type: 'DIRECTOR_ATTEMPT_FAILED', payload: { sessionId: 'campaign-1', name: 'regionalFronts', key: state.session.pendingRegionalFronts.key } });
+        expect(failed.session.regionFaceAttempts).toEqual([{ region: 'the Riverlands', attempts: 1, atMessage: 20 }]);
+        expect(failed.session.pendingRegionalFronts).toEqual(state.session.pendingRegionalFronts);
+    });
+
+    it('a land whose face never comes still gets its establishing shot, faceless, when the attempts run out', () => {
+        let state = { ...traveled(), regions: { 'the Riverlands': { ...face(), atMessage: 20 } } };
+        state = { ...state, session: { ...state.session, pendingRegionalFronts: null } };
+        state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } } });
+        expect(state.session.pendingRegionalFronts).toMatchObject({ region: 'the Icebound Coast' });
+        state = installFace(state, null); // the seed came back without a face
+        expect(state.session.interlude ?? null).toBeNull();
+        state = installFace(classify(state, 30, 'Fort Halla', 'the Icebound Coast'), null);
+        expect(state.session.interlude ?? null).toBeNull();
+        state = installFace(classify(state, 40, 'Fort Halla', 'the Icebound Coast'), null);
+        expect(state.session.interlude).toMatchObject({ reason: 'region', region: 'the Icebound Coast' });
+        expect(state.session.interludedRegions).toContain('the Icebound Coast');
+    });
+
+    it('the tally counts a motif once per settlement, not once per record of it', () => {
+        let state = traveled();
+        for (const name of ['Aldermill', 'Aldermill Market Square', 'Aldermill Tannery']) {
+            state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name, profile: { type: 'settlement', motifs: ['timber palisade'] } } });
+        }
+        expect(state.worldMotifs['timber palisade']).toEqual({ count: 1, lastMessage: 20 });
+        // Another town of the same land still counts: a land's monotony is the point.
+        state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Fort Halla', profile: { motifs: ['timber palisade'] } } });
+        expect(state.worldMotifs['timber palisade'].count).toBe(2);
+    });
+
+    it('session.seededRegions loads typed — a string can no longer throw out of the next classification', () => {
+        expect(sanitizeLivingWorldSession({ seededRegions: 'Riverlands' }, { maxMessageCount: 20 }).seededRegions).toEqual([]);
+        expect(sanitizeLivingWorldSession({ seededRegions: ['the Coast', 7, null, 'x'.repeat(200)] }, { maxMessageCount: 20 }).seededRegions)
+            .toEqual(['the Coast', 'x'.repeat(120)]);
+        const typed = sanitizeLivingWorldSession({ regionFaceAttempts: [{ region: 'the Coast', attempts: 9, atMessage: 1e9 }, { region: '', attempts: 1 }, 'junk'] }, { maxMessageCount: 20 });
+        expect(typed.regionFaceAttempts).toEqual([{ region: 'the Coast', attempts: 3, atMessage: 20 }]);
+        let state = traveled();
+        state = { ...state, session: { ...state.session, ...sanitizeLivingWorldSession({ seededRegions: 'Riverlands' }, { maxMessageCount: 20 }), pendingRegionalFronts: null } };
+        expect(() => gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } } })).not.toThrow();
     });
 });

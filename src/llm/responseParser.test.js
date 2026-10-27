@@ -851,7 +851,7 @@ describe('applyEvents dispatch coverage', () => {
         const dispatch = run({ level_up: true, exp_awarded: 50 });
         expect(dispatch).toHaveBeenCalledWith({
             type: 'LEVEL_UP',
-            payload: expect.objectContaining({ bonusExp: 50, reason: 'milestone', _meta: expect.any(Object) }),
+            payload: expect.objectContaining({ bonusExp: 50, _meta: expect.any(Object) }),
         });
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_EXP' }));
     });

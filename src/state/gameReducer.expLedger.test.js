@@ -236,9 +236,40 @@ describe('DM XP lanes are bounded engine-side (2026-09-07)', () => {
             dmLevelUp(0, { sourceId: 'msg-10' }),
         );
         expect(state.character.level).toBe(20);
+        // The milestone banks nothing at max level (2026-10-27 P2: it banked
+        // +25000 through the threshold table's last-row fallback).
+        expect(state.character.exp).toBe(0);
         const line = state.messages.at(-1).content;
         expect(line).toContain('max level reached, no level gained');
-        expect(line).toContain('Max level reached');
+        expect(state.messages.at(-1).dmVisible).toBe(true);
+    });
+
+    it('a level-20 milestone pays its bonus only', () => {
+        const base = makeState();
+        const state = gameReducer(
+            { ...base, character: { ...base.character, level: 20, maxHP: 150, currentHP: 150, hitDice: { total: 20, remaining: 20, die: 10 } } },
+            dmLevelUp(40, { sourceId: 'msg-10' }),
+        );
+        expect(state.character.exp).toBe(40);
+        expect(state.messages.at(-1).content).toContain('+40 XP (story milestone — max level reached, no level gained');
+    });
+
+    it('two DIFFERENT over-cap awards both pay — the ledger keys on the request (2026-10-27 P2)', () => {
+        const base = makeState();
+        const l1 = { ...base, character: { ...base.character, level: 1, exp: 0 } };
+        let state = gameReducer(l1, dmExp(60, { sourceId: 'msg-10' }));
+        const first = state.character.exp;
+        expect(first).toBeGreaterThan(0);
+        expect(first).toBeLessThan(60);
+        state = passTurns(state, 2);
+        state = gameReducer(state, dmExp(80, { sourceId: 'msg-11' }));
+        expect(state.character.exp).toBe(first * 2);
+        expect(state.messages.at(-1).content).not.toContain('Duplicate XP award ignored');
+        // …while the echo of the SAME request is still caught.
+        state = passTurns(state, 2);
+        const echo = gameReducer(state, dmExp(80, { sourceId: 'msg-12' }));
+        expect(echo.character.exp).toBe(first * 2);
+        expect(echo.messages.at(-1).content).toContain('Duplicate XP award ignored');
     });
 
     it('engine awards (the fold) stay unbounded', () => {

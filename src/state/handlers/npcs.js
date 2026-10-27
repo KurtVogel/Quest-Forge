@@ -51,9 +51,9 @@ import { bornStoryMemoryCard, findStoryMemoryMatch, normalizeStoryMemoryCard } f
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
 import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isDirectionEvidencedInText, isLocationEvidencedInText, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, linkLocations, normalizeTravelDirection, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
-import { findRegionProfile } from '../../engine/regionProfile.js';
+import { findRegionProfile, mayAskRegionFace } from '../../engine/regionProfile.js';
 import { recordWorldMotifs } from '../../engine/worldMotifs.js';
-import { hasInterludedRegion, mintInterlude, rememberInterludedRegion } from '../../engine/interlude.js';
+import { openRegionInterlude } from '../../engine/interlude.js';
 import { ABSENCE_DRIFT_COOLDOWN_MESSAGES, ABSENCE_DRIFT_MIN_AWAY, MAX_ACTIVE_FRONTS, MAX_DRIFT_DEVELOPMENTS, distanceSince, findDriftTheaterFront, getFrontIntensityBand, isAbsenceDriftLocalNpc, isDriftTheaterFront } from '../../engine/worldTempo.js';
 import { gameReducer } from '../gameReducer.js';
 import { isStaleCampaignAction, systemMessage, upsertNpc } from './shared.js';
@@ -137,44 +137,24 @@ function seedMayReplace(pending) {
 }
 
 /**
- * The interlude's REGION seam (WOW 2026-10-26): the hero stands in a land
- * this story has not yet given its establishing shot. The HOME land is
- * remembered without one — the opening scene is its establishing shot — and
- * a land is remembered only when its shot was minted, so a cooldown or a
- * fight defers it to the next classification or arrival rather than losing
- * it. Home is the land of the campaign's FIRST place record (the 2026-10-27
- * live proof, run 7: the hero sailed from an unnamed Gullmark and the far
- * coast was the first land ever named — "no other land known" called it home
- * and the crossing got no shot); any other first-named land was reached by
- * travel and gets its shot.
- */
-function openRegionInterlude(state, region, { recordId = null } = {}) {
-    const name = typeof region === 'string' ? region.trim() : '';
-    if (!name || hasInterludedRegion(state.session?.interludedRegions, name)) return state;
-    const others = collectKnownRegions(state.locations).filter(known => !isSameRegion(known, name));
-    const remembered = rememberInterludedRegion(state.session?.interludedRegions, name);
-    const openingRecord = (state.locations || [])[0] || null;
-    const isHome = others.length === 0 && (!recordId || !openingRecord?.id || openingRecord.id === recordId);
-    if (isHome) return { ...state, session: { ...state.session, interludedRegions: remembered } };
-    if (state.combat?.active) return state;
-    const session = mintInterlude(state.session, {
-        reason: 'region',
-        region: name,
-        messageCount: (state.messages || []).length,
-        messages: state.messages,
-    });
-    if (session === state.session) return state;
-    return { ...state, session: { ...session, interludedRegions: remembered } };
-}
-
-/**
  * The durable variety tally's per-place feed (WOW 2026-10-26): a record's
  * NEW archetype or motif keys count once — a re-classification that repeats
  * what the record already holds adds nothing.
  */
 function countPlaceMotifs(state, before, after) {
     if (!after) return state;
-    const held = new Set([before?.archetype, ...(before?.motifs || [])].filter(Boolean));
+    // Counted once per SETTLEMENT, not per record (2026-10-27 living-world
+    // P2, measured): the registry keeps a town's market square, tannery and
+    // harbor as records of their own, and one palisade tagged on four of them
+    // read "timber palisade ×4 … NONE of these" while the hero stood in that
+    // town. A key a related record (same cluster, `areRelatedPlaces`) already
+    // holds is not a new sighting. Across towns of one land it still counts:
+    // a land's monotony is exactly what the line is for.
+    const cluster = (state.locations || []).filter(record => record && record !== after
+        && record.id !== after.id && areRelatedPlaces(record, after));
+    const held = new Set([before, ...cluster]
+        .flatMap(record => [record?.archetype, ...(Array.isArray(record?.motifs) ? record.motifs : [])])
+        .filter(Boolean));
     const added = [after.archetype, ...(after.motifs || [])].filter(key => key && !held.has(key));
     if (added.length === 0) return state;
     return { ...state, worldMotifs: recordWorldMotifs(state.worldMotifs, added, { atMessage: (state.messages || []).length }) };
@@ -820,6 +800,10 @@ export const handlers = {
         const wantsProfile = !findRegionProfile(state.regions, region);
         const mintProfileOnly = () => {
             if (!wantsProfile || next.session?.pendingRegionalFronts) return;
+            // The per-region face ledger (2026-10-27 P2): a land whose calls
+            // keep bringing no face waits its backoff, and stays faceless
+            // after REGION_FACE_MAX_ATTEMPTS — never a call per classification.
+            if (!mayAskRegionFace(state.session, region, state.messages)) return;
             next.session = { ...next.session, pendingRegionalFronts: mintRegionalSeed(region, here.name, state.messages, { profileOnly: true }) };
         };
         // The establishing shot (the interlude's REGION seam, 2026-10-26).

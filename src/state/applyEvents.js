@@ -149,6 +149,14 @@ function applyFightOpeningChannels(events, dispatch, getState, opts) {
     }
 }
 
+// Does this reply resolve a front the state still holds open? By id only, as
+// UPDATE_FRONT matches (a title is never an identity, 2026-10-16).
+function resolvesLiveFront(frontUpdates, fronts) {
+    if (!Array.isArray(frontUpdates) || !Array.isArray(fronts)) return false;
+    return frontUpdates.some(update => update?.status === 'resolved'
+        && fronts.some(front => front?.id === update.id && front.status !== 'resolved'));
+}
+
 /**
  * Apply parsed events to dispatch game state changes.
  * @param {object} events - Normalized events from parseResponse/normalizeEvents
@@ -454,14 +462,26 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         console.warn('[applyEvents] Ignored exp_awarded emitted alongside a quest completion — the engine pays quest XP itself.');
         expAwarded = 0;
     }
-    if (events.levelUp) {
+    // A front resolution IS the arc closing, and UPDATE_FRONT pays it the
+    // front tier (half a level). A level_up / exp_awarded beside it is the
+    // same arc paid twice — one reply used to bank a WHOLE level (2026-10-27
+    // progression P2, measured: +150 campaign milestone + 188 story milestone
+    // = Level 2 from L1 / 0 XP). The quest precedent above, judged against the
+    // ENTRY state: only a resolution of a front still live pays.
+    let levelUp = !!events.levelUp;
+    if ((levelUp || expAwarded > 0) && resolvesLiveFront(events.frontUpdates, state?.fronts)) {
+        console.warn('[applyEvents] Ignored level_up / exp_awarded emitted alongside a front resolution — the engine pays the front milestone itself.');
+        levelUp = false;
+        expAwarded = 0;
+    }
+    if (levelUp) {
         // Explicit story milestone from the DM. The reducer's DM lane pays the
         // engine-bounded milestone tier (half a level) plus the quest-tier-capped
         // bonus in ONE award, so the two can never double-level (2026-09-07
         // audit P1). _meta arms the recentExpAwards replay guard: a level_up or
         // exp_awarded re-emitted on a recap turn must not pay twice (2026-08-26
         // player report).
-        dispatch({ type: 'LEVEL_UP', payload: { bonusExp: expAwarded, reason: 'milestone', _meta: transactionMeta } });
+        dispatch({ type: 'LEVEL_UP', payload: { bonusExp: expAwarded, _meta: transactionMeta } });
     } else if (expAwarded > 0) {
         dispatch({ type: 'ADD_EXP', payload: { amount: expAwarded, _meta: transactionMeta } });
     }

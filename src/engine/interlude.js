@@ -22,8 +22,8 @@
 import { cleanText, isRecord } from './text.js';
 import { clampMessageStamp, conversationalDistance } from './replayLedger.js';
 import { describeFrontPortents } from './fronts.js';
-import { findLocationRecord, LOCATION_STATE_MAX } from './locationRegistry.js';
-import { describeRegionForInterlude, findRegionProfile, REGION_NAME_MAX } from './regionProfile.js';
+import { collectKnownRegions, findLocationRecord, isSameRegion, LOCATION_STATE_MAX } from './locationRegistry.js';
+import { describeRegionForInterlude, findRegionProfile, isRegionFaceComing, REGION_NAME_MAX } from './regionProfile.js';
 
 export const INTERLUDE_REASONS = Object.freeze(['region', 'turning', 'conclusion', 'rest', 'demand']);
 /** Conversational rows between interludes (the demand ignores it). */
@@ -145,6 +145,48 @@ export function consumeInterlude(session, { messageCount = 0, messages = null } 
         return { ...session, interlude: null };
     }
     return session;
+}
+
+/**
+ * The interlude's REGION seam (WOW 2026-10-26): the hero stands in a land
+ * this story has not yet given its establishing shot. The HOME land is
+ * remembered without one — the opening scene is its establishing shot — and
+ * a land is remembered only when its shot was minted, so a cooldown or a
+ * fight defers it to the next classification or arrival rather than losing
+ * it. Home is the land of the campaign's FIRST place record (the 2026-10-27
+ * live proof, run 7); any other first-named land was reached by travel and
+ * gets its shot.
+ *
+ * The shot WAITS for the land's face (2026-10-27 living-world P2, measured):
+ * the classification that asked the regional director for the face used to
+ * mint the shot at once, the next DM row spent it with "its face is not yet
+ * on record", and the land was remembered — the face, landing seconds later,
+ * never reached an establishing shot. While a face is still coming
+ * (`isRegionFaceComing`) nothing is minted or remembered; the installer
+ * that writes the face (INSTALL_REGIONAL_FRONTS) opens it, and a land whose
+ * attempts ran out gets its shot faceless.
+ *
+ * Moved here from handlers/npcs.js so both the classification and the
+ * installer read one seam.
+ */
+export function openRegionInterlude(state, region, { recordId = null } = {}) {
+    const name = typeof region === 'string' ? region.trim() : '';
+    if (!name || hasInterludedRegion(state.session?.interludedRegions, name)) return state;
+    const others = collectKnownRegions(state.locations).filter(known => !isSameRegion(known, name));
+    const remembered = rememberInterludedRegion(state.session?.interludedRegions, name);
+    const openingRecord = (state.locations || [])[0] || null;
+    const isHome = others.length === 0 && (!recordId || !openingRecord?.id || openingRecord.id === recordId);
+    if (isHome) return { ...state, session: { ...state.session, interludedRegions: remembered } };
+    if (state.combat?.active) return state;
+    if (isRegionFaceComing(state, name)) return state;
+    const session = mintInterlude(state.session, {
+        reason: 'region',
+        region: name,
+        messageCount: (state.messages || []).length,
+        messages: state.messages,
+    });
+    if (session === state.session) return state;
+    return { ...state, session: { ...session, interludedRegions: remembered } };
 }
 
 /** A land gets its establishing shot once. */

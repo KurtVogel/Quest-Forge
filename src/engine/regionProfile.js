@@ -17,8 +17,8 @@
  * contrast context and the interlude's establishing shot.
  */
 import { cleanText, isRecord } from './text.js';
-import { findLocationRecord, isSameRegion } from './locationRegistry.js';
-import { clampMessageStamp } from './replayLedger.js';
+import { findLocationRecord, isSameRegion, REGION_NAME_MAX } from './locationRegistry.js';
+import { clampMessageStamp, conversationalDistance } from './replayLedger.js';
 
 /** The five faces of a land, in render order. */
 export const REGION_PROFILE_FIELDS = Object.freeze(['terrain', 'people', 'built', 'dread', 'names']);
@@ -26,8 +26,8 @@ export const REGION_PROFILE_FIELDS = Object.freeze(['terrain', 'people', 'built'
 export const REGION_PROFILE_REQUIRED = Object.freeze(['terrain', 'people', 'dread']);
 /** Per-field clamp — five fields at this cap is ~700 dynamic chars per turn. */
 export const REGION_PROFILE_FIELD_MAX = 120;
-/** A region's name, as the registry and the pending marker clamp it. */
-export const REGION_NAME_MAX = 120;
+/** A region's name, as the readers clamp it (the registry's own constant, re-exported). */
+export { REGION_NAME_MAX };
 /** The record's ceiling; the oldest profile leaves first past it. */
 export const MAX_REGION_PROFILES = 24;
 /** How many known lands the contrast context names (newest first). */
@@ -70,7 +70,9 @@ export function sanitizeRegions(raw, { maxMessageCount } = {}) {
     const out = {};
     for (const [name, value] of Object.entries(raw)) {
         const region = cleanText(name, REGION_NAME_MAX);
-        if (!region || Object.hasOwn(out, region)) continue;
+        // A `__proto__` key would SET the accumulator's prototype through the
+        // bracket write (2026-10-27 nit) — never a land's name.
+        if (!region || region === '__proto__' || Object.hasOwn(out, region)) continue;
         const profile = normalizeRegionProfile(value);
         if (!profile) continue;
         const atMessage = clampMessageStamp(value?.atMessage, maxMessageCount);
@@ -199,4 +201,89 @@ export function describeRegionForInterlude(name, profile) {
     if (!region || !profile) return '';
     const clauses = faceClauses(profile);
     return clauses.length ? `${region} — ${clauses.join('; ')}.` : '';
+}
+
+/*
+ * THE FACE-ATTEMPT LEDGER (2026-10-27 living-world P2, measured). The face-
+ * only marker used to re-mint on every classification of a faceless land,
+ * and the give-up tally keys on the MARKER's key (new per mint) — so a
+ * deterministic director failure cost up to three hidden DM-model calls per
+ * classified place for the whole campaign, and an INCOMPLETE reply (a
+ * required face missing) cleared the marker with no tally at all. The ledger
+ * is per REGION: every failed call and every reply that brought no face
+ * counts, a counted land waits REGION_FACE_RETRY_DISTANCE conversational
+ * rows before it is asked again, and at REGION_FACE_MAX_ATTEMPTS it stays
+ * faceless by decision (the Region line simply does not render; the seed
+ * call, bought for its fronts, may still bring one).
+ * Stored as `session.regionFaceAttempts: [{ region, attempts, atMessage }]`.
+ */
+export const REGION_FACE_MAX_ATTEMPTS = 3;
+export const REGION_FACE_RETRY_DISTANCE = 6;
+export const REGION_FACE_LEDGER_CAP = 12;
+
+function typeFaceAttempt(raw, maxMessageCount) {
+    if (!isRecord(raw)) return null;
+    const region = cleanText(raw.region, REGION_NAME_MAX);
+    const attempts = Math.floor(Number(raw.attempts));
+    if (!region || !Number.isFinite(attempts) || attempts < 1) return null;
+    const atMessage = clampMessageStamp(raw.atMessage, maxMessageCount);
+    return { region, attempts: Math.min(attempts, REGION_FACE_MAX_ATTEMPTS), atMessage: atMessage === null ? 0 : atMessage };
+}
+
+/** Load twin: typed entries, one per region, newest kept past the cap. */
+export function sanitizeRegionFaceAttempts(raw, { maxMessageCount } = {}) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const entry of raw) {
+        const typed = typeFaceAttempt(entry, maxMessageCount);
+        if (!typed) continue;
+        const idx = out.findIndex(held => isSameRegion(held.region, typed.region));
+        if (idx !== -1) out.splice(idx, 1);
+        out.push(typed);
+    }
+    return out.slice(-REGION_FACE_LEDGER_CAP);
+}
+
+function findFaceAttempt(list, region) {
+    const name = cleanText(region, REGION_NAME_MAX);
+    if (!name || !Array.isArray(list)) return null;
+    return sanitizeRegionFaceAttempts(list).find(entry => isSameRegion(entry.region, name)) || null;
+}
+
+/** One more call that brought no face for this land. */
+export function recordRegionFaceAttempt(list, region, { atMessage = 0 } = {}) {
+    const name = cleanText(region, REGION_NAME_MAX);
+    const typed = sanitizeRegionFaceAttempts(list);
+    if (!name) return typed;
+    const held = typed.find(entry => isSameRegion(entry.region, name));
+    const kept = typed.filter(entry => entry !== held);
+    const stamp = Number.isFinite(Number(atMessage)) ? Math.max(0, Math.floor(Number(atMessage))) : 0;
+    const attempts = Math.min((held?.attempts || 0) + 1, REGION_FACE_MAX_ATTEMPTS);
+    return [...kept, { region: held?.region || name, attempts, atMessage: stamp }].slice(-REGION_FACE_LEDGER_CAP);
+}
+
+/** This land has used every attempt: faceless by decision. */
+export function isRegionFaceExhausted(session, region) {
+    return (findFaceAttempt(session?.regionFaceAttempts, region)?.attempts || 0) >= REGION_FACE_MAX_ATTEMPTS;
+}
+
+/** May a face-only call be bought for this land now (not exhausted, not inside its backoff)? */
+export function mayAskRegionFace(session, region, messages) {
+    const entry = findFaceAttempt(session?.regionFaceAttempts, region);
+    if (!entry) return true;
+    if (entry.attempts >= REGION_FACE_MAX_ATTEMPTS) return false;
+    const list = Array.isArray(messages) ? messages : [];
+    return conversationalDistance(list, entry.atMessage - 1, list.length) >= REGION_FACE_RETRY_DISTANCE;
+}
+
+/**
+ * Is a face still COMING for this land — none on record and attempts left?
+ * The establishing shot waits for it (2026-10-27 P2: the shot was minted by
+ * the classification that requested the face and spent before the face
+ * landed, so a first crossing never showed the land).
+ */
+export function isRegionFaceComing(state, region) {
+    if (!cleanText(region, REGION_NAME_MAX)) return false;
+    if (findRegionProfile(state?.regions, region)) return false;
+    return !isRegionFaceExhausted(state?.session, region);
 }

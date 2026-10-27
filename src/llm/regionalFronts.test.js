@@ -203,3 +203,28 @@ describe('the land\'s face (WOW 2026-10-26, slice 1)', () => {
         expect(buildRegionalPrompt({ wantsFronts: true, wantsProfile: false })).not.toContain('CONTRAST IS MANDATORY');
     });
 });
+
+describe('the combined call after the 2026-10-27 audit', () => {
+    const profile = { terrain: 'Salt flats to a grey horizon', people: 'Salt-boilers and grudge-keepers', built: 'Brine-bleached boards', dread: 'Things that crawl up the pans at night', names: 'Grell, Mott' };
+
+    it('a reply carrying the face without the fronts list keeps the face — an empty seed, not a failure', async () => {
+        sendMessageMock.mockResolvedValue(`The land:\n${JSON.stringify({ region_profile: profile })}`);
+        const result = await generateRegionalFronts(baseState());
+        expect(result).toEqual({ fronts: [], profile });
+    });
+
+    it('a face-only marker whose face landed meanwhile makes no DM-model call', async () => {
+        sendMessageMock.mockClear();
+        const state = baseState();
+        state.session.pendingRegionalFronts = { ...state.session.pendingRegionalFronts, profileOnly: true };
+        state.regions = { 'The Harchwold': { ...profile, atMessage: 3 } };
+        await expect(generateRegionalFronts(state)).resolves.toEqual({ fronts: [], profile: null });
+        expect(sendMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('the contrast list folds the region by isSameRegion, not by case alone', () => {
+        const state = baseState();
+        state.regions = { Harchwold: { ...profile, atMessage: 5 }, 'The Riverlands': { ...profile, atMessage: 2 } };
+        expect(buildRegionalFrontsContext(state).knownRegions.map(land => land.name)).toEqual(['The Riverlands']);
+    });
+});

@@ -6,7 +6,19 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-27 (the "world has lands" slices proved live on Flash — seven runs, three proof-found engine fixes in, both post-run wordings proved; the 10-26 night build, the 10-26 strengthening clear and the earlier sweeps below)_
+_Last updated: 2026-10-27 evening (the 10-27 strengthening queue cleared — 10 P2 across progression + living-world; the "world has lands" live proof, the 10-26 night build and the earlier sweeps below)_
+
+## 2026-10-27 (evening) — strengthening queue cleared: 10 P2 across progression (Lap 1) + living-world (Lap 2) — pushed AND deployed
+
+**Ruling: DECISIONS.md 2026-10-27 (evening), eight points — four items were flagged "decision" and are decided there.** Vesa: "Check strengthening, implement, deploy." +14 tests (4,194 / 268), lint clean.
+
+**What a player can notice:** a DM that resolves a hidden pressure and ALSO declares a `level_up` no longer hands a whole level in one reply (the front's own milestone pays; the prompt says so); two different over-cap XP bonuses both pay instead of the second reading as a "duplicate"; a level-20 milestone no longer banks 25,000 meaningless XP; a new land's establishing shot now waits for the land's face and opens when it lands (it used to fire first and say the face was "not yet on record"); a palisade seen in one town's square, tannery and harbor counts once in "THIS WORLD HAS ALREADY SHOWN".
+
+**What changed underneath:** `resolvesLiveFront` in `applyEvents.js`; the exp ledger keyed on the requested amount (`handlers/character.js`); `session.regionFaceAttempts` + `mayAskRegionFace` / `isRegionFaceComing` / `recordRegionFaceAttempt` / `sanitizeRegionFaceAttempts` in `engine/regionProfile.js` (a land whose face calls keep failing waits 6 rows and stops after 3 — it used to cost up to three hidden DM calls per classified place forever); `openRegionInterlude` moved to `engine/interlude.js` and opened from `INSTALL_REGIONAL_FRONTS` (`openRegionShotIfHere`); `countPlaceMotifs` counts per cluster; the combined regional call reads both anchors and skips a call that wants nothing; `session.seededRegions` load twin; `REGION_NAME_MAX` in `locationRegistry.js`.
+
+**Not exercised live:** the deferred shot on a real crossing (the lands probe's next run would show it — the shot should now carry the face's particulars).
+
+**Next:** unchanged — the doom arm on Sol once the prepay is topped up; the WOW companion slice's live proof; the next grand run on Sol; the commitment probe's multi-provider pass.
 
 ## 2026-10-27 — "The world has lands" proved live on Flash (seven runs) — three engine fixes the proof found are in, both post-run wordings proved — pushed AND deployed
 

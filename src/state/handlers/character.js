@@ -394,7 +394,10 @@ export const handlers = {
         const amount = Math.min(requested, getDmBonusXpCap(state.character?.level));
         let recentExpAwards = state.recentExpAwards || [];
         if (amount > 0) {
-            const guarded = guardExpAwardLedger(recentExpAwards, amount, meta, currentMessageIndex(state), state.messages);
+            // The ledger keys on the REQUESTED amount (2026-10-27 P2): an echo
+            // repeats the request, while two DIFFERENT over-cap awards (60, then
+            // 80) clamp to one number and used to collide as a "duplicate".
+            const guarded = guardExpAwardLedger(recentExpAwards, requested, meta, currentMessageIndex(state), state.messages);
             recentExpAwards = guarded.recentExpAwards;
             if (guarded.suppressed) {
                 return {
@@ -498,7 +501,7 @@ export const handlers = {
             const requestedBonus = bonusExp;
             bonusExp = Math.min(bonusExp, getDmBonusXpCap(level));
             if (bonusExp > 0) {
-                const guarded = guardExpAwardLedger(recentExpAwards, bonusExp, meta, messageIndex, state.messages);
+                const guarded = guardExpAwardLedger(recentExpAwards, requestedBonus, meta, messageIndex, state.messages);
                 recentExpAwards = guarded.recentExpAwards;
                 if (guarded.suppressed) {
                     extraMessages.push(systemMessage(`Duplicate XP award ignored — **+${bonusExp} XP** matches an award just granted; the milestone itself stands.`, { dmVisible: true }));
@@ -513,8 +516,22 @@ export const handlers = {
             // level_up + big-bonus double-level is structurally gone. At max
             // level the XP line says so explicitly — a silent no-op used to be
             // the one suppressed reward with no line (2026-09-07 P2).
-            const milestoneXp = getStoryMilestoneXp(level);
+            // At max level the milestone pays nothing (2026-10-27 P2: it banked
+            // +25000 XP through the threshold table's last-row fallback — a
+            // number with no level behind it); the bonus still pays.
             const atCap = isMaxLevel(level);
+            const milestoneXp = atCap ? 0 : getStoryMilestoneXp(level);
+            if (atCap && bonusExp <= 0) {
+                return {
+                    ...state,
+                    recentExpAwards,
+                    messages: [
+                        ...state.messages,
+                        ...extraMessages,
+                        systemMessage('**Story milestone** — max level reached, no level gained.', { dmVisible: true }),
+                    ],
+                };
+            }
             // A capped bonus that survived the ledger is said on the XP line itself.
             const bonusNote = bonusExp > 0 && bonusExp < requestedBonus
                 ? ` + bonus ${bonusExp}, capped from ${requestedBonus}`

@@ -21,6 +21,7 @@ import { sanitizePendingWonder, sanitizeWonder } from './wonder.js';
 import { sanitizeDirectorFailures } from './directorRetry.js';
 import { sanitizeHeroDeath } from './heroDeath.js';
 import { sanitizeInterlude, sanitizeInterludedRegions } from './interlude.js';
+import { sanitizeRegionFaceAttempts } from './regionProfile.js';
 import { cleanText as text, isRecord } from './text.js';
 import { clampMessageStamp } from './replayLedger.js';
 
@@ -214,6 +215,21 @@ export function sanitizeLivingWorldSession(session, { maxMessageCount } = {}) {
     // The lands already given their establishing shot (2026-10-26).
     if (session.interludedRegions !== undefined) {
         next.interludedRegions = sanitizeInterludedRegions(session.interludedRegions);
+    }
+    // The seed ledger (2026-10-27 living-world P2, measured): it had no load
+    // twin beside its two siblings — a string loaded as-is and the next NEW
+    // land's classification threw `.some is not a function` out of
+    // UPDATE_LOCATION_PROFILE (the Scribe's dispatch), and INSTALL_REGIONAL_FRONTS
+    // spread it into one-letter regions. Strings ≤ 120, cap 12 (the writer's).
+    if (session.seededRegions !== undefined) {
+        next.seededRegions = (Array.isArray(session.seededRegions) ? session.seededRegions : [])
+            .map(region => (typeof region === 'string' ? text(region, 120) : ''))
+            .filter(Boolean)
+            .slice(-12);
+    }
+    // The per-region face ledger (2026-10-27): typed entries, stamps clamped.
+    if (session.regionFaceAttempts !== undefined) {
+        next.regionFaceAttempts = sanitizeRegionFaceAttempts(session.regionFaceAttempts, { maxMessageCount });
     }
     // The deferred-region ledger (2026-10-15): short strings, cap 6.
     if (session.deferredRegions !== undefined) {
