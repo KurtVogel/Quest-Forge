@@ -75,8 +75,16 @@ export const handlers = {
         // (WOW 2026-10-26): never by a table-talk reply (the OOC request for
         // one is answered at the table; the wide shot opens the NEXT turn),
         // a hidden row, or a combat row (the block never renders in a fight).
+        // …and never one minted AFTER the player's line this reply answers
+        // (2026-10-28, measured on the healed megacampaign): a background
+        // director that lands while the reply streams mints the shot into a
+        // turn whose prompt was already built, and that reply used to spend
+        // it unseen. It waits for the next reply, whose prompt carries it.
+        const lastPlayerRow = (state.messages || []).findLastIndex(m => m?.role === 'user');
+        const mintedThisTurn = Number.isFinite(next.session?.interlude?.mintedAtMessage)
+            && next.session.interlude.mintedAtMessage > lastPlayerRow;
         if (role === 'assistant' && next.session?.interlude && !action.payload?.hidden && !next.combat?.active
-            && !isTableTalkReply(state.messages)) {
+            && !mintedThisTurn && !isTableTalkReply(state.messages)) {
             const session = consumeInterlude(next.session, { messageCount: state.messages.length, messages: state.messages });
             if (session !== next.session) next.session = session;
         }

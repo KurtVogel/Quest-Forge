@@ -161,7 +161,10 @@ describe('a region met at a full web is deferred and seeded on the next arrival 
         state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Aldermill' });
         state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Aldermill', profile: { type: 'settlement', danger: 'low', region: 'the Riverlands' }, evidenceText: 'Aldermill, in the Riverlands.' } });
         state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Fort Halla' });
-        return { ...state, fronts: Array.from({ length: 3 }, (_, i) => front({ id: `f${i}`, title: `F${i}` })) };
+        // All three fronts hold ground at Fort Halla, so none is "left behind"
+        // (2026-10-28) and the full web still defers the land.
+        const locations = state.locations.map(r => (r.name === 'Fort Halla' ? { ...r, theaterFrontIds: ['f0', 'f1', 'f2'] } : r));
+        return { ...state, locations, fronts: Array.from({ length: 3 }, (_, i) => front({ id: `f${i}`, title: `F${i}` })) };
     };
 
     it('defers at a full web, then seeds when the hero next arrives in that land with a slot free', () => {

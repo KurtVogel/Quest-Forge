@@ -52,7 +52,7 @@ import {
 } from '../engine/characterUtils.js';
 import { foldExperience, isHeroDown, MAX_CHARACTER_LEVEL } from '../engine/progression.js';
 import { normalizeEquippedSlots, shouldAutoEquip } from '../engine/equipment.js';
-import { createInitialFronts } from '../engine/fronts.js';
+import { createInitialFronts, openDoomWindow } from '../engine/fronts.js';
 import { isSpellcaster, sanitizeSpellSlots, sanitizeSustainedSpell } from '../engine/spellcasting.js';
 import { initialGameState } from './initialState.js';
 import { coverage, tokenSet } from '../engine/textMatch.js';
@@ -60,6 +60,8 @@ import { sanitizePortraitUrl } from '../engine/portraitUrl.js';
 import { cleanTextField, HERO_TEXT_LIMITS, MAX_COIN_HELD } from '../config/contentLimits.js';
 import { applyEarlyDefeat, isLowLevelSolo, stackIdentity, systemMessage } from './handlers/shared.js';
 import { strictFlag } from '../engine/text.js';
+import { isSameRegion } from '../engine/locationRegistry.js';
+import { regionForPrompt } from '../engine/regionProfile.js';
 
 /**
  * Save-format version stamped into every persisted payload (persistence.js
@@ -541,7 +543,96 @@ function healOverfullStacks(save) {
     };
 }
 
+/**
+ * Legacy records learn WHEN they happened (2026-10-28, Vesa's megacampaign:
+ * 1,805 of 1,813 world facts, 677 of 948 story cards and every NPC sighting
+ * predated the conversational stamps, so every age-aware reader — WORLD
+ * FACTS' recency, the callback scorer, DM REMINDERS, KNOWN NPCs — read them
+ * as ageless). Each carries a wall-clock stamp and every transcript row does
+ * too, so the stamp maps to the transcript length at that moment: the count
+ * of rows whose `timestamp` is at or before it. Only a monotonic, fully
+ * stamped transcript is read; only a missing message stamp is filled.
+ */
+function healLegacyMessageClock(save) {
+    const messages = Array.isArray(save.messages) ? save.messages : [];
+    if (messages.length === 0) return save;
+    const clock = messages.map(m => Number(m?.timestamp));
+    for (let i = 0; i < clock.length; i += 1) {
+        if (!Number.isFinite(clock[i]) || (i > 0 && clock[i] < clock[i - 1])) return save;
+    }
+    const countAt = (wallClock) => {
+        const at = Number(wallClock);
+        if (!Number.isFinite(at) || at <= 0) return null;
+        let lo = 0;
+        let hi = clock.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (clock[mid] <= at) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    };
+    const fill = (record, pairs) => {
+        let next = record;
+        for (const [messageKey, wallKey] of pairs) {
+            if (Number.isFinite(next?.[messageKey])) continue;
+            const count = countAt(next?.[wallKey]);
+            if (count === null) continue;
+            if (next === record) next = { ...record };
+            next[messageKey] = count;
+        }
+        return next;
+    };
+    const mapAll = (list, pairs) => {
+        if (!Array.isArray(list)) return list;
+        let changed = false;
+        const out = list.map(entry => {
+            if (!entry || typeof entry !== 'object') return entry;
+            const next = fill(entry, pairs);
+            if (next !== entry) changed = true;
+            return next;
+        });
+        return changed ? out : list;
+    };
+    const worldFacts = mapAll(save.worldFacts, [['atMessage', 'timestamp']]);
+    const storyMemory = mapAll(save.storyMemory, [['firstSeenMessage', 'firstSeenAt'], ['lastSeenMessage', 'lastSeenAt'], ['lastUsedMessage', 'lastUsedAt']]);
+    const npcs = mapAll(save.npcs, [['lastSeenMessage', 'lastSeen']]);
+    if (worldFacts === save.worldFacts && storyMemory === save.storyMemory && npcs === save.npcs) return save;
+    return { ...save, worldFacts, storyMemory, npcs };
+}
+
+/**
+ * A full clock that never got its doom window (2026-10-28): the window opens
+ * only when a clock MOVES, so a front that filled before the doom feature
+ * (2026-10-22) — or a second full clock that waited behind the first — sat
+ * at 6/6 forever (Vesa's "Trouble around Vault"). The load opens the one
+ * window `openDoomWindow` allows, at once; every rule after that is the
+ * live one (the card, the settle on the player's row, the landing director).
+ */
+function healUnopenedDooms(save) {
+    if (!Array.isArray(save.fronts) || save.fronts.length === 0) return save;
+    // Never for a front whose every theater lies in another land than the
+    // hero's (measured on the healed megacampaign, 2026-10-28: the card said
+    // the doom "arrives as NEWS" a sea away, and Flash marched the old land's
+    // spear-hunters onto the new land's causeway). A front left behind waits
+    // for the hero's return; the live clock lanes judge it there.
+    const locations = Array.isArray(save.locations) ? save.locations : [];
+    const heroLand = regionForPrompt(locations, save.currentLocation)?.name || null;
+    const leftBehind = (front) => {
+        if (!heroLand) return false;
+        const lands = locations
+            .filter(record => Array.isArray(record?.theaterFrontIds) && record.theaterFrontIds.includes(front?.id) && record.region)
+            .map(record => record.region);
+        return lands.length > 0 && !lands.some(land => isSameRegion(land, heroLand));
+    };
+    const eligible = save.fronts.map(front => (leftBehind(front) ? { ...front, status: 'left-behind' } : front));
+    const { opened } = openDoomWindow(eligible, { messageCount: Array.isArray(save.messages) ? save.messages.length : 0 });
+    if (!opened) return save;
+    return { ...save, fronts: save.fronts.map(front => (front?.id === opened.id ? { ...opened, status: front.status } : front)) };
+}
+
 const UNCONDITIONAL_HEALS = [
+    healLegacyMessageClock,
     healUnknownClassRace,
     healShadowInventoryRows,
     healStackedInventoryRows,
@@ -613,5 +704,6 @@ export function migrateLoadedSave(validatedSave) {
     }
     save = deriveSessionBoundaries(save);
     save = reseedMissingFronts(save);
+    save = healUnopenedDooms(save);
     return { ...save, saveVersion: CURRENT_SAVE_VERSION };
 }

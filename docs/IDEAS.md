@@ -11,6 +11,24 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
+### Doom news a land away is still the doom's own people at the door — status: `idea` (2026-10-28, measured)
+On the healed megacampaign (DECISIONS 2026-10-28 evening, point 3) a doom window opened for a front
+whose theaters all lay a sea away; the card said its final step "arrives as NEWS — a rider, a
+refugee, a glow on the horizon", and Flash brought three of the front's spear-hunters onto the new
+land's causeway instead. The load heal now skips such a front, but the LIVE path can open the same
+card when a clock fills while the hero is abroad. Options: render a far doom as a one-line
+"word comes from <land>" NEWS card without the faction's name (the DM cannot field what it cannot
+name), or hold the window until the hero is back in the front's land. Wants one live doom run
+abroad before choosing.
+
+### A note in prose is not a person — status: `idea` (2026-10-28)
+`findSubjectsInText` judges presence by any distinctive-looking token, so a role-named record
+("Armory Guard", "Scarred Guard", "The heavy crossbowman") is "present" whenever the prose says
+"armory", "scarred" or "heavy" — the DM's own tics ("heavy" ×1,251 in the megacampaign) keep dead
+fodder in the scene. 2026-10-28 gated KNOWN NPCs' presence on the record (dead / far-and-forgotten);
+the RAG presence penalty and callback curation still read the raw match. The recall lane's
+`findNamedSubjects` rule (2026-09-21) is the shelf to share.
+
 ### [wow] The world has lands, not a name: region profiles, a durable bestiary tally, and the interlude that reads them — status: all three slices `shipped` (2026-10-26 night, same day as proposed — DECISIONS.md 2026-10-26 (night), nine points; `engine/regionProfile.js` / `worldMotifs.js` / `interlude.js`; built + pinned; the live proof RUN 2026-10-27 on Flash — three runs, `docs/LANDS_PLAYTEST_2026-10-27.md`, DECISIONS 2026-10-27: slice 1 and slice 3 proved, slice 2 half-proved (the worn KEY avoided, the CLASS not — the face's `dread` field is reworded and PROVED on run 7 — a cliff-krait, no dead); the Region line inherits the land last visited, the Scribe reads KNOWN LANDS + the premise, and a "<place>, <Region>" name keeps its region as the proof's three engine fixes; seven runs in all, `QF_LANDS_START=port` for the crossing)
 Vesa, from the long campaign: he travelled south for turns on end through "muddy pine woods" and
 "mouthless blind undead scavengers" in every dungeon, took a ship to ANOTHER CONTINENT to see

@@ -446,6 +446,81 @@ function splitDossierClauses(text) {
 // short, so a repeat usually covers completely or not at all.
 const CLAUSE_RESTATEMENT_THRESHOLD = 0.8;
 
+/**
+ * The load-time cleanup of a dossier field the clause-level merge never
+ * touched (2026-10-28, Vesa's megacampaign): records written before
+ * 2026-08-28 kept every restatement — one companion's personality was eleven
+ * near-repeats ("Pragmatic, ribald… Pragmatic, cynical… pragmatic,
+ * resilient…") and another's ended "Nervous, timid, and;; Timid,;;;;". A
+ * clause another clause already covers is dropped (a richer later clause
+ * takes the earlier one's place), a clause with no meaningful word is junk.
+ * Idempotent; a field with nothing to drop comes back byte-identical.
+ */
+export function compactDossierText(text) {
+    if (typeof text !== 'string' || !text.trim()) return text;
+    const clauses = splitDossierClauses(text);
+    const kept = [];
+    let dropped = false;
+    for (const clause of clauses) {
+        const tokens = meaningfulTokens(clause);
+        if (tokens.size === 0) { dropped = true; continue; }
+        if (kept.some(held => coversTokens(held.tokens, tokens, CLAUSE_RESTATEMENT_THRESHOLD))) { dropped = true; continue; }
+        const covered = kept.findIndex(held => coversTokens(tokens, held.tokens, CLAUSE_RESTATEMENT_THRESHOLD));
+        if (covered !== -1) {
+            kept[covered] = { clause, tokens };
+            dropped = true;
+            continue;
+        }
+        kept.push({ clause, tokens });
+    }
+    if (!dropped) return text;
+    return kept
+        .map(({ clause }) => clause.replace(/[\s,;:]+$/, ''))
+        .map(clause => (/[.!?…]["')\]]*$/.test(clause) ? clause : `${clause}.`))
+        .join(' ');
+}
+
+/** The dossier fields the clause merge owns — the ones legacy accretion swelled. */
+export const COMPACTED_DOSSIER_FIELDS = Object.freeze(['personality', 'goals', 'secrets', 'stanceToPlayer']);
+
+/** A personality is a TRAIT list: at most this many survive the compaction. */
+export const MAX_PERSONALITY_TRAITS = 12;
+
+/**
+ * Personality compacts at the TRAIT level (2026-10-28): legacy records hold
+ * a dozen comma lists that each restate a few traits ("Pragmatic, ribald… /
+ * pragmatic, resilient… / Pragmatic, gritty, loyal…"), so no whole clause
+ * ever covers another. Each trait counts once (a trait inside a richer one —
+ * "cynical" in "cynical about nobility" — folds into it); past
+ * MAX_PERSONALITY_TRAITS the most often restated survive, in first-seen
+ * order. Idempotent; nothing to fold returns the text unchanged.
+ */
+export function compactTraitList(text) {
+    if (typeof text !== 'string' || !text.trim()) return text;
+    const units = text.split(/[.;,]|\s+and\s+|\s+yet\s+/i).map(unit => unit.trim()).filter(Boolean);
+    const kept = [];
+    let folded = false;
+    for (const unit of units) {
+        const tokens = meaningfulTokens(unit);
+        if (tokens.size === 0) { folded = true; continue; }
+        const inside = kept.find(held => coversTokens(held.tokens, tokens, 1));
+        if (inside) { inside.count += 1; folded = true; continue; }
+        const richer = kept.findIndex(held => coversTokens(tokens, held.tokens, 1));
+        if (richer !== -1) {
+            kept[richer] = { unit, tokens, count: kept[richer].count + 1, at: kept[richer].at };
+            folded = true;
+            continue;
+        }
+        kept.push({ unit, tokens, count: 1, at: kept.length });
+    }
+    if (!folded && kept.length <= MAX_PERSONALITY_TRAITS) return text;
+    const chosen = kept.length > MAX_PERSONALITY_TRAITS
+        ? [...kept].sort((a, b) => b.count - a.count || a.at - b.at).slice(0, MAX_PERSONALITY_TRAITS).sort((a, b) => a.at - b.at)
+        : kept;
+    const list = chosen.map(({ unit }) => unit.toLowerCase()).join(', ');
+    return `${list.charAt(0).toUpperCase()}${list.slice(1)}.`;
+}
+
 export function mergeNpcDossierText(existingText, incomingText, max = NPC_DOSSIER_FIELD_MAX) {
     const prev = clampNpcDossierField(existingText, max);
     const next = clampNpcDossierField(incomingText, max);
@@ -1126,6 +1201,11 @@ export function migrateLegacyNpc(npc = {}) {
         else if (field === 'basedIn' || field === 'lastLocation') merged[field] = null;
         else delete merged[field];
     }
+    // Legacy accretion compacts once, on load (2026-10-28) — idempotent.
+    for (const field of COMPACTED_DOSSIER_FIELDS) {
+        if (typeof merged[field] !== 'string' || !merged[field]) continue;
+        merged[field] = field === 'personality' ? compactTraitList(merged[field]) : compactDossierText(merged[field]);
+    }
     merged.disposition = normalizeDisposition(merged.disposition);
     if (merged.trust !== null && merged.trust !== undefined) {
         const trust = Number(merged.trust);
@@ -1222,8 +1302,14 @@ export function curateNpcsForPrompt(npcs = [], { location = '', limit = 8, now =
         .map(npc => ({ npc, score: scoreNpcForPrompt(npc, { location, now, messages, messageCount }) }))
         .sort((a, b) => b.score - a.score)
         .map(entry => entry.npc);
+    // A name in the recent prose is presence only for the living and the
+    // recently seen (2026-10-28: "Scarred Guard", killed ~1,700 messages
+    // earlier, matched "scarred hand"; "Armory Guard" matched "the armory
+    // racks") — a bonded friend's name still seats them, so talking ABOUT
+    // Gretka brings her card.
     const present = Array.isArray(presentNames) && presentNames.length > 0
-        ? ranked.filter(npc => presentNames.some(name => namesMatch(npc.name, name)))
+        ? ranked.filter(npc => presentNames.some(name => namesMatch(npc.name, name))
+            && !isRecordedDead(npc) && !isFarAndForgotten(npc, { messages, messageCount }))
         : [];
     const located = location
         ? ranked.filter(npc => locationMatchesPlace(location, npc.lastLocation))
@@ -1243,8 +1329,36 @@ export function curateNpcsForPrompt(npcs = [], { location = '', limit = 8, now =
     take(ranked.filter(n => n.pinned), true);
     take(present);
     take(located);
-    take(ranked);
+    // The score-fill is for people who could plausibly matter NOW (2026-10-28,
+    // Vesa's megacampaign: a continent away, the block still seated a killed
+    // "Scarred Guard" at importance 5/5, Riven's crossbowman and Lady Celeste).
+    // The recorded dead never fill a slot, and neither does anyone unseen for
+    // KNOWN_NPC_STALE_MESSAGES who is not a friend with a bond that mattered —
+    // pinned, present and local people are untouched above, and the rest stay
+    // reachable through RETRIEVED MEMORIES.
+    take(ranked.filter(npc => !isRecordedDead(npc) && !isFarAndForgotten(npc, { messages, messageCount })));
     return chosen;
+}
+
+/** Conversational rows unseen after which a non-friend leaves the score-fill. */
+export const KNOWN_NPC_STALE_MESSAGES = 300;
+
+// A note OPENING on "Killed" is the NPC's death only when nothing follows
+// it but by/in/at/during or the end ("Killed by Vesa.", "Killed in combat.")
+// — "Killed two guards and fled" is a living NPC's deed.
+const RECORDED_DEATH_RE = /^\s*(?:dead|died)\b|^\s*(?:killed|slain|executed|murdered)(?:\s+(?:by|in|at|during)\b|\s*[.;!]|\s*$)|\b(?:killed|slain|executed|murdered|beheaded)\s+(?:by|in)\b|\b(?:is|was|lies|lay)\s+(?:now\s+)?dead\b|\bdead\s+on\s+the\b/i;
+
+/** The record's own latest note says this person is dead. */
+export function isRecordedDead(npc) {
+    return RECORDED_DEATH_RE.test(cleanText(npc?.lastNotes));
+}
+
+function isFarAndForgotten(npc, { messages, messageCount }) {
+    const age = conversationalAgeSince(npc?.lastSeenMessage, { messages, messageCount });
+    if (age === null || age < KNOWN_NPC_STALE_MESSAGES) return false;
+    const friend = npc?.disposition === 'friendly'
+        && ((npc.bondMoments || []).some(moment => (Number(moment?.salience) || 0) >= 4) || (Number(npc.trust) || 0) >= 70);
+    return !friend;
 }
 
 /**

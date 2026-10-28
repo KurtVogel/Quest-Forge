@@ -8,6 +8,14 @@ lives in git history and the settled outcomes in DECISIONS.md).
 
 _Last updated: 2026-10-28 (the Opus-played playtest on Flash + five fixes from it; the 10-27 strengthening clear, the "world has lands" live proof and the earlier sweeps below)_
 
+## 2026-10-28 (evening) — Vesa's megacampaign read end to end: seven engine fixes for "the world repeats", the save healed — pushed AND deployed
+
+**Ruling: DECISIONS.md 2026-10-28 (evening), ten points.** Vesa exported his 2,983-message campaign (the dossier and appendix are private in `test-results/`). The engine's own causes of the repetition: the old land's fronts never ended and blocked every new land, DM REMINDERS re-billed dead pressures, the callback scorer preferred the oldest memories, KNOWN NPCs seated the dead and far away, legacy records were ageless, a full clock never doomed. Fixed: legacy records stamped from the transcript clock at load, a left-behind front sleeps to make room for a new land, the load opens an unopened doom only in the hero's own land, DM REMINDERS skips ended threats and shows ages (≤ 2 old), callbacks pay for distance, KNOWN NPCs skips the dead and the long-gone non-friends, legacy dossiers compact (clause + trait level), the prompt says when memory is down, an interlude minted mid-turn waits a reply. +18 tests (4,214 / 269), lint clean.
+
+**The heal** (verified live on Flash through `QF_LOAD_JSON` in the Opus driver): Riven's front resolved, Vault and Ichor dormant, Ketta Nor folded, Eir-Vael's places tagged and seeded — Eir-Vael got its face and two native fronts, the land line rides the prompt, no old-land intrusion. Vesa loads `test-results/my-campaign-healed.json` with a console loader and re-saves to the cloud.
+
+**For Vesa:** Flash's length and the "Do you X, or Y?" endings (unchanged — your call).
+
 ## 2026-10-28 — the Opus-played playtest: Claude plays, Flash DMs (66 turns) — five fixes in, pushed AND deployed
 
 **Ruling: DECISIONS.md 2026-10-28; the write-up with the rubric and every column is `docs/OPUS_PLAYTEST_2026-10-27.md`.** New tool: `scripts/playtest_opus_driver.cjs` — a persistent Puppeteer session over the production build behind a localhost HTTP API, so an outside player (Claude) writes every line, rolls or challenges every check and fights every round; `QF_CONTINUE=1` resumes the autosave; every DM prompt is captured per turn.

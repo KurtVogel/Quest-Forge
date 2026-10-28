@@ -769,7 +769,7 @@ describe('active constraints (DM reminders)', () => {
 
     it('surfaces world facts matching threat keywords', () => {
         const text = prompt({ worldFacts: [{ fact: 'A bounty hunter is pursuing the player.', category: 'event' }] });
-        expect(text).toContain('Active threats/pressures:');
+        expect(text).toContain('Active threats/pressures');
         expect(text).toContain('A bounty hunter is pursuing the player.');
     });
 

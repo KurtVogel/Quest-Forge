@@ -276,6 +276,7 @@ export function createTurnRunner({
             // curated `storyMemory` below is only what the callbacks block SHOWS.
             storyMemoryPool: s.storyMemory || [],
             recallRecord,
+            memoryUnavailable: memoryDown,
             character: s.character,
             inventory: s.inventory,
             quests: s.quests,
@@ -349,6 +350,15 @@ export function createTurnRunner({
     const getLastCommittedTurn = () => lastCommittedTurn;
 
     /**
+     * Is long-term memory down? (2026-10-28, Vesa's megacampaign #2719: after
+     * three failed lookups and a provider error, the DM told the player its
+     * memory was "active and fully loaded".) Set when a lookup fails, cleared
+     * when one succeeds; every lane's prompt carries a plain note while it is
+     * set — the out-of-character lane included, where the question gets asked.
+     */
+    let memoryDown = false;
+
+    /**
      * Send a message to the LLM and process the response.
      * Returns the parsed events (or null).
      * @param {string} userMessage
@@ -402,6 +412,7 @@ export function createTurnRunner({
         const recallIntent = wantsMemories ? findRecallIntent(s, originalPlayerMessage) : null;
         const recallDossier = recallIntent ? buildRecallDossier(s, recallIntent) : null;
         if (recallDossier) onStatus('Consulting the record');
+        let memoryFailedThisCall = false;
         if (wantsMemories && machineryKey) {
             const sceneContext = [
                 recallIntent?.subjects?.length ? `About: ${recallIntent.subjects.join(', ')}` : null,
@@ -423,11 +434,15 @@ export function createTurnRunner({
                 // The line names the cause (2026-09-19): a key rejected after
                 // a vendor switch is a standing outage with a Settings remedy;
                 // a rate limit or a stall is transient.
-                onUnavailable: (reason) => dispatch({
-                    type: 'ADD_MESSAGE',
-                    payload: { role: 'system', kind: 'error', content: describeMemoryUnavailable(reason, s.settings) },
-                }),
-            }).catch(() => []);
+                onUnavailable: (reason) => {
+                    memoryFailedThisCall = true;
+                    dispatch({
+                        type: 'ADD_MESSAGE',
+                        payload: { role: 'system', kind: 'error', content: describeMemoryUnavailable(reason, s.settings) },
+                    });
+                },
+            }).catch(() => { memoryFailedThisCall = true; return []; });
+            memoryDown = memoryFailedThisCall;
             curationQuery = sceneContext;
         }
         // PROMPT state — the ONE read after the call's only pre-stream await

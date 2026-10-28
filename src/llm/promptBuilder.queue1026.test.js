@@ -64,7 +64,7 @@ describe('WORLD FACTS — pinned live facts ride first (queue 2026-10-26 P2)', (
 describe('DM REMINDERS threat scan — whole words, present tense, aspect-aware (queue 2026-10-26 P2)', () => {
     it('still surfaces a present-tense pursuit', () => {
         const block = reminderBlock(prompt({ worldFacts: [{ id: 'b', fact: 'A bounty hunter is pursuing the player.', category: 'event', atMessage: 1 }] }));
-        expect(block).toContain('Active threats/pressures:');
+        expect(block).toContain('Active threats/pressures');
         expect(block).toContain('- A bounty hunter is pursuing the player.');
     });
 
@@ -76,7 +76,7 @@ describe('DM REMINDERS threat scan — whole words, present tense, aspect-aware 
             { id: 'bountiful', fact: 'The harvest was bountiful this year.', category: 'lore', atMessage: 6 },
         ];
         const text = prompt({ worldFacts });
-        expect(text).not.toContain('Active threats/pressures:');
+        expect(text).not.toContain('Active threats/pressures');
         for (const f of worldFacts) expect(isThreatFact(f)).toBe(false);
     });
 

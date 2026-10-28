@@ -386,7 +386,30 @@ async function bootAndCreateHero(page) {
     let queue = Promise.resolve();
     const serial = fn => (queue = queue.then(fn, fn));
 
-    const opening = process.env.QF_CONTINUE === '1'
+    // QF_LOAD_JSON=<path>: boot with the test settings and LOAD_GAME an
+    // exported campaign (the ?debugState=1 dispatch hook) — a heal's check.
+    const opening = process.env.QF_LOAD_JSON
+        ? await act(page, 'load-json', async () => {
+            await page.goto(APP_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+            await delay(1500);
+            await page.evaluate(({ providerName, modelName, key, geminiKey }) => {
+                localStorage.setItem('rpg-client-settings', JSON.stringify({
+                    llmProvider: providerName, apiKey: key, geminiApiKey: geminiKey, imageApiKey: '',
+                    model: modelName, memoryInspector: true, paceDial: 'standard',
+                }));
+            }, { providerName: provider, modelName: model, key: dmKey, geminiKey: GEMINI_API_KEY });
+            await page.reload({ waitUntil: 'networkidle2' });
+            await delay(2000);
+            const payload = fs.readFileSync(path.resolve(process.env.QF_LOAD_JSON), 'utf8');
+            const loaded = await page.evaluate((json) => {
+                if (typeof window.__QF_DISPATCH__ !== 'function') return false;
+                window.__QF_DISPATCH__({ type: 'LOAD_GAME', payload: JSON.parse(json) });
+                return true;
+            }, payload);
+            await delay(8000);
+            return { loaded };
+        })
+        : process.env.QF_CONTINUE === '1'
         ? await act(page, 'continue', async () => {
             await page.goto(APP_URL, { waitUntil: 'networkidle2', timeout: 60000 });
             await delay(2500);

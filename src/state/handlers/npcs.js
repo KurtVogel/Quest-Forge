@@ -118,6 +118,31 @@ function regionalSeedHasRoom(fronts) {
     return activeFronts < MAX_ACTIVE_FRONTS - 1;
 }
 
+/**
+ * A land the hero has reached deserves pressures of its own (2026-10-28,
+ * Vesa's megacampaign: three fronts born in the first land's caverns stayed
+ * active for 1,500 messages and four new lands across a sea, so no new land
+ * could ever be seeded — the only hidden forces in the world were the
+ * cavern's, and one of them posted its undead crypt contract on a far board).
+ * When the web has no room, the OLDEST active front with no theater in this
+ * land and no open doom window goes DORMANT — left behind, not ended: its
+ * clock, portents and notes stand, the DM's `front_updates` can wake it, and
+ * a dormant front still resolves with the full ceremony. Returns the fronts
+ * unchanged when no front qualifies.
+ */
+function sleepFrontLeftBehind(fronts, locations, region) {
+    const list = Array.isArray(fronts) ? fronts : [];
+    const holdsGroundHere = (front) => (Array.isArray(locations) ? locations : []).some(record => record?.region
+        && isSameRegion(record.region, region)
+        && Array.isArray(record.theaterFrontIds) && record.theaterFrontIds.includes(front.id));
+    const idx = list.findIndex(front => front && (front.status || 'active') === 'active'
+        && !(Number.isFinite(front.doomAtMessage) && !Number.isFinite(front.doomClosedAtMessage))
+        && !holdsGroundHere(front));
+    if (idx === -1) return list;
+    console.log(`[Fronts] "${list[idx].title}" goes dormant — the hero has left its land for ${region}.`);
+    return list.map((front, i) => (i === idx ? { ...front, status: 'dormant' } : front));
+}
+
 function mintRegionalSeed(region, locationName, messages, { profileOnly = false } = {}) {
     return {
         key: `${region.toLowerCase()}|${(messages || []).length}${profileOnly ? '|profile' : ''}`,
@@ -483,7 +508,14 @@ export const handlers = {
         const deferred = (state.session?.deferredRegions || []).find(region => isSameRegion(region, arrivalRegion));
         if (deferred && seedMayReplace(state.session?.pendingRegionalFronts)
             && !(state.session?.seededRegions || []).some(known => isSameRegion(known, deferred))
-            && regionalSeedHasRoom(state.fronts)) {
+            && !regionalSeedHasRoom(next.fronts)) {
+            // A front left behind in another land makes room first (2026-10-28).
+            const slept = sleepFrontLeftBehind(next.fronts, locations, deferred);
+            if (regionalSeedHasRoom(slept)) next = { ...next, fronts: slept };
+        }
+        if (deferred && seedMayReplace(state.session?.pendingRegionalFronts)
+            && !(state.session?.seededRegions || []).some(known => isSameRegion(known, deferred))
+            && regionalSeedHasRoom(next.fronts)) {
             next.session = {
                 ...next.session,
                 deferredRegions: (state.session?.deferredRegions || []).filter(region => !isSameRegion(region, deferred)),
@@ -826,7 +858,12 @@ export const handlers = {
         // re-judged on the hero's next ARRIVAL at a place of that land
         // (SET_LOCATION) — the seed needs the hero there. Its FACE is not
         // deferred: the profile-only call buys no front slot.
-        if (!regionalSeedHasRoom(state.fronts)) {
+        // A front left behind in another land makes room first (2026-10-28).
+        if (!regionalSeedHasRoom(next.fronts)) {
+            const slept = sleepFrontLeftBehind(next.fronts, locations, region);
+            if (regionalSeedHasRoom(slept)) next = { ...next, fronts: slept };
+        }
+        if (!regionalSeedHasRoom(next.fronts)) {
             next.session = { ...next.session, deferredRegions: rememberDeferredRegion(state.session?.deferredRegions, region) };
             mintProfileOnly();
             return next;

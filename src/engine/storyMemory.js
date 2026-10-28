@@ -1,6 +1,7 @@
 import { containment, overlapCount, tokenSet as sharedTokenSet } from './textMatch.js';
 import { conversationalAgeSince } from './replayLedger.js';
-import { isStillAtPlace } from './locationRegistry.js';
+import { findLocationRecord, isSameRegion, isStillAtPlace } from './locationRegistry.js';
+import { regionForPrompt } from './regionProfile.js';
 import { clampNumber, textOr as cleanText, toFlag } from './text.js';
 
 const ALLOWED_TYPES = new Set([
@@ -42,6 +43,19 @@ const RECENCY_DECAY_MESSAGES = 20;
  * the DM could not already see.
  */
 export const CALLBACK_MIN_AGE = 20;
+/** A distant callback (nobody here to say it, no tie to this place) from ANOTHER land pays this. */
+export const FAR_LAND_CALLBACK_PENALTY = 6;
+/** …and one this many conversational rows old (land unknown) loses its age bonus and pays this. */
+export const LONG_AGO_CALLBACK_MESSAGES = 300;
+export const LONG_AGO_CALLBACK_PENALTY = 3;
+
+/** The land a card's place record lies in, or null (an unregistered or untagged place). */
+function landOfPlace(locations, place) {
+    if (!place || !Array.isArray(locations)) return null;
+    const idx = findLocationRecord(locations, String(place));
+    const region = idx === -1 ? null : locations[idx]?.region;
+    return typeof region === 'string' && region.trim() ? region : null;
+}
 /**
  * The landed-callback judge (2026-10-24 story-memory P1): the card's
  * DISTINCTIVE tokens — what the scene it was curated for did not already
@@ -548,17 +562,42 @@ export function scoreStoryMemory(card, { query = '', location = '', npcs = [], m
         score += 4;
     }
 
+
+    const atPlace = !!(location && card.location && isStillAtPlace(locations, String(card.location), String(location)));
     const npcNames = new Set((npcs || []).map(n => String(n.name || '').toLowerCase()).filter(Boolean));
+    let speakerHere = false;
     for (const name of cardNpcNames) {
-        if (npcNames.has(String(name).toLowerCase())) score += 5;
+        if (npcNames.has(String(name).toLowerCase())) {
+            score += 5;
+            speakerHere = true;
+        }
     }
 
     const seenAge = conversationalAgeSince(card.lastSeenMessage, { messages, messageCount });
+    // A memory with nobody here to say it and no tie to this place is judged
+    // by distance (2026-10-28, Vesa's megacampaign: on another continent the
+    // top callback was still the goblin warren's salience-5 "Deep Rooms"
+    // mystery from ~2,500 messages earlier — the age bonus PREFERRED it).
+    // From another land: a penalty. From long ago: no age bonus and a smaller
+    // penalty. A present speaker or the place itself keeps the old rule.
+    let distant = false;
+    if (!speakerHere && !atPlace) {
+        const cardLand = landOfPlace(locations, card.location);
+        const hereLand = regionForPrompt(locations, location)?.name || null;
+        if (cardLand && hereLand && !isSameRegion(cardLand, hereLand)) {
+            score -= FAR_LAND_CALLBACK_PENALTY;
+            distant = true;
+        } else if (seenAge !== null && seenAge >= LONG_AGO_CALLBACK_MESSAGES) {
+            score -= LONG_AGO_CALLBACK_PENALTY;
+            distant = true;
+        }
+    }
     if (seenAge !== null) {
         // Inside the window the DM already has it; past the window the older
-        // the better, up to +3 (the inverted recency term, 2026-10-14).
+        // the better, up to +3 (the inverted recency term, 2026-10-14) —
+        // unless the memory is distant (above).
         if (seenAge < CALLBACK_MIN_AGE) return 0;
-        score += Math.min(3, (seenAge - CALLBACK_MIN_AGE) / RECENCY_DECAY_MESSAGES);
+        if (!distant) score += Math.min(3, (seenAge - CALLBACK_MIN_AGE) / RECENCY_DECAY_MESSAGES);
     } else if (card.lastSeenAt) {
         const ageHours = Math.max(0, (now - card.lastSeenAt) / (1000 * 60 * 60));
         score += Math.max(0, 3 - ageHours / LEGACY_RECENCY_DECAY_HOURS);

@@ -829,8 +829,8 @@ describe('regional front seeding', () => {
         expect(capped.session.deferredRegions).toEqual(['the Icebound Coast']);
 
         // One-slot reserve (2026-08-06): at MAX_ACTIVE_FRONTS - 1 the installer
-        // has no room either, so the marker isn't raised — the region stays
-        // unseeded and may trigger later when a slot frees.
+        // has no room either. Since 2026-10-28 the oldest front with no ground
+        // in the new land goes dormant to make that room, and the land seeds.
         const nearlyFull = {
             ...state,
             fronts: Array.from({ length: 3 }, (_, i) => ({ id: `f${i}`, title: `F${i}`, status: 'active' })),
@@ -839,7 +839,8 @@ describe('regional front seeding', () => {
             type: 'UPDATE_LOCATION_PROFILE',
             payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' } },
         });
-        expect(reserved.session.pendingRegionalFronts).toMatchObject(homeFaceOnly);
+        expect(reserved.session.pendingRegionalFronts).toMatchObject({ region: 'the Icebound Coast', locationName: 'Fort Halla' });
+        expect(reserved.fronts.map(f => f.status)).toEqual(['dormant', 'active', 'active']);
     });
 
     it('regional installs never fill the last front slot (2026-08-06 one-slot reserve)', () => {

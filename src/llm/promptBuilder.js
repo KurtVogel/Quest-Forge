@@ -30,7 +30,7 @@ import { briefNpcFieldForPrompt, findCompanionRecord, resolveCompanionLook } fro
 import { buildRelationshipBeatBlock } from '../engine/relationshipArc.js';
 import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
 import { describeStateTag, liveWorldFacts } from '../engine/worldFacts.js';
-import { describeTurnsAgo } from '../engine/replayLedger.js';
+import { conversationalAgeSince, describeTurnsAgo } from '../engine/replayLedger.js';
 
 // ——— RETRIEVED MEMORIES (the RAG block — moved here from engine/vectorMemory.js
 // 2026-10-11: a prompt block is the prompt builder's, and the engine module's
@@ -162,7 +162,7 @@ export function buildSystemPromptSplit(options) {
  * every dynamic block has a ceiling from its inputs' caps, and a test that can
  * read the blocks by name can pin each one instead of only the total.
  */
-export function buildSystemPromptParts({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, regions = null, worldMotifs = null, interlude = null, narrationOnly = false, intentOnly = false, nudgeOnly = false, mode = null, storyMemoryPool = null }) {
+export function buildSystemPromptParts({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, regions = null, worldMotifs = null, interlude = null, memoryUnavailable = false, narrationOnly = false, intentOnly = false, nudgeOnly = false, mode = null, storyMemoryPool = null }) {
     // `intentOnly` (2026-09-30 prompt-building Lap-3 P2): the combat INTENT
     // call translates one committed action into a bounded combat_exchange
     // whose targets are enemy ids and whose actions are the slot whitelist —
@@ -551,6 +551,11 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
             parts.push(recallRecord, 'recallRecord');
         }
 
+        // Memory is down (2026-10-28): say so, so the DM never claims otherwise.
+        if (memoryUnavailable) {
+            parts.push(MEMORY_UNAVAILABLE_NOTE, 'memoryNote');
+        }
+
         // Combat state
         if (ctx.combatActive) {
             parts.push(buildCombatBlock(combat, character, { narrationOnly }), 'combat');
@@ -571,6 +576,8 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
 
     return namedParts;
 }
+
+export const MEMORY_UNAVAILABLE_NOTE = '## MEMORY NOTE — the long-term memory lookup FAILED on the latest attempt. RETRIEVED MEMORIES are missing; the journal, facts and people above still stand. If the player asks whether you remember something, say plainly that the long-term memory is not reachable right now — never claim it is loaded.';
 
 const CORE_INSTRUCTIONS = `# YOU ARE THE DUNGEON MASTER
 
@@ -1563,7 +1570,18 @@ const THREAT_PATTERNS = [
     /\bwanted\s+(?:by|for|in)\b/i,
     /\bdeadline\b/i,
 ];
-export const isThreatFact = (fact) => fact?.aspect !== 'intent' && THREAT_PATTERNS.some(re => re.test(cleanText(fact?.fact)));
+// A fact that records a threat ENDING is not a standing pressure (2026-10-28,
+// Vesa's megacampaign: "Captain Riven's bounty on Vesa is nullified with her
+// death" matched "bounty on" and was billed as a pressure to MAINTAIN on
+// every turn, a continent away from the dead captain).
+const THREAT_ENDED_RE = /\b(?:nullified|lifted|withdrawn|rescinded|revoked|cancell?ed|voided|called off|paid off|no longer|expired|annulled)\b/i;
+export const isThreatFact = (fact) => fact?.aspect !== 'intent'
+    && THREAT_PATTERNS.some(re => re.test(cleanText(fact?.fact)))
+    && !THREAT_ENDED_RE.test(cleanText(fact?.fact));
+
+/** Conversational rows after which a threat fact counts as OLD; at most MAX_OLD_THREAT_REMINDERS of those ride. */
+export const OLD_THREAT_MESSAGES = 400;
+const MAX_OLD_THREAT_REMINDERS = 2;
 
 function buildActiveConstraints(worldFacts, heroReminder = '', solo = false, { messages = null, messageCount } = {}) {
     const reminders = [];
@@ -1579,14 +1597,30 @@ function buildActiveConstraints(worldFacts, heroReminder = '', solo = false, { m
     // and permanently re-billed them as threats, so it was dropped).
     const MAX_THREAT_REMINDERS = 6;
     const THREAT_REMINDER_CHARS = 200;
+    // Old pressures stay remembered, but at most two of them (2026-10-28,
+    // Vesa's megacampaign: all six slots were bounties 260–650 turns old from
+    // a land a sea away, and the DM worried about that land's militia).
+    const isOldThreat = (f) => Number.isFinite(f.atMessage) && Array.isArray(messages)
+        && conversationalAgeSince(f.atMessage, { messages, messageCount }) >= OLD_THREAT_MESSAGES;
+    let oldKept = 0;
     const threatFacts = (worldFacts || [])
         .filter(f => f && typeof f === 'object')
         .map(f => ({ ...f, fact: cleanText(f.fact) }))
         .filter(isThreatFact)
         .sort(compareFactRecency)
+        .filter(f => !isOldThreat(f) || (oldKept += 1) <= MAX_OLD_THREAT_REMINDERS)
         .slice(0, MAX_THREAT_REMINDERS);
     if (threatFacts.length > 0) {
-        reminders.push(`Active threats/pressures:\n${threatFacts.map(f => `- ${describeStateTag(f, { messages, messageCount })}${f.fact.slice(0, THREAT_REMINDER_CHARS)}`).join('\n')}`);
+        // Each pressure says how old it is (2026-10-28): the scan reaches every
+        // fact ever recorded, so a bounty from a land the hero left hundreds
+        // of turns ago used to read exactly like this morning's — the DM
+        // judges an old one as possibly faded or left behind.
+        const ageOf = (f) => {
+            if (f.aspect === 'state' || !Number.isFinite(f.atMessage) || !Array.isArray(messages)) return '';
+            const ago = describeTurnsAgo(messages, f.atMessage);
+            return ago ? ` (recorded ${ago})` : '';
+        };
+        reminders.push(`Active threats/pressures (an old one may have faded, or belong to a place the hero has left far behind — weigh its age before pressing it):\n${threatFacts.map(f => `- ${describeStateTag(f, { messages, messageCount })}${f.fact.slice(0, THREAT_REMINDER_CHARS)}${ageOf(f)}`).join('\n')}`);
     }
 
     // The hero's state, restated at the tail — `describeHeroStatus(...).reminder`

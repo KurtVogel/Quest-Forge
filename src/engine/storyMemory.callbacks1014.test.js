@@ -24,14 +24,14 @@ describe('a callback is what the window forgot', () => {
         expect(CALLBACK_MIN_AGE).toBe(MESSAGE_WINDOW);
     });
 
-    it('a card seen inside the window scores 0; past it the older the better, up to +3', () => {
-        const inWindow = scoreStoryMemory(ribbon, { query: 'ribbon', messages: transcript(10 + CALLBACK_MIN_AGE - 2) });
+    it('a card seen inside the window scores 0; past it the older the better, up to +3 (Mira here to say it)', () => {
+        const inWindow = scoreStoryMemory(ribbon, { query: 'ribbon', npcs: [{ name: 'Mira' }], messages: transcript(10 + CALLBACK_MIN_AGE - 2) });
         expect(inWindow).toBe(0);
-        const atEdge = scoreStoryMemory(ribbon, { query: 'ribbon', messages: transcript(10 + CALLBACK_MIN_AGE) });
+        const atEdge = scoreStoryMemory(ribbon, { query: 'ribbon', npcs: [{ name: 'Mira' }], messages: transcript(10 + CALLBACK_MIN_AGE) });
         expect(atEdge).toBeGreaterThan(0);
-        const old = scoreStoryMemory(ribbon, { query: 'ribbon', messages: transcript(10 + CALLBACK_MIN_AGE + 60) });
+        const old = scoreStoryMemory(ribbon, { query: 'ribbon', npcs: [{ name: 'Mira' }], messages: transcript(10 + CALLBACK_MIN_AGE + 60) });
         expect(old - atEdge).toBeCloseTo(3, 5);
-        const older = scoreStoryMemory(ribbon, { query: 'ribbon', messages: transcript(400) });
+        const older = scoreStoryMemory(ribbon, { query: 'ribbon', npcs: [{ name: 'Mira' }], messages: transcript(400) });
         expect(older).toBe(old); // capped
     });
 
