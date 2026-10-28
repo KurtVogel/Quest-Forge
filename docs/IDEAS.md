@@ -910,6 +910,29 @@ departure/arrival stamps on location records. **Same-day round two (DECISIONS.md
 story cards are now the third hearsay source — alongside the epistemics layer (`knownBy`
 secrets that never travel). **Still open:** a memory-inspector readout for the
 living-world state (pending markers, hearsay ledger, seeded regions). Original notes below.
+**WOW audit 2026-10-28 (living-world, Lap 1 — `docs/SCHEDULED_WOW.md` 2026-10-28, W1 ×2; both
+slices extend this entry, no new one):** the system is genre-strong at its one trigger and silent
+everywhere else. **Slice A — the return is a visible difference:** the drift installer writes people's
+`agenda` / `lastNotes` and one fact but never the place's own `lastState`, so the return prompt carries
+`Now: <the state as the hero LEFT it>` on the place line beside the away block's "the place has moved
+on", the Places card's "Now:" stays stale, and the 10-26 interlude's ELSEWHERE lines read the same
+frozen states; the director is never shown what the hero last saw (`signature` / `lastState` /
+`visitCount` / `happenedHere`), so it cannot write a DIFFERENCE. Give the director the record and a
+`place_now` field (≤ 200, a replace), write it through `normalizeLocationRecord` as the doom installer
+does, keep the old state as `absenceDrift.before`, and render ONE away line `As the hero last saw it:
+… · now: …`; the Places card shows Then / Now for the window. Zero new calls. **Slice B — word comes
+to the hero:** every lane is arrival-keyed and hearsay carries only the HERO's deeds (plus a prevailed
+front), so a hero who stays 60 rows in one town or crosses a sea and never returns hears nothing of
+the people and places behind them. A fourth hearsay source, `news` — PUBLIC material the engine
+already holds about ELSEWHERE: a front's passed portent as its public face (never title / clock), a
+doom, a drift fact stamped with its place, a known place's moved `lastState` — graded by distance
+like a deed, one slot at most; and a second trigger that is not an arrival: the journal cadence rolls
+a die for a `news` offer at the current cluster after a ≥ 30-row stay when something elsewhere moved
+since (a traveler, a letter, a market rumor; the same block, the same NPC-dialogue rule, cooldown
+40). Pushback recorded against a per-cadence "world-news director" call: the engine holds the
+material, selection is zero-call like hearsay. Proof for both: the 08-05 harness's return leg on
+Flash (three runs; the return names a `place_now` particular; an NPC voices the news as hearsay,
+the title never). The Inspector readout above is still open.
 Today a return visit relies on RAG recalling what a place *was* — nothing makes the place
 have **moved** in the meantime, and nothing makes the hero's deeds travel ahead of them.
 Two halves of one system, both triggered by the same event: SET_LOCATION arriving at a
