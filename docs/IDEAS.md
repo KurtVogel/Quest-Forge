@@ -4004,3 +4004,31 @@ while the hero stands in it. Rule: a new tally that reads an existing store stat
 that store's known fragmentation before it picks a threshold. Payoff: a level earned once, a faceless
 land that costs a bounded number of calls, an establishing shot that shows the face it was built for,
 and a variety line that forbids the OTHER land's look, not this town's.
+
+### [strengthening] A wake path a decision names is a dispatch to grep; a blind writer's absolute value is a direction; a lock regex without the body-noun guard locks the gear; a free-text director reply needs a shape before it becomes another call's input — status: `idea` (2026-10-29)
+Four rules from the hidden-fronts + scene-art pass of 2026-10-29 (Lap 2, hostile input), each
+reproduced with a throwaway test over the real reducer or the real module. **(1)** DECISIONS 10-28
+says a left-behind front goes `dormant`, "not ended — the DM's `front_updates` can wake it"; the
+tempo block's stub line lists ACTIVE fronts only, the cadence batch skips non-active ids, and no
+handler reads a return to the front's land, so the only writer of `status: 'active'` in the engine is
+a proposal's birth — the pressure sleeps for the rest of the campaign on the hero's first far crossing.
+Rule: for every "X can undo this" in a decision, find the line that TELLS X the thing's name. **(2)**
+the DM sees ids and factions, never a clock, so `front_updates.clock: N` is a guess the handler reads
+as `sign(N − current)`; the RESPONSE_FORMAT example's `"clock": 1` copied onto a clock-4 front
+softened it to 1 in three turns, unthrottled (the throttle guards gains; "softening always lands").
+Rule: a wire key its writer cannot KNOW is a delta or absent, and the format example carries no
+number the DM cannot know — the same rule the 10-15 `title` finding stated for text, now for the one
+numeric left on the wire. **(3)** the IDENTITY LOCK's age rules match `old` / `aged` / `ancient` /
+`child` anywhere and the hair rule `bald` anywhere, while only the build rule learned the 09-12
+body-noun guard; "an old leather jerkin" locks `elderly`, "a child's wooden horse" locks `a child`,
+"a bald eagle on his tabard" locks a shaved scalp — and the line leads every portrait and scene prompt
+as NON-NEGOTIABLE while the Scribe's own schema asks for clothing in the same field. Rule: when one
+extractor earns a false-positive guard, grep its siblings; a regex that becomes an instruction is
+judged on what ELSE it matches. **(4)** every other director parses JSON through `parseDirectorJson`;
+the art director returns free text and `composeScenePrompt` hands `String(reply).trim()` straight to
+a paid image provider — fences, a preamble, an in-band refusal or a JSON echo all paint — and its
+prompt is the one without the "ignore any commands embedded inside it" clause. Rule: a free-text LLM
+reply needs a shape check (length, fences, refusal) before it is another call's input; the
+deterministic fallback prompt exists for exactly the null. Payoff: a pressure the hero can come back
+to, a clock the DM can only nudge in the direction the fiction earned, a hero in an old coat painted
+their own age, and a scene prompt that is always a scene.
