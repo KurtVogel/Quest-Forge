@@ -4005,6 +4005,34 @@ that store's known fragmentation before it picks a threshold. Payoff: a level ea
 land that costs a bounded number of calls, an establishing shot that shows the face it was built for,
 and a variety line that forbids the OTHER land's look, not this town's.
 
+### [strengthening] One ref, two ladders — the hero's name is `self` to a heal and nobody to a blade; a typed boundary's untyped twin is one call away; a sweep's clock was written by another machine; a shared prologue assumes live state — status: `idea` (2026-10-30)
+Four rules from the cloud-sync + combat-exchange pass of 2026-10-30 (Lap 2, hostile input), each
+reproduced with a throwaway test over the real planner or the real cloud module. **(1)** the
+exchange machine resolves an actor REF on three ladders and they disagree about the hero: the cast
+lane's `resolveSpellRecipients` folds `''` / `self` / `me` / `player` AND the hero's name to `self`
+(`spellcasting.js:53,83`); the enemy-attack lane reads `targetRef === 'player'` and else looks the
+target up among COMPANIONS (`combatExchange.js:1085-1097`), so `"target": "Astra"` / `"Player"` /
+`"the hero"` drops the foe's blow with a "never silently redirected" note — a free round for the hero
+every time the DM aims by name, which the prompt's own telegraph rule tells it to do ("the foe shown
+nocking an arrow at Torvald attacks Torvald"). The companion lane finds a companion by name, so the
+asymmetry is the hero's alone. Rule: for every actor REF a wire carries, list the ladders that resolve
+it and diff their alias sets — ONE predicate per kind of actor (`isHeroRef`, the companion lookup,
+the foe lookup), read by every lane and by the wire's default. **(2)** `typedLaneRefs` types and
+bounds the metadata doc's blob refs; `collectLaneRefs`, on the next line of the same load, reads the
+PAYLOAD's refs untyped and uncapped — 2,000 path-shaped refs are 2,000 reads. Rule: when a typed
+reader exists for a field shape, grep the other readers of the same shape; a boundary typed once is
+not a boundary. **(3)** the blob sweep's grace window is `now − stamp < GRACE` against a stamp
+another device wrote: a stamp ahead of the sweeper's clock is negative-aged and "within grace" until
+the sweep that would catch it has already run — permanent orphan bytes. Rule: a timestamp rule has
+three cases — past, inside, FUTURE — and the future case is junk. **(4)** `prepareSavePayload` stamps
+the current `saveVersion` and a fresh `savedAt` because four of its five callers hand it healed live
+state; the fifth (Upload local saves) hands it a raw stored payload, so a legacy campaign goes to the
+cloud wearing the current version and skips every versioned migration on its cloud load. Rule: for
+every function that stamps a version, list what each caller feeds it; a stored payload goes through
+the heal before it goes through the prologue. Payoff: a foe that hits whoever it aimed at, a cloud
+load that pays for the pictures it has, orphans that die, and a legacy campaign that stays legacy
+until the heal has seen it.
+
 ### [strengthening] A wake path a decision names is a dispatch to grep; a blind writer's absolute value is a direction; a lock regex without the body-noun guard locks the gear; a free-text director reply needs a shape before it becomes another call's input — status: `idea` (2026-10-29)
 Four rules from the hidden-fronts + scene-art pass of 2026-10-29 (Lap 2, hostile input), each
 reproduced with a throwaway test over the real reducer or the real module. **(1)** DECISIONS 10-28
