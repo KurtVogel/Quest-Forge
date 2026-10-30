@@ -4,6 +4,7 @@
  */
 import { initialGameState } from '../initialState.js';
 import { FACT_ASPECTS } from '../../engine/worldFacts.js';
+import { liveMessageIds, typeWitnesses } from '../../engine/retraction.js';
 import { migrateLoadedSave } from '../migrations.js';
 import { createInitialFronts, normalizeFront } from '../../engine/fronts.js';
 import { normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
@@ -89,12 +90,12 @@ function typeLoadedMessage(message, index) {
  * aspect is whitelisted to `FACT_ASPECTS` (`state` 2026-09-30, `intent`
  * 2026-10-07); anything else loads as a standing truth.
  */
-function typeLoadedWorldFacts(list, maxMessageCount) {
+function typeLoadedWorldFacts(list, maxMessageCount, messageIds = null) {
     const typed = (Array.isArray(list) ? list : [])
         .map(f => {
             const sanitized = sanitizeWorldFactPayload(f);
             if (!sanitized) return null;
-            const { supersedes, supersededBy, supersededAtMessage, aspect, atMessage, sourceMessage, retractedAtMessage, ...rest } = f;
+            const { supersedes, supersededBy, supersededAtMessage, aspect, atMessage, sourceMessage, retractedAtMessage, witnesses, ...rest } = f;
             const out = { ...rest, ...sanitized };
             // The 2026-09-30 stamps: aspect whitelisted, message stamps clamped
             // to the transcript, the source message id string-or-drop.
@@ -102,6 +103,10 @@ function typeLoadedWorldFacts(list, maxMessageCount) {
             const born = Number(atMessage);
             if (Number.isFinite(born)) out.atMessage = Math.max(0, Math.min(Math.floor(born), maxMessageCount));
             if (typeof sourceMessage === 'string' && sourceMessage) out.sourceMessage = sourceMessage.slice(0, 80);
+            // The restating messages (2026-10-28): string ids the live
+            // transcript holds, never the fact's own source, capped.
+            const typedWitnesses = typeWitnesses(witnesses, { sourceMessage: out.sourceMessage || null, messageIds });
+            if (typedWitnesses) out.witnesses = typedWitnesses;
             const retracted = Number(retractedAtMessage);
             if (Number.isFinite(retracted)) out.retractedAtMessage = Math.max(0, Math.min(Math.floor(retracted), maxMessageCount));
             if (typeof supersedes === 'string' && supersedes) out.supersedes = supersedes;
@@ -340,6 +345,9 @@ function validateSaveState(payload) {
     const messageCount = Array.isArray(payload.messages)
         ? payload.messages.filter(message => message && typeof message === 'object').length
         : 0;
+    // The ids of the rows that still stand: a fact's / card's `witnesses`
+    // (2026-10-28) keep only ids the transcript holds and has not removed.
+    const liveIds = liveMessageIds(Array.isArray(payload.messages) ? payload.messages : []);
     const rawSession = payload.session && typeof payload.session === 'object' && !Array.isArray(payload.session)
         ? payload.session
         : initialGameState.session;
@@ -402,7 +410,7 @@ function validateSaveState(payload) {
         npcs,
         // Heal poisoned saves: a pre-guard non-string fact/category crashed prompt
         // building on every turn — re-type what's fixable, drop what isn't.
-        worldFacts: typeLoadedWorldFacts(payload.worldFacts, (Array.isArray(payload.messages) ? payload.messages : []).length),
+        worldFacts: typeLoadedWorldFacts(payload.worldFacts, (Array.isArray(payload.messages) ? payload.messages : []).length, liveIds),
         // Promotion-twin heal (2026-08-30 P1): merges stale same-subject
         // `npc_roster` cards stranded by pre-stable-id type flips and stamps
         // the survivor's stable id. No-op on healthy saves.
@@ -417,7 +425,7 @@ function validateSaveState(payload) {
             Array.isArray(payload.storyMemory)
                 ? payload.storyMemory
                     .filter(m => m && typeof m === 'object' && !Array.isArray(m))
-                    .map(m => normalizeStoryMemoryCard(m, null, { maxMessageCount: messageCount }))
+                    .map(m => normalizeStoryMemoryCard(m, null, { maxMessageCount: messageCount, messageIds: liveIds }))
                     .filter(Boolean)
                 : [],
             npcs

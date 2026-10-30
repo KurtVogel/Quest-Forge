@@ -47,6 +47,7 @@
 import { containment, tokenSet } from './textMatch.js';
 import { conversationalDistance } from './replayLedger.js';
 import { normalizeKnownBy } from './storyMemory.js';
+import { appendWitness } from './retraction.js';
 
 const FACT_STOP_WORDS = new Set([
     'the', 'a', 'an', 'of', 'to', 'in', 'is', 'are', 'was', 'were', 'and', 'or',
@@ -274,14 +275,26 @@ export function planWorldFactAdditions(worldFacts, payload, { messageCount = 0, 
             // STATE fact ("the road is still flooded") re-stamps its age
             // instead of being dropped — the DM reads the freshness. An
             // INTENT restated ("he still means to…") re-stamps the same way
-            // (2026-10-07).
-            if ((verdict.of?.aspect === 'state' || verdict.of?.aspect === 'intent') && verdict.of.id) {
+            // (2026-10-07). And EVERY aspect's restatement is a WITNESS
+            // (memory-research M0, 2026-10-28): the restating message joins
+            // the held fact's `witnesses`, so removing the fact's first
+            // message retracts it only when nothing later said it too.
+            if (verdict.of?.id) {
                 const ofId = verdict.of.id;
-                facts = facts.map(existing => (existing.id === ofId
-                    ? { ...existing, atMessage: messageCount, timestamp: now }
-                    : existing));
-                live = liveWorldFacts(facts);
-                changed = true;
+                const restamp = verdict.of.aspect === 'state' || verdict.of.aspect === 'intent';
+                const witnesses = appendWitness(verdict.of.witnesses, verdict.of.sourceMessage, stamp);
+                const witnessed = witnesses.length > 0 && witnesses !== verdict.of.witnesses;
+                if (restamp || witnessed) {
+                    facts = facts.map(existing => (existing.id === ofId
+                        ? {
+                            ...existing,
+                            ...(restamp && { atMessage: messageCount, timestamp: now }),
+                            ...(witnessed && { witnesses }),
+                        }
+                        : existing));
+                    live = liveWorldFacts(facts);
+                    changed = true;
+                }
             }
             continue;
         }

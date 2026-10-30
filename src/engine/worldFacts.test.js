@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { classifyFactCandidate, describeSupersededTag, hasNegation, isLiveFact, liveWorldFacts } from './worldFacts.js';
+import { classifyFactCandidate, describeSupersededTag, hasNegation, isLiveFact, liveWorldFacts, planWorldFactAdditions } from './worldFacts.js';
+import { WITNESS_CAP } from './retraction.js';
 import { buildSystemPrompt } from '../llm/promptBuilder.js';
 
 const fact = (id, text, extra = {}) => ({ id, fact: text, category: 'general', knownBy: [], timestamp: 1, ...extra });
@@ -90,5 +91,39 @@ describe('the DM prompt carries only the present', () => {
         expect(prompt).toContain('a line opening "planned (as of N turns ago)" is an INTENT');
         expect(prompt).toContain('- Tammo returned the knife.');
         expect(prompt).not.toContain('Tammo promised to return the knife.');
+    });
+});
+
+describe('planWorldFactAdditions — a duplicate verdict stamps a WITNESS (memory-research M0, 2026-10-28)', () => {
+    const held = [
+        fact('f-state', 'The harbor road is flooded.', { aspect: 'state', atMessage: 2, sourceMessage: 'a1' }),
+        fact('f-standing', 'Odo Ferrin is dead, killed at the docks.', { atMessage: 2, sourceMessage: 'a1' }),
+    ];
+
+    it('stamps the restating message on EVERY aspect, re-stamps the age only on a state / intent, never stamps the own source or a source-less dispatch', () => {
+        const plan = planWorldFactAdditions(held, [{ fact: 'The harbor road is still flooded.' }, { fact: 'Odo Ferrin was killed at the docks.' }], { messageCount: 12, sourceMessage: 'a3' });
+        expect(plan.changed).toBe(true);
+        expect(plan.added).toEqual([]);
+        expect(plan.worldFacts[0]).toMatchObject({ atMessage: 12, witnesses: ['a3'] });
+        expect(plan.worldFacts[1]).toMatchObject({ atMessage: 2, witnesses: ['a3'] });
+        // The same source again: no witness, and a standing restatement changes nothing.
+        const own = planWorldFactAdditions(held, [{ fact: 'Odo Ferrin was killed at the docks.' }], { messageCount: 12, sourceMessage: 'a1' });
+        expect(own.changed).toBe(false);
+        expect(own.worldFacts[1].witnesses).toBeUndefined();
+        const none = planWorldFactAdditions(held, [{ fact: 'Odo Ferrin was killed at the docks.' }], { messageCount: 12 });
+        expect(none.changed).toBe(false);
+        // A state's restatement without a source still re-stamps its age, witness-free.
+        const aged = planWorldFactAdditions(held, [{ fact: 'The harbor road is still flooded.' }], { messageCount: 12 });
+        expect(aged.changed).toBe(true);
+        expect(aged.worldFacts[0].atMessage).toBe(12);
+        expect(aged.worldFacts[0].witnesses).toBeUndefined();
+    });
+
+    it(`dedupes and keeps the newest ${WITNESS_CAP} witnesses`, () => {
+        let facts = held;
+        for (const id of ['a3', 'a5', 'a5', 'a7', 'a9', 'a11']) {
+            facts = planWorldFactAdditions(facts, [{ fact: 'Odo Ferrin was killed at the docks.' }], { messageCount: 20, sourceMessage: id }).worldFacts;
+        }
+        expect(facts[1].witnesses).toEqual(['a5', 'a7', 'a9', 'a11']);
     });
 });

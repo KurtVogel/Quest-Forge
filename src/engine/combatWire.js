@@ -144,7 +144,12 @@ export function normalizeCombatExchange(raw) {
             return {
                 enemyId,
                 action,
-                target: ref(intent.target) || 'player',
+                // An ABSENT target is the DM's shorthand for the hero; an
+                // UNREADABLE one (an object, an empty string) stays null and
+                // the exchange drops that foe's slot with its note — this
+                // `|| 'player'` was the one silent redirect onto the hero
+                // (2026-10-30 strengthening P2).
+                target: intent.target === undefined || intent.target === null ? 'player' : ref(intent.target),
                 description: text(intent.description, 180),
                 ...(removeConditions.length > 0 && { removeConditions }),
                 ...(situationalRuling && { situationalRuling }),
@@ -183,10 +188,16 @@ export function normalizeCombatExchange(raw) {
     // { "remove": [...] }` in the hero's free-form canonical condition names.
     // REMOVE only — the exchange's own dice are the one lane for harm in a
     // fight; the engine whitelists the names against the hero's live list.
+    // A bare list (`["paralyzed"]`) is the record's `remove` — the sibling
+    // `remove_conditions` reads a scalar as a one-item list the same way
+    // (2026-10-30 strengthening P2: the list was "not a record", no release,
+    // a dead turn).
     const rawPlayerConditions = raw.player_condition_updates || raw.playerConditionUpdates;
-    const rawPlayerRemove = rawPlayerConditions && typeof rawPlayerConditions === 'object' && !Array.isArray(rawPlayerConditions)
-        ? (rawPlayerConditions.remove ?? rawPlayerConditions.remove_conditions ?? rawPlayerConditions.removeConditions)
-        : null;
+    const rawPlayerRemove = Array.isArray(rawPlayerConditions)
+        ? rawPlayerConditions
+        : rawPlayerConditions && typeof rawPlayerConditions === 'object'
+            ? (rawPlayerConditions.remove ?? rawPlayerConditions.remove_conditions ?? rawPlayerConditions.removeConditions)
+            : null;
     const playerRemove = normalizeConditionList(Array.isArray(rawPlayerRemove) ? rawPlayerRemove : [rawPlayerRemove]);
 
     return {

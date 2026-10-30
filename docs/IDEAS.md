@@ -11,6 +11,18 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
+### A ship is a moving place — status: `idea` (2026-10-30, from the Opus playtest's observed P2)
+`findLocationRecord` folds a DM location string into a canonical record by token containment, so
+"The Wren, Tervola Harbor" — the hero's ship, named once at the home quay — was re-used as the
+current location in Cala Meron a sea away: the ship's record carried the HOME region, the home
+land's face rode the prompt, and the visit count said "visited ×N". A vessel is a place whose region
+is wherever it floats. Options: a `location_profile.type: 'vessel'` (Scribe-classified like
+haven / settlement) whose record never carries a `region` of its own and inherits the land of the
+last NON-vessel place the hero stood in (the `regionForPrompt` inherit rule already exists for a
+tagged place with no region — a vessel is the deliberate case); the fold then prefers a non-vessel
+record when the DM string names a port AND a ship ("aboard the Wren, at the Cala Meron quay" is
+the quay). Zero calls. Wants a second far-land Opus run to see how Flash names a ship at anchor.
+
 ### Doom news a land away is still the doom's own people at the door — status: `idea` (2026-10-28, measured)
 On the healed megacampaign (DECISIONS 2026-10-28 evening, point 3) a doom window opened for a front
 whose theaters all lay a sea away; the card said its final step "arrives as NEWS — a rider, a
@@ -429,7 +441,7 @@ the `memory-callbacks` moment in `docs/SCHEDULED_WOW.md`; the Chronicle stays st
 player-facing (DECISIONS.md 2026-07-26) — the dossier reads the journal and the transcript,
 never the saga.
 
-### [memory-research] Bi-temporal world facts: a fact can stop being true — status: four slices `shipped` (the RAG-lane age 2026-10-21 — every retrieved line says "N turns ago", DECISIONS.md 2026-10-21 second entry, point 1; the intent slice 2026-10-07; the state slice 2026-09-30; the first slice 2026-09-29 — the polarity-aware dedupe + supersession ledger, `engine/worldFacts.js`; DECISIONS.md 2026-09-29), the rest `idea` (M0, memory research 2026-09-17, Lane B)
+### [memory-research] Bi-temporal world facts: a fact can stop being true — status: five slices `shipped` (the `since changed:` tag on a retrieved row 2026-10-30 — DECISIONS.md 2026-10-30 point 8b; the RAG-lane age 2026-10-21 — every retrieved line says "N turns ago", DECISIONS.md 2026-10-21 second entry, point 1; the intent slice 2026-10-07; the state slice 2026-09-30; the first slice 2026-09-29 — the polarity-aware dedupe + supersession ledger, `engine/worldFacts.js`; DECISIONS.md 2026-09-29), the rest `idea` (M0, memory research 2026-09-17, Lane B)
 **2026-09-29 — shipped as the first slice (the dialogue's contested third slot, Codex's pick):** a near-duplicate whose negation differs is a FLIP — stored, superseding its twin; superseded facts leave every live reader and stay on the record tagged in the recall dossier (`[NO LONGER TRUE — changed N turns ago]`); the RAG seed retires their cached rows through `seedMemories({ retiredTexts })`. Still open from the shape below: a Scribe `supersedes` ref for semantic flips without a negation, the `(formerly: …)` tail (deliberately NOT built — the prompt carries the present, the record carries history), and the `eval:memory` N+15 probe.
 `ADD_WORLD_FACT(S)` dedupes restatements by containment and stores forever, so "the mill wheel
 turns" and "the mill burned" coexist at equal standing in WORLD FACTS and RAG. Zep/Graphiti's
@@ -500,7 +512,7 @@ rule (ambiguous → nobody, DECISIONS 2026-08-25) extended to every write; DECIS
 extended to the write side. Proof: reducer twins of the scratch + a same-name pair in the commitment probe. Full
 shape in `docs/MEMORY_RESEARCH.md` Verdict Log 2026-10-13.
 
-### [memory-research] Source-stamped retraction: scrubbing a message scrubs its canon — status: `shipped` (2026-09-30 — `meta.sourceMessage` on every Scribe dispatch, `retractedAtMessage` on facts, dormant cards, dropped impressions, `retractMemoriesFromMessage` for the RAG rows; DECISIONS.md 2026-09-30; `bondMoments` deliberately not stamped) (M0, memory research 2026-09-17, Lane A)
+### [memory-research] Source-stamped retraction: scrubbing a message scrubs its canon — status: `shipped` (the last-witness rule 2026-10-30 — `engine/retraction.js`, DECISIONS.md 2026-10-30 point 8a; 2026-09-30 — `meta.sourceMessage` on every Scribe dispatch, `retractedAtMessage` on facts, dormant cards, dropped impressions, `retractMemoriesFromMessage` for the RAG rows; DECISIONS.md 2026-09-30; `bondMoments` deliberately not stamped) (M0, memory research 2026-09-17, Lane A)
 `DELETE_MESSAGE` (2026-08-28, built to scrub refusals) soft-deletes the row and every reader
 honors it — but the Scribe facts, cards, NPC impressions, and the `narrative`/`player` RAG rows
 that turn minted stay live, so a scrubbed refusal keeps priming from memory. Every enthusiast

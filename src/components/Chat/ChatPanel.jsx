@@ -27,6 +27,7 @@ import { isDirectorBackingOff, RETRYABLE_DIRECTORS } from '../../engine/director
 import { isWonderRequest } from '../../engine/wonder.js';
 import { isInterludeRequest } from '../../engine/interlude.js';
 import { liveWorldFacts } from '../../engine/worldFacts.js';
+import { planRetraction } from '../../engine/retraction.js';
 import { buildCampaignOpeningPrompt, shouldPrimeCampaignOpening } from './sessionPriming.js';
 import { needsSpellCastNarration, routeTurnEvents, TURN_ROUTES } from './eventRouting.js';
 import CombatPanel from '../Combat/CombatPanel.jsx';
@@ -145,18 +146,6 @@ export default function ChatPanel() {
     const [showJumpToLatest, setShowJumpToLatest] = useState(false);
     const abortControllerRef = useRef(null);
     const inputRef = useRef(null);
-    // Stable so the memoized ChatMessage rows don't re-render per panel paint.
-    const handleDeleteMessage = useCallback((id) => {
-        // Source-stamped retraction (memory-research M0, 2026-09-30): the
-        // reducer retracts the facts / cards / impressions this message
-        // minted; its RAG rows leave the store here (the reducer cannot reach
-        // IndexedDB). The fact texts are named in the seed's own format.
-        const factTexts = (state.worldFacts || [])
-            .filter(fact => fact && fact.sourceMessage === id)
-            .map(factMemoryText);
-        dispatch({ type: 'DELETE_MESSAGE', payload: id });
-        retractMemoriesFromMessage(id, factTexts).catch(() => {});
-    }, [dispatch, state.worldFacts]);
     const hasPrimedRef = useRef(false); // True while an opening-scene attempt is in flight (reset on failure so it can retry)
     const [primingRetryToken, setPrimingRetryToken] = useState(0); // Bumped after a failed attempt to re-arm the priming effect
     const primingAttemptsRef = useRef(0); // Bounded so a persistently failing key can't loop the opening call
@@ -170,6 +159,23 @@ export default function ChatPanel() {
     // Use a ref to always read the latest state inside async callbacks
     const stateRef = useRef(state);
     stateRef.current = state;
+    // Stable so the memoized ChatMessage rows don't re-render per panel paint
+    // (it reads stateRef at click time, never a render-time field).
+    const handleDeleteMessage = useCallback((id) => {
+        // Source-stamped retraction (memory-research M0, 2026-09-30): the
+        // reducer retracts the facts / cards / impressions this message
+        // minted; its RAG rows leave the store here (the reducer cannot reach
+        // IndexedDB). The fact texts are named in the seed's own format.
+        // Retraction follows the last witness (2026-10-28): the SAME plan the
+        // reducer commits names the facts RETRACTED (their rows leave) and
+        // the facts KEPT because a later message restated them (their rows
+        // stay, retagged to the new source message).
+        const plan = planRetraction(stateRef.current, id);
+        dispatch({ type: 'DELETE_MESSAGE', payload: id });
+        retractMemoriesFromMessage(id, plan.retractedFacts.map(factMemoryText), {
+            keep: plan.keptFacts.map(fact => ({ text: factMemoryText(fact), sourceMessage: fact.sourceMessage })),
+        }).catch(() => {});
+    }, [dispatch]);
 
     // Streaming display paints are coalesced to one per animation frame: a raw
     // per-chunk setState re-renders the whole transcript O(campaign × chunks)

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearImageCache, generateSceneImageDetailed, generatePortraitImageDetailed, IMAGE_FETCH_TIMEOUT_MS, NPC_PORTRAIT_SIZE, peekCachedImage } from './imageGen.js';
 
-const xaiOk = (b64 = 'dGVzdA==') => ({
+const xaiOk = (b64 = '/9j/dGVzdA==') => ({
     ok: true,
     json: async () => ({ data: [{ b64_json: b64 }] }),
 });
@@ -42,7 +42,7 @@ describe('scene image provider reporting', () => {
         expect(result).toEqual({
             provider: 'xai',
             fallbackReason: null,
-            url: 'data:image/jpeg;base64,dGVzdA==',
+            url: 'data:image/jpeg;base64,/9j/dGVzdA==',
         });
         expect(fetchMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
             headers: expect.objectContaining({
@@ -109,8 +109,8 @@ describe('input-keyed scene cache (2026-08-01 queue P1)', () => {
 
     it('bypassCache rerolls and the new image replaces the cached entry', async () => {
         const fetchMock = vi.fn()
-            .mockResolvedValueOnce(xaiOk('dGVzdA=='))
-            .mockResolvedValueOnce(xaiOk('bmV3ZXI='));
+            .mockResolvedValueOnce(xaiOk('/9j/dGVzdA=='))
+            .mockResolvedValueOnce(xaiOk('/9j/bmV3ZXI='));
         vi.stubGlobal('fetch', fetchMock);
         const first = await generateSceneImageDetailed('Prompt', 'xai-key', { cacheKey: 'k' });
         const rerolled = await generateSceneImageDetailed('Prompt', 'xai-key', { cacheKey: 'k', bypassCache: true });
@@ -230,7 +230,7 @@ describe('2026-10-16 Lap-1 pins: two tiers, one request contract', () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
             // The player presses Cancel while the body is being read.
-            json: async () => { controller.abort(); return { data: [{ b64_json: 'dGVzdA==' }] }; },
+            json: async () => { controller.abort(); return { data: [{ b64_json: '/9j/dGVzdA==' }] }; },
         });
         vi.stubGlobal('fetch', fetchMock);
         await expect(generateSceneImageDetailed('A cavern', 'xai-key', { geminiApiKey: 'gem-key', cacheKey: 'k', signal: controller.signal }))
@@ -406,7 +406,7 @@ describe('downscaleDataUrl portrait compaction (2026-07-06 queue P1)', () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
 
         const result = await generatePortraitImageDetailed('A portrait', 'xai-key');
-        expect(result.url).toBe('data:image/jpeg;base64,dGVzdA==');
+        expect(result.url).toBe('data:image/jpeg;base64,/9j/dGVzdA==');
     });
 
     it('degrades to the original data URL when decoding fails', async () => {
@@ -414,13 +414,13 @@ describe('downscaleDataUrl portrait compaction (2026-07-06 queue P1)', () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
 
         const result = await generatePortraitImageDetailed('A portrait', 'xai-key');
-        expect(result.url).toBe('data:image/jpeg;base64,dGVzdA==');
+        expect(result.url).toBe('data:image/jpeg;base64,/9j/dGVzdA==');
     });
 
     it('the scene render handed back stays full-resolution (no maxWidth/maxHeight)', async () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
         const result = await generateSceneImageDetailed('A scene', 'xai-key');
-        expect(result.url).toBe('data:image/jpeg;base64,dGVzdA==');
+        expect(result.url).toBe('data:image/jpeg;base64,/9j/dGVzdA==');
     });
 
     it('the CACHED scene copy is display-sized, never the full-resolution render (2026-09-21 audit P2)', async () => {
@@ -428,7 +428,7 @@ describe('downscaleDataUrl portrait compaction (2026-07-06 queue P1)', () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(xaiOk()));
 
         const first = await generateSceneImageDetailed('A wide scene', 'xai-key', { cacheKey: 'scene-1' });
-        expect(first.url).toBe('data:image/jpeg;base64,dGVzdA==');
+        expect(first.url).toBe('data:image/jpeg;base64,/9j/dGVzdA==');
 
         const cached = peekCachedImage('scene-1', { imageApiKey: 'xai-key' });
         expect(cached.url).toBe(dom.encodedUrl);
@@ -533,8 +533,8 @@ describe('sessionScope isolation + provider mime branches (2026-09-01 test depth
 
     it('the same cacheKey in two campaigns never shares a render, and peekCachedImage honors the scope', async () => {
         const fetchMock = vi.fn()
-            .mockResolvedValueOnce(xaiOk('Y2FtcGFpZ25B'))
-            .mockResolvedValueOnce(xaiOk('Y2FtcGFpZ25C'));
+            .mockResolvedValueOnce(xaiOk('/9j/Y2FtcGFpZ25B'))
+            .mockResolvedValueOnce(xaiOk('/9j/Y2FtcGFpZ25C'));
         vi.stubGlobal('fetch', fetchMock);
         const a = await generateSceneImageDetailed('Prompt', 'xai-key', { cacheKey: 'scene|msg-1|Tavern', sessionScope: 'campaign-a' });
         const b = await generateSceneImageDetailed('Prompt', 'xai-key', { cacheKey: 'scene|msg-1|Tavern', sessionScope: 'campaign-b' });

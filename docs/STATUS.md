@@ -6,7 +6,19 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-28 (the Opus-played playtest on Flash + five fixes from it; the 10-27 strengthening clear, the "world has lands" live proof and the earlier sweeps below)_
+_Last updated: 2026-10-30 (the open-queue sweep — 19 strengthening findings + two memory M0s in six parallel clusters; the 10-28 Opus playtest, the megacampaign read and the earlier sweeps below)_
+
+## 2026-10-30 — the open queues read end to end: 19 strengthening findings + both memory M0s built in six parallel clusters — pushed AND deployed
+
+**Ruling: DECISIONS.md 2026-10-30, nine points (three decisions flagged on the queue are decided there: the DM clock as a DIRECTION with the DM-lane soften throttle — a stated revisit of 2026-08-26 —, `resolved`-only on the front wire + the engine wake, and `keepStamps` for an uploaded stored payload).** Vesa: "check all the strengthenings and other ideas, give your take and implement and deploy." +109 tests (4,323 / 279), lint clean; nothing real-provider-playtested.
+
+**What a player can notice:** a foe the DM aims at the hero by NAME now swings (it used to drop its attack with a note — every by-name telegraph was a free round); a pressure the hero sailed away from WAKES when they come back to its land; a DM that copies the format example can no longer soften a clock from 4 to 1 in three turns, and a `"status": "completed"` on a front no longer pays a whole half-level for one battle; a young hero in an old coat is no longer painted elderly on every render, and a child's toy no longer paints a child; "THE BOND HAS TURNED" waits until that person is actually in the scene; deleting a message keeps a fact something LATER restated (the ✕ line says "kept — restated later"); a retrieved journal line that restates an old truth now carries the correction beside it.
+
+**What changed underneath:** `isHeroRef` (spellcasting.js), the null-target drop + bare-list conditions + ordered same-name pairing (combatWire / combatExchange); `typedLaneRefs` / `MAX_LANE_REFS` on the lane shelf, `|age|` grace, the bounded chunk delete, `keepStamps` (portraitStore / cloudSync / persistence / SettingsModal); `clock_delta` / `stage_delta` + `frontUpdateDirection` + `lastDmClockSoftenMessage`, `resolved`-only wire, `wakeFrontsReturnedTo` at two seams, tiered `sleepFrontLeftBehind`, `openDoomWindow({ skipIds })` (fronts.js / handlers/fronts.js / handlers/npcs.js / migrations.js / promptBuilder's example — the prefix bytes changed, one cache re-bill); the person-anchored age rules + object guards, `cleanArtDirectorReply`, SceneArt's `liveSessionRef`, the strict `mimeFromBase64` (appearanceIdentity / sceneDirector / SceneArt / imageGen); the turn beat's `presenceText` gate (relationshipArc), `isRosterPerson` in `buildEncounterEntry` (worldTempo); `engine/retraction.js` (`planRetraction`, `appendWitness`, `typeWitnesses`) + `witnesses` on facts and cards + the `keep` list through `retractMemoriesFromMessage`; `STALE_ROW_CONTAINMENT` + the `since changed:` tag in `buildRetrievedMemoriesBlock`.
+
+**Left open on the queues (reasons on the lines):** the recall AS SAID ranking (fixture first), the ship as a moving place (IDEAS entry), the Scribe's 2 sp miss (fixture first), the uid-at-click hint; memory's lexical channel (needs the probe run); the WOW ties slice is proposed as its own session.
+
+**Next:** the second Opus run in a far land (the naming fix's proof — and now the wake's: sail back); the doom arm on Sol once the prepay is topped up; the commitment probe's multi-provider pass with the new retraction knowledge point.
 
 ## 2026-10-28 (evening) — Vesa's megacampaign read end to end: seven engine fixes for "the world repeats", the save healed — pushed AND deployed
 

@@ -625,10 +625,13 @@ function healUnopenedDooms(save) {
             .map(record => record.region);
         return lands.length > 0 && !lands.some(land => isSameRegion(land, heroLand));
     };
-    const eligible = save.fronts.map(front => (leftBehind(front) ? { ...front, status: 'left-behind' } : front));
-    const { opened } = openDoomWindow(eligible, { messageCount: Array.isArray(save.messages) ? save.messages.length : 0 });
+    // The left-behind fronts are SKIPPED, never relabeled (2026-10-30 P2): a
+    // relabel hid a left-behind front's OPEN window from openDoomWindow's
+    // one-window check, and a home-land full clock opened a second one.
+    const skipIds = save.fronts.filter(leftBehind).map(front => front.id);
+    const { opened } = openDoomWindow(save.fronts, { messageCount: Array.isArray(save.messages) ? save.messages.length : 0, skipIds });
     if (!opened) return save;
-    return { ...save, fronts: save.fronts.map(front => (front?.id === opened.id ? { ...opened, status: front.status } : front)) };
+    return { ...save, fronts: save.fronts.map(front => (front?.id === opened.id ? opened : front)) };
 }
 
 const UNCONDITIONAL_HEALS = [

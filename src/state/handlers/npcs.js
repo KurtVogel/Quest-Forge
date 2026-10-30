@@ -126,21 +126,61 @@ function regionalSeedHasRoom(fronts) {
  * cavern's, and one of them posted its undead crypt contract on a far board).
  * When the web has no room, the OLDEST active front with no theater in this
  * land and no open doom window goes DORMANT — left behind, not ended: its
- * clock, portents and notes stand, the DM's `front_updates` can wake it, and
- * a dormant front still resolves with the full ceremony. Returns the fronts
- * unchanged when no front qualifies.
+ * clock, portents and notes stand, the engine WAKES it when the hero returns
+ * to a land where it holds ground (`wakeFrontsReturnedTo`, the sleep's own
+ * mirror — the DM wire admits no status but `resolved`, 2026-10-30), and a
+ * dormant front still resolves with the full ceremony. "Left behind" means it
+ * has a BEHIND (2026-10-30 P2): a front holding ground in some OTHER land
+ * sleeps first; a theaterless front is a candidate only when none does.
+ * Oldest first within each tier. Returns the fronts unchanged when no front
+ * qualifies.
  */
-function sleepFrontLeftBehind(fronts, locations, region) {
-    const list = Array.isArray(fronts) ? fronts : [];
-    const holdsGroundHere = (front) => (Array.isArray(locations) ? locations : []).some(record => record?.region
+function holdsGroundIn(front, locations, region) {
+    return (Array.isArray(locations) ? locations : []).some(record => record?.region
         && isSameRegion(record.region, region)
         && Array.isArray(record.theaterFrontIds) && record.theaterFrontIds.includes(front.id));
-    const idx = list.findIndex(front => front && (front.status || 'active') === 'active'
+}
+
+function holdsGroundElsewhere(front, locations, region) {
+    return (Array.isArray(locations) ? locations : []).some(record => record?.region
+        && !isSameRegion(record.region, region)
+        && Array.isArray(record.theaterFrontIds) && record.theaterFrontIds.includes(front.id));
+}
+
+function sleepFrontLeftBehind(fronts, locations, region) {
+    const list = Array.isArray(fronts) ? fronts : [];
+    const candidate = (front) => front && (front.status || 'active') === 'active'
         && !(Number.isFinite(front.doomAtMessage) && !Number.isFinite(front.doomClosedAtMessage))
-        && !holdsGroundHere(front));
+        && !holdsGroundIn(front, locations, region);
+    let idx = list.findIndex(front => candidate(front) && holdsGroundElsewhere(front, locations, region));
+    if (idx === -1) idx = list.findIndex(candidate);
     if (idx === -1) return list;
     console.log(`[Fronts] "${list[idx].title}" goes dormant — the hero has left its land for ${region}.`);
     return list.map((front, i) => (i === idx ? { ...front, status: 'dormant' } : front));
+}
+
+/**
+ * The sleep's mirror (2026-10-30 hidden-fronts P1: a slept front had NO
+ * reachable wake — the tempo stub lists active fronts only, the cadence batch
+ * skips non-active ids, and no handler read a return). On an arrival in a
+ * land where a DORMANT front holds ground, the front wakes. When the web is
+ * at MAX_ACTIVE_FRONTS, the oldest active front holding no ground in THIS
+ * land sleeps first (`sleepFrontLeftBehind` — it never picks a front of this
+ * land); when that frees nothing, no wake. A resolved front never wakes, and
+ * a dormant front with no ground here stays asleep. Pure over the list.
+ */
+function wakeFrontsReturnedTo(fronts, locations, region) {
+    let list = Array.isArray(fronts) ? fronts : [];
+    if (!region) return list;
+    const sleepers = list.filter(front => front && front.status === 'dormant' && holdsGroundIn(front, locations, region));
+    for (const sleeper of sleepers) {
+        const activeCount = () => list.filter(front => (front?.status || 'active') === 'active').length;
+        if (activeCount() >= MAX_ACTIVE_FRONTS) list = sleepFrontLeftBehind(list, locations, region);
+        if (activeCount() >= MAX_ACTIVE_FRONTS) break;
+        console.log(`[Fronts] "${sleeper.title}" wakes — the hero has returned to ${region}, where it holds ground.`);
+        list = list.map(front => (front.id === sleeper.id ? { ...front, status: 'active' } : front));
+    }
+    return list;
 }
 
 function mintRegionalSeed(region, locationName, messages, { profileOnly = false } = {}) {
@@ -505,6 +545,8 @@ export const handlers = {
         // A region met while the front web was full is seeded on the hero's
         // next arrival in that land once a slot has freed (2026-10-15).
         const arrivalRegion = locations[destinationIdx].region;
+        // A front left behind in THIS land wakes on the hero's return (2026-10-30).
+        if (arrivalRegion) next = { ...next, fronts: wakeFrontsReturnedTo(next.fronts, locations, arrivalRegion) };
         const deferred = (state.session?.deferredRegions || []).find(region => isSameRegion(region, arrivalRegion));
         if (deferred && seedMayReplace(state.session?.pendingRegionalFronts)
             && !(state.session?.seededRegions || []).some(known => isSameRegion(known, deferred))
@@ -840,6 +882,10 @@ export const handlers = {
         };
         // The establishing shot (the interlude's REGION seam, 2026-10-26).
         next = openRegionInterlude(next, region, { recordId: here.id });
+        // The place the hero stands in has just learned its land: a front
+        // left behind here wakes (2026-10-30) — the arrival itself knew no
+        // region when the record was new, so the classification is the seam.
+        next = { ...next, fronts: wakeFrontsReturnedTo(next.fronts, locations, region) };
         if (priorRegions.length === 0) { mintProfileOnly(); return next; } // home region — never seeded
         if (priorRegions.some(known => isSameRegion(known, region))) { mintProfileOnly(); return next; }
         if ((state.session?.seededRegions || []).some(known => isSameRegion(known, region))) { mintProfileOnly(); return next; }

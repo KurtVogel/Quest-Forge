@@ -3,6 +3,7 @@ import { conversationalAgeSince } from './replayLedger.js';
 import { findLocationRecord, isSameRegion, isStillAtPlace } from './locationRegistry.js';
 import { regionForPrompt } from './regionProfile.js';
 import { clampNumber, textOr as cleanText, toFlag } from './text.js';
+import { typeWitnesses } from './retraction.js';
 
 const ALLOWED_TYPES = new Set([
     'callback',
@@ -284,8 +285,9 @@ export const STORY_MEMORY_ENGINE_STAMPS = Object.freeze([
     'firstSeenMessage', 'lastSeenMessage', 'lastUsedMessage', 'usedCount',
     'firstSeenAt', 'first_seen_at', 'lastSeenAt', 'last_seen_at', 'lastUsedAt', 'last_used_at',
     // Source-stamped retraction (2026-09-30): the reducer stamps the DM
-    // message a card was read from and the message count it was retracted at.
-    'sourceMessage', 'retractedAtMessage',
+    // message a card was read from and the message count it was retracted at
+    // — and the messages that RESTATED it (`witnesses`, 2026-10-28).
+    'sourceMessage', 'retractedAtMessage', 'witnesses',
 ]);
 
 export function stripStoryMemoryEngineStamps(card) {
@@ -308,7 +310,7 @@ function isCardShape(card) {
  *   09-14 `openedAtMessage` / 09-10 rollHistory pattern). An OPTIONS OBJECT,
  *   never positional — `.map` would pass the index.
  */
-export function normalizeStoryMemoryCard(card = {}, existing = null, { maxMessageCount } = {}) {
+export function normalizeStoryMemoryCard(card = {}, existing = null, { maxMessageCount, messageIds = null } = {}) {
     // A `null` element used to walk into `card.text` and throw — out of
     // validateSaveState (the campaign un-loadable) and out of the middle of
     // ADD_STORY_MEMORY_CARDS (every card and dispatch queued behind it lost
@@ -346,12 +348,17 @@ export function normalizeStoryMemoryCard(card = {}, existing = null, { maxMessag
         ? card.sourceMessage.slice(0, 80)
         : (typeof base?.sourceMessage === 'string' && base.sourceMessage ? base.sourceMessage.slice(0, 80) : null);
     const retractedAtMessage = messageStamp(card.retractedAtMessage, messageStamp(base?.retractedAtMessage, undefined, maxMessageCount), maxMessageCount);
+    // The messages that RESTATED the card (2026-10-28): string ids, capped,
+    // never the card's own source; LOAD_GAME passes the live transcript ids
+    // so a witness whose message is gone is dropped.
+    const witnesses = typeWitnesses(card.witnesses ?? base?.witnesses, { sourceMessage, messageIds });
     const usedCount = Math.max(0, Math.trunc(Number(card.usedCount ?? base?.usedCount) || 0));
 
     return {
         ...(knownBy.length > 0 && { knownBy }),
         ...(sourceMessage && { sourceMessage }),
         ...(Number.isFinite(retractedAtMessage) && { retractedAtMessage }),
+        ...(witnesses && { witnesses }),
         ...(witnessed && { witnessed: true }),
         ...(Number.isFinite(firstSeenMessage) && { firstSeenMessage }),
         ...(Number.isFinite(lastSeenMessage) && { lastSeenMessage }),

@@ -1,6 +1,6 @@
 import { db, firestoreSdk } from "../config/firebase.js";
 import { asSaveObject, prepareSavePayload, projectSaveMetadata } from "./persistence.js";
-import { BLOB_LANES, collectLaneRefs, restoreLanes } from "./portraitStore.js";
+import { BLOB_LANES, collectLaneRefs, restoreLanes, typedLaneRefs } from "./portraitStore.js";
 
 /**
  * Cloud save layer (bring-your-own Firebase, manual saves only).
@@ -47,24 +47,10 @@ import { BLOB_LANES, collectLaneRefs, restoreLanes } from "./portraitStore.js";
  * `chapterRefs`; a chapter is ≤ 60k chars, well under the 1 MiB doc cap).
  */
 /**
- * Most refs a metadata doc is trusted for per lane — a hostile-input bound,
- * several times any real save (a mature campaign holds ~40 portraits and ~20
- * chapters), not an expected size.
+ * `{ [lane.id]: refs[] }` — every lane's typed refs from one metadata doc
+ * (`typedLaneRefs` on the lane shelf: well-formed keys only, deduped, bounded
+ * at `MAX_LANE_REFS` — the same typing `collectLaneRefs` gives a payload's refs).
  */
-const MAX_LANE_REFS = 512;
-
-/** The refs a metadata doc claims for one lane, typed: well-formed keys only, deduped, bounded. */
-function typedLaneRefs(value, lane) {
-    if (!Array.isArray(value)) return [];
-    const refs = new Set();
-    for (const ref of value) {
-        if (refs.size >= MAX_LANE_REFS) break;
-        if (typeof ref === 'string' && lane.keyPattern.test(ref)) refs.add(ref);
-    }
-    return [...refs];
-}
-
-/** `{ [lane.id]: refs[] }` — every lane's typed refs from one metadata doc. */
 function typedRefsByLane(record) {
     const out = {};
     for (const lane of BLOB_LANES) out[lane.id] = typedLaneRefs(record?.[lane.refsField], lane);
@@ -265,10 +251,16 @@ async function ensureLaneBlobs(uid, lane, blobs, previouslyListed) {
  */
 export const BLOB_SWEEP_GRACE_MS = 5 * 60_000;
 
-/** A blob doc's age judgement: a stamp that does not parse is OLD (a hostile stamp must not make a blob unsweepable). */
+/**
+ * A blob doc's age judgement: a stamp that does not parse is OLD, and so is a
+ * stamp more than the grace window AHEAD of this clock (2026-10-30 audit P2:
+ * `now − stamp < GRACE` read a future stamp as negative-aged and spared it
+ * forever — a hostile stamp must not make a blob unsweepable). A stamp a
+ * little ahead is another device's clock skew and is spared like a young one.
+ */
 function isWithinSweepGrace(createdAt, now = Date.now()) {
     const stamp = typeof createdAt === 'string' ? Date.parse(createdAt) : NaN;
-    return Number.isFinite(stamp) && now - stamp < BLOB_SWEEP_GRACE_MS;
+    return Number.isFinite(stamp) && Math.abs(now - stamp) < BLOB_SWEEP_GRACE_MS;
 }
 
 /**
@@ -335,7 +327,7 @@ function savedAtMs(savedAt) {
  * steady-state save, since blobs ride their own collections) — or the shared
  * failure shape, with `too-large` for the pre-flight (Firestore never called).
  */
-export async function saveGameToCloud(uid, slotId, gameState) {
+export async function saveGameToCloud(uid, slotId, gameState, options = {}) {
     if (!db) return UNAVAILABLE;
     if (!uid) return signedOut('saving to the cloud');
 
@@ -347,7 +339,9 @@ export async function saveGameToCloud(uid, slotId, gameState) {
         // 1 MiB reason to trim summarized scrollback), portrait bytes and
         // chapter prose out of the payload lane by lane, each lane's ref list
         // on the metadata doc.
-        const { state: trimmedState, lanes, metadata } = prepareSavePayload(slotId, gameState, new Date().toISOString());
+        // `options.keepStamps`: a STORED payload (Settings' local-saves
+        // upload) keeps its own saveVersion / savedAt; a live state is stamped.
+        const { state: trimmedState, lanes, metadata } = prepareSavePayload(slotId, gameState, new Date().toISOString(), options);
 
         // The state is stored as a stringified JSON blob (avoids Firestore's
         // nested object limits/index explosion), ALWAYS in the `chunks`
@@ -580,8 +574,18 @@ export async function deleteGameFromCloud(uid, slotId) {
             const existing = existingSnap.exists() ? existingSnap.data() : null;
             const chunkCount = boundedChunkCount(existing?.payloadChunks);
             releasedRefs = typedRefsByLane(existing);
-            const chunkIds = new Set(listedChunkIds);
+            // The stored count's range first (the real chunks), then the
+            // listed docs up to the same bound (2026-10-30 audit nit: the
+            // listing had no bound while the count clamps at MAX_SAVE_CHUNKS,
+            // so 3,000 stray docs queued 3,000 deletes in one transaction).
+            // A stray left past the bound is harmless: the loader reads a
+            // chunk only from the doc named by its index.
+            const chunkIds = new Set();
             for (let i = 0; i < chunkCount; i++) chunkIds.add(String(i));
+            for (const id of listedChunkIds) {
+                if (chunkIds.size >= MAX_SAVE_CHUNKS) break;
+                chunkIds.add(id);
+            }
             for (const id of chunkIds) {
                 transaction.delete(doc(chunksCollection(uid, slotId), id));
             }

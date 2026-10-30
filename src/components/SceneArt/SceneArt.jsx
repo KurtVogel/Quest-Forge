@@ -34,6 +34,14 @@ export default function SceneArt() {
     // One in-flight render at a time; Cancel aborts it (a deliberate cancel
     // never falls through to the next provider — imageGen rethrows AbortError).
     const abortRef = useRef(null);
+    // The campaign on screen NOW (2026-10-29 audit P2): a render captures the
+    // state at the click and lands 10–60 s later, so a Continue of another
+    // save inside that wait used to paint campaign A's scene under campaign
+    // B's panel. `show` compares the click's session with this ref.
+    const liveSessionRef = useRef(state.session?.id || '');
+    useEffect(() => {
+        liveSessionRef.current = state.session?.id || '';
+    }, [state.session?.id]);
 
     const gear = useMemo(() => equippedSummary(state.inventory), [state.inventory]);
     // The dropdown's figures — the pure list in sceneArtHelpers.js (the
@@ -63,8 +71,9 @@ export default function SceneArt() {
         abortRef.current?.abort();
         const controller = new AbortController();
         abortRef.current = controller;
+        const sessionId = state.session?.id || '';
         const genOptions = imageRequestOptions(state.settings, {
-            sessionScope: state.session?.id || '',
+            sessionScope: sessionId,
             bypassCache: reroll,
             signal: controller.signal,
         });
@@ -72,8 +81,10 @@ export default function SceneArt() {
         // One way a finished render reaches the screen, whatever the mode.
         const show = (result, caption, shape) => {
             // The one signal check before the paint: imageGen rethrows a cancel
-            // on its own lanes, this covers the cached and the free ones.
+            // on its own lanes, this covers the cached and the free ones — and
+            // a render of a campaign that is no longer on screen never paints.
             if (!result || controller.signal.aborted) return;
+            if (liveSessionRef.current !== sessionId) return;
             setIsHidden(false);
             setCurrentImage({ url: result.url, caption, shape });
             setGenerationNotice(fallbackNotice(result));

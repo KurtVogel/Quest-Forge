@@ -4,7 +4,7 @@
  * extract fold, one restore fold — read by both storage paths.
  */
 import { describe, expect, it } from 'vitest';
-import { BLOB_LANES, collectLaneRefs, extractLanes, restoreLanes } from './portraitStore.js';
+import { BLOB_LANES, MAX_LANE_REFS, collectLaneRefs, extractLanes, restoreLanes, typedLaneRefs } from './portraitStore.js';
 
 const portrait = (seed) => `data:image/jpeg;base64,${String(seed).repeat(3000)}`;
 
@@ -78,5 +78,49 @@ describe('extractLanes / restoreLanes', () => {
     it('a non-object payload passes through untouched', () => {
         expect(extractLanes(null).state).toBeNull();
         expect(restoreLanes('junk', () => undefined)).toBe('junk');
+    });
+});
+
+describe('collectLaneRefs is TYPED and BOUNDED (2026-10-30 audit P2: the rehydrate read any string as a ref)', () => {
+    const validRef = (i) => `p-${i.toString(36).padStart(4, '0')}-${(i * 7).toString(36).padStart(5, '0')}-abc12`;
+
+    it('drops a ref that is not a key of the lane\'s shape and caps the list at MAX_LANE_REFS, deduped', () => {
+        const [portraits] = BLOB_LANES;
+        const state = {
+            character: { name: 'Astra', portraitRef: '../../x', portraitProvider: 'xai', portraitUpdatedAt: 5 },
+            npcs: [
+                ...Array.from({ length: 600 }, (_, i) => ({ id: `n${i}`, name: `N ${i}`, portraitRef: validRef(i) })),
+                { id: 'dup', name: 'Dup', portraitRef: validRef(0) }, // the same key twice is one read
+                { id: 'junk-1', name: 'J1', portraitRef: 'users/u2/portraits/p-1-1-1' }, // a path, not a key
+                { id: 'junk-2', name: 'J2', portraitRef: 'p-' + 'z'.repeat(40) }, // over-long segments
+                { id: 'junk-3', name: 'J3', portraitRef: 'c-1-1-1' }, // the OTHER lane's key shape
+            ],
+        };
+        const wanted = collectLaneRefs(state);
+        expect(wanted).toHaveLength(1);
+        expect(wanted[0].lane.id).toBe('portraits');
+        expect(wanted[0].refs).toHaveLength(MAX_LANE_REFS);
+        expect(MAX_LANE_REFS).toBe(512);
+        wanted[0].refs.forEach(ref => expect(ref).toMatch(portraits.keyPattern));
+        expect(wanted[0].refs).not.toContain('../../x');
+        expect(wanted[0].refs).not.toContain('c-1-1-1');
+        expect(new Set(wanted[0].refs).size).toBe(wanted[0].refs.length);
+        // Both storage paths read only this list, so the junk ref is never fetched; its record then
+        // restores as a missing picture (stamps stripped), never a ref in live state.
+        const restored = restoreLanes(state, () => undefined);
+        expect(restored.character).toEqual({ name: 'Astra' });
+        expect(JSON.stringify(restored)).not.toContain('portraitRef');
+    });
+
+    it('a payload with only junk refs names no lane at all — zero reads on either path', () => {
+        expect(collectLaneRefs({ character: { portraitRef: '../../x' }, npcs: [{ portraitRef: 7 }, { portraitRef: '' }], chronicle: [{ chapterRef: 'p-1-1-1' }] })).toEqual([]);
+    });
+
+    it('typedLaneRefs is the one typing for a metadata claim list and a payload\'s refs', () => {
+        const [portraits, chapters] = BLOB_LANES;
+        expect(typedLaneRefs(['p-1-1-1', 'p-1-1-1', 'c-1-1-1', 7, null, '../../x'], portraits)).toEqual(['p-1-1-1']);
+        expect(typedLaneRefs(['p-1-1-1', 'c-1-1-1'], chapters)).toEqual(['c-1-1-1']);
+        expect(typedLaneRefs('p-1-1-1', portraits)).toEqual([]);
+        expect(typedLaneRefs(Array.from({ length: 600 }, (_, i) => validRef(i)), portraits)).toHaveLength(MAX_LANE_REFS);
     });
 });

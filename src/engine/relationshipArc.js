@@ -16,6 +16,7 @@
  */
 import { NPC_BOND_MOMENT_MAX, namesMatch, normalizeBondMoments, selectKeyBondMoments } from './npcRoster.js';
 import { conversationalAgeSince } from './replayLedger.js';
+import { nameTokensPresent, textWordSet } from './textMatch.js';
 import { liveWorldFacts } from './worldFacts.js';
 
 export const RELATIONSHIP_STAGES = ['stranger', 'acquaintance', 'familiar', 'trusted', 'intimate', 'rival', 'estranged'];
@@ -396,8 +397,23 @@ const BEAT_MOVES = {
 /**
  * The private cue. Re-judged at RENDER (the world-tempo rule): the window
  * must be open, the NPC must still be on the roster, and never in combat.
+ *
+ * A TURN beat renders only while its person is IN THE SCENE (2026-10-30,
+ * story-memory P2 from the Opus playtest: THE BOND HAS TURNED for Sanna
+ * rode 24 DM prompts while she was four weeks of sea away — the DM had a
+ * "beat of their own" for someone who could not be on the page). Present
+ * means on the party line, or named in `presenceText` by the KNOWN NPCs
+ * presence rule (`nameTokensPresent` over `textWordSet` — the same
+ * tokenizer `findSubjectsInText` uses, whole-word). The window still runs
+ * down meanwhile: an unspent turn beat for someone who never reappears
+ * expires like any other, never carried.
+ *
+ * The ABSENCE beat ("SOMEONE REACHES OUT") is deliberately UNGATED by
+ * presence: its whole premise is a person who is APART from the hero acting
+ * on their own initiative — a letter, a messenger, word sent through someone,
+ * or turning up themselves. Gating it on presence would delete the feature.
  */
-export function buildRelationshipBeatBlock(beat, npcs = [], { messageCount, combatActive = false, party = [] } = {}) {
+export function buildRelationshipBeatBlock(beat, npcs = [], { messageCount, combatActive = false, party = [], presenceText = '' } = {}) {
     const b = sanitizeRelationshipBeat(beat);
     if (!b || combatActive || !isRelationshipBeatOpen(b, messageCount)) return '';
     const npc = (Array.isArray(npcs) ? npcs : []).find(n => n && beatTargets(b, n));
@@ -406,7 +422,10 @@ export function buildRelationshipBeatBlock(beat, npcs = [], { messageCount, comb
     // beat's estranged / rival variant for a PARTY member is the moment they
     // say why and leave, or name the one condition on which they stay.
     const inParty = (Array.isArray(party) ? party : []).some(c => typeof c?.name === 'string' && c.name && namesMatch(c.name, npc.name));
-    if (b.mode === 'turn') return buildTurnBeatBlock(b, npc, { inParty });
+    if (b.mode === 'turn') {
+        const inScene = inParty || nameTokensPresent(textWordSet(presenceText), npc.name) === true;
+        return inScene ? buildTurnBeatBlock(b, npc, { inParty }) : '';
+    }
     const { stage } = deriveRelationshipStage(npc);
     const moves = BEAT_MOVES[stage] || BEAT_MOVES.trusted;
     const thread = b.thread ? ` Between them now: ${b.thread}.` : '';

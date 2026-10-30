@@ -4,6 +4,7 @@
  */
 import { normalizeJournalEntry } from '../../engine/journalEntry.js';
 import { planWorldFactAdditions } from '../../engine/worldFacts.js';
+import { appendWitness } from '../../engine/retraction.js';
 import {
     applyStoryMemoryDormancy,
     bornStoryMemoryCard,
@@ -193,6 +194,11 @@ export const handlers = {
                     emotionalCharge: Math.max(existing.emotionalCharge || 0, card.emotionalCharge || 0),
                     tags: [...new Set([...(existing.tags || []), ...(card.tags || [])])],
                     linkedNpcNames: [...new Set([...(existing.linkedNpcNames || []), ...(card.linkedNpcNames || [])])],
+                    // A re-report is a WITNESS (memory-research M0, 2026-10-28):
+                    // the restating message joins the held card's `witnesses`,
+                    // so removing the card's first message retracts it only
+                    // when nothing later reported the beat too.
+                    witnesses: appendWitness(existing.witnesses, existing.sourceMessage, action.meta?.sourceMessage),
                 }, existing)
                 : memory),
         };

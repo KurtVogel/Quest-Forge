@@ -755,3 +755,84 @@ describe('cloud portrait collection (2026-09-22 audit P2)', () => {
         expect(JSON.stringify(row)).not.toContain('data:image/');
     });
 });
+
+describe('hostile payloads and stamps (2026-10-30 audit, Lap 2)', () => {
+    const portrait = (seed) => `data:image/jpeg;base64,${seed.toString(36).padStart(4, '0').repeat(25_000)}`;
+    const gallery = (count, { seedOffset = 0 } = {}) => makeGameState({
+        character: { ...makeGameState().character, portraitUrl: portrait(1000 + seedOffset), portraitProvider: 'xai', portraitUpdatedAt: 5 },
+        npcs: Array.from({ length: count }, (_, i) => ({
+            id: `npc-${i}`, name: `Villager ${i}`, portraitUrl: portrait(i + seedOffset), portraitProvider: 'xai', portraitUpdatedAt: 1000 + i,
+        })),
+    });
+    const stampBlobs = (refs, createdAt) => refs.forEach(ref => { firestore.__store.get(`users/u1/portraits/${ref}`).createdAt = createdAt; });
+    const slotRefs = (slot) => firestore.__store.get(`users/u1/saves/${slot}`).portraitRefs;
+    const blobPresent = (ref) => firestore.__store.has(`users/u1/portraits/${ref}`);
+
+    it('the rehydrate reads a TYPED, BOUNDED ref list: a `../../x` portrait ref is never fetched and 600 valid-looking refs cost at most MAX_LANE_REFS reads', async () => {
+        const validRef = (i) => `p-${i.toString(36).padStart(4, '0')}-${(i * 7).toString(36).padStart(5, '0')}-abc12`;
+        // A stored payload naming refs directly (no inline bytes to split) — what a hostile or corrupt chunk looks like.
+        await saveGameToCloud('u1', 'slot-hostile', makeGameState({
+            character: { ...makeGameState().character, portraitRef: '../../x', portraitProvider: 'xai', portraitUpdatedAt: 5 },
+            npcs: Array.from({ length: 600 }, (_, i) => ({ id: `npc-${i}`, name: `Villager ${i}`, portraitRef: validRef(i) })),
+        }));
+        const probed = [];
+        const origHas = firestore.__store.has.bind(firestore.__store);
+        firestore.__store.has = (path) => { if (path.includes('/portraits/')) probed.push(path); return origHas(path); };
+        let loaded;
+        try {
+            loaded = await loadState('u1', 'slot-hostile');
+        } finally {
+            firestore.__store.has = origHas;
+        }
+        expect(probed).toHaveLength(512); // MAX_LANE_REFS — 600 named, 512 read (2,000 junk refs used to cost 2,000 reads)
+        expect(probed.some(path => path.includes('../../x'))).toBe(false);
+        expect(loaded.character).not.toHaveProperty('portraitRef');
+        expect(loaded.character).not.toHaveProperty('portraitUrl'); // a missing picture, stamps stripped
+        expect(JSON.stringify(loaded)).not.toContain('portraitRef');
+    });
+
+    it('a blob stamped more than the grace window AHEAD of the clock is OLD (sweepable); a stamp a minute ahead is clock skew and is spared', async () => {
+        await saveGameToCloud('u1', 'slot-a', gallery(1)); // set 1
+        const set1 = slotRefs('slot-a');
+        stampBlobs(set1, new Date(Date.now() + 10 * 60_000).toISOString()); // +10 min: junk, never young
+        await saveGameToCloud('u1', 'slot-a', gallery(1, { seedOffset: 50 })); // set 2 releases set 1
+        set1.forEach(ref => expect(blobPresent(ref), `+10 min ${ref}`).toBe(false));
+
+        const set2 = slotRefs('slot-a');
+        stampBlobs(set2, new Date(Date.now() + 365 * 24 * 60 * 60_000).toISOString()); // +1 year
+        await saveGameToCloud('u1', 'slot-a', gallery(1, { seedOffset: 90 })); // set 3 releases set 2
+        set2.forEach(ref => expect(blobPresent(ref), `+1 year ${ref}`).toBe(false));
+
+        const set3 = slotRefs('slot-a');
+        stampBlobs(set3, new Date(Date.now() + 60_000).toISOString()); // −1 min of age: another device's clock, spared
+        await saveGameToCloud('u1', 'slot-a', makeGameState()); // releases set 3
+        set3.forEach(ref => expect(blobPresent(ref), `−1 min ${ref}`).toBe(true));
+    });
+
+    it('a delete queues at most MAX_SAVE_CHUNKS chunk deletes however many stray docs the subcollection lists (3,000 strays, one transaction)', async () => {
+        await saveGameToCloud('u1', 'slot-strays', makeGameState());
+        expect(chunkPaths()).toHaveLength(1);
+        for (let i = 0; i < 3000; i++) {
+            firestore.__store.set(`users/u1/saves/slot-strays/chunks/stray-${i}`, { index: 99, data: 'x' });
+        }
+        expect((await deleteGameFromCloud('u1', 'slot-strays')).ok).toBe(true);
+        expect(firestore.__store.has('users/u1/saves/slot-strays')).toBe(false);
+        expect(firestore.__store.has('users/u1/saves/slot-strays/chunks/0')).toBe(false); // the real chunk goes first
+        // 3,001 chunk docs listed, 64 deleted: the stored count's range, then listed strays up to the bound.
+        expect(chunkPaths()).toHaveLength(3001 - 64);
+    });
+
+    it('saveGameToCloud({ keepStamps: true }) stores a STORED payload with its own saveVersion / savedAt; a live state still stamps CURRENT and now', async () => {
+        const stored = { ...makeGameState(), saveVersion: 1, savedAt: 1000 };
+        expect((await saveGameToCloud('u1', 'slot-legacy', stored, { keepStamps: true })).ok).toBe(true);
+        const uploaded = await loadState('u1', 'slot-legacy');
+        expect(uploaded.saveVersion).toBe(1);
+        expect(uploaded.savedAt).toBe(1000);
+
+        const before = Date.now();
+        expect((await saveGameToCloud('u1', 'slot-live', stored)).ok).toBe(true);
+        const live = await loadState('u1', 'slot-live');
+        expect(live.saveVersion).toBe(CURRENT_SAVE_VERSION);
+        expect(live.savedAt).toBeGreaterThanOrEqual(before);
+    });
+});

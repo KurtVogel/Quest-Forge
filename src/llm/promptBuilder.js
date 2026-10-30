@@ -8,7 +8,7 @@ import { describeArmorAc, describeShieldAc, formatModifier, getModifier, getProf
 import { SUPPORTED_ENEMY_CONDITIONS_SENTENCE } from '../engine/enemyStats.js';
 import { getDmBonusXpCap, getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalBlocks, describeBondForPrompt } from './journalBlocks.js';
-import { findSubjectsInText } from '../engine/textMatch.js';
+import { coverage, findSubjectsInText } from '../engine/textMatch.js';
 import { buildWonderBlock } from '../engine/wonder.js';
 import { buildInterludeBlock } from '../engine/interlude.js';
 import { buildPresenceText } from './narrativeMessages.js';
@@ -29,7 +29,7 @@ import { describeHeroIncapacity, isLowLevelSolo } from '../engine/combatPredicat
 import { briefNpcFieldForPrompt, findCompanionRecord, resolveCompanionLook } from '../engine/npcRoster.js';
 import { buildRelationshipBeatBlock } from '../engine/relationshipArc.js';
 import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
-import { describeStateTag, liveWorldFacts } from '../engine/worldFacts.js';
+import { describeStateTag, factTokenSet, hasNegation, isLiveFact, liveWorldFacts } from '../engine/worldFacts.js';
 import { conversationalAgeSince, describeTurnsAgo } from '../engine/replayLedger.js';
 
 // ——— RETRIEVED MEMORIES (the RAG block — moved here from engine/vectorMemory.js
@@ -48,6 +48,76 @@ import { conversationalAgeSince, describeTurnsAgo } from '../engine/replayLedger
 export const RETRIEVED_MEMORY_ROW_MAX = 600;
 export const RETRIEVED_MEMORIES_CHAR_CEILING = 8000;
 const MEMORY_LABEL_MAX = 80;
+
+/**
+ * A retrieved row that RESTATES a since-flipped fact carries its correction
+ * (memory-research 2026-10-28 M0, D1 / D4 — "Obsolete Facts": the newest
+ * value present with one obsolete competitor beside it cost 100 → 44.6 %;
+ * reproduced on ours as a journal row restating a flipped fact printed bare
+ * beside the live flip in WORLD FACTS). A journal / narrative / npc / general
+ * row whose text holds at least this share of a superseded fact's meaning
+ * tokens — the dedupe's own tokenizer, `factTokenSet` — and whose restating
+ * clause does not already carry the live twin's polarity ends
+ * ` — since changed: "<live twin>"`. Never a `world_fact` row (the seed
+ * prunes those) and never a `player` row (a claim, not canon). Zero calls.
+ */
+export const STALE_ROW_CONTAINMENT = 0.8;
+const STALE_TAG_TWIN_MAX = 160;
+const STALE_TAGGABLE_CATEGORIES = new Set(['journal', 'narrative', 'npc', 'general']);
+
+/** The superseded facts whose LIVE twin is on record, newest change first, with their token sets. */
+function listStaleFacts(worldFacts) {
+    if (!Array.isArray(worldFacts) || worldFacts.length === 0) return [];
+    const byId = new Map(worldFacts.filter(f => f && typeof f.id === 'string').map(f => [f.id, f]));
+    const stamp = f => (Number.isFinite(f.supersededAtMessage) ? f.supersededAtMessage : -1);
+    return worldFacts
+        .filter(f => f && typeof f.fact === 'string' && f.supersededBy && !Number.isFinite(f.retractedAtMessage))
+        .map(f => {
+            // A twin itself superseded (a re-flip) is not the live truth: the
+            // fact it replaced may be true again, and its own successor tags.
+            const twin = byId.get(f.supersededBy);
+            if (!isLiveFact(twin)) return null;
+            const tokens = factTokenSet(f.fact);
+            if (tokens.size === 0) return null;
+            return { stale: f, twin, tokens, flip: hasNegation(f.fact) !== hasNegation(twin.fact) };
+        })
+        .filter(Boolean)
+        .sort((a, b) => stamp(b.stale) - stamp(a.stale));
+}
+
+/** The sentence of `text` holding the most of `tokens` — where the row's polarity on THIS claim is judged. */
+function restatingClause(text, tokens) {
+    const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean);
+    if (sentences.length <= 1) return text;
+    let best = sentences[0];
+    let bestShare = -1;
+    for (const sentence of sentences) {
+        const share = coverage(tokens, factTokenSet(sentence));
+        if (share > bestShare) {
+            best = sentence;
+            bestShare = share;
+        }
+    }
+    return best;
+}
+
+/** The ` — since changed: "…"` tag for a row, or '' — one tag per row, the newest change winning. */
+function staleRowTag(memory, staleFacts) {
+    if (staleFacts.length === 0 || typeof memory?.text !== 'string') return '';
+    const category = typeof memory.category === 'string' ? memory.category : 'general';
+    if (!STALE_TAGGABLE_CATEGORIES.has(category)) return '';
+    const rowTokens = factTokenSet(memory.text);
+    if (rowTokens.size === 0) return '';
+    for (const { twin, tokens, flip } of staleFacts) {
+        if (coverage(tokens, rowTokens) < STALE_ROW_CONTAINMENT) continue;
+        // A genuine flip pair: a clause already on the twin's side of the
+        // negation states the new truth and needs no tag. A same-polarity
+        // close (a plan closed by its deed) is judged on the tokens alone.
+        if (flip && hasNegation(restatingClause(memory.text, tokens)) === hasNegation(twin.fact)) continue;
+        return ` — since changed: "${clipMemoryText(twin.fact, STALE_TAG_TWIN_MAX)}"`;
+    }
+    return '';
+}
 
 /** A memory's label (category / location) read string-or-fallback, clamped — the row came from a cache. */
 function cleanMemoryLabel(value, fallback = '') {
@@ -72,12 +142,17 @@ function clipMemoryText(text, max) {
  * summary of a flood used to print exactly like a 2-turn-old one while every
  * other memory line in the game says its age); a row with no stamp prints no
  * age — never "0 turns ago". The age is the LINE's, never the embedded text's.
+ * A row that restates a since-flipped fact ends ` — since changed: "<live
+ * twin>"` when `worldFacts` (the WHOLE list — the superseded rows are the
+ * ones read; `liveWorldFacts` would hide them) is given; the tag counts
+ * toward the row max and the ceiling like the age does.
  * @param {Array<{text: string, category: string, location?: string, atMessage?: number}>} memories
- * @param {{ messages?: Array|null }} [options]
+ * @param {{ messages?: Array|null, worldFacts?: Array|null }} [options]
  * @returns {string}
  */
-export function buildRetrievedMemoriesBlock(memories, { messages = null } = {}) {
+export function buildRetrievedMemoriesBlock(memories, { messages = null, worldFacts = null } = {}) {
     if (!memories || memories.length === 0) return '';
+    const staleFacts = listStaleFacts(worldFacts);
     const lines = [];
     let used = 0;
     let omitted = 0;
@@ -89,7 +164,8 @@ export function buildRetrievedMemoriesBlock(memories, { messages = null } = {}) 
         const location = cleanMemoryLabel(m.location);
         const locationTag = location ? ` — recorded at: ${location}` : '';
         const age = Array.isArray(messages) && Number.isFinite(m.atMessage) ? describeTurnsAgo(messages, m.atMessage) : '';
-        const line = `- [${label}${locationTag}] ${clipMemoryText(m.text, RETRIEVED_MEMORY_ROW_MAX)}${age ? ` — ${age}` : ''}`;
+        const stale = staleRowTag(m, staleFacts);
+        const line = `- [${label}${locationTag}] ${clipMemoryText(m.text, RETRIEVED_MEMORY_ROW_MAX - stale.length)}${stale}${age ? ` — ${age}` : ''}`;
         if (used + line.length + 1 > RETRIEVED_MEMORIES_CHAR_CEILING) {
             omitted += 1;
             continue;
@@ -394,6 +470,9 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
             combatActive: ctx.combatActive,
             // A travelling companion's turn beat is a breaking point (WOW 2026-10-13).
             party: ctx.party,
+            // A TURN beat needs its person in the scene (2026-10-30 P2): the
+            // same presence text the KNOWN NPCs slots read below.
+            presenceText: ctx.messages && ctx.messages.length > 0 ? buildPresenceText(ctx.messages) : '',
         });
         if (beatBlock) {
             parts.push(beatBlock, 'relationshipBeat');
@@ -539,7 +618,10 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
         }
 
         // RAG: retrieved memories most relevant to the current player action
-        const ragBlock = buildRetrievedMemoriesBlock(retrievedMemories, { messages: ctx.messages });
+        // The WHOLE fact list rides (2026-10-30 M0): a row restating a since-
+        // flipped fact is tagged with its live twin, and only the superseded
+        // rows — the ones liveWorldFacts filters out — say which those are.
+        const ragBlock = buildRetrievedMemoriesBlock(retrievedMemories, { messages: ctx.messages, worldFacts });
         if (ragBlock) {
             parts.push(ragBlock, 'retrievedMemories');
         }
@@ -757,7 +839,7 @@ When game events occur, include a structured JSON block at the END of your respo
     { "name": "<culture-grounded NPC name>", "gender": "woman", "species": "human", "disposition": "friendly", "lastNotes": "Gave the player a room and hinted at a missing merchant", "basedIn": "Millhaven", "lastLocation": "The Rusty Flagon, Millhaven", "stanceToPlayer": "Grateful for the rescue and quietly charmed by the hero's easy humor", "bondMoment": "The hero flirted while paying for the room; she laughed and undercharged him" }
   ],
   "front_updates": [
-    { "id": "front-local-pressure", "clock": 1, "stage": 1, "publicHints": ["Refugees whisper that the north road is watched."], "notes": "Advanced because the party spent a night away from the road." },
+    { "id": "front-local-pressure", "clock_delta": -1, "publicHints": ["Refugees say the watchers have pulled back from the north road."], "notes": "Softened because the hero burned the watchers' camp on the north road." },
     { "id": "front-defeated-pressure", "status": "resolved", "notes": "The hero slew the pack matriarch beneath the mill and burned the brood; the raids on the valley are over." }
   ],
   "memory_updates": [
@@ -831,7 +913,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - If the WORLD TEMPO section is present, it is private DM state. Never reveal front ids, faction stubs, intensity labels, pace levels, or that a pacing system exists. The player only ever experiences the fiction.
 - OBEY THE TEMPO: when the section says the world is QUIET, introduce no unprovoked new threats or pressure symptoms — quiet scenes are complete scenes. When it grants a permission, surface at most that ONE symptom, at or below the stated intensity. Player-initiated risk ("I go hunt goblins") is always honored normally and never counts against the tempo.
 - A private cadenced director owns ordinary off-screen clock movement. Do not increment a front merely because time passed or it was ignored in this response.
-- Use \`front_updates\` only for an immediate, response-established change: the player meaningfully helps/hinders/resolves a pressure, or the narration makes a new symptom concretely visible. Keep any clock/stage change to one step at most.
+- Use \`front_updates\` only for an immediate, response-established change: the player meaningfully helps/hinders/resolves a pressure, or the narration makes a new symptom concretely visible. Move a pressure with \`clock_delta\`: -1 or +1 (one step; you never see the clock, so never write an absolute value), and \`stage_delta\`: +1 only when a new portent became visibly manifest.
 - **RESOLVING A FRONT:** when THIS response's fiction has the player decisively END a pressure — its driving force destroyed, disbanded, redeemed, or permanently neutralized on-screen — emit \`front_updates\` with that front's id, \`"status": "resolved"\`, and a short \`notes\` epitaph stating how it ended. This is how a victory becomes permanent: the engine canonizes it, announces it to the player, and keeps that world honest afterward. Never leave a genuinely defeated pressure unresolved.
 - Resolution is for the pressure itself being finished, not for winning one battle, clearing one symptom, or driving it off temporarily — if it can regroup and keep pursuing its goal, soften the clock instead. Resolved is final: never advance, revive, or re-emit a resolved front.
 - After a resolution (see any RECENT VICTORY line), the world visibly relaxes where that pressure operated. Show the absence; do not backfill it with a similar threat.

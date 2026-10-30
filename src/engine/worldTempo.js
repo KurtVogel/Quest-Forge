@@ -26,6 +26,7 @@ import { conversationalDistance } from './replayLedger.js';
 import { DEFAULT_MAX_CLOCK, DOOM_WINDOW_MESSAGES, describeAvertedPortent, describeFrontDoom, describeFrontPortents } from './fronts.js';
 import { cleanText as typedText } from './text.js';
 import { describeWornMotifs, recordWorldMotifs } from './worldMotifs.js';
+import { isGenericCreatureName, namesMatch } from './npcRoster.js';
 
 export const INTENSITY_LEVELS = ['whispers', 'indirect', 'presence', 'confrontation'];
 export const PACE_DIALS = ['slow-burn', 'standard', 'breakneck'];
@@ -279,16 +280,36 @@ export function foeFamilyKey(name) {
     return head;
 }
 
+/**
+ * A foe who is a PERSON on the roster is not a monster family (2026-10-30,
+ * living-world P2 from the Opus playtest: END_COMBAT counted "Joss" and
+ * "oar-hand" as motif families, and THIS WORLD HAS ALREADY SHOWN would have
+ * warned the DM off a man's name). The roster rule only, never a guess from
+ * capitalization: a character-tier record whose name matches the foe's
+ * (trailing numeral stripped, namesMatch short / long forms) keeps the foe
+ * out of foeFamilies; an archived creature record ("Ghoul") or a generic
+ * creature name never shields a kind. The enemies summary keeps the name.
+ */
+function isRosterPerson(name, npcs) {
+    const clean = cleanText(name, 60).replace(/\s+\d+$/, '');
+    if (!clean || !Array.isArray(npcs)) return false;
+    return npcs.some(npc => npc && typeof npc.name === 'string'
+        && (!npc.rosterTier || npc.rosterTier === 'character')
+        && !isGenericCreatureName(npc.name)
+        && namesMatch(npc.name, clean));
+}
+
 /** Build the ledger entry END_COMBAT appends (cap MAX_RECENT_ENCOUNTERS). */
 export function buildEncounterEntry(state, payload = {}) {
     const outcome = payload.defeat ? 'defeat' : payload.escaped ? 'escaped' : 'victory';
     const enemies = state.combat?.enemies || [];
+    const kinds = enemies.filter(enemy => !isRosterPerson(enemy?.name, state.npcs));
     return {
         at: Date.now(),
         messageIndex: (state.messages || []).length,
         location: cleanText(state.currentLocation, 120) || null,
         enemies: summarizeEncounterEnemies(enemies),
-        foeFamilies: [...new Set(enemies.map(enemy => foeFamilyKey(enemy?.name)).filter(Boolean))].slice(0, 8),
+        foeFamilies: [...new Set(kinds.map(enemy => foeFamilyKey(enemy?.name)).filter(Boolean))].slice(0, 8),
         outcome,
         // The striking particular a place keeps (fight memory, 2026-09-28) —
         // hearsay's text, never the tempo block's; absent for a plain fight.

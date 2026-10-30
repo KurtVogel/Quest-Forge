@@ -147,12 +147,19 @@ async function cacheRender(key, result, options) {
     cacheSet(key, url === result.url ? result : { ...result, url });
 }
 
-/** Guess the image MIME from the leading bytes of a base64 payload. */
+/**
+ * The image MIME the leading bytes of a base64 payload declare, or null for
+ * anything that is not one of the four image magics (2026-10-29 audit nit):
+ * an unrecognised body used to default to JPEG, so a non-image `b64_json`
+ * became a `data:image/jpeg` URL the sanitizer accepted and the reducer
+ * stored. xAI returns JPEG by default — `/9j/` is its SOI marker.
+ */
 function mimeFromBase64(b64) {
     if (b64.startsWith('iVBOR')) return 'image/png';
     if (b64.startsWith('R0lGOD')) return 'image/gif';
     if (b64.startsWith('UklGR')) return 'image/webp';
-    return 'image/jpeg'; // xAI returns JPEG by default
+    if (b64.startsWith('/9j/')) return 'image/jpeg';
+    return null;
 }
 
 // Provider payloads are trusted by TYPE, not shape (2026-09-09 audit P2): a
@@ -275,9 +282,15 @@ const TIERS = {
         }),
         extract: (data) => {
             const b64 = base64ImageBody(data?.data?.[0]?.b64_json);
-            return b64 ? `data:${mimeFromBase64(b64)};base64,${b64}` : null;
+            const mime = b64 ? mimeFromBase64(b64) : null;
+            return mime ? `data:${mime};base64,${b64}` : null;
         },
-        emptyDetail: () => '',
+        // A base64 body with no image magic is "not an image", told apart
+        // from the bare `xai-empty` the moderation predicate reads.
+        emptyDetail: (data) => {
+            const b64 = base64ImageBody(data?.data?.[0]?.b64_json);
+            return b64 && !mimeFromBase64(b64) ? 'not an image' : '';
+        },
     },
     gemini: {
         request: (prompt, apiKey, { aspectRatio }) => ({

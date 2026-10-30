@@ -10,7 +10,7 @@ import {
     sanitizePendingRoleplayCheck,
 } from '../../engine/roleplayCheck.js';
 import { appendRollHistory, reviveCharacter, systemMessage } from './shared.js';
-import { isLiveFact } from '../../engine/worldFacts.js';
+import { planRetraction } from '../../engine/retraction.js';
 import { consumeInterlude } from '../../engine/interlude.js';
 import { isTableTalkMessage } from '../../engine/tableTalkIntent.js';
 import { gameReducer } from '../gameReducer.js';
@@ -159,20 +159,19 @@ export const handlers = {
         // never deleted — the record lane shows it tagged), an active card
         // goes dormant, an impression is dropped. The RAG rows leave the
         // store in ChatPanel (the reducer cannot reach IndexedDB).
-        const messageCount = state.messages.length;
-        let facts = 0;
-        let cards = 0;
+        // Retraction follows the LAST WITNESS (memory-research M0, 2026-10-28):
+        // a fact / card the fiction restated from a later message is KEPT —
+        // its source moves to the newest surviving witness — and only a record
+        // nothing later said is retracted. `planRetraction` is the one
+        // judgement; ChatPanel reads the same plan for the RAG store.
+        const plan = planRetraction(state, messageId);
+        const worldFacts = plan.worldFacts;
+        const storyMemory = plan.storyMemory;
+        const facts = plan.retractedFacts.length;
+        const cards = plan.retractedCards.length;
+        const keptFacts = plan.keptFacts.length;
+        const keptCards = plan.keptCards.length;
         let impressions = 0;
-        const worldFacts = (state.worldFacts || []).map(fact => {
-            if (!fact || fact.sourceMessage !== messageId || !isLiveFact(fact)) return fact;
-            facts += 1;
-            return { ...fact, retractedAtMessage: messageCount };
-        });
-        const storyMemory = (state.storyMemory || []).map(card => {
-            if (!card || card.sourceMessage !== messageId || (card.status || 'active') !== 'active') return card;
-            cards += 1;
-            return { ...card, status: 'dormant', retractedAtMessage: messageCount };
-        });
         const npcs = (state.npcs || []).map(npc => {
             if (!npc || !Array.isArray(npc.recentImpressions)) return npc;
             const kept = npc.recentImpressions.filter(entry => entry?.sourceMessage !== messageId);
@@ -183,20 +182,32 @@ export const handlers = {
             return rest;
         });
         const retracted = facts + cards + impressions;
-        if (retracted > 0) {
-            const parts = [
-                facts > 0 && `${facts} world fact${facts === 1 ? '' : 's'}`,
-                cards > 0 && `${cards} story card${cards === 1 ? '' : 's'}`,
-                impressions > 0 && `${impressions} unconfirmed impression${impressions === 1 ? '' : 's'}`,
-            ].filter(Boolean).join(', ');
-            // An infrastructure line (kind: 'error'): never retold as saga.
+        const kept = keptFacts + keptCards;
+        const count = (n, noun) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+        const parts = [
+            facts > 0 && count(facts, 'world fact'),
+            cards > 0 && count(cards, 'story card'),
+            impressions > 0 && count(impressions, 'unconfirmed impression'),
+        ].filter(Boolean).join(', ');
+        const keptParts = [
+            keptFacts > 0 && count(keptFacts, 'world fact'),
+            keptCards > 0 && count(keptCards, 'story card'),
+        ].filter(Boolean).join(', ');
+        // An infrastructure line (kind: 'error'): never retold as saga. One
+        // line names what left the record and what stayed because a later
+        // message said it too.
+        if (retracted > 0 && kept > 0) {
+            messages = [...messages, systemMessage(`✕ Message removed — and what it had put on the record is retracted with it: ${parts}. Kept — restated later: ${keptParts}. The DM no longer sees what was retracted; nothing else changed.`, { kind: 'error' })];
+        } else if (retracted > 0) {
             messages = [...messages, systemMessage(`✕ Message removed — and what it had put on the record is retracted with it: ${parts}. The DM no longer sees them; nothing else changed.`, { kind: 'error' })];
+        } else if (kept > 0) {
+            messages = [...messages, systemMessage(`✕ Message removed — what it had put on the record is kept — restated later: ${keptParts}. Nothing else changed.`, { kind: 'error' })];
         }
         return {
             ...state,
             messages,
-            ...(facts > 0 && { worldFacts }),
-            ...(cards > 0 && { storyMemory }),
+            ...(plan.factsChanged && { worldFacts }),
+            ...(plan.cardsChanged && { storyMemory }),
             ...(impressions > 0 && { npcs }),
         };
     },

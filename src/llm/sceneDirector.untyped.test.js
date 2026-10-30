@@ -18,7 +18,8 @@ describe('composeScenePrompt with untyped records', () => {
     beforeEach(() => sendMessage.mockReset());
 
     it('never rejects on object identity fields and never paints "[object Object]"', async () => {
-        sendMessage.mockResolvedValue('prompt');
+        // A real-length reply: anything under ART_DIRECTOR_MIN_WORDS is not a prompt (2026-10-29).
+        sendMessage.mockResolvedValue('A quiet dock at dusk, Ghazra on the planks, Wit beside her with a dagger, Maren watching from the pier.');
         const result = await composeScenePrompt({
             situation: 'A quiet dock.',
             character: { name: 'Ghazra', gender: {}, appearance: {}, background: ['x'], race: 'halfOrc', class: 'fighter', equippedSummary: 7 },
@@ -27,7 +28,7 @@ describe('composeScenePrompt with untyped records', () => {
             currentLocation: 'Docks',
             settings,
         });
-        expect(result).toBe('prompt');
+        expect(result).toMatch(/^A quiet dock at dusk/);
         const text = userMessage();
         expect(text).not.toContain('[object Object]');
         expect(text).toContain('Player character — Ghazra: a Half-Orc Fighter');

@@ -1127,6 +1127,36 @@ describe('chronicle store — chapter prose does not ride the record that change
     });
 });
 
+describe('serializeGameState keepStamps — a STORED payload keeps its own stamps (2026-10-30 audit P2)', () => {
+    it('a live state is stamped CURRENT + now (the default, unchanged)', () => {
+        const before = Date.now();
+        const serialized = serializeGameState(makeGameState({ saveVersion: 1, savedAt: 1000 }));
+        expect(serialized.saveVersion).toBe(CURRENT_SAVE_VERSION);
+        expect(serialized.savedAt).toBeGreaterThanOrEqual(before);
+    });
+
+    it('keepStamps keeps a finite saveVersion / savedAt exactly — a { saveVersion: 1, savedAt: 1000 } payload is not re-stamped current', () => {
+        const serialized = serializeGameState(makeGameState({ saveVersion: 1, savedAt: 1000 }), { keepStamps: true });
+        expect(serialized.saveVersion).toBe(1);
+        expect(serialized.savedAt).toBe(1000);
+        expect(serialized.settings).toBeUndefined(); // the strip still applies
+    });
+
+    it('keepStamps leaves an absent or junk stamp ABSENT: a pre-versioned payload reads as version 0 and owes every migration; a stamp-less one heals lastPlayedAt to nothing', async () => {
+        const { getSaveVersion } = await import('./migrations.js');
+        const bare = makeGameState();
+        delete bare.saveVersion;
+        delete bare.savedAt;
+        const serialized = serializeGameState(bare, { keepStamps: true });
+        expect(serialized).not.toHaveProperty('saveVersion');
+        expect(serialized).not.toHaveProperty('savedAt');
+        expect(getSaveVersion(serialized)).toBe(0);
+        const junk = serializeGameState(makeGameState({ saveVersion: '3', savedAt: 'yesterday' }), { keepStamps: true });
+        expect(junk).not.toHaveProperty('saveVersion');
+        expect(junk).not.toHaveProperty('savedAt');
+    });
+});
+
 describe('2026-10-06 audit: the queue sweep (persistence + character-vault)', () => {
     it('a roster row saved from the Character Sheet equals one saved from an import of the same hero', async () => {
         // The sheet saves the LIVE hero (wounded, dying, spent); the import path

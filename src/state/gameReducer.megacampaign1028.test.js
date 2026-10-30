@@ -214,6 +214,154 @@ describe('a new land makes room by putting a front left behind to sleep', () => 
         expect(seeded.fronts.map(f => f.status)).toEqual(['active', 'dormant', 'active']);
         expect(seeded.session.pendingRegionalFronts).toMatchObject({ region: 'the Icebound Coast' });
     });
+
+    it('"left behind" means it has a BEHIND: a front holding ground in another land sleeps before an older theaterless one (2026-10-30 P2)', () => {
+        let state = { ...initialGameState, messages: msgs(20), session: { ...initialGameState.session, id: 's1' }, character: hero };
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Aldermill' });
+        state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Aldermill', profile: { type: 'settlement', region: 'the Riverlands' }, evidenceText: 'Aldermill, in the Riverlands.' } });
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Fort Halla' });
+        state = {
+            ...state,
+            locations: state.locations.map(r => (r.name === 'Aldermill' ? { ...r, theaterFrontIds: ['f1'] } : r)),
+            fronts: ['f0', 'f1', 'f2'].map(id => ({ id, title: id.toUpperCase(), status: 'active' })),
+        };
+        const seeded = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Fort Halla', profile: { region: 'the Icebound Coast' }, evidenceText: 'Fort Halla, on the Icebound Coast.' } });
+        expect(seeded.fronts.map(f => f.status)).toEqual(['active', 'dormant', 'active']);
+    });
+});
+
+describe('a slept front wakes when the hero returns to its land (2026-10-30 P1 — the sleep\'s mirror)', () => {
+    // Aldermill lies in the Riverlands, Fort Halla on the Icebound Coast; the hero stands at Fort Halla.
+    const traveled = () => {
+        let state = { ...initialGameState, messages: msgs(20), session: { ...initialGameState.session, id: 's1' }, character: hero };
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Aldermill' });
+        state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Aldermill', profile: { type: 'settlement', region: 'the Riverlands' }, evidenceText: 'Aldermill, in the Riverlands.' } });
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Fort Halla' });
+        state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Fort Halla', profile: { type: 'settlement', region: 'the Icebound Coast' }, evidenceText: 'Fort Halla, on the Icebound Coast.' } });
+        return { ...state, session: { ...state.session, pendingRegionalFronts: null } };
+    };
+    const withTheaters = (state, map) => ({
+        ...state,
+        locations: state.locations.map(r => (map[r.name] ? { ...r, theaterFrontIds: map[r.name] } : r)),
+    });
+    const front = (id, status = 'active') => ({ id, title: id.toUpperCase(), status, clock: 2, maxClock: 6 });
+
+    it('a dormant front holding ground in the arrival land wakes; one with no ground here stays asleep; a resolved one never wakes', () => {
+        let state = withTheaters(traveled(), { Aldermill: ['f-river', 'f-done'] });
+        state = { ...state, fronts: [front('f-ice'), front('f-river', 'dormant'), front('f-nowhere', 'dormant'), front('f-done', 'resolved')] };
+        const back = gameReducer(state, { type: 'SET_LOCATION', payload: 'Aldermill' });
+        expect(back.fronts.map(f => f.status)).toEqual(['active', 'active', 'dormant', 'resolved']);
+    });
+
+    it('a full web puts the oldest front holding no ground here to sleep to make room — preferring one with a BEHIND', () => {
+        let state = withTheaters(traveled(), { Aldermill: ['f-river'], 'Fort Halla': ['f-ice'] });
+        state = { ...state, fronts: [front('f-home'), front('f-ice'), front('f-b'), front('f-c'), front('f-river', 'dormant')] };
+        const back = gameReducer(state, { type: 'SET_LOCATION', payload: 'Aldermill' });
+        // f-ice (ground on the Icebound Coast) sleeps before the older theaterless f-home; f-river wakes.
+        expect(back.fronts.map(f => `${f.id}:${f.status}`)).toEqual(['f-home:active', 'f-ice:dormant', 'f-b:active', 'f-c:active', 'f-river:active']);
+    });
+
+    it('when nothing can sleep, nothing wakes', () => {
+        let state = withTheaters(traveled(), { Aldermill: ['f-a', 'f-b', 'f-c', 'f-d', 'f-river'] });
+        state = { ...state, fronts: [front('f-a'), front('f-b'), front('f-c'), front('f-d'), front('f-river', 'dormant')] };
+        const back = gameReducer(state, { type: 'SET_LOCATION', payload: 'Aldermill' });
+        expect(back.fronts.map(f => f.status)).toEqual(['active', 'active', 'active', 'active', 'dormant']);
+    });
+
+    it('a re-statement of the current place is no arrival and wakes nothing', () => {
+        let state = withTheaters(traveled(), { 'Fort Halla': ['f-ice'] });
+        state = { ...state, fronts: [front('f-home'), front('f-ice', 'dormant')] };
+        const same = gameReducer(state, { type: 'SET_LOCATION', payload: 'Fort Halla' });
+        expect(same.fronts.map(f => f.status)).toEqual(['active', 'dormant']);
+    });
+
+    it('the classification seam: a new place learning its land wakes the front sleeping in that land', () => {
+        let state = traveled();
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Icebound Keep' });
+        state = withTheaters(state, { 'Fort Halla': ['f-ice'] });
+        state = { ...state, fronts: [front('f-home'), front('f-ice', 'dormant')] };
+        const classified = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Icebound Keep', profile: { type: 'hostile_site', region: 'the Icebound Coast' }, evidenceText: 'The keep stands on the Icebound Coast.' } });
+        expect(classified.fronts.map(f => f.status)).toEqual(['active', 'active']);
+    });
+});
+
+describe('the DM moves a clock by direction, softening throttled like a gain (2026-10-30 P1)', () => {
+    const base = (clock = 4, overrides = {}) => ({
+        ...initialGameState,
+        messages: msgs(20),
+        fronts: [{ id: 'known', title: 'Known', goal: 'g', stakes: 's', grimPortents: ['a', 'b', 'c', 'd'], clock, maxClock: 6, stage: 2, status: 'active', ...overrides }],
+    });
+    const update = (state, payload) => gameReducer(state, { type: 'UPDATE_FRONT', payload: { id: 'known', ...payload } });
+
+    it('the old example\'s absolute `clock: 1` copied onto a clock-4 front softens ONCE in the window', () => {
+        const first = update(base(), { clock: 1, stage: 1, notes: 'first' });
+        expect(first.fronts[0]).toMatchObject({ clock: 3, stage: 2, lastDmClockSoftenMessage: 20, notes: 'first' });
+        const second = update(first, { clock: 1, stage: 1, notes: 'second' });
+        expect(second.fronts[0]).toMatchObject({ clock: 3, notes: 'second' });
+        const third = update(second, { clock: 1, stage: 1 });
+        expect(third.fronts[0].clock).toBe(3);
+    });
+
+    it('clock_delta: -1 softens one step; the next soften waits out the window, then lands', () => {
+        const softened = update(base(), { clock_delta: -1 });
+        expect(softened.fronts[0].clock).toBe(3);
+        expect(update(softened, { clock_delta: -1 }).fronts[0].clock).toBe(3);
+        const later = { ...softened, messages: msgs(20 + 12) };
+        expect(update(later, { clock_delta: -1 }).fronts[0]).toMatchObject({ clock: 2, lastDmClockSoftenMessage: 32 });
+    });
+
+    it('clock_delta: 5 clamps to +1 and rides the gain throttle; a legacy absolute still folds to its direction', () => {
+        const gained = update(base(2), { clock_delta: 5 });
+        expect(gained.fronts[0]).toMatchObject({ clock: 3, lastDmClockGainMessage: 20 });
+        expect(update(gained, { clock_delta: 1, notes: 'echo' }).fronts[0]).toMatchObject({ clock: 3, notes: 'echo' });
+        expect(update(base(2), { clock: 6, stage: 6 }).fronts[0]).toMatchObject({ clock: 3, stage: 3 });
+        expect(update(base(2), { clock: 0 }).fronts[0].clock).toBe(1);
+        expect(update(base(2), { clock: 2 }).fronts[0]).toMatchObject({ clock: 2 });
+    });
+
+    it('a soften inside the gain window and a gain inside the soften window both land — two stamps, two dials', () => {
+        const gained = update(base(2), { clock_delta: 1 });
+        expect(update(gained, { clock_delta: -1 }).fronts[0].clock).toBe(2);
+        const softened = update(base(4), { clock_delta: -1 });
+        expect(update(softened, { clock_delta: 1 }).fronts[0].clock).toBe(4);
+    });
+
+    it('stage_delta: +1 is a gain; stage never regresses; a throttled soften keeps hints, notes and resolved flowing', () => {
+        expect(update(base(), { stage_delta: 1 }).fronts[0].stage).toBe(3);
+        expect(update(base(), { stage_delta: -1 }).fronts[0].stage).toBe(2);
+        const softened = update(base(), { clock_delta: -1 });
+        const throttled = update(softened, { clock_delta: -1, publicHints: ['The watchers pull back.'], notes: 'held' });
+        expect(throttled.fronts[0]).toMatchObject({ clock: 3, publicHints: ['The watchers pull back.'], notes: 'held' });
+        const resolved = update(softened, { clock_delta: -1, status: 'resolved', notes: 'Ended.' });
+        expect(resolved.fronts[0].status).toBe('resolved');
+    });
+
+    it('the wire\'s completed / dormant / active change nothing on the record', () => {
+        for (const word of ['completed', 'dormant', 'active']) {
+            expect(update(base(), { status: word }).fronts[0].status).toBe('active');
+        }
+        const dormant = update(base(4, { status: 'dormant' }), { status: 'active' });
+        expect(dormant.fronts[0].status).toBe('dormant');
+    });
+});
+
+describe('the load heal skips a left-behind front instead of relabeling it (2026-10-30 P2)', () => {
+    it('a left-behind front with an OPEN window blocks a home-land full clock from opening a second', () => {
+        const full = (id, overrides = {}) => ({ id, title: id, goal: 'g', stakes: 's', grimPortents: ['a', 'b', 'c', 'd'], clock: 6, maxClock: 6, stage: 4, status: 'active', faction: { name: `${id} faction`, goal: 'x' }, ...overrides });
+        const locations = [
+            { id: 'l1', name: 'The basin', aliases: [], region: 'Jewelglade', theaterFrontIds: ['front-left'] },
+            { id: 'l2', name: 'South watchtower', aliases: [], region: 'Eir-Vael', theaterFrontIds: ['front-home'] },
+        ];
+        const payload = (fronts) => ({ character: hero, inventory: [], messages: msgs(50), session: { id: 's1' }, fronts, locations, currentLocation: 'South watchtower' });
+        const blocked = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: payload([full('front-left', { doomAtMessage: 30 }), full('front-home')]) });
+        expect(blocked.fronts.map(f => f.status)).toEqual(['active', 'active']);
+        expect(blocked.fronts[0].doomAtMessage).toBe(30);
+        expect(blocked.fronts[1].doomAtMessage ?? null).toBeNull();
+        // With the left-behind window CLOSED (or never opened) the home clock opens as before.
+        const open = gameReducer(initialGameState, { type: 'LOAD_GAME', payload: payload([full('front-left'), full('front-home')]) });
+        expect(open.fronts[0].doomAtMessage ?? null).toBeNull();
+        expect(open.fronts[1].doomAtMessage).toBe(open.messages.length);
+    });
 });
 
 describe('memory down is said, never denied', () => {

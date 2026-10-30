@@ -259,10 +259,40 @@ export function extractLanes(serializedState) {
     return { state, lanes };
 }
 
-/** The refs a stored payload names, lane by lane — only lanes that name any. */
+/**
+ * Most refs ONE lane is trusted for, on a metadata record's claim list and on
+ * a stored payload alike — a hostile-input bound, several times any real save
+ * (a mature campaign holds ~40 portraits and ~20 chapters), not an expected size.
+ */
+export const MAX_LANE_REFS = 512;
+
+/**
+ * The refs a list claims for one lane, TYPED: well-formed keys only
+ * (`lane.keyPattern`), deduped, bounded at `MAX_LANE_REFS`. One rule for the
+ * metadata doc's claims (cloudSync.js) and for the refs a payload names
+ * (`collectLaneRefs` below — 2026-10-30 audit P2: the rehydrate used to read
+ * ANY non-empty string as a ref, one blob read each, no cap, so a hostile
+ * payload naming 2,000 junk refs cost 2,000 reads).
+ */
+export function typedLaneRefs(value, lane) {
+    if (!Array.isArray(value)) return [];
+    const refs = new Set();
+    for (const ref of value) {
+        if (refs.size >= MAX_LANE_REFS) break;
+        if (typeof ref === 'string' && lane.keyPattern.test(ref)) refs.add(ref);
+    }
+    return [...refs];
+}
+
+/**
+ * The refs a stored payload names, lane by lane — only lanes that name any,
+ * each list typed and bounded (`typedLaneRefs`). A ref that is not a key of
+ * this lane's shape is never read: its record restores as a missing picture /
+ * a dropped chapter (the lane's own `onMissing`), on both storage paths.
+ */
 export function collectLaneRefs(state) {
     return BLOB_LANES
-        .map(lane => ({ lane, refs: lane.collect(state) }))
+        .map(lane => ({ lane, refs: typedLaneRefs(lane.collect(state), lane) }))
         .filter(entry => entry.refs.length > 0);
 }
 

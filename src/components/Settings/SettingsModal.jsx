@@ -319,7 +319,10 @@ export default function SettingsModal() {
                         failures.push(`"${save.name || save.slotId}": could not be read locally`);
                         continue;
                     }
-                    const cloud = await saveGameToCloud(state.user.uid, save.slotId, savedState);
+                    // A STORED payload keeps its own saveVersion / savedAt
+                    // (2026-10-30): re-stamping it as current would skip the
+                    // migrations its version still owes.
+                    const cloud = await saveGameToCloud(state.user.uid, save.slotId, savedState, { keepStamps: true });
                     if (cloud.ok) uploaded++;
                     else failures.push(`"${save.name || save.slotId}": ${cloud.message}`);
                 } catch (e) {

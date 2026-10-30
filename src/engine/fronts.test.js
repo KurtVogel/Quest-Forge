@@ -197,8 +197,11 @@ describe('normalizeFrontUpdate', () => {
         expect(update.notes).toHaveLength(500);
     });
 
-    it('maps completed to resolved', () => {
-        expect(normalizeFrontUpdate({ id: 'f', status: 'completed' }).status).toBe('resolved');
+    it('admits only resolved on the wire — completed is a one-battle win, not a resolution (2026-10-30)', () => {
+        expect(normalizeFrontUpdate({ id: 'f', status: 'completed' })).not.toHaveProperty('status');
+        expect(normalizeFrontUpdate({ id: 'f', status: 'resolved' }).status).toBe('resolved');
+        // The record's LOAD fold keeps the alias: a legacy save's `completed` loads resolved.
+        expect(normalizeFront({ id: 'f', status: 'completed' }).status).toBe('resolved');
     });
 });
 

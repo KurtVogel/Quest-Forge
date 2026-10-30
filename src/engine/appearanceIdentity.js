@@ -36,8 +36,11 @@ const SKIN_RULES = [
     { pattern: /\bred[- ]skin(?:ned)?\b|\bcrimson skin\b/i, lock: 'red skin' },
 ];
 
-const BALD_PATTERN = /\bbald(?:[- ]headed)?\b|\bshaved?[- ]?head\b|\bshaven[- ]?head(?:ed)?\b|\bhead (?:is |was )?(?:shaved|shaven|clean[- ]shaven)\b|\bshaved (?:her |his |their )?(?:head|scalp|skull)\b|\bhairless (?:head|scalp|skull)\b|\bsmooth (?:bare |shaved |shaven )?(?:scalp|skull|pate)\b|\bbare (?:scalp|skull|pate)\b|\bno hair\b|\bhead shaved\b|\bscalp shaved\b|\bcropped to the skin\b|\bstubbled scalp\b/i;
-const BALDING_ONLY = /\bbalding\b|\breceding hairline\b|\bthinning hair\b/i;
+// "bald" names a HEAD only when nothing else claims the word (2026-10-29
+// audit P1): a bald eagle on a tabard, a bald-faced lie and a bald tire locked
+// a smooth scalp; a bald patch / spot is the balding state, judged below.
+const BALD_PATTERN = /\bbald(?:[- ]headed)?\b(?![- ]?(?:eagle|eagles|patch|patches|spot|spots|tires?|tyres?|faced)\b)|\bshaved?[- ]?head\b|\bshaven[- ]?head(?:ed)?\b|\bhead (?:is |was )?(?:shaved|shaven|clean[- ]shaven)\b|\bshaved (?:her |his |their )?(?:head|scalp|skull)\b|\bhairless (?:head|scalp|skull)\b|\bsmooth (?:bare |shaved |shaven )?(?:scalp|skull|pate)\b|\bbare (?:scalp|skull|pate)\b|\bno hair\b|\bhead shaved\b|\bscalp shaved\b|\bcropped to the skin\b|\bstubbled scalp\b/i;
+const BALDING_ONLY = /\bbalding\b|\breceding hairline\b|\bthinning hair\b|\bbald (?:patch|spot)\b/i;
 
 const HAIR_NOUNS = 'hair|braids|braid|cornrows|locs|dreadlocks|dreads|curls|ringlets|ponytail|topknot|mohawk|plaits|plait|bun|mane|tresses|afro|buzz cut|crew cut|undercut|pigtails';
 // Up to three descriptive words before the hair noun ("long white hair",
@@ -55,16 +58,40 @@ const BUILD_TERMS = [
 ];
 // A build word describing something other than the body must not lock the
 // body: "a thin scar", "short hair", "a lean smile", "a massive sword".
-const NOT_BODY_NOUN = '(?!\\s+(?:[a-z-]+\\s+)?(?:scar|scars|line|lines|lip|lips|smile|mouth|nose|beard|moustache|mustache|brow|brows|eyebrow|eyebrows|finger|fingers|hand|hands|coat|cloak|blade|sword|dagger|axe|bow|rope|strip|layer|veil|voice|hair|braid|braids|cornrows|face|eyes|neck|waist|wrist|wrists|ankle|ankles|nail|nails|streak|streaks|stubble|door|wall|tail)s?\\b)';
+// A massive warhammer, a fat purse and a stout chest (the box) locked the
+// body too (2026-10-29 audit P1): the gear and the beasts join the list.
+const NOT_BODY_NOUN = '(?!\\s+(?:[a-z-]+\\s+)?(?:scar|scars|line|lines|lip|lips|smile|mouth|nose|beard|moustache|mustache|brow|brows|eyebrow|eyebrows|finger|fingers|hand|hands|coat|cloak|blade|sword|dagger|axe|bow|rope|strip|layer|veil|voice|hair|braid|braids|cornrows|face|eyes|neck|waist|wrist|wrists|ankle|ankles|nail|nails|streak|streaks|stubble|door|wall|tail|warhammer|hammer|shield|club|mace|spear|staff|staves|purse|pack|sack|chest|book|tome|boot|boots|belt|buckle|ring|chain|gem|stone|horse|dog|hound|wolf|wolves|frame of the (?:door|window))s?\\b)';
 const BUILD_PATTERN = new RegExp(`\\b(${BUILD_TERMS.map(t => t.replace(/[-\s]/g, '[-\\s]')).join('|')})\\b${NOT_BODY_NOUN}`, 'gi');
 const BUILD_MAX = 3;
 
+// An age word locks the PERSON, never the gear (2026-10-29 audit P1): "an old
+// leather jerkin" locked elderly, "an ancient bronze amulet" too, "a child's
+// wooden horse" locked a child. The bare age words (old / aged / ancient /
+// elderly) need a person anchor — a person noun within two words after them,
+// or a copula / degree phrase before them ("is old", "looks old", "grown
+// old", "very old", "an old one") — and never an object noun right after;
+// the words that NAME an old person (wizened, crone, greybeard) stay
+// unconditional. "young" keeps locking on its own but gets the object guard.
+const AGE_WORDS = '(?:elderly|ancient|aged|old)';
+const PERSON_NOUN = '(?:woman|women|man|men|lady|ladies|gentleman|gentlemen|crone|hag|fellow|soldier|sailor|priest|priestess|merchant|farmer|fisher\\w*|elf|elves|dwarf|dwarves|orc|goblin|human|halfling|face|features|eyes|hands|voice|frame|body|figure|person|girl|boy|mother|father|grandmother|grandfather|widow|widower|veteran|beggar|guard|servant|witch|wife|husband|king|queen|lord|knight|warrior|wizard|scholar|healer|hunter|smith|innkeeper|one)';
+// Garments, gear, places, relations — an age word before one of these names
+// the thing, not the person wearing or holding it.
+const NOT_OBJECT_NOUN = '(?!\\s+(?:[a-z-]+\\s+)?(?:jerkin|coat|cloak|boot|leather|amulet|sword|blade|book|tome|map|scar|wound|ruin|stone|tree|oak|pine|tower|house|inn|wall|road|bridge|song|habit|friend|debt|wine|ale|tunic|shirt|dress|gown|robe|hat|cap|helm|helmet|armou?r|mail|belt|bag|pack|satchel|purse|ring|chain|pendant|necklace|brooch|dagger|knife|axe|bow|staff|spear|shield|hammer|warhammer|lantern|lamp|pipe|key|coin|scroll|letter|parchment|ledger|journal|name|word|tale|story|stories|saying|joke|way|custom|grudge|quarrel|rivalry|rival|enemy|foe|comrade|crew|dog|hound|horse|mare|mule|cart|wagon|boat|ship|hull|net|rope|sail|dock|pier|mill|barn|farm|fort|keep|castle|temple|shrine|church|chapel|cellar|well|gate|door|path|trail|track|forest|wood|god|kingdom|empire|war|blood|magic|spell|curse|oath|vow|promise|law|lore|rite|burn|break|injury|injuries|fracture|limp|cut|bruise|silver|gold|iron|bronze|brass|copper|steel|wool|linen|silk|fur|hide|bone|wooden|toy|doll|drawing|game|trick|fashion|style|world|days|times|country|town|city|village|port|quarter|district|street|lane|market|square|family|line|lineage|house|clan|order|guild|faith|religion|tongue|language|dialect|script|rune|runes|sign|mark|brand|tattoo)s?\\b)';
+// "an old, weathered face" / "an aged elven woman": the age word, at most two
+// words, then a person noun — and nothing object-like straight after the age word.
+const AGE_PERSON_ANCHOR = `\\b(?:very |extremely |quite |rather )?${AGE_WORDS}\\b${NOT_OBJECT_NOUN}(?:[,\\s]+[a-z-]+){0,2}?[,\\s]+${PERSON_NOUN}\\b`;
+// "is old", "looks old", "grown old", "very old" — a predicate about the
+// person; still never when an object noun follows ("a very old sword").
+const AGE_COPULA_ANCHOR = `\\b(?:is|was|looks?|looked|looking|seems?|seemed|grown|grew|getting|gotten|very|extremely|quite|rather|too|so) ${AGE_WORDS}\\b${NOT_OBJECT_NOUN}`;
 const AGE_RULES = [
     // "middle-aged" contains "aged": it must be judged before the elderly rule.
-    { pattern: /\bmiddle[- ]aged\b|\bin (?:her|his|their) (?:forties|fifties)\b|\bmatronly\b|\bgreying\b|\bgraying\b/i, lock: 'middle-aged' },
-    { pattern: /\b(?:very |extremely )?(?:elderly|ancient|aged|old|wizened|crone|greybeard|graybeard)\b|\bin (?:her|his|their) (?:sixties|seventies|eighties|nineties)\b|\b(?:an old|the old) (?:woman|man)\b/i, lock: 'elderly' },
-    { pattern: /\b(?:very )?young\b|\byouthful\b|\bteenage(?:d)?\b|\badolescent\b|\bin (?:her|his|their) (?:teens|twenties)\b|\bboyish\b|\bgirlish\b|\bbarely (?:grown|adult|of age)\b/i, lock: 'young adult' },
-    { pattern: /\bchild\b|\blittle (?:girl|boy)\b|\bsmall (?:girl|boy)\b|\btoddler\b|\binfant\b/i, lock: 'a child' },
+    { pattern: /\bmiddle[- ]aged\b|\bin (?:her|his|their) (?:forties|fifties)\b|\b(?:4\d|5\d|forty|fifty)(?:[- ]\w+)? years old\b|\bmatronly\b|\bgreying\b|\bgraying\b/i, lock: 'middle-aged' },
+    { pattern: new RegExp(`${AGE_PERSON_ANCHOR}|${AGE_COPULA_ANCHOR}|\\b(?:an|the) old one\\b|\\b(?:wizened|crone|greybeard|graybeard)\\b|\\bin (?:her|his|their) (?:sixties|seventies|eighties|nineties)\\b|\\b(?:[6-9]\\d|1\\d\\d|sixty|seventy|eighty|ninety)(?:[- ]\\w+)? years old\\b`, 'i'), lock: 'elderly' },
+    { pattern: new RegExp(`\\b(?:very )?young\\b${NOT_OBJECT_NOUN}|\\byouthful\\b|\\bteenage(?:d)?\\b|\\badolescent\\b|\\bin (?:her|his|their) (?:teens|twenties)\\b|\\b(?:1[3-9]|2\\d|eighteen|nineteen|twenty)(?:[- ]\\w+)? years old\\b|\\bboyish\\b|\\bgirlish\\b|\\bbarely (?:grown|adult|of age)\\b`, 'i'), lock: 'young adult' },
+    // "child" only as the head noun of the person: never the possessive
+    // ("a child's wooden horse"), never a compound ("child-sized"), never a
+    // past self ("as a child", "when she was a child"), never before an object.
+    { pattern: new RegExp(`(?<!\\bas a )(?<!\\bwas a )(?<!\\bwere a )\\bchild\\b(?!['’]s?\\b)(?!-)${NOT_OBJECT_NOUN}|\\blittle (?:girl|boy)\\b|\\bsmall (?:girl|boy)\\b|\\btoddler\\b|\\binfant\\b`, 'i'), lock: 'a child' },
 ];
 
 const clean = value => (typeof value === 'string' ? value.trim() : '');

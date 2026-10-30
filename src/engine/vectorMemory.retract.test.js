@@ -64,6 +64,26 @@ describe('retractMemoriesFromMessage', () => {
         expect(getMemoryTexts()).toContain('Orsa owns the countinghouse.');
     });
 
+    it('a KEPT fact (restated later) keeps its row — retagged to the new source in memory and on disk — while the rest of the message leaves (2026-10-28)', async () => {
+        await seedMemories('key', [], 'sess-1');
+        await addMemory('key', '[Location: Saltmere] The reeve says Rarg is dead.', 'narrative', 'Saltmere', null, 'a1');
+        await addMemory('key', 'Rarg is dead.', 'world_fact', 'Saltmere', null, 'a1');
+        await addMemory('key', 'The harbor road is flooded.', 'world_fact', 'Saltmere', null, 'a1');
+        expect(getMemoryTexts()).toHaveLength(3);
+
+        const removed = await retractMemoriesFromMessage('a1', ['The harbor road is flooded.'], { keep: [{ text: 'Rarg is dead.', sourceMessage: 'a2' }] });
+        expect(removed).toBe(2);
+        expect(getMemoryTexts()).toEqual(['Rarg is dead.']);
+        // The in-memory retag: the row now answers to a2.
+        expect(await retractMemoriesFromMessage('a1')).toBe(0);
+        expect(getMemoryTexts()).toEqual(['Rarg is dead.']);
+        // The disk retag: a re-seed from the cache loads the row under a2.
+        await seedMemories('key', [{ text: 'Rarg is dead.', category: 'world_fact' }], 'sess-1');
+        expect(getMemoryTexts()).toEqual(['Rarg is dead.']);
+        expect(await retractMemoriesFromMessage('a2')).toBe(1);
+        expect(getMemoryTexts()).toEqual([]);
+    });
+
     it('returns 0 and touches nothing for an unknown message or junk', async () => {
         await addMemory('key', 'A row.', 'narrative', null, null, 'a1');
         expect(await retractMemoriesFromMessage('nope')).toBe(0);

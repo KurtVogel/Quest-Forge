@@ -286,7 +286,9 @@ describe('The bond turns into a scene (2026-10-07, wow npc-relationships) — a 
 
     it('renders THE BOND HAS TURNED by the minted stage with the moment that earned it — in the window, off the live roster, never in combat', () => {
         const beat = mintTurnBeat(trusted, detectBondTurn(bare, trusted), { messageCount: 40 });
-        const block = buildRelationshipBeatBlock(beat, [trusted], { messageCount: 41 });
+        // A turn beat needs its person in the scene (2026-10-30 P2): Tammo is named in the presence text here.
+        const here = { presenceText: 'Tammo sets the oars down and looks at the hero.' };
+        const block = buildRelationshipBeatBlock(beat, [trusted], { messageCount: 41, ...here });
         expect(block).toContain('## THE BOND HAS TURNED — PRIVATE');
         expect(block).toContain('now trusted — earned by: Tammo pulled the hero from the weir and said nothing of it to anyone.');
         expect(block).not.toContain('anyone..');
@@ -294,18 +296,18 @@ describe('The bond turns into a scene (2026-10-07, wow npc-relationships) — a 
         expect(block).toContain('open it as a quest');
         expect(block).toContain('never force the hero\'s reply');
         expect(block).not.toContain('SOMEONE REACHES OUT');
-        expect(buildRelationshipBeatBlock(beat, [trusted], { messageCount: 41, combatActive: true })).toBe('');
-        expect(buildRelationshipBeatBlock(beat, [trusted], { messageCount: 39 })).toBe('');
-        expect(buildRelationshipBeatBlock(beat, [trusted], { messageCount: 41 + BEAT_WINDOW_MESSAGES + 1 })).toBe('');
-        expect(buildRelationshipBeatBlock(beat, [], { messageCount: 41 })).toBe('');
-        expect(buildRelationshipBeatBlock(beat, [{ ...trusted, rosterTier: 'archived_creature' }], { messageCount: 41 })).toBe('');
-        const night = buildRelationshipBeatBlock(mintTurnBeat(intimate, detectBondTurn(trusted, intimate), { messageCount: 40 }), [intimate], { messageCount: 40 });
+        expect(buildRelationshipBeatBlock(beat, [trusted], { messageCount: 41, combatActive: true, ...here })).toBe('');
+        expect(buildRelationshipBeatBlock(beat, [trusted], { messageCount: 39, ...here })).toBe('');
+        expect(buildRelationshipBeatBlock(beat, [trusted], { messageCount: 41 + BEAT_WINDOW_MESSAGES + 1, ...here })).toBe('');
+        expect(buildRelationshipBeatBlock(beat, [], { messageCount: 41, ...here })).toBe('');
+        expect(buildRelationshipBeatBlock(beat, [{ ...trusted, rosterTier: 'archived_creature' }], { messageCount: 41, ...here })).toBe('');
+        const night = buildRelationshipBeatBlock(mintTurnBeat(intimate, detectBondTurn(trusted, intimate), { messageCount: 40 }), [intimate], { messageCount: 40, ...here });
         expect(night).toContain('now intimate');
         expect(night).toContain('the morning-after word');
-        const rift = buildRelationshipBeatBlock(mintTurnBeat(hostile, detectBondTurn(bare, hostile), { messageCount: 40 }), [hostile], { messageCount: 40 });
+        const rift = buildRelationshipBeatBlock(mintTurnBeat(hostile, detectBondTurn(bare, hostile), { messageCount: 40 }), [hostile], { messageCount: 40, ...here });
         expect(rift).toContain('a claim or a warning');
         const cold = { ...bare, bondMoments: [rescue, m('Tammo found the hero had sold his boat and turned his back.', 'betrayal', 5, 9)] };
-        const shut = buildRelationshipBeatBlock(mintTurnBeat(cold, detectBondTurn(trusted, cold), { messageCount: 40 }), [cold], { messageCount: 40 });
+        const shut = buildRelationshipBeatBlock(mintTurnBeat(cold, detectBondTurn(trusted, cold), { messageCount: 40 }), [cold], { messageCount: 40, ...here });
         expect(shut).toContain('now estranged');
         expect(shut).toContain('the door shuts');
         // The block is sized for the dynamic half: one paragraph.

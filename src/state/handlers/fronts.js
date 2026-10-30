@@ -14,6 +14,7 @@ import {
     normalizeFront,
     normalizeFrontProposal,
     normalizeFrontUpdate,
+    frontUpdateDirection,
     openDoomWindow,
     cadenceIdFor,
 } from '../../engine/fronts.js';
@@ -32,6 +33,9 @@ import { rollDie } from '../../engine/dice.ts';
 import { isRecord } from '../../engine/text.js';
 import { gameReducer } from '../gameReducer.js';
 import { systemMessage, upsertNpc } from './shared.js';
+
+/** The two dials a DM `front_updates` entry may move, in either wire shape — never carried onto the record as written. */
+const DIAL_KEYS = ['clock', 'stage', 'clockDelta', 'stageDelta'];
 
 /**
  * Shared installer core for the aftermath/regional one-shot proposals
@@ -386,36 +390,49 @@ export const handlers = {
         // hints may still update; the mechanics are frozen.
         const alreadyResolved = (existing.status || 'active') === 'resolved';
         const update = alreadyResolved
-            ? Object.fromEntries(Object.entries(rawUpdate).filter(([key]) => !['status', 'clock', 'stage'].includes(key)))
+            ? Object.fromEntries(Object.entries(rawUpdate).filter(([key]) => key !== 'status' && !DIAL_KEYS.includes(key)))
             : rawUpdate;
+        // The DM wire is a DIRECTION (2026-10-30 P1): `clock_delta` /
+        // `stage_delta` as given, a legacy absolute folded to the sign of
+        // (value − current) — the DM never sees a clock, so an absolute is a
+        // blind guess and only ever moves the dial one step either way.
+        const messageCount = (state.messages || []).length;
+        const inDmWindow = (stamp) => Number.isFinite(stamp)
+            && conversationalDistance(state.messages, stamp, messageCount) <= DM_CLOCK_GAIN_WINDOW;
+        const clockDir = frontUpdateDirection(update, 'clock', existing.clock);
+        const stageDir = frontUpdateDirection(update, 'stage', existing.stage);
         // DM clock-GAIN throttle (2026-08-24 P2: front_updates was the last
         // DM-writable numeric channel with no replay guard — a re-emitted +1
         // walked a clock 0→max in maxClock turns around the cadence pacing).
-        // One +1 per front per DM_CLOCK_GAIN_WINDOW conversational messages;
-        // softening and symptom/notes/status updates are NEVER throttled —
-        // player interference always lands, the applyFrontAdvanceBatch rule.
-        const wantsGain = (update.clock !== undefined && update.clock > (existing.clock || 0))
-            || (update.stage !== undefined && update.stage > (existing.stage || 0));
-        const gainThrottled = wantsGain
-            && Number.isFinite(existing.lastDmClockGainMessage)
-            && conversationalDistance(state.messages, existing.lastDmClockGainMessage, (state.messages || []).length) <= DM_CLOCK_GAIN_WINDOW;
+        // One +1 per front per DM_CLOCK_GAIN_WINDOW conversational messages.
+        const wantsGain = clockDir > 0 || stageDir > 0;
+        const gainThrottled = wantsGain && inDmWindow(existing.lastDmClockGainMessage);
+        // DM SOFTENING is throttled on the same window through its own stamp
+        // (2026-10-30 P1 — a deliberate revisit of the 2026-08-26 "softening
+        // never throttled" clause for the DM LANE ONLY; the cadence batch
+        // keeps its rule): the example's `clock: 1` copied onto a clock-4
+        // front softened it 4→3→2→1 in three turns. One −1 per front per
+        // window; a throttled soften keeps the existing clock. Symptoms,
+        // notes and `resolved` stay unthrottled.
+        const wantsSoften = clockDir < 0;
+        const softenThrottled = wantsSoften && inDmWindow(existing.lastDmClockSoftenMessage);
+        const carried = Object.fromEntries(Object.entries(update).filter(([key]) => !DIAL_KEYS.includes(key)));
         const boundedUpdate = {
-            ...update,
-            ...(update.clock !== undefined && {
-                clock: gainThrottled
-                    ? Math.min(existing.clock || 0, Math.max((existing.clock || 0) - 1, update.clock))
-                    : Math.max((existing.clock || 0) - 1, Math.min((existing.clock || 0) + 1, update.clock)),
+            ...carried,
+            ...(clockDir > 0 && !gainThrottled && {
+                clock: (existing.clock || 0) + 1,
+                lastDmClockGainMessage: messageCount,
             }),
-            ...(wantsGain && !gainThrottled && {
-                lastDmClockGainMessage: (state.messages || []).length,
+            ...(wantsSoften && !softenThrottled && {
+                clock: Math.max(0, (existing.clock || 0) - 1),
+                lastDmClockSoftenMessage: messageCount,
             }),
             // Stage is non-regressing (like the cadence engine, fronts.js): portents
             // already manifest in the world stay manifest. Clock may soften instead.
             // A throttled update keeps the existing stage (never regresses).
-            ...(update.stage !== undefined && {
-                stage: gainThrottled
-                    ? (existing.stage || 0)
-                    : Math.max(existing.stage || 0, Math.min((existing.stage || 0) + 1, update.stage)),
+            ...(stageDir > 0 && !gainThrottled && {
+                stage: (existing.stage || 0) + 1,
+                lastDmClockGainMessage: messageCount,
             }),
             // Symptoms ACCUMULATE (2026-09-08 P2): the DM only ever sees the
             // last three hints, so its one new symptom used to replace — i.e.

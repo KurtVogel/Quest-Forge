@@ -89,7 +89,8 @@ describe('a travelling companion\'s turn beat is the breaking point', () => {
             expect(inParty).toContain('THE BOND HAS TURNED');
             expect(inParty).toContain('TRAVELLING WITH the hero, so this is the breaking point');
             expect(inParty).toContain('`remove_companions`');
-            const notInParty = buildRelationshipBeatBlock(beat(stage), [npc], { messageCount: 30, party: [] });
+            // Not travelling with the hero but IN the scene (2026-10-30 P2: a turn beat for an absent person renders nothing).
+            const notInParty = buildRelationshipBeatBlock(beat(stage), [npc], { messageCount: 30, party: [], presenceText: 'Osma Varrow stands by the fire.' });
             expect(notInParty).toContain('THE BOND HAS TURNED');
             expect(notInParty).not.toContain('breaking point');
         }

@@ -34,8 +34,14 @@ describe('junk means omit in normalizeFrontUpdate (P1/P2)', () => {
         for (const junk of [null, '', 'ongoing', 'escalating', 42, {}]) {
             expect(normalizeFrontUpdate({ id: 'front-a', status: junk })).not.toHaveProperty('status');
         }
-        expect(normalizeFrontUpdate({ id: 'front-a', status: 'completed' }).status).toBe('resolved');
-        expect(normalizeFrontUpdate({ id: 'front-a', status: 'Dormant' }).status).toBe('dormant');
+        // On the wire `status` is `resolved` ONLY (2026-10-30 P2): `completed`
+        // used to run the whole resolution ceremony for a one-battle win,
+        // `dormant` slept a front the DM could never wake, `active` revived
+        // one the engine had put to sleep. The record's load fold keeps them.
+        for (const word of ['completed', 'Dormant', 'active', 'ACTIVE']) {
+            expect(normalizeFrontUpdate({ id: 'front-a', status: word })).not.toHaveProperty('status');
+        }
+        expect(normalizeFrontUpdate({ id: 'front-a', status: 'Resolved' }).status).toBe('resolved');
     });
 
     it('wraps a single string hint, and omits an empty or junk hint list rather than wiping the ledger', () => {

@@ -56,6 +56,7 @@ import { reviveHero } from './progression.js';
 import {
     buildSustainedSpell,
     chooseSlotLevel,
+    isHeroRef,
     describeRecipientClamp,
     describeSlotChoice,
     dropCondition,
@@ -242,6 +243,20 @@ function makeResult(kind, exchangeId, round, events, terminal, { enemies, compan
 function findByRef(list, value) {
     const normalized = String(value || '').toLowerCase();
     return list.find(item => item.id === value || item.name?.toLowerCase() === normalized) || null;
+}
+
+/**
+ * `findByRef` for the enemy-intent pairing: the exact id first, else the
+ * first SAME-NAMED foe no earlier intent claimed (2026-10-30 strengthening
+ * P2 — two "Bandit"s addressed by name both resolved to the first; the
+ * second intent was skipped as a duplicate and that foe fell back to its
+ * default attack on the hero).
+ */
+function findUnclaimedByRef(list, value, claimed) {
+    const byId = list.find(item => item.id === value);
+    if (byId) return claimed.has(byId.id) ? null : byId;
+    const normalized = String(value || '').toLowerCase();
+    return list.find(item => !claimed.has(item.id) && item.name?.toLowerCase() === normalized) || null;
 }
 
 function activeEnemies(enemies) {
@@ -1062,8 +1077,11 @@ function resolveCompanions({ exchange, enemies, companions, events }, { onlyIds 
         const targets = activeEnemies(enemies);
         let target = intent.target ? findByRef(targets, intent.target) : targets[0];
         if (!target && intent.target && targets.length > 0) {
+            // A downed foe, an ally, or junk: the branch redirects to the
+            // first standing foe either way, so the note says THAT (it used
+            // to call every miss "target is down" — 2026-10-30 audit nit).
             target = targets[0];
-            events.push({ type: 'note', text: `${companion.name}'s target is down; retargeting to ${target.name}.` });
+            events.push({ type: 'note', text: `${companion.name}'s declared target "${intent.target}" is not a standing foe; redirected to ${target.name}.` });
         }
         if (!target) {
             events.push({ type: 'note', text: `${companion.name} has no valid target and holds position.` });
@@ -1082,7 +1100,14 @@ function resolveEnemyAttack({ enemy, targetRef, character, playerAc, companions,
     let targetConditions = character.conditions;
     let intercepted = false;
 
-    const wantsPlayer = !targetRef || targetRef === 'player';
+    // Who the foe means (2026-10-30 strengthening P1): an absent ref is the
+    // hero; a null ref is the wire's "unreadable" and drops below; an exact
+    // companion id / name is that companion; else `isHeroRef` reads
+    // "player" / "self" / "the hero" / the hero's own NAME as the hero — a
+    // foe written as "attacks Astra" used to look Astra up among the
+    // companions and swing at nobody.
+    const wantsPlayer = targetRef === undefined
+        || (targetRef !== null && !findByRef(companions, targetRef) && isHeroRef(targetRef, character));
     // A guarding companion bodily screens the hero: attacks aimed at the player are
     // redirected into the guardian, re-checked per attack so a guardian who drops
     // mid-round stops screening and later blows reach the hero again.
@@ -1157,8 +1182,8 @@ function resolveEnemyAttack({ enemy, targetRef, character, playerAc, companions,
 function resolveEnemies({ exchange, inventory, enemies, companions, events }, { character, playerHp, playerDodging, onlyIds = null, uncannyDodgeState = null }) {
     const intents = new Map();
     for (const intent of exchange?.enemyIntents || []) {
-        const enemy = findByRef(enemies, intent.enemyId);
-        if (enemy && !intents.has(enemy.id)) intents.set(enemy.id, intent);
+        const enemy = findUnclaimedByRef(enemies, intent.enemyId, intents);
+        if (enemy) intents.set(enemy.id, intent);
     }
     let playerDamage = 0;
     // Uncanny Dodge is once per TURN, not once per resolveEnemies call. Callers that

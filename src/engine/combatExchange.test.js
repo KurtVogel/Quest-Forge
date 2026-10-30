@@ -1907,7 +1907,7 @@ describe('combatNarrationPrompt size at the 10-event ceiling (2026-09-23 combat-
         const events = [
             attack('Oda', 'Marsh bandit 1', true, 25, 34),
             attack('Oda', 'Marsh bandit 1', true, 16, 34),
-            { type: 'note', text: "Torvald's target is down; retargeting to Marsh bandit 2." },
+            { type: 'note', text: "Torvald's declared target \"Marsh bandit 1\" is not a standing foe; redirected to Marsh bandit 2." },
             attack('Torvald', 'Marsh bandit 2', true, 27, 34),
             attack('Mira', 'Marsh bandit 2', false, 27, 34),
             attack('Marsh bandit 1', 'Oda', true, 31, 44),
@@ -2083,12 +2083,12 @@ describe('combat pins the audit found missing (2026-10-05)', () => {
         expect(plan.payload.result.events[0]).toMatchObject({ hit: true, damage: 14, remainingHp: 16 });
     });
 
-    it('an object target ref is no target (it used to read "[object Object]")', () => {
+    it('an object target ref is no target (it used to read "[object Object]") — and an unreadable enemy target stays null, never the hero (2026-10-30 P2)', () => {
         const intent = normalizeCombatExchange({
             player_slots: [{ action: 'attack', strikes: [{ target: { evil: true } }, { target: 'Goblin' }] }],
             enemy_intents: [{ enemy_id: { evil: true }, action: 'attack' }, { enemy_id: 'Goblin', action: 'attack', target: { evil: true } }],
         });
         expect(intent.playerSlots[0].strikes).toEqual([{ target: 'Goblin' }]);
-        expect(intent.enemyIntents).toEqual([{ enemyId: 'Goblin', action: 'attack', target: 'player', description: '' }]);
+        expect(intent.enemyIntents).toEqual([{ enemyId: 'Goblin', action: 'attack', target: null, description: '' }]);
     });
 });

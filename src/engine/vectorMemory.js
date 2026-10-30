@@ -361,18 +361,44 @@ function memoryStamp(value) {
  * named (`texts`, in the seed's own format) — from the store and from disk.
  * The player removed the message (✕, a refusal); its canon leaves with it.
  * Never rejects; the cache is derivable.
+ *
+ * Retraction follows the last witness (memory-research M0, 2026-10-28): a
+ * fact the record KEPT because a later message restated it is named in
+ * `keep` (`{ text, sourceMessage }` — the text in the seed's format, the
+ * new source the reducer moved it to); its row stays, retagged to that
+ * source in memory and on disk, whatever the row's old `sourceMessage` said.
+ * Returns the count of rows removed.
  */
-export function retractMemoriesFromMessage(messageId, texts = []) {
+export function retractMemoriesFromMessage(messageId, texts = [], { keep = [] } = {}) {
     if (typeof messageId !== 'string' || !messageId) return Promise.resolve(0);
     const named = new Set((Array.isArray(texts) ? texts : []).filter(t => typeof t === 'string' && t));
-    const gone = memoryStore.filter(row => row.sourceMessage === messageId || (named.size > 0 && named.has(row.text)));
-    if (gone.length === 0) return Promise.resolve(0);
+    const keptSource = new Map();
+    for (const entry of (Array.isArray(keep) ? keep : [])) {
+        if (entry && typeof entry.text === 'string' && entry.text) {
+            keptSource.set(entry.text, typeof entry.sourceMessage === 'string' && entry.sourceMessage ? entry.sourceMessage.slice(0, 80) : null);
+        }
+    }
+    const gone = memoryStore.filter(row => !keptSource.has(row.text)
+        && (row.sourceMessage === messageId || (named.size > 0 && named.has(row.text))));
+    const retagged = [];
+    if (keptSource.size > 0) {
+        memoryStore = memoryStore.map(row => {
+            if (!keptSource.has(row.text) || row.sourceMessage !== messageId) return row;
+            const source = keptSource.get(row.text);
+            const { sourceMessage: _old, ...rest } = row;
+            const next = source ? { ...rest, sourceMessage: source } : rest;
+            retagged.push(next);
+            return next;
+        });
+    }
+    if (gone.length === 0 && retagged.length === 0) return Promise.resolve(0);
     const goneSet = new Set(gone);
     memoryStore = memoryStore.filter(row => !goneSet.has(row));
     queryVectorMemo.clear();
     const persisted = gone.filter(row => row.sessionId != null);
-    if (persisted.length === 0) return Promise.resolve(gone.length);
-    return syncPersistedEmbeddings({ remove: persisted }).then(() => gone.length, () => gone.length);
+    const put = retagged.filter(row => row.sessionId != null);
+    if (persisted.length === 0 && put.length === 0) return Promise.resolve(gone.length);
+    return syncPersistedEmbeddings({ remove: persisted, put }).then(() => gone.length, () => gone.length);
 }
 
 /** Clamp an untrusted subjects list to a small array of clean name strings. */

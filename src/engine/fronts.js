@@ -216,6 +216,7 @@ export const FRONT_RECORD_KEYS = Object.freeze([
     'id', 'title', 'goal', 'stakes', 'grimPortents', 'clock', 'maxClock', 'stage', 'status',
     'publicHints', 'lastAdvanceId', 'lastAdvanceDelta', 'notes', 'faction',
     'resolvedAtMessage', 'resolution', 'resolvedTheaterIds', 'lastDmClockGainMessage',
+    'lastDmClockSoftenMessage',
     'outcome', 'doomAtMessage', 'doomActivationDistance', 'doomClosedAtMessage',
 ]);
 
@@ -253,6 +254,11 @@ export function normalizeFront(front = {}, existing = null) {
     const lastDmClockGainMessage = Number.isFinite(lastDmClockGainMessageRaw)
         ? Math.max(0, Math.round(lastDmClockGainMessageRaw))
         : (existing?.lastDmClockGainMessage ?? null);
+    // The gain stamp's sibling (2026-10-30 hidden-fronts P1): the DM lane's
+    // SOFTENING is throttled on the same window — the DM never sees a clock,
+    // so the example's absolute `clock: 1` copied onto a clock-4 front used
+    // to soften it 4→3→2→1 in three turns with no guard at all.
+    const lastDmClockSoftenMessage = finiteStamp(front.lastDmClockSoftenMessage, existing?.lastDmClockSoftenMessage ?? null);
     // Theaters the front held at the moment it resolved (2026-08-31 P2):
     // resolution frees the records' theaterFrontIds for future fronts, so
     // regional hearsay needs this stamp to grade a retelling at the front's
@@ -291,6 +297,7 @@ export function normalizeFront(front = {}, existing = null) {
         resolution: cleanText(front.resolution, existing?.resolution || '').slice(0, 240),
         resolvedTheaterIds,
         lastDmClockGainMessage,
+        lastDmClockSoftenMessage,
         outcome,
         doomAtMessage,
         doomActivationDistance,
@@ -319,13 +326,23 @@ export function isFrontClockFull(front) {
  * (0–1), counted like the tempo window's: one scene ≈ 2 conversational rows.
  * Pure: returns the same array when nothing opens. Called after the cadence
  * batch and after a DM clock gain — the two ways a clock moves.
+ *
+ * ONE window, judged over the WHOLE list (2026-10-30 P2): `occupied` reads
+ * every unresolved front whatever its status — the load heal used to relabel
+ * a left-behind front before this check, which hid its OPEN window and let a
+ * home-land full clock open a second one. A resolved front's window is over
+ * by construction (the hero's resolve inside the window keeps the stamp and
+ * never closes it). `skipIds` names fronts that may not open — the heal's
+ * left-behind fronts, whose doom waits for the hero's return.
  */
-export function openDoomWindow(fronts = [], { messageCount = 0, delayScenes = 0 } = {}) {
+export function openDoomWindow(fronts = [], { messageCount = 0, delayScenes = 0, skipIds = [] } = {}) {
     const list = Array.isArray(fronts) ? fronts : [];
-    const occupied = list.some(front => (front?.status || 'active') === 'active'
+    const skip = new Set(Array.isArray(skipIds) ? skipIds : []);
+    const occupied = list.some(front => (front?.status || 'active') !== 'resolved'
         && Number.isFinite(front?.doomAtMessage) && !Number.isFinite(front?.doomClosedAtMessage));
     if (occupied) return { fronts: list, opened: null };
     const idx = list.findIndex(front => front && (front.status || 'active') === 'active'
+        && !skip.has(front.id)
         && isFrontClockFull(front) && !Number.isFinite(front.doomAtMessage));
     if (idx === -1) return { fronts: list, opened: null };
     const delay = clampInt(delayScenes, 0, DOOM_TIMING_DIE_SIDES - 1, 0);
@@ -444,6 +461,19 @@ export function describeAvertedPortent(front) {
  * `{ id, title: 'A Name The DM Invented' }` renamed the private front and the
  * resolution fact, the 🕰️ line and hearsay carried it to the player). An
  * update never changes a title.
+ *
+ * The DM is a BLIND writer (2026-10-30 hidden-fronts P1): it sees ids and
+ * factions, never a clock, so the PREFERRED wire is a direction —
+ * `clock_delta` / `stage_delta`, each clamped to -1 | 0 | +1 and carried as
+ * `clockDelta` / `stageDelta`. A legacy absolute `clock` / `stage` still
+ * rides as before; the reducer folds it to a direction against the front it
+ * holds (sign of value − current), exactly as it always did. When both
+ * shapes arrive, the delta wins. On the wire `status` is `resolved` ONLY
+ * (2026-10-30 P2): `completed`, `dormant`, `active` and every other word drop
+ * the key — `completed` used to run the full resolution ceremony for a
+ * one-battle win, `dormant` slept a front the DM could never wake, `active`
+ * revived one the engine had put to sleep. `normalizeStatus` stays the
+ * record's LOAD fold.
  */
 export function normalizeFrontUpdate(update = {}) {
     if (!update || typeof update !== 'object' || Array.isArray(update)) return null;
@@ -456,15 +486,19 @@ export function normalizeFrontUpdate(update = {}) {
     // and an empty hint list all drop their key so the existing front value
     // stands. A single string hint is the common one-item LLM shape and
     // wraps to a list; the reducer APPENDS hints to the front's ledger.
-    const clock = finiteOrUndefined(update.clock);
-    const stage = finiteOrUndefined(update.stage);
+    const clockDelta = finiteOrUndefined(update.clock_delta ?? update.clockDelta);
+    const stageDelta = finiteOrUndefined(update.stage_delta ?? update.stageDelta);
+    const clock = clockDelta === undefined ? finiteOrUndefined(update.clock) : undefined;
+    const stage = stageDelta === undefined ? finiteOrUndefined(update.stage) : undefined;
     const rawHints = update.publicHints ?? update.public_hints;
     const publicHints = normalizeTextArray(typeof rawHints === 'string' ? [rawHints] : rawHints, [], { recent: true });
-    const status = update.status === undefined ? null : normalizeStatus(update.status, null);
+    const status = cleanText(update.status).toLowerCase() === 'resolved' ? 'resolved' : null;
     const notes = cleanText(update.notes).slice(0, FRONT_NOTES_MAX);
 
     const normalized = {
         id,
+        ...(clockDelta !== undefined && { clockDelta: clampInt(clockDelta, -1, 1, 0) }),
+        ...(stageDelta !== undefined && { stageDelta: clampInt(stageDelta, -1, 1, 0) }),
         ...(clock !== undefined && { clock: clampInt(clock, 0, 12, 0) }),
         ...(stage !== undefined && { stage: clampInt(stage, 0, 12, 0) }),
         ...(publicHints.length > 0 && { publicHints }),
@@ -472,6 +506,20 @@ export function normalizeFrontUpdate(update = {}) {
     };
     if (status) normalized.status = status;
     return normalized;
+}
+
+/**
+ * The direction a DM `front_updates` entry asks of one dial (clock or stage),
+ * read from the typed update against the front the reducer holds: the
+ * preferred `*Delta` as given, else the legacy absolute folded to the sign of
+ * (value − current), else 0 when the entry says nothing about that dial.
+ */
+export function frontUpdateDirection(update, dial, current = 0) {
+    const delta = update?.[`${dial}Delta`];
+    if (delta !== undefined) return Math.sign(delta);
+    const absolute = update?.[dial];
+    if (absolute === undefined) return 0;
+    return Math.sign(absolute - (Number(current) || 0));
 }
 
 function normalizeAdvance(advance = {}) {

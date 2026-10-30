@@ -8,6 +8,7 @@
 import { CLASSES } from '../data/classes.js';
 import { findSpell, SPELL_LIST } from '../data/spells.js';
 import { getModifier, getProficiencyBonus } from './rules.js';
+import { namesMatch } from './npcRoster.js';
 
 export const MAX_SPELL_LEVEL = 5;
 
@@ -50,7 +51,27 @@ export function spellTargetLimit(spell) {
     return spell?.targeting?.mode === 'upTo3' ? 3 : 1;
 }
 
-const SELF_ALIASES = new Set(['', 'self', 'me', 'player']);
+const SELF_ALIASES = new Set(['', 'self', 'me', 'player', 'the player', 'hero', 'the hero']);
+
+/**
+ * THE "this ref means the hero" predicate (2026-10-30 strengthening P1).
+ * Empty / self / me / player / the player / hero / the hero (case-folded,
+ * trimmed) and the hero's own name (exact, or `namesMatch` — "Astra" for
+ * "Astra Vane"). The cast lane's recipient ladder and the exchange's enemy
+ * lane read it alike: a foe aiming at the hero BY NAME used to look the name
+ * up among the companions, find nobody, and drop its attack as an
+ * "unavailable target" — every blow the DM wrote as "attacks Astra" was
+ * swallowed. Only a STRING can be the hero: an object, null or undefined is
+ * not (an absent ref is the caller's default to state, not this predicate's).
+ */
+export function isHeroRef(ref, character) {
+    if (typeof ref !== 'string') return false;
+    const lc = ref.trim().toLowerCase();
+    if (SELF_ALIASES.has(lc)) return true;
+    const heroName = typeof character?.name === 'string' ? character.name.trim() : '';
+    if (!heroName || !lc) return false;
+    return lc === heroName.toLowerCase() || namesMatch(ref.trim(), heroName);
+}
 
 /**
  * THE recipient ladder for a self/ally/any-side cast — read by CAST_SPELL
@@ -73,16 +94,17 @@ const SELF_ALIASES = new Set(['', 'self', 'me', 'player']);
  */
 export function resolveSpellRecipients(spell, character, party, refs) {
     const side = spell?.targeting?.side;
-    const heroName = String(character?.name || '').trim().toLowerCase();
     const named = (Array.isArray(refs) ? refs : [refs])
         .map(ref => String(ref ?? '').trim())
         .filter(Boolean);
     const requested = named.length > 0 ? named : [''];
     const resolveOne = (ref) => {
         const lc = ref.toLowerCase();
-        if (SELF_ALIASES.has(lc) || (heroName && lc === heroName)) return { type: 'self' };
+        // An exact party id / name outranks the hero's SHORT-name match (a
+        // companion "Mika" beside a hero "Mika Stone" is still Mika).
         const companion = (party || []).find(c => c && (c.id === ref || String(c.name || '').toLowerCase() === lc)) || null;
         if (companion) return companion.status === 'dead' ? null : { type: 'companion', companion };
+        if (isHeroRef(ref, character)) return { type: 'self' };
         return side === 'any' ? { type: 'other', name: ref.slice(0, 60) } : null;
     };
     let redirected = null;

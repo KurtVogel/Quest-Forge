@@ -78,16 +78,30 @@ export function loadSettings() {
  * The save-format version stamped here is owned by the load-time migration
  * pipeline (state/migrations.js), which version-gates its one-time era
  * migrations on it; `validateSaveState` keeps normalizing defensively either way.
+ *
+ * `keepStamps` (2026-10-30 audit P2): a STORED payload being copied to another
+ * store — Settings' "Upload local saves" feeds `saveGameToCloud` the raw
+ * `loadGame` payload, never a live state — keeps its OWN `saveVersion` and
+ * `savedAt` exactly as it holds them: a finite stamp as is, an absent or junk
+ * one absent (a pre-versioned payload reads as version 0 and runs every
+ * migration on load; a stamp-less one heals `lastPlayedAt` to nothing). The
+ * default re-stamped it CURRENT + now, so a `{ saveVersion: 1 }` payload was
+ * stored as current and skipped every future migration, and a pre-stamp
+ * campaign's last-played time healed to the upload's minute.
  */
-export function serializeGameState(gameState) {
-    const { user: _user, ui: _ui, settings: _settings, ...persisted } = gameState;
+export function serializeGameState(gameState, { keepStamps = false } = {}) {
+    const { user: _user, ui: _ui, settings: _settings, saveVersion, savedAt, ...persisted } = gameState;
     return {
         ...persisted,
-        saveVersion: CURRENT_SAVE_VERSION,
-        // Wall-clock stamp on the PAYLOAD (2026-09-16, the return card): the
-        // slot metadata already carries one, but the loaded state never did,
-        // so LOAD_GAME could not heal a pre-stamp campaign's lastPlayedAt.
-        savedAt: Date.now(),
+        ...(keepStamps
+            ? { ...(Number.isFinite(saveVersion) && { saveVersion }), ...(Number.isFinite(savedAt) && { savedAt }) }
+            : {
+                saveVersion: CURRENT_SAVE_VERSION,
+                // Wall-clock stamp on the PAYLOAD (2026-09-16, the return card): the
+                // slot metadata already carries one, but the loaded state never did,
+                // so LOAD_GAME could not heal a pre-stamp campaign's lastPlayedAt.
+                savedAt: Date.now(),
+            }),
         rollHistory: (gameState.rollHistory || []).slice(-ROLL_HISTORY_CAP),
     };
 }
@@ -165,10 +179,11 @@ export function projectSaveMetadata(data, fallbackSlotId = null) {
  * and both copies stamped `session.prunedMessageCount`, a field
  * `deriveSessionBoundaries` recomputes from the loaded messages on every load;
  * the dead write is gone with the duplication. `savedAt` is the path's own
- * stamp shape (a number locally, an ISO string in Firestore).
+ * stamp shape (a number locally, an ISO string in Firestore). `options` is
+ * `serializeGameState`'s (`keepStamps` for a stored payload being copied).
  */
-export function prepareSavePayload(slotId, gameState, savedAt) {
-    const { state, lanes } = extractLanes(serializeGameState(gameState));
+export function prepareSavePayload(slotId, gameState, savedAt, options = {}) {
+    const { state, lanes } = extractLanes(serializeGameState(gameState, options));
     const metadata = {
         slotId,
         ...buildSaveMetadata(gameState),
