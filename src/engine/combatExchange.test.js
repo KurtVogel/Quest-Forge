@@ -2092,3 +2092,31 @@ describe('combat pins the audit found missing (2026-10-05)', () => {
         expect(intent.enemyIntents).toEqual([{ enemyId: 'Goblin', action: 'attack', target: null, description: '' }]);
     });
 });
+
+describe('a field cleared by FLIGHT over a fallen party is the fight lost (2026-10-30 Opus playtest)', () => {
+    const dyingAlone = party => state({
+        character: { level: 1, currentHP: 0, maxHP: 10, dying: true, deathSaves: { successes: 0, failures: 0 }, conditions: ['Unconscious'] },
+        party,
+    });
+    const fleeIntent = companionIntents => normalizeCombatExchange({
+        player_slots: [{ action: 'death_save' }],
+        ...(companionIntents && { companion_intents: companionIntents }),
+        enemy_intents: [{ enemy_id: 'Goblin', action: 'flee' }],
+    });
+
+    it('a level-1 hero with no standing ally, the foe fleeing: defeat — no victory, no flee-XP', () => {
+        const plan = planCombatExchange(dyingAlone([]), fleeIntent());
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.deathSaveSkipped).toBe(true);
+        expect(plan.payload.enemies[0].combatStatus).toBe('fled');
+        expect(plan.payload.result.terminal).toBe('defeat');
+    });
+
+    it('the same flight with a companion still standing is the party\'s victory', () => {
+        const standing = [{ id: 'c1', name: 'Brann', hp: 8, maxHp: 8, ac: 12, status: 'active' }];
+        rollQueue.push(12); // the hero's death save (a companion stands, so the die rolls)
+        const plan = planCombatExchange(dyingAlone(standing), fleeIntent([{ companion_id: 'c1', action: 'pass' }]));
+        expect(plan.ok).toBe(true);
+        expect(plan.payload.result.terminal).toBe('victory');
+    });
+});

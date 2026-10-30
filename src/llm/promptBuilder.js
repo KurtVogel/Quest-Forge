@@ -1509,7 +1509,10 @@ ${lines.join('\n')}`;
 }
 
 function buildPremiseBlock(premise) {
-    return `## CAMPAIGN PREMISE (the player's authored foundation — permanent canon, never contradict)\n${premise}`;
+    // The premise is the START, not the present (2026-10-30 Opus playtest: home
+    // again after the voyage, Flash had the ship "weighing anchor on the morning
+    // flood" — the premise's own line, days after the hero had sailed on it).
+    return `## CAMPAIGN PREMISE (the player's authored foundation — permanent canon of how the campaign BEGAN; never contradict it, but it is the starting point, not the present: what the record and the scene say has happened since takes precedence — a departure that was "in three days" may be long behind the hero)\n${premise}`;
 }
 
 /**

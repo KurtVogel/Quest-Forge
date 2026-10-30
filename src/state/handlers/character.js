@@ -315,10 +315,13 @@ export const handlers = {
             return {
                 ...state,
                 character: applyEarlyDefeat(character),
-                messages: [
-                    ...state.messages,
-                    systemMessage('**Death save skipped.** Low-level solo protection converts this into a defeat setback instead of permanent death.'),
-                ],
+                // `quiet`: the exchange lane posted its own skipped-save note (2026-10-30).
+                messages: action.payload?.quiet
+                    ? state.messages
+                    : [
+                        ...state.messages,
+                        systemMessage('**Death save skipped.** Low-level solo protection converts this into a defeat setback instead of permanent death.'),
+                    ],
             };
         }
         const die = action.payload?.die;

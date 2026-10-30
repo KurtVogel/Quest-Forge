@@ -747,6 +747,37 @@ or front-tied (the eval must seed a lull, not a front). Touches: `hidden-fronts-
 ### [playtest] Hero tells need a REAL-PROVIDER playtest — status: `done` (2026-09-29 — `scripts/playtest_recall_wonder.cjs tells` on Gemini Pro + GPT Terra, `docs/HERO_TELLS_PLAYTEST_2026-09-29.md`: established after 3 scenes on both, Terra's window opened at scene 4 and Tammo named the habit unprompted the next turn, Pro voiced it through invented hearsay from a non-witness; "That's not me" honored by the system on both, Pro's DM noticed the coin's absence once from its own window; two record fixes shipped — witness-name folding, no pronoun in a tell — DECISIONS.md 2026-09-29). **Open from the run:** the sheet's strike button in the harness (dispatch was used), and whether a non-witness voicing a PUBLIC tell as hearsay should be allowed by the prompt at all (today the standing rule forbids it and Gemini did it anyway).
 Both hero-tells entries (DECISIONS.md 2026-09-23 ×2) are pinned end to end in vitest but have never been played against a real DM or a real Scribe. This is Claude's own testing job, the `scripts/playtest_recall_wonder.cjs` pattern (production build, Gemini 3.1 Pro + GPT Terra as DMs — never Grok — Flash as the game's machinery and as the judge): add a `tells` probe that plays ~30 turns with a companion in the party, repeats one visible habit in three different scenes (a pipe, a joke at every serious turn) and one intimate scene, then reads `state.heroTells` and the prompt captures from the Memory Inspector. **What to watch, in order of risk:** (1) does Gemini Flash report OBSERVABLE behavior or guesses about motive ("hides fear behind jokes") — the schema forbids it, prompt-only; (2) over-use — the standing `WHAT THEY HAVE NOTICED` block's "sparingly, never more than a touch per scene" is prompt-only, the pointed remark is the only engine-gated one; count remarks per scene on both DMs; (3) does the Scribe re-report by `id` from KNOWN HERO TELLS or mint twins (the 0.8 containment merge is the belt); (4) does `voiced`/`voicedBy` come back when the companion actually says it, and does the open window close (`session.heroTellBeat` null after the line); (5) the intimate tell: partner-only witnesses, neutral register, and the DM honoring the private-only rule before others; (6) `public: true` on a tavern sighting → the tell rides `## REGIONAL HEARSAY` at the next town; (7) the sheet's "How others see you" appears only after a line was said, and "That's not me" silences it. Fix what breaks with pins, write `docs/HERO_TELLS_PLAYTEST_<date>.md`, tick this. *(Strengthening 2026-09-24: fix the queue's hero-tells P1 first — a habit the Scribe reports at ≤ 16-row spacing never gains a second sighting, so the pipe on consecutive turns would read as "the Scribe never re-reports"; until then space the three scenes > 16 rows apart.)*
 
+### [playtest] The second Opus-played run on Flash, 2026-10-30 — status: `idea` (`docs/OPUS_PLAYTEST_2026-10-30.md`; ten fixes are `shipped`, DECISIONS.md 2026-10-30 (night))
+What the run left to the DM, the next run, or a decision:
+- **Flash's length and the "X, or Y?" menu ending** — 18 / 63 in the 60–180 band, ~17 menu endings, now
+  mostly spoken by the companion (Maro was the menu's mouthpiece every turn). Vesa's call (DECISIONS
+  2026-10-03); if it is ever taken up, THE ASK's stop rule could name the companion case explicitly, and
+  `eval:turns` is the proof.
+- **A companion order in a fight is not honored** — "Maro, the one with the billet!" → `companion_intents`
+  defend; and a telegraph aimed at the companion landed on the hero. The intent lane reads the hero's line
+  for the hero's slots; a companion ORDER could ride as a hint on the intent prompt ("the hero told Maro
+  to…"), zero engine change.
+- **A knowledge leak through the DM's own window** — Rautio, at home, knew the 7 gp paid at a kiln an
+  ocean away: the `−7 gp` receipt rode the 20-row window home and Flash put it in an NPC's mouth
+  (CRITICAL RULE 9 exists; the DM broke it). A receipt row could carry WHERE it was paid, so the rule has
+  something to bite on — or receipts older than N rows could leave the window on a land change.
+- **A far institution's NAME walked home** — the Reach's "Tally-Court" became Harrow Sound's square and a
+  new record; the variety tally covers creatures and materials, not institutions. An "institutions seen"
+  key class in `worldMotifs` (court, guild, syndicate…) would put it on the THIS WORLD HAS ALREADY SHOWN
+  line; small.
+- **A Scribe loss miss** — the tally-stub handed to Maarit stayed in the pack (no `narrated_losses`); and
+  Maarit later "pulled your berth receipt from under the sinker" while it was in the pack. Fixture-first,
+  like the 10-27 2 sp miss.
+- **The rest line vs the panel** — "Maro 3/11 (back on their feet)" against a panel reading 1/11 right
+  after the low-level setback: the driver's view reads `currentHP ?? hp`; whether a stray `currentHP` key
+  rides a companion record or the two lanes really diverge wants `/debug` right after a rest next run.
+- **The Strait crossed in one turn each way**, Eero never on the party line after "you're coming home with
+  me", an off-ladder DC 13, an adze that became a mallet, an oilskin both worn and given away, two
+  paragraphs in the past tense — the DM's; recorded, not acted on.
+- **For the next run's first columns:** the far port's region in `/debug` the turn after landing; a fight
+  lost to flight (defeat, no XP, "fell to"); a ✕ with `twice`; the engine wake (sail away with a FULL web —
+  the premise should seed three pressures — and come back).
+
 ### [playtest] Wonder die + recall lane follow-ups from the 2026-09-19 real-provider run — status: `idea` (playtest 2026-09-19; `docs/RECALL_WONDER_PLAYTEST_2026-09-19.md`)
 - **Weight the wonder die toward standalone.** 3 of 6 installed wonders (2 of 4 natural, 1 of 2 on-demand) were front-tied plot hooks (a clerk with a receipt, a broker with a ledger) while the director had offered a free-standing antlered mare; Vesa's brief is "may or may not fit the larger story". A standalone floor (~50 %) in `selectWonder` — a DECISIONS call.
 - **Expose the wonder guard.** One Gemini run waited 20 turns after the lull was met (turn 20 → 40) and the harness could not name the guard (heat above the setpoint? a front at confrontation? the DM's own arrest arc). Show the holding guard in the Memory Inspector.

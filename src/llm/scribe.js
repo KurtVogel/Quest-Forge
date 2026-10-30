@@ -266,6 +266,9 @@ export function buildKnownLands({ locations = [], currentLocation = null, sessio
     const lines = [];
     if (known.length > 0) {
         lines.push(`Lands on record: ${known.join('; ')}. The current place lies in ${here ? `"${here}"` : 'NO land on record yet'}.`);
+        // A guess is the one wrong answer (2026-10-30 Opus playtest: Flash tagged a
+        // far port's canal shed with the only land it had been shown).
+        if (!here) lines.push('A place in NO land on record is NOT in a listed land by default: if the hero has crossed a sea or travelled beyond every listed land, this is a NEW land — name it from the premise, the scene or the arrival; reuse a listed land only when the fiction puts the hero there.');
     } else {
         lines.push('No land is on record yet.');
     }

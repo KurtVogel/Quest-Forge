@@ -1327,8 +1327,20 @@ const TERMINAL_BY_PLAYER_STATUS = Object.freeze({
  * branches beside a snapshot whose doc promised to "mirror" it.
  */
 function terminalState(enemies, playerStatus, companions = []) {
-    if (activeEnemies(enemies).length === 0) return 'victory';
-    if (playerStatus === 'stable' && (companions || []).some(isCompanionActive)) return null;
+    const partyStands = (companions || []).some(isCompanionActive);
+    if (activeEnemies(enemies).length === 0) {
+        // Foes who FLED or SURRENDERED over a fallen party did not lose (2026-10-30
+        // Opus playtest, measured: two full-HP wardens "fled" the round the hero
+        // was judged defeated and her only companion lay at 0 — the engine called
+        // it a victory, paid +121 XP for the fleeing foes and minted a "beat them"
+        // wound card). A field cleared only by flight with nobody standing on the
+        // hero's side is the fight LOST; a field cleared by death is won whoever
+        // stands.
+        const heroOut = TERMINAL_BY_PLAYER_STATUS[playerStatus] === 'defeat' || playerStatus === 'dying';
+        const fieldLeft = enemies.some(enemy => ['fled', 'surrendered'].includes(enemy?.combatStatus));
+        return heroOut && !partyStands && fieldLeft ? 'defeat' : 'victory';
+    }
+    if (playerStatus === 'stable' && partyStands) return null;
     return TERMINAL_BY_PLAYER_STATUS[playerStatus] ?? null;
 }
 

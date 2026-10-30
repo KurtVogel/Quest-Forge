@@ -462,6 +462,28 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
         else if (recentlyGranted) console.warn(`[Scribe] Narrated item "${item.name}" was already granted moments ago (ledger); skipping.`);
         return !alreadyApplied && !recentlyGranted;
     });
+    // A shared HEAD NOUN pairs one-to-one (2026-10-30 Opus playtest, measured):
+    // the DM evented "Tally-Court day token" and narrated "stamped lead token" —
+    // ONE shared token, so looseSameItem (>= 2 shared) passed it by and the audit
+    // minted a second token. When exactly ONE unmatched narrated item and exactly
+    // ONE unmatched event grant end in the same head noun they are one object; a
+    // head shared by two on either side decides nothing. Over-matching only ever
+    // skips a grant.
+    const headNoun = (name) => {
+        const tokens = [...tokenSet(String(name || '').replace(/\([^)]*\)/g, ' '), { minLength: 2 })];
+        return tokens.length ? tokens[tokens.length - 1] : '';
+    };
+    for (const item of [...missingItems]) {
+        const head = headNoun(item.name);
+        if (!head) continue;
+        const narratedWithHead = missingItems.filter(other => headNoun(other.name) === head);
+        const appliedWithHead = unpairedAppliedNames.filter(name => headNoun(name) === head);
+        if (narratedWithHead.length === 1 && appliedWithHead.length === 1) {
+            console.warn(`[Scribe] Narrated item "${item.name}" is the event path's "${appliedWithHead[0]}" by its head noun; skipping.`);
+            unpairedAppliedNames.splice(unpairedAppliedNames.indexOf(appliedWithHead[0]), 1);
+            missingItems.splice(missingItems.indexOf(item), 1);
+        }
+    }
     // ONE narrated item nobody matched beside ONE event-granted item nobody
     // matched is the same object under a name with no shared token: the DM
     // narrated a "Restorative Draft" flask and evented it as the catalog

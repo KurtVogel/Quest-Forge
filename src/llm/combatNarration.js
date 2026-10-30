@@ -55,7 +55,7 @@ export function combatNarrationPrompt(result, { cost = null, resonance = null } 
         : result.terminal === 'defeat'
             ? (heroDead
                 ? `The player has DIED — the third failed death save. Narrate the death plainly and finally; the fight ends here. Do not add damage, a rescue, or a last-moment revival. SAY IT IN PLAIN WORDS — "${result.postState.player.name} is dead" or "dies" must appear in the prose; a fade to black, a last breath, or "the story ends" on its own is not the death. The count that killed them (three failed saving throws) may be named.`
-                : 'The player is mechanically defeated. Narrate the setback or collapse without adding more damage.')
+                : 'The player is mechanically defeated. Narrate the setback or collapse without adding more damage. The hero is UNCONSCIOUS at the end of this passage — never wake them, never have them speak or act; the waking is the next scene\'s, and the engine announces it.')
             : result.terminal === 'escaped'
                 ? 'The player has mechanically escaped combat. Narrate the retreat without adding pursuit attacks or XP.'
             : result.terminal === 'dying'

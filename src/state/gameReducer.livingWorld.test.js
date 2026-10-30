@@ -76,12 +76,13 @@ describe('absence-drift pending marker', () => {
         // The street, the shop ON it, and the guild quarter fragment into three
         // records. The hero "returns" to the street after 30+ messages by ITS
         // stale stamp — but spent most of that time inside the shop. A related
-        // record (shared "tallow" token) with a fresh stamp means no real absence.
-        let state = gameReducer(atMessages(initialGameState, 5), { type: 'SET_LOCATION', payload: 'Tallow Lane' });
-        state = gameReducer(atMessages(state, 8), { type: 'SET_LOCATION', payload: 'E. Duskwell, Tallow & Tapers' });
+        // record (the shop names its street — a shared SEGMENT, since 2026-10-30 never a
+        // shared trade word) with a fresh stamp means no real absence.
+        let state = gameReducer(atMessages(initialGameState, 5), { type: 'SET_LOCATION', payload: 'Tallow Lane, Weatherby' });
+        state = gameReducer(atMessages(state, 8), { type: 'SET_LOCATION', payload: 'Duskwell Chandlery, Weatherby' });
         state = gameReducer(atMessages(state, 20), { type: 'SET_LOCATION', payload: 'Weatherby Guild Quarter' });
-        const returned = gameReducer(atMessages(state, 45), { type: 'SET_LOCATION', payload: 'Tallow Lane' });
-        expect(returned.locations.map(r => r.name)).toContain('E. Duskwell, Tallow & Tapers');
+        const returned = gameReducer(atMessages(state, 45), { type: 'SET_LOCATION', payload: 'Tallow Lane, Weatherby' });
+        expect(returned.locations.map(r => r.name)).toContain('Duskwell Chandlery, Weatherby');
         expect(returned.session.pendingAbsenceDrift).toBeUndefined();
     });
 
@@ -130,9 +131,9 @@ describe('traveling rumor on arrival', () => {
     });
 
     it('does not re-offer a deed at a nested sibling of the place it was offered at (playtest #8)', () => {
-        let state = gameReducer(withDeeds(), { type: 'SET_LOCATION', payload: 'Tallow Lane' });
+        let state = gameReducer(withDeeds(), { type: 'SET_LOCATION', payload: 'Tallow Lane, Weatherby' });
         expect(state.recentHearsay).toHaveLength(1);
-        const next = gameReducer(atMessages(state, 34), { type: 'SET_LOCATION', payload: 'E. Duskwell, Tallow & Tapers' });
+        const next = gameReducer(atMessages(state, 34), { type: 'SET_LOCATION', payload: 'Duskwell Chandlery, Weatherby' });
         expect(next.recentHearsay).toHaveLength(1); // same audience, no second offer
         // 2026-08-31 P1 r3: the live offer SURVIVES the related-place move
         // (it used to be nulled here, so the shopkeeper never voiced it).
@@ -147,7 +148,8 @@ describe('traveling rumor on arrival', () => {
             messageCount: next.messages.length,
         });
         expect(block).toContain('## REGIONAL HEARSAY — PRIVATE');
-        // Without the registry the guard cannot see the kinship: the names share no token.
+        // Without the registry the guard reads name identity alone: the settlement kinship
+        // (a shared SEGMENT since 2026-10-30) is the registry's to see.
         expect(buildRegionalHearsayBlock(next.session.regionalHearsay, {
             currentLocation: next.currentLocation, messages: next.messages, messageCount: next.messages.length,
         })).toBe('');

@@ -13,7 +13,7 @@
  *
  * API (localhost only, JSON):
  *   POST /say    { text }          type and send a line; waits for the turn and the background lanes
- *   POST /click  { text, scope? }  click the first <button> whose text includes `text` (scope = CSS selector)
+ *   POST /click  { text, scope?, twice? }  click the first <button> whose text includes `text` (scope = CSS selector; twice = click again 600 ms later, for the ✕ confirm)
  *   GET  /view                     what the player sees now: the newest rows, the check card, the fight
  *   GET  /debug                    the full engine snapshot (fronts, regions, tally, interlude …) — for JUDGING
  *   POST /reload                   autosave flush, reload, Continue
@@ -355,6 +355,11 @@ async function bootAndCreateHero(page) {
     await delay(900);
     await expectOnScreen(page, 'Choose your skills', 'after stats');
     for (const sk of HERO.skills) { await clickByText(page, sk, '.skill-choice-card'); await delay(250); }
+    // A Rogue's skills step grows an EXPERTISE grid once every skill is picked (2026-10-30:
+    // the driver stalled at the hero reveal for a Rogue) — the first two chosen skills, by name.
+    if (await page.$('.expertise-selection')) {
+        for (const sk of HERO.skills.slice(0, 2)) { await clickByText(page, sk, '.expertise-selection'); await delay(250); }
+    }
     await page.click('.char-creation-actions .btn-primary');
     await delay(1000);
     await expectOnScreen(page, 'stands ready', 'hero reveal');
@@ -443,7 +448,14 @@ async function bootAndCreateHero(page) {
                     }));
                 }
                 if (req.method === 'POST' && req.url === '/click') {
-                    return send(200, await act(page, 'click', async () => ({ clicked: await clickByText(page, String(input.text || ''), input.scope || 'button'), wanted: input.text })));
+                    // `twice: true` clicks again 600 ms later — the chat row's two-click ✕ confirm
+                    // resets after 4 s, longer than one /click's settle (2026-10-30 run).
+                    return send(200, await act(page, 'click', async () => {
+                        const clicked = await clickByText(page, String(input.text || ''), input.scope || 'button');
+                        let second = null;
+                        if (input.twice) { await delay(600); second = await clickByText(page, String(input.text || ''), input.scope || 'button'); }
+                        return { clicked, second, wanted: input.text };
+                    }));
                 }
                 if (req.method === 'POST' && req.url === '/fill') {
                     // Fill the first input / textarea inside `scope` (default: the check panel) — the challenge reason box.

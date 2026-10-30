@@ -474,6 +474,39 @@ function sameSubjectAgrees(held, card) {
  * used to merge before any text comparison — see idReportAgrees and
  * SAME_SUBJECT_CONTAINMENT); a rung that fails falls through to the next.
  */
+/**
+ * A PROMISE re-minted in new words about the same person (2026-10-30 Opus
+ * playtest: Maro's "one silver a day" guide contract landed as four cards under
+ * four subjects — "Maro's guide agreement in the Basin", "Maro's guidance
+ * contract", … — because the subject rung needs 0.8 subject containment and
+ * the near-duplicate rung is gated on the subject too). Same type, a shared
+ * linked person, and the texts — the people's names set aside — sharing at
+ * least COMMITMENT_MIN_SHARED meaning tokens at COMMITMENT_CONTAINMENT: one
+ * commitment, whatever the subject says. Only `promise` (`npcAgenda` is one
+ * card per person already; a wound or a beat may legitimately recur).
+ */
+export const COMMITMENT_MIN_SHARED = 3;
+export const COMMITMENT_CONTAINMENT = 0.5;
+const COMMITMENT_TYPES = new Set(['promise']);
+
+function linkedNames(card) {
+    return new Set((Array.isArray(card?.linkedNpcNames) ? card.linkedNpcNames : [])
+        .map(name => cleanText(name).toLowerCase()).filter(Boolean));
+}
+
+function sameCommitmentReworded(held, card) {
+    if (!held || !card || held.type !== card.type || !COMMITMENT_TYPES.has(card.type)) return false;
+    const people = linkedNames(held);
+    const shared = [...linkedNames(card)].filter(name => people.has(name));
+    if (shared.length === 0) return false;
+    const names = new Set([...people, ...linkedNames(card)].flatMap(name => [...meaningTokens(name)]));
+    const strip = tokens => new Set([...tokens].filter(token => !names.has(token)));
+    const a = strip(meaningTokens(held.text));
+    const b = strip(meaningTokens(card.text));
+    if (!a.size || !b.size) return false;
+    return overlapScore(a, b) >= COMMITMENT_MIN_SHARED && tokenContainment(a, b) >= COMMITMENT_CONTAINMENT;
+}
+
 export function findStoryMemoryMatch(memories = [], card = {}) {
     const subject = cleanText(card.subject).toLowerCase();
     const text = cleanText(card.text).toLowerCase();
@@ -481,6 +514,7 @@ export function findStoryMemoryMatch(memories = [], card = {}) {
         if (card.id && m.id === card.id && idReportAgrees(m, card)) return true;
         if (subject && m.subject?.toLowerCase() === subject && m.type === card.type && sameSubjectAgrees(m, card)) return true;
         if (text && m.text?.toLowerCase() === text) return true;
+        if (sameCommitmentReworded(m, card)) return true;
         return isNearDuplicateStoryCard(m, card);
     });
 }

@@ -427,10 +427,19 @@ describe('dedupeLocationRecords', () => {
 });
 
 describe('areRelatedPlaces (live playtest #7 nested-place kinship)', () => {
-    it('relates a street to a shop on it through a shared name token', () => {
+    it('relates a street to a shop that NAMES it — a shared segment, never a shared trade word (2026-10-30)', () => {
         const street = normalizeLocationRecord({ name: 'Tallow Lane' });
-        const shop = normalizeLocationRecord({ name: 'E. Duskwell, Tallow & Tapers' });
-        expect(areRelatedPlaces(street, shop)).toBe(true);
+        // The sign alone repeats the street's word: not kinship (the Opus playtest's far port,
+        // 'Puerto Azafrán, the Salt Wharves', was kin to home's 'The Salt-Cellars, Harrow Sound'
+        // through 'salt' and inherited the HOME land).
+        expect(areRelatedPlaces(street, normalizeLocationRecord({ name: 'E. Duskwell, Tallow & Tapers' }))).toBe(false);
+        expect(areRelatedPlaces(street, normalizeLocationRecord({ name: 'E. Duskwell, Tallow & Tapers, Tallow Lane' }))).toBe(true);
+        expect(areRelatedPlaces(
+            normalizeLocationRecord({ name: 'Puerto Azafrán, the Salt Wharves' }),
+            normalizeLocationRecord({ name: 'The Salt-Cellars, Harrow Sound' }),
+        )).toBe(false);
+        expect(areRelatedPlaces(normalizeLocationRecord({ name: 'The Quays, Harrow Sound' }), normalizeLocationRecord({ name: 'Harrow Sound' }))).toBe(true);
+        expect(areRelatedPlaces(normalizeLocationRecord({ name: 'Kiln Throat' }), normalizeLocationRecord({ name: 'Kiln Throat (upper flues)' }))).toBe(true);
     });
 
     it('relates through aliases, not just canonical names', () => {

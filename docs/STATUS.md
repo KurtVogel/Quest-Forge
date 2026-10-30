@@ -6,7 +6,19 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-30 (the open-queue sweep — 19 strengthening findings + two memory M0s in six parallel clusters; the 10-28 Opus playtest, the megacampaign read and the earlier sweeps below)_
+_Last updated: 2026-10-30 (night) (the second Opus playtest on Flash + ten fixes from it; the morning's open-queue sweep; the 10-28 Opus playtest and the megacampaign read below)_
+
+## 2026-10-30 (night) — the second Opus-played playtest on Flash (74 turns, home → far land → home): ten fixes in — pushed AND deployed
+
+**Ruling: DECISIONS.md 2026-10-30 (night), ten points; the write-up with the rubric is `docs/OPUS_PLAYTEST_2026-10-30.md`.** Vesa, asleep: "Run an Opus 5.5 agent to play test the game on browser … only use the gemini flash DM. Fix every bug you find." Run `opus-flash-2` (an elf Wizard, two lands in the premise): zero page errors, zero failed DM calls, p50 30 s. +12 tests (4,335 / 281), lint clean.
+
+**What a player can notice:** a port across the sea no longer inherits the HOME land because its name shares one trade word with a home cellar (the Region line, the land's names and the establishing shot all followed that one wrong tag for ten turns); a fight where the hero and her only companion both go down and the foes flee is now a LOSS (no flee-XP, a "fell to" wound card) instead of a victory; "Death save skipped" posts once; a narrated token is no longer granted twice beside its evented twin; a promise reworded by the Scribe about the same person merges into its card; the premise is read as how the campaign began, not as the present.
+
+**What changed underneath:** `areRelatedPlaces` (segment kinship — the playtest-#7 pin revisited), KNOWN LANDS' no-land clause (`scribe.js`), `terminalState` (combatExchange.js), `quiet` on `DEATH_SAVE_RESULT` (handlers/combat.js, character.js), `fitSentences` / `WOUND_CARD_TEXT_MAX` (fightTally.js), `foeFamilyKey` (worldTempo.js), the loot audit's head-noun tier (scribeAudits.js), the commitment rung + `COMMITMENT_MIN_SHARED` / `COMMITMENT_CONTAINMENT` (storyMemory.js), the premise header (promptBuilder.js — prefix bytes changed), the defeat narration line (combatNarration.js), the driver's Rogue expertise step and `/click { twice }`.
+
+**Proved live from the morning's sweep:** by-name attacks on the hero land (`isHeroRef`). **Not exercised:** the engine wake (the web never filled, so no front slept) and the ✕ retraction (driver timing, fixed).
+
+**Next:** a third Opus run that proves tonight's fixes live — land in the far port and read `/debug` for its region at once, lose a fight to flight, delete a message with `twice`; the doom arm on Sol once the prepay is topped up; the WOW ties slice (proposed as its own session).
 
 ## 2026-10-30 — the open queues read end to end: 19 strengthening findings + both memory M0s built in six parallel clusters — pushed AND deployed
 

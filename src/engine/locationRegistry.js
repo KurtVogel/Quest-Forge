@@ -872,18 +872,30 @@ export function isStillAtPlace(locations, place, here) {
 }
 
 export function areRelatedPlaces(a, b) {
-    const pool = (record) => {
-        const tokens = new Set();
+    // Kinship is a shared SEGMENT (2026-10-30 Opus playtest, measured): the old
+    // rule related two records on ANY one shared token, so "Puerto Azafrán, the
+    // Salt Wharves" — a far port — was kin to home's "The Salt-Cellars, Harrow
+    // Sound" through the word "salt", and the cluster rule handed the port the
+    // HOME land (the Region line, the names and the late establishing shot all
+    // followed). Two records are related when a comma segment of one (or its
+    // whole name, or an alias) token-equals, or fits whole inside, a segment or
+    // name of the other: "The Quays, Harrow Sound" / "Harrow Sound", "Kiln
+    // Throat" / "Kiln Throat (upper flues)", "The Stonebridge market square" /
+    // "Stonebridge". A shop sign that merely repeats its street's trade word is
+    // not kinship any more (the live-playtest-#7 pin, revisited).
+    const segments = (record) => {
+        const list = [];
         for (const text of [record?.name, ...(record?.aliases || [])]) {
-            for (const token of locationTokens(text)) tokens.add(token);
+            if (typeof text !== 'string' || !text.trim()) continue;
+            list.push(locationTokens(text));
+            for (const part of text.split(/[,;]|\s[—–]\s/)) list.push(locationTokens(part));
         }
-        return tokens;
+        return list.filter(tokens => tokens.size > 0);
     };
-    const poolA = pool(a);
-    for (const token of pool(b)) {
-        if (poolA.has(token)) return true;
-    }
-    return false;
+    const segmentsA = segments(a);
+    const segmentsB = segments(b);
+    if (segmentsA.length === 0 || segmentsB.length === 0) return false;
+    return segmentsA.some(x => segmentsB.some(y => containment(x, y) >= 0.99));
 }
 
 /**

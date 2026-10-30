@@ -273,7 +273,9 @@ export function summarizeEncounterEnemies(enemies = []) {
  * nudge, not an exact count.
  */
 export function foeFamilyKey(name) {
-    const words = cleanText(name, 60).toLowerCase().replace(/\s+\d+$/, '').split(/\s+/).filter(Boolean);
+    // A parenthetical epithet is not the kind (2026-10-30 Opus playtest: "Syndicate
+    // Warden (Cleaver)" keyed "(cleaver)" into the motif tally).
+    const words = cleanText(name, 60).toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/\s+\d+$/, '').split(/\s+/).filter(Boolean);
     if (words.length === 0) return '';
     let head = words[words.length - 1];
     if (head.length > 3 && head.endsWith('s') && !head.endsWith('ss')) head = head.slice(0, -1);

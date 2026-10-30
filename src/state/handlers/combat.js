@@ -327,7 +327,9 @@ export const handlers = {
         // with no natural, and DEATH_SAVE_RESULT's own live isLowLevelSolo check
         // converts the save into the defeat setback — 2026-09-02 audit P1).
         if (Number.isInteger(payload.deathSaveNatural) || payload.deathSaveSkipped) {
-            next = gameReducer(next, { type: 'DEATH_SAVE_RESULT', payload: { die: payload.deathSaveNatural ?? null } });
+            // The exchange's own note already said the die was skipped (2026-10-30 Opus
+            // playtest: the same sentence twice in one turn) — the reducer converts quietly.
+            next = gameReducer(next, { type: 'DEATH_SAVE_RESULT', payload: { die: payload.deathSaveNatural ?? null, quiet: payload.deathSaveSkipped === true } });
         }
         // Commit the party BETWEEN the death save and the enemy damage — the
         // exchange's own order (player phase → companions → foes) — so the

@@ -408,6 +408,26 @@ export function isMarkingFight(tally) {
  * appearance merge can make the scar canon. `source: 'engine'` + the
  * `fight-cost` tag are what the dormancy pass keys on.
  */
+/** The card's own text cap — the record's MAX_TEXT_LENGTH (storyMemory.js), restated here. */
+export const WOUND_CARD_TEXT_MAX = 260;
+
+/**
+ * Whole sentences up to `max` (2026-10-30 Opus playtest: the Kiln Throat card
+ * read "…Maro went down in the fight. The wound is fresh and" — a hard slice
+ * mid-sentence). The first sentence always rides, clipped at a word if alone.
+ */
+export function fitSentences(sentences, max) {
+    let out = '';
+    for (const sentence of sentences) {
+        const next = out ? `${out} ${sentence}` : sentence;
+        if (next.length > max) break;
+        out = next;
+    }
+    if (out) return out;
+    const head = String(sentences[0] || '').slice(0, max - 1);
+    return `${head.slice(0, Math.max(head.lastIndexOf(' '), 1)).replace(/[\s,;:]+$/, '')}…`;
+}
+
 export function buildFightWoundCard(tally, state, outcome = 'victory') {
     const t = sanitizeFightTally(tally);
     if (!t || !isMarkingFight(t) || !state?.character) return null;
@@ -436,7 +456,7 @@ export function buildFightWoundCard(tally, state, outcome = 'victory') {
     return {
         type: 'wound',
         subject: `${hero}'s wound from ${foes}`.slice(0, 80),
-        text: sentences.join(' ').slice(0, 260),
+        text: fitSentences(sentences, WOUND_CARD_TEXT_MAX),
         salience: 4,
         emotionalCharge: 3,
         status: 'active',
