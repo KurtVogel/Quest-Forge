@@ -62,27 +62,19 @@ describe('hero display lists at load (2026-09-18 P1)', () => {
     });
 });
 
-describe('NPC relationship history at load (2026-09-18 P1)', () => {
-    const npc = (extra) => ({ name: 'Saima Aallotar', rosterTier: 'character', kind: 'character', disposition: 'wary', ...extra });
-
-    it('a null entry on an ARC-STAMPED record is dropped — KNOWN NPCs builds every turn', () => {
+describe('the retired disposition log at load (2026-10-31)', () => {
+    it('relationshipHistory / arcDisposition leave the record and the prompt prints no relationship: line', () => {
         const next = load(save({}, {
-            npcs: [npc({ arcDisposition: 'wary', relationshipHistory: [{ from: 'friendly', to: 'wary', at: 5, note: 'The lie' }, null] })],
+            npcs: [{
+                name: 'Saima Aallotar', rosterTier: 'character', kind: 'character', disposition: 'wary', arcDisposition: 'wary',
+                relationshipHistory: [{ from: 'friendly', to: 'wary', at: 5, note: 'The lie' }, null, { from: { x: 1 } }],
+            }],
         }));
-        expect(next.npcs[0].relationshipHistory).toEqual([{ from: 'friendly', to: 'wary', at: 5, note: 'The lie' }]);
+        expect('relationshipHistory' in next.npcs[0]).toBe(false);
+        expect('arcDisposition' in next.npcs[0]).toBe(false);
         const prompt = promptFor(next);
-        expect(prompt).toContain('relationship: friendly → wary');
-    });
-
-    it('an object / unknown from/to is no entry; case folds; a junk `at` is dropped', () => {
-        const next = load(save({}, {
-            npcs: [npc({
-                arcDisposition: 'wary',
-                relationshipHistory: [{ from: { x: 1 }, to: 'wary' }, { from: 'Friendly', to: 'WARY', at: 'junk' }, { from: 'smitten', to: 'wary' }, 'junk'],
-            })],
-        }));
-        expect(next.npcs[0].relationshipHistory).toEqual([{ from: 'friendly', to: 'wary' }]);
-        expect(promptFor(next)).not.toContain('[object Object]');
+        expect(prompt).not.toContain('relationship:');
+        expect(prompt).not.toContain('[object Object]');
     });
 });
 

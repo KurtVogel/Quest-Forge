@@ -342,7 +342,7 @@ describe('worldJournal context builder', () => {
 });
 
 describe('KNOWN NPCs extras rendering (queue 2026-07-18)', () => {
-    it('renders the full dossier extras line: pin, importance, agenda, secret, tension, trust, arc, hooks', () => {
+    it('renders the full dossier extras line: pin, importance, agenda, secret, tension, trust, hooks', () => {
         const npcs = [{
             name: 'Mother Sorsa',
             disposition: 'wary',
@@ -357,7 +357,6 @@ describe('KNOWN NPCs extras rendering (queue 2026-07-18)', () => {
             trust: 35,
             basedIn: 'Kuusisaari',
             lastLocation: 'The stilt-quarter parlor',
-            relationshipHistory: [{ from: 'neutral', at: 1 }],
             callbackHooks: ['the unpaid winter favor', 'the Lamplighter informant years', 'a third hook that must not render'],
             lastSeen: 1000,
         }];
@@ -374,29 +373,20 @@ describe('KNOWN NPCs extras rendering (queue 2026-07-18)', () => {
         expect(context).toContain('trust: 35/100');
         expect(context).toContain('based in: Kuusisaari');
         expect(context).toContain('last seen: The stilt-quarter parlor');
-        expect(context).toContain('relationship: neutral → wary');
         expect(context).toContain('hooks: the unpaid winter favor; the Lamplighter informant years');
         expect(context).not.toContain('a third hook that must not render'); // capped at 2
     });
 
-    it('renders only the latest relationship shift, not the whole chain (Vesa, 2026-07-23)', () => {
+    it('carries no disposition-flip line: the bond stage is the arc (2026-10-31)', () => {
         const npcs = [{
             name: 'Valto',
             disposition: 'friendly',
             lastNotes: 'Won over at the pickets.',
             rosterTier: 'character',
-            relationshipHistory: [
-                { from: 'neutral', at: 1 },
-                { from: 'wary', at: 2 },
-                { from: 'hostile', at: 3 },
-            ],
+            relationshipHistory: [{ from: 'neutral', at: 1 }, { from: 'hostile', at: 3 }],
             lastSeen: 1000,
         }];
-        const context = buildJournalContext([], npcs, 'Varga Pass');
-
-        expect(context).toContain('relationship: hostile → friendly');
-        expect(context).not.toContain('neutral → wary → hostile');
-        expect(context).not.toContain('wary → hostile → friendly');
+        expect(buildJournalContext([], npcs, 'Varga Pass')).not.toContain('relationship:');
     });
 
     it('filters non-character roster tiers and caps the list at 8 with an overflow line', () => {

@@ -272,14 +272,16 @@ describe('buildKnownAppearances', () => {
     it('includes the player and only the NPCs actually named in the turn text', () => {
         const context = buildKnownAppearances(state, 'I ask Maera about the ledger.', 'Maera frowns at the mention.');
         expect(context).toContain('Vesa (PLAYER CHARACTER): A scarred human fighter');
-        expect(context).toContain('Maera: Close-cropped white hair');
+        expect(context).toContain('Maera (species NOT ON RECORD): Close-cropped white hair');
         expect(context).not.toContain('Odo Ferrin');
     });
 
-    it('matches NPC names case-insensitively and skips NPCs without a recorded look', () => {
+    it('matches NPC names case-insensitively; a person with no look rides only to ask for the missing species (2026-10-31)', () => {
         const context = buildKnownAppearances(state, 'BRAN and odo ferrin wait by the gate.');
-        expect(context).toContain('Odo Ferrin: A stooped man');
-        expect(context).not.toContain('Bran:');
+        expect(context).toContain('Odo Ferrin (species NOT ON RECORD): A stooped man');
+        expect(context).toContain('Bran (species NOT ON RECORD): no look on record yet');
+        const known = buildKnownAppearances({ npcs: [{ name: 'Bran', species: 'human' }, { name: 'Cave Bear', kind: 'creature' }] }, 'Bran and the Cave Bear.');
+        expect(known).toBeNull();
     });
 
     it('returns null when nobody in the exchange has a recorded appearance', () => {
@@ -292,7 +294,7 @@ describe('buildKnownAppearances', () => {
             npcs: [{ name: 'Maera', gender: 'woman', appearance: 'Close-cropped white hair.' }],
         };
         const context = buildKnownAppearances(gendered, 'Maera waits by the gate.');
-        expect(context).toContain('Maera (woman): Close-cropped white hair');
+        expect(context).toContain('Maera (woman; species NOT ON RECORD): Close-cropped white hair');
     });
 
     it('tags registered species ahead of gender so appearance merges keep it', () => {

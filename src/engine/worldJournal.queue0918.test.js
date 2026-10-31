@@ -129,16 +129,15 @@ describe('journal location is bounded (2026-09-18 P2)', () => {
     });
 });
 
-describe('KNOWN NPCs arc line belt (2026-09-18 P1)', () => {
-    it('a null / object-from last relationshipHistory entry never throws and never prints [object Object]', () => {
+describe('KNOWN NPCs carries no disposition log (2026-10-31)', () => {
+    it('a legacy relationshipHistory never throws and never prints a relationship: line', () => {
         const npcs = [
-            { name: 'Saima', rosterTier: 'character', disposition: 'wary', arcDisposition: 'wary', relationshipHistory: [{ from: 'friendly', to: 'wary' }, null] },
-            { name: 'Orvo', rosterTier: 'character', disposition: 'wary', relationshipHistory: [{ from: { x: 1 }, to: 'wary' }] },
-            { name: 'Tuuli', rosterTier: 'character', disposition: 'hostile', relationshipHistory: [{ from: 'neutral', to: 'hostile' }] },
+            { name: 'Saima', rosterTier: 'character', disposition: 'wary', relationshipHistory: [{ from: 'friendly', to: 'wary' }, null] },
+            { name: 'Tuuli', rosterTier: 'character', disposition: 'hostile', relationshipHistory: [{ from: { x: 1 }, to: 'hostile' }] },
         ];
         let context = '';
         expect(() => { context = buildJournalContext([], npcs, 'Mirefen'); }).not.toThrow();
         expect(context).not.toContain('[object Object]');
-        expect(context).toContain('relationship: neutral → hostile');
+        expect(context).not.toContain('relationship:');
     });
 });

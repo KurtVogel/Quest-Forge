@@ -71,7 +71,7 @@ function stageResult(stage, moment = null) {
  * - an intimacy key moment (salience ≥ 4) while not hostile/wary → `intimate`
  * - a trust-earning key moment (confession / promise / rescue / shared
  *   danger, salience ≥ 4) or trust ≥ 70 while not hostile → `trusted`
- * - any moment, stance, or arc history → `familiar`; a record with only
+ * - any moment or a stance → `familiar`; a record with only
  *   notes → `acquaintance`; a bare name → `stranger`.
  * Ungraded legacy moments never lift a stage past `familiar` — the honest
  * reading of a record nobody graded (Deepen memory grades it).
@@ -90,8 +90,7 @@ export function deriveRelationshipStage(npc = {}) {
     const rift = lastOfKinds(key, RIFT_KINDS, 4);
     if (rift) {
         const laterMend = key.slice(rift.index + 1).some(m => m.kind === 'reconciliation');
-        const warmthBefore = key.slice(0, rift.index).some(m => WARM_STAGE_KINDS.has(m.kind) && salienceOf(m) >= 4)
-            || (Array.isArray(npc?.relationshipHistory) && npc.relationshipHistory.some(step => step?.from === 'friendly'));
+        const warmthBefore = key.slice(0, rift.index).some(m => WARM_STAGE_KINDS.has(m.kind) && salienceOf(m) >= 4);
         if (!laterMend && warmthBefore) return stageResult('estranged', rift.moment);
     }
 
@@ -105,9 +104,7 @@ export function deriveRelationshipStage(npc = {}) {
     if (trust !== null && trust >= 70) return stageResult('trusted');
 
     if (moments.length > 0) return stageResult('familiar', moments[0]);
-    if (text(npc?.stanceToPlayer) || (Array.isArray(npc?.relationshipHistory) && npc.relationshipHistory.length > 0)) {
-        return stageResult('familiar');
-    }
+    if (text(npc?.stanceToPlayer)) return stageResult('familiar');
     if (text(npc?.lastNotes) || text(npc?.notes) || (disposition && disposition !== 'unknown')) {
         return stageResult('acquaintance');
     }
@@ -135,6 +132,37 @@ export function resolveOpenThread(npc = {}, storyMemory = []) {
         if (cardText) return { text: cardText, source: 'promise' };
     }
     return null;
+}
+
+/** How many stage steps an arc keeps — the newest, enough to read the story of a bond. */
+export const MAX_ARC_STEPS = 6;
+
+/**
+ * The ARC of a bond (2026-10-31, replacing the cadence-stamped disposition
+ * log): the stages the relationship has passed through, each with the moment
+ * that moved it — `[{ stage, label, since, sinceAt }]`, oldest first. Derived
+ * by replaying deriveRelationshipStage over the chronological prefixes of the
+ * bond moments with the current-state readings (disposition, trust) set
+ * aside, then closing on the stage the record reads NOW (a hostile turn or a
+ * trust-written lift lands as the last step). Never stored, never an LLM's
+ * mood guess, so it cannot flicker: a moment does not get re-read every turn.
+ * The old log recorded the Scribe's per-scene disposition at each journal
+ * cadence and read "friendly → neutral, neutral → friendly ×8" for a steady
+ * companion.
+ */
+export function deriveRelationshipArc(npc = {}) {
+    const moments = normalizeBondMoments(npc?.bondMoments);
+    const steps = [];
+    const push = (result) => {
+        if (steps.length > 0 && steps[steps.length - 1].stage === result.stage) return;
+        steps.push(result);
+    };
+    for (let i = 0; i < moments.length; i++) {
+        push(deriveRelationshipStage({ bondMoments: moments.slice(0, i + 1) }));
+    }
+    const current = deriveRelationshipStage(npc);
+    if (current.stage !== 'stranger' && current.stage !== 'acquaintance') push(current);
+    return steps.slice(-MAX_ARC_STEPS);
 }
 
 /** One compact clause for a prompt line: `trusted (since: …)`. */

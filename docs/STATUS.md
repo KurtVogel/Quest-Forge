@@ -8,6 +8,12 @@ lives in git history and the settled outcomes in DECISIONS.md).
 
 _Last updated: 2026-10-30 (night) (the second Opus playtest on Flash + ten fixes from it; the morning's open-queue sweep; the 10-28 Opus playtest and the megacampaign read below)_
 
+## 2026-10-31 (later) — the relationship arc is derived, missing species get filled, placeholder secrets and repeated wants fold — pushed AND deployed
+
+Vesa's two follow-ups on the megacampaign appendix, both built (DECISIONS.md 2026-10-31 later, revisiting 2026-08-28 / 2026-07-23 on Vesa's go-ahead): the "Relationship arc" was a log of the Scribe's per-scene mood guess ("friendly → neutral ×8" for a steady companion) and is now DERIVED from the bond moments — the stages the bond passed through, each with the moment that moved it (`deriveRelationshipArc`); the old log, its cadence stamper and the DM's `relationship:` line are gone and saves shed them at load. Wit had no species (88 of 109 records didn't): names like "Goblin Archer" now fill it, and the Scribe is told "species NOT ON RECORD" for every present person missing one. "unknown" / "None revealed" never land as a secret or a want, wants fold want by want, and the Scribe sees the wants and secret on record. `src/engine/npcRecord1031.test.js`.
+
+**Next:** a real-provider run that brings Wit on screen — her species should fill in her first scene — and watch the Scribe's goals / secrets emissions under the new rule. Wit reads Trusted, not Intimate, on the megacampaign: her intimacy moments are ungraded or below salience 4 — Deepen memory would regrade them.
+
 ## 2026-10-31 — personality / stance repetition: the Scribe sees the record, personality folds during play, a revising stance sentence replaces its twin — pushed AND deployed
 
 Vesa spotted Ketta Mor's personality in the megacampaign appendix as eleven near-repeat trait lists. The appendix was the RAW export (the 10-28 load fold already cleans the personality), but the cause was live: the Scribe never saw the personality on record and saw the stance cut at 240 chars, so it re-composed both fields and the clause merge appended the paraphrases. Fixed (DECISIONS.md 2026-10-31): KNOWN STANCES carries the whole stance + the personality, the schema asks for new traits only, personality folds at the trait level on every merge, and a stance sentence that revises a held one replaces it (live and at load — 8 of the megacampaign's 45 stances fold, Ketta's doubled sentence to one). `src/engine/npcRoster.repetition1031.test.js`.

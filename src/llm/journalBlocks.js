@@ -197,14 +197,6 @@ export function buildKnownNpcsBlock(npcs, currentLocation, { presentNames = null
         // 3,177 chars and eight of them cost ~3.4k chars per call. The
         // party line caps the same fields at 300; the same budget here.
         const notes = briefNpcFieldForPrompt(n.lastNotes || n.notes || '', KNOWN_NPC_NOTES_MAX);
-        // Show the latest relationship shift so the DM keeps a changed bond
-        // consistent — a friend who turned on the player should stay turned.
-        // Only previous → current: the full chain burned tokens/card space
-        // without adding play value (Vesa, 2026-07-23); data keeps every step.
-        const lastArcFrom = Array.isArray(n.relationshipHistory) ? n.relationshipHistory[n.relationshipHistory.length - 1]?.from : null;
-        const arc = typeof lastArcFrom === 'string' && lastArcFrom
-            ? `relationship: ${lastArcFrom} → ${n.disposition}`
-            : '';
         const extras = [
             n.pinned && 'pinned',
             n.importance && `importance: ${n.importance}/5`,
@@ -223,7 +215,6 @@ export function buildKnownNpcsBlock(npcs, currentLocation, { presentNames = null
             Number.isFinite(n.trust) && `trust: ${n.trust}/100`,
             n.basedIn && `based in: ${n.basedIn}`,
             n.lastLocation && `last seen: ${n.lastLocation}`,
-            arc,
             Array.isArray(n.callbackHooks) && n.callbackHooks.length > 0 && `hooks: ${n.callbackHooks.slice(0, 2).join('; ')}`,
         ].filter(Boolean).join(' | ');
         return `- **${n.name}**${disp}: ${notes}${extras ? ` [${extras}]` : ''}`;

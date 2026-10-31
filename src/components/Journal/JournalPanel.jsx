@@ -4,7 +4,7 @@ import { enrichNpcProfile, needsNpcEnrichment, normalizeCallbackHook } from '../
 import { suggestArchivableFodder } from '../../llm/npcFodderReview.js';
 import { isMachineryReady, getMachineryGeminiKey } from '../../llm/machinery.js';
 import { bondKindLabel, listNpcImpressions, scoreNpcForPrompt, splitBondMoments } from '../../engine/npcRoster.js';
-import { deriveRelationshipStage, describeAbsence, listKnownByNpc, resolveOpenThread } from '../../engine/relationshipArc.js';
+import { deriveRelationshipArc, deriveRelationshipStage, describeAbsence, listKnownByNpc, resolveOpenThread } from '../../engine/relationshipArc.js';
 import { describeLastHere, describeTravelLink, groupPlacesByRegion, listVisitedPlaces } from '../../engine/locationRegistry.js';
 import { NPC_PORTRAIT_SIZE, requestPortrait } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
@@ -739,6 +739,7 @@ function NPCTab({
                 // Where you stand + what is pending (2026-09-13 overhaul
                 // slice 1): the derived stage chip and the live thread.
                 const arc = deriveRelationshipStage(npc);
+                const arcSteps = deriveRelationshipArc(npc);
                 const thread = resolveOpenThread(npc, storyMemory);
                 const knows = listKnownByNpc(npc, worldFacts, storyMemory);
                 const absence = archived ? null : describeAbsence(npc, { messages, messageCount: Array.isArray(messages) ? messages.length : undefined });
@@ -904,38 +905,25 @@ function NPCTab({
                                 </ul>
                             </div>
                         )}
-                        {npc.relationshipHistory?.length > 0 && (
-                            // Only the latest shift shows by default (previous → current) —
-                            // the full chain took card space without play value (Vesa,
-                            // 2026-07-23). The stored history is the opt-in timeline below.
+                        {arcSteps.length > 1 && (
+                            // The arc is the stages the bond has passed through, each
+                            // earned by a moment (2026-10-31) — derived, never the
+                            // per-scene mood log it replaced. Expand for the moments.
                             <details className="journal-npc-arc-details">
-                                <summary className="journal-npc-arc" title="How this relationship last shifted — expand for the full history">
+                                <summary className="journal-npc-arc" title="How this relationship has grown — expand for the moments that moved it">
                                     <span className="journal-npc-arc-label">Arc:</span>
-                                    <span className={`journal-npc-arc-step ${npc.relationshipHistory[npc.relationshipHistory.length - 1]?.from}`}>
-                                        {npc.relationshipHistory[npc.relationshipHistory.length - 1]?.from}
-                                    </span>
-                                    <span className="journal-npc-arc-seg">
-                                        <span className="journal-npc-arc-sep">→</span>
-                                        <span className={`journal-npc-arc-step ${npc.disposition}`}>{npc.disposition}</span>
-                                    </span>
-                                    {npc.relationshipHistory.length > 1 && (
-                                        <span className="journal-npc-arc-more">
-                                            +{npc.relationshipHistory.length - 1} earlier
+                                    {arcSteps.map((step, i) => (
+                                        <span key={i} className="journal-npc-arc-seg">
+                                            {i > 0 && <span className="journal-npc-arc-sep">→</span>}
+                                            <span className={`journal-npc-arc-step ${step.stage}`}>{step.label}</span>
                                         </span>
-                                    )}
+                                    ))}
                                 </summary>
                                 <ol className="journal-npc-arc-timeline">
-                                    {npc.relationshipHistory.map((step, i) => (
+                                    {arcSteps.map((step, i) => (
                                         <li key={i}>
-                                            {step.at && (
-                                                <span className="journal-npc-arc-when">
-                                                    {new Date(step.at).toLocaleDateString()}
-                                                </span>
-                                            )}
-                                            <span className={`journal-npc-arc-step ${step.from}`}>{step.from}</span>
-                                            <span className="journal-npc-arc-sep">→</span>
-                                            <span className={`journal-npc-arc-step ${step.to}`}>{step.to}</span>
-                                            {step.note && <span className="journal-npc-arc-note" title={step.note}>{step.note}</span>}
+                                            <span className={`journal-npc-arc-step ${step.stage}`}>{step.label}</span>
+                                            {step.since && <span className="journal-npc-arc-note" title={step.since}>{step.since}</span>}
                                         </li>
                                     ))}
                                 </ol>

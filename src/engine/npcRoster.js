@@ -55,7 +55,7 @@ export const NPC_RECORD_KEYS = new Set([
     ...Object.keys(NPC_LANE_TEXT_LIMITS),
     'id', 'kind', 'rosterTier', 'pinned', 'importance', 'disposition', 'trust',
     'bondMoments', 'recentImpressions', 'openThread', 'openThreadMessage', 'openThreadResolvedMessage', 'callbackHooks',
-    'knownFacts', 'relationshipHistory', 'arcDisposition', 'firstMet', 'lastSeen', 'lastSeenMessage',
+    'knownFacts', 'firstMet', 'lastSeen', 'lastSeenMessage',
     // Joining and leaving are moments (WOW 2026-10-13): the reducer stamps
     // when a companion joined / left the party; never lane-writable.
     'joinedPartyMessage', 'leftPartyMessage',
@@ -515,6 +515,67 @@ export function compactDossierText(text, { revise = false } = {}) {
     return kept.map(({ clause }) => asRebuiltSentence(clause)).join(' ');
 }
 
+/**
+ * A placeholder is not a fact (2026-10-31): the Scribe fills an empty schema
+ * slot with "unknown" / "None revealed", and the clause merge appended each
+ * one as canon — Wit's SECRET read "… None revealed. … unknown". A clause that
+ * says only that nothing is known is dropped wherever the record is composed.
+ */
+const PLACEHOLDER_CLAUSE_RE = /^(?:(?:her|his|their|its)\s+)?(?:(?:goals?|secrets?|motives?|motivations?|personality|wants?)\s+(?:are|is)\s+)?(?:unknown|none|nothing|n\/?a|unclear|tbd|unrevealed|undisclosed|unknown\s+(?:goals?|secrets?|motives?|motivations?)|not\s+(?:yet\s+)?(?:revealed|known|stated|disclosed|apparent)(?:\s+yet)?|(?:none|nothing|no\s+(?:known\s+)?(?:secrets?|goals?|motives?))(?:\s+yet)?(?:\s+(?:revealed|known|stated|apparent|disclosed|hinted|evident|established|discovered))?(?:\s+(?:yet|so\s+far))?)$/;
+
+export function isPlaceholderClause(clause) {
+    const normalized = String(clause || '').toLowerCase().replace(/[^a-z/\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    return !normalized || PLACEHOLDER_CLAUSE_RE.test(normalized);
+}
+
+/** The text without its placeholder clauses; unchanged when there are none, '' when nothing else is left. */
+export function dropPlaceholderClauses(text) {
+    if (typeof text !== 'string' || !text.trim()) return text;
+    const clauses = splitDossierClauses(text);
+    const kept = clauses.filter(clause => !isPlaceholderClause(clause));
+    if (kept.length === clauses.length) return text;
+    return kept.map(asRebuiltSentence).join(' ');
+}
+
+/**
+ * Two wants are one when they share at least two meaningful words and those
+ * cover WANT_FOLD_OVERLAP of the shorter one ("Protect and follow Vesa" /
+ * "Stay close to and protect Vesa"). Wants are short, so the 0.8 clause
+ * restatement rule never fired on them and Wit's Wants grew to a dozen
+ * rewordings of "serve Vesa".
+ */
+export const WANT_FOLD_OVERLAP = 0.6;
+const WANT_FOLD_MIN_SHARED = 2;
+
+function sameWant(heldTokens, tokens) {
+    const small = heldTokens.size <= tokens.size ? heldTokens : tokens;
+    const large = small === heldTokens ? tokens : heldTokens;
+    if (small.size === 0) return false;
+    let shared = 0;
+    for (const token of small) if (large.has(token)) shared += 1;
+    return shared >= WANT_FOLD_MIN_SHARED && shared / small.size >= WANT_FOLD_OVERLAP;
+}
+
+/** Goals fold want by want (2026-10-31): the richer wording of a pair stays, in the first one's place. Idempotent. */
+export function compactWantList(text) {
+    if (typeof text !== 'string' || !text.trim()) return text;
+    const kept = [];
+    let folded = false;
+    for (const clause of splitDossierClauses(text)) {
+        const tokens = meaningfulTokens(clause);
+        if (tokens.size === 0) { folded = true; continue; }
+        const same = kept.findIndex(held => sameWant(held.tokens, tokens));
+        if (same !== -1) {
+            if (tokens.size > kept[same].tokens.size) kept[same] = { clause, tokens };
+            folded = true;
+            continue;
+        }
+        kept.push({ clause, tokens });
+    }
+    if (!folded) return text;
+    return kept.map(({ clause }) => asRebuiltSentence(clause)).join(' ');
+}
+
 /** The dossier fields the clause merge owns — the ones legacy accretion swelled. */
 export const COMPACTED_DOSSIER_FIELDS = Object.freeze(['personality', 'goals', 'secrets', 'stanceToPlayer']);
 
@@ -844,6 +905,45 @@ export function locationMatchesPlace(playerLocation, npcPlace) {
     return player === place || player.includes(place) || place.includes(player);
 }
 
+/**
+ * Ancestry words a NAME can carry (2026-10-31): "Goblin Archer", "Grukk the
+ * Goblin", "the dwarven smith". Adjective forms fold to the noun. Roles,
+ * beasts and monsters are deliberately absent — "Giant Spider" is no giant.
+ */
+const NAME_ANCESTRY = new Map([
+    ['goblin', 'goblin'], ['hobgoblin', 'hobgoblin'], ['bugbear', 'bugbear'],
+    ['orc', 'orc'], ['orcish', 'orc'], ['half-orc', 'half-orc'],
+    ['elf', 'elf'], ['elven', 'elf'], ['half-elf', 'half-elf'], ['drow', 'drow'],
+    ['dwarf', 'dwarf'], ['dwarven', 'dwarf'], ['halfling', 'halfling'], ['gnome', 'gnome'],
+    ['kobold', 'kobold'], ['gnoll', 'gnoll'], ['troll', 'troll'], ['ogre', 'ogre'],
+    ['tiefling', 'tiefling'], ['dragonborn', 'dragonborn'], ['lizardfolk', 'lizardfolk'],
+]);
+/** A word after the ancestry that makes it the TARGET, not the person: "Goblin Hunter Vale". */
+const ANCESTRY_OBJECT_WORDS = new Set(['slayer', 'hunter', 'killer', 'bane', 'friend', 'catcher', 'tamer', 'lover']);
+
+/**
+ * The species a record's NAME states, or ''. 88 of 109 roster records in Vesa's
+ * megacampaign had none — the field shipped after they existed and the Scribe
+ * captures it only the first time — so "Goblin Archer" was painted as a man.
+ * One ancestry word, as a whole token (never a plural, a possessive, or a
+ * hyphenated compound like "goblin-slayer"), not followed by an object word.
+ * Two different ancestries decide nothing.
+ */
+export function inferSpeciesFromName(name) {
+    // Hyphens and apostrophes stay inside a token: "goblin-slayer" and
+    // "goblin's" are never the ancestry word.
+    const tokens = String(typeof name === 'string' ? name : '').toLowerCase()
+        .replace(/[^a-z'\s-]/g, ' ').split(/\s+/).filter(Boolean);
+    const found = new Set();
+    tokens.forEach((token, i) => {
+        const species = NAME_ANCESTRY.get(token);
+        if (!species) return;
+        if (ANCESTRY_OBJECT_WORDS.has(tokens[i + 1])) return;
+        found.add(species);
+    });
+    return found.size === 1 ? [...found][0] : '';
+}
+
 function tokenizeCreatureName(name) {
     return String(name || '')
         .toLowerCase()
@@ -964,11 +1064,6 @@ export function blocksFodderArchive(npc = {}) {
     if (cleanText(npc.personality) || cleanText(npc.goals) || cleanText(npc.secrets)) return true;
     if (Array.isArray(npc.callbackHooks) && npc.callbackHooks.length > 0) return true;
     if (Number.isFinite(npc.trust)) return true;
-    if (!isGenericCreatureName(npc.name)
-        && Array.isArray(npc.relationshipHistory)
-        && npc.relationshipHistory.length > 0) {
-        return true;
-    }
     return false;
 }
 
@@ -983,7 +1078,6 @@ export function hasNpcNarrativeWeight(npc = {}) {
         || (Array.isArray(npc.bondMoments) && npc.bondMoments.length > 0)
         || cleanText(npc.privateNotes)
         || (Array.isArray(npc.callbackHooks) && npc.callbackHooks.length > 0)
-        || (Array.isArray(npc.relationshipHistory) && npc.relationshipHistory.length > 0)
         || Number.isFinite(npc.trust)
         || npc.pinned
     );
@@ -1122,8 +1216,7 @@ export function computeNpcImportance(npc = {}) {
     let score = 1;
     if (cleanText(npc.stanceToPlayer)) score += 1;
     if (cleanText(npc.relationshipTension)) score += 1;
-    if ((Array.isArray(npc.bondMoments) && npc.bondMoments.length > 0)
-        || (Array.isArray(npc.relationshipHistory) && npc.relationshipHistory.length > 0)) score += 1;
+    if (Array.isArray(npc.bondMoments) && npc.bondMoments.length > 0) score += 1;
     if (cleanText(npc.agenda) || (Array.isArray(npc.callbackHooks) && npc.callbackHooks.length > 0)) score += 1;
     if (cleanText(npc.personality) || cleanText(npc.goals) || cleanText(npc.secrets)) score += 0.5;
     if (Number.isFinite(npc.trust)) score += 0.5;
@@ -1134,58 +1227,6 @@ function clampImportance(value, fallback = 3) {
     const n = Number(value);
     if (!Number.isFinite(n)) return fallback;
     return Math.max(1, Math.min(5, Math.round(n)));
-}
-
-/**
- * Same-sitting arc noise (2026-08-28, Vesa's "+9 earlier in one tavern
- * evening" report): pre-fix records stamped a relationshipHistory transition on
- * EVERY Scribe disposition re-read, so mood flicker minted Neutral↔Friendly↔Wary
- * chains with no arc meaning. Collapse runs of entries closer than 30 minutes
- * into one first→last transition (dropped entirely when it lands back where it
- * started). Applied only to records the cadence stamper has never touched —
- * once `arcDisposition` exists, entries are cadence-grade history and stay.
- */
-const ARC_SAME_SITTING_MS = 30 * 60 * 1000;
-
-/**
- * The arc history loads TYPED whatever the record's age (2026-09-18 P1): a
- * `null` entry on an arc-stamped record used to skip the compaction below and
- * throw out of the KNOWN NPCs arc line on every prompt build; an object `from`
- * rendered "relationship: [object Object] → wary". Plain-object entries only,
- * `from`/`to` from NPC_DISPOSITIONS, a finite `at`, a clamped string note.
- */
-const ARC_HISTORY_LOAD_CAP = 24;
-
-export function typeRelationshipHistory(history) {
-    const out = [];
-    for (const entry of Array.isArray(history) ? history : []) {
-        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-        const from = typeof entry.from === 'string' ? entry.from.trim().toLowerCase() : '';
-        const to = typeof entry.to === 'string' ? entry.to.trim().toLowerCase() : '';
-        if (!NPC_DISPOSITIONS.has(from) || !NPC_DISPOSITIONS.has(to)) continue;
-        const typed = { from, to };
-        if (Number.isFinite(entry.at)) typed.at = entry.at;
-        if (typeof entry.note === 'string') typed.note = entry.note.slice(0, 600);
-        out.push(typed);
-    }
-    return out.slice(-ARC_HISTORY_LOAD_CAP);
-}
-
-export function compactRelationshipHistory(history = []) {
-    const entries = typeRelationshipHistory(history);
-    if (entries.length <= 1) return entries;
-    const compacted = [];
-    let run = null;
-    for (const entry of entries) {
-        if (run && Number.isFinite(entry.at) && Number.isFinite(run.at) && entry.at - run.at <= ARC_SAME_SITTING_MS) {
-            run = { ...run, to: entry.to, at: entry.at, note: entry.note || run.note };
-        } else {
-            if (run && run.from !== run.to) compacted.push(run);
-            run = { ...entry };
-        }
-    }
-    if (run && run.from !== run.to) compacted.push(run);
-    return compacted;
 }
 
 /** Dossier fields whose "nothing on record" shape is '' (the birth defaults in upsertNpc). */
@@ -1204,7 +1245,6 @@ export function migrateLegacyNpc(npc = {}) {
         knownFacts: [],
         basedIn: null,
         lastLocation: null,
-        relationshipHistory: [],
         agenda: '',
         relationshipTension: '',
         stanceToPlayer: '',
@@ -1227,9 +1267,9 @@ export function migrateLegacyNpc(npc = {}) {
         if (impressions.length > 0) merged.recentImpressions = impressions;
         else delete merged.recentImpressions;
     }
-    merged.relationshipHistory = merged.arcDisposition
-        ? typeRelationshipHistory(merged.relationshipHistory)
-        : compactRelationshipHistory(merged.relationshipHistory);
+    // The disposition-flip log is retired (2026-10-31): the arc is derived
+    // from the bond moments (deriveRelationshipArc); the NPC_RECORD_KEYS
+    // projection below drops `relationshipHistory` / `arcDisposition`.
     delete merged.portraitPrompt;
     if (merged.portraitUrl !== undefined) {
         const safeUrl = sanitizePortraitUrl(merged.portraitUrl);
@@ -1255,12 +1295,21 @@ export function migrateLegacyNpc(npc = {}) {
         else if (field === 'basedIn' || field === 'lastLocation') merged[field] = null;
         else delete merged[field];
     }
+    // A species the name states fills an empty field (2026-10-31) — never
+    // overwrites one on record.
+    if (!merged.species) {
+        const species = inferSpeciesFromName(merged.name);
+        if (species) merged.species = species;
+    }
     // Legacy accretion compacts once, on load (2026-10-28) — idempotent.
+    // Every write composes through here (normalizeNpcRecord), so the fold
+    // and the placeholder strip hold live as well as on load.
     for (const field of COMPACTED_DOSSIER_FIELDS) {
         if (typeof merged[field] !== 'string' || !merged[field]) continue;
-        merged[field] = field === 'personality'
-            ? compactTraitList(merged[field])
-            : compactDossierText(merged[field], { revise: field === 'stanceToPlayer' });
+        const real = dropPlaceholderClauses(merged[field]);
+        if (field === 'personality') merged[field] = compactTraitList(real);
+        else if (field === 'goals') merged[field] = compactWantList(compactDossierText(real));
+        else merged[field] = compactDossierText(real, { revise: field === 'stanceToPlayer' });
     }
     merged.disposition = normalizeDisposition(merged.disposition);
     if (merged.trust !== null && merged.trust !== undefined) {
@@ -1338,7 +1387,6 @@ export function scoreNpcForPrompt(npc = {}, { location = '', now = Date.now(), m
     if (cleanText(npc.stanceToPlayer)) score += 6;
     if (Array.isArray(npc.bondMoments) && npc.bondMoments.length > 0) score += 2;
     if (Array.isArray(npc.callbackHooks) && npc.callbackHooks.length > 0) score += 4;
-    if (Array.isArray(npc.relationshipHistory) && npc.relationshipHistory.length > 0) score += 3;
     if (cleanText(npc.agenda)) score += 2;
     return score;
 }
@@ -1778,8 +1826,6 @@ export function dedupeNpcRoster(npcs = []) {
             recentImpressions: normalizeImpressions([...(base.recentImpressions || []), ...(newer.recentImpressions || [])]),
             callbackHooks: appendCallbackHooks(base.callbackHooks, newer.callbackHooks),
             knownFacts: [...new Set([...(base.knownFacts || []), ...(newer.knownFacts || [])])],
-            relationshipHistory: [...(base.relationshipHistory || []), ...(newer.relationshipHistory || [])]
-                .sort((a, b) => (a.at || 0) - (b.at || 0)),
         };
         for (const field of NPC_DURABLE_TEXT_FIELDS) {
             merged[field] = mergeNpcDossierText(base[field], newer[field]);

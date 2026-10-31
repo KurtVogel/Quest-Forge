@@ -544,49 +544,6 @@ export function clearSustainedSpellState(character, party, inventory) {
     return { character: nextCharacter, party: nextParty };
 }
 
-/** How many disposition shifts to keep per NPC — enough to show an arc, bounded for state size. */
-const MAX_NPC_HISTORY = 10;
-
-/**
- * Cadence-stamped relationship arcs (2026-08-28): a transition enters
- * relationshipHistory only when it SURVIVES to a journal cadence — the live
- * `disposition` chip still moves per turn, but Neutral↔Friendly↔Wary flicker
- * inside one sitting collapses to wherever the relationship actually landed.
- * `arcDisposition` anchors the last stamped state; legacy records derive it
- * from their history tail (or current disposition) on first stamp, so the fix
- * never mints a retroactive transition. The 'unknown' → X establishment is
- * not an arc beat, matching the old rule.
- */
-export function stampNpcRelationshipArcs(npcs) {
-    if (!Array.isArray(npcs) || npcs.length === 0) return npcs;
-    let changed = false;
-    const next = npcs.map(npc => {
-        const history = Array.isArray(npc.relationshipHistory) ? npc.relationshipHistory : [];
-        const anchor = npc.arcDisposition
-            || history[history.length - 1]?.to
-            || npc.disposition
-            || 'unknown';
-        if (!npc.disposition || npc.disposition === anchor) {
-            if (npc.arcDisposition === anchor) return npc;
-            changed = true;
-            return { ...npc, arcDisposition: anchor };
-        }
-        changed = true;
-        if (anchor === 'unknown') {
-            return { ...npc, arcDisposition: npc.disposition };
-        }
-        return {
-            ...npc,
-            arcDisposition: npc.disposition,
-            relationshipHistory: [
-                ...history,
-                { from: anchor, to: npc.disposition, at: Date.now(), note: npc.lastNotes || '' },
-            ].slice(-MAX_NPC_HISTORY),
-        };
-    });
-    return changed ? next : npcs;
-}
-
 function defaultCompanionDamage(weapon = '') {
     const w = String(weapon || '').toLowerCase();
     if (w.includes('great') || w.includes('maul')) return '2d6+2';
@@ -819,8 +776,7 @@ export function mergeNpcUpdate(npcs, payload) {
 export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, presenceText = '', onAmbiguous = null } = {}) {
     // The lane trust boundary (2026-09-16 P1): known keys only, text fields
     // string-or-drop at their clamps, disposition whitelisted — see
-    // sanitizeNpcLanePayload. Engine-owned keys (relationshipHistory,
-    // arcDisposition, knownFacts, firstMet, portrait*, the stamps) can no
+    // sanitizeNpcLanePayload. Engine-owned keys (knownFacts, firstMet, portrait*, the stamps) can no
     // longer arrive from a DM or Scribe payload.
     const payload = sanitizeNpcLanePayload(rawPayload);
     if (!payload) return npcs;
@@ -921,11 +877,8 @@ export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, pre
         if (!classified.allowRoster && existing.rosterTier !== 'character' && !existing.pinned) {
             return npcs;
         }
-        // Disposition updates live here, but arc HISTORY is no longer stamped
-        // per update (2026-08-28): every Scribe mood re-read used to mint a
-        // transition, so one tavern evening produced nine meaningless hops.
-        // stampNpcRelationshipArcs records a transition on the journal cadence,
-        // only for shifts that actually held.
+        // Disposition is current mood only; the ARC is derived from the bond
+        // moments (deriveRelationshipArc, 2026-10-31), never logged per mood.
         if (bondAdditions.length > 0) {
             update.bondMoments = appendBondMoments(existing.bondMoments, bondAdditions, { messageCount, messages });
         }
@@ -991,7 +944,6 @@ export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, pre
         knownFacts: [],
         basedIn: null,
         lastLocation: null,
-        relationshipHistory: [],
         agenda: '',
         relationshipTension: '',
         stanceToPlayer: '',

@@ -112,7 +112,6 @@ export function gatherNpcEnrichmentContext(state = {}, npc = {}) {
             callbackHooks: npc.callbackHooks || [],
             basedIn: npc.basedIn,
             lastLocation: npc.lastLocation,
-            relationshipHistory: npc.relationshipHistory || [],
         },
         premise: premise || null,
         journalHighlights: journal,
@@ -173,8 +172,7 @@ export function needsNpcEnrichment(npc = {}) {
         && cleanText(npc.stanceToPlayer);
     if (hasDepth) return false;
     const hasSignal = cleanText(npc.lastNotes || npc.notes)
-        || cleanText(npc.personality)
-        || (Array.isArray(npc.relationshipHistory) && npc.relationshipHistory.length > 0);
+        || cleanText(npc.personality);
     return !!hasSignal;
 }
 

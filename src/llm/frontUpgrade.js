@@ -81,7 +81,6 @@ export function buildFrontUpgradeContext(state) {
             knownFacts: (npc.knownFacts || []).slice(-8),
             agenda: cleanText(npc.agenda, 500),
             relationshipTension: cleanText(npc.relationshipTension, 400),
-            relationshipHistory: (npc.relationshipHistory || []).slice(-6),
             privateNotes: cleanText(npc.privateNotes, 500),
             lastLocation: cleanText(npc.lastLocation, 120),
         })),

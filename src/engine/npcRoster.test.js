@@ -30,7 +30,6 @@ import {
     selectKeyBondMoments,
     splitBondMoments,
     mergeNpcDossierText,
-    compactRelationshipHistory,
     migrateLegacyNpc,
     normalizeBondMoments,
     normalizeCallbackHook,
@@ -494,13 +493,6 @@ describe('npcRoster classification', () => {
         expect(archivable.map(npc => npc.name)).toEqual(['Goblin #12', 'Goblin runt B']);
     });
 
-    it('still blocks bulk archive for named rivals with relationship arcs', () => {
-        expect(blocksFodderArchive({
-            name: 'Captain Riven',
-            relationshipHistory: [{ from: 'neutral', to: 'hostile' }],
-        })).toBe(true);
-    });
-
     it('keeps dossier depth for journal while trimming prompt excerpts', () => {
         const longMind = `${'Her failure to capture Vesa is a severe blow. '.repeat(8)}The goblin threat is secondary.`;
         const clamped = clampNpcDossierField(longMind);
@@ -628,52 +620,6 @@ describe('mergeNpcDossierText', () => {
         const known = 'Wary but intrigued by the promise of gold; views him as a potentially dangerous but paying client.';
         const incoming = 'Wary but intrigued by the promise of gold.';
         expect(mergeNpcDossierText(known, incoming)).toBe(known);
-    });
-});
-
-describe('compactRelationshipHistory (2026-08-28 same-sitting arc noise)', () => {
-    const MIN = 60 * 1000;
-    const hop = (from, to, at, note = '') => ({ from, to, at, note });
-
-    it('collapses a tavern evening of flip-flops into the transition that held', () => {
-        const evening = [
-            hop('neutral', 'friendly', 0 * MIN),
-            hop('friendly', 'wary', 5 * MIN),
-            hop('wary', 'friendly', 12 * MIN),
-            hop('friendly', 'wary', 20 * MIN),
-            hop('wary', 'friendly', 28 * MIN, 'shared a bed'),
-        ];
-        expect(compactRelationshipHistory(evening)).toEqual([
-            hop('neutral', 'friendly', 28 * MIN, 'shared a bed'),
-        ]);
-    });
-
-    it('drops a run that lands back where it started', () => {
-        const flicker = [
-            hop('neutral', 'wary', 0),
-            hop('wary', 'neutral', 5 * MIN),
-        ];
-        expect(compactRelationshipHistory(flicker)).toEqual([]);
-    });
-
-    it('keeps transitions from separate sittings apart', () => {
-        const arcs = [
-            hop('neutral', 'friendly', 0),
-            hop('friendly', 'hostile', 3 * 60 * MIN, 'the betrayal'),
-        ];
-        expect(compactRelationshipHistory(arcs)).toEqual(arcs);
-    });
-
-    it('migrateLegacyNpc compacts noisy pre-fix histories but never cadence-stamped ones', () => {
-        const noisy = [
-            { from: 'neutral', to: 'friendly', at: 0 },
-            { from: 'friendly', to: 'wary', at: 5 * MIN },
-        ];
-        const healed = migrateLegacyNpc({ name: 'Ketta Mor', relationshipHistory: noisy });
-        expect(healed.relationshipHistory).toEqual([{ from: 'neutral', to: 'wary', at: 5 * MIN }]);
-
-        const stamped = migrateLegacyNpc({ name: 'Ketta Mor', arcDisposition: 'wary', relationshipHistory: noisy });
-        expect(stamped.relationshipHistory).toEqual(noisy);
     });
 });
 

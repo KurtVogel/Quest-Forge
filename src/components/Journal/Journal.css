@@ -357,11 +357,10 @@
     text-transform: capitalize;
 }
 
-.journal-npc-arc-step.friendly { color: var(--success); }
-.journal-npc-arc-step.hostile { color: var(--danger); }
-.journal-npc-arc-step.wary { color: #e6a23c; }
-.journal-npc-arc-step.neutral { color: var(--text-secondary); }
-.journal-npc-arc-step.unknown { color: var(--text-muted); }
+.journal-npc-arc-step.trusted,
+.journal-npc-arc-step.intimate { color: var(--gold); }
+.journal-npc-arc-step.rival,
+.journal-npc-arc-step.estranged { color: #e08080; }
 
 .journal-npc-arc-details > summary {
     cursor: pointer;
@@ -369,15 +368,6 @@
 }
 
 .journal-npc-arc-details > summary::-webkit-details-marker {
-    display: none;
-}
-
-.journal-npc-arc-more {
-    color: var(--text-muted);
-    font-style: italic;
-}
-
-.journal-npc-arc-details[open] .journal-npc-arc-more {
     display: none;
 }
 
@@ -395,11 +385,6 @@
     align-items: baseline;
     flex-wrap: wrap;
     gap: 0.25rem;
-}
-
-.journal-npc-arc-when {
-    color: var(--text-muted);
-    min-width: 4.2rem;
 }
 
 .journal-npc-arc-note {

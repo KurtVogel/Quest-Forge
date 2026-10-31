@@ -196,8 +196,8 @@ describe('deriveRelationshipStage (2026-09-13 overhaul slice 1) — derived from
         expect(mended.stage).toBe('intimate');
         // A betrayal with no warmth before it is just a rift on a familiar record.
         expect(deriveRelationshipStage({ name: 'Odo', disposition: 'neutral', bondMoments: [m('Odo cheated the hero at dice.', 'betrayal', 4, 1)] }).stage).toBe('familiar');
-        // Warmth proven by arc history counts too.
-        expect(deriveRelationshipStage({ name: 'Odo', disposition: 'neutral', relationshipHistory: [{ from: 'friendly', to: 'wary', at: 1 }], bondMoments: [m('Odo cheated the hero at dice.', 'betrayal', 4, 2)] }).stage).toBe('estranged');
+        // The retired disposition log proves no warmth (2026-10-31): only key moments do.
+        expect(deriveRelationshipStage({ name: 'Odo', disposition: 'neutral', relationshipHistory: [{ from: 'friendly', to: 'wary', at: 1 }], bondMoments: [m('Odo cheated the hero at dice.', 'betrayal', 4, 2)] }).stage).toBe('familiar');
     });
 
     it('describeStageForPrompt renders a compact clause and nothing for thin records', () => {

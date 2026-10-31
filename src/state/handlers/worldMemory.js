@@ -16,7 +16,7 @@ import {
     stripStoryMemoryEngineStamps,
 } from '../../engine/storyMemory.js';
 import { gameReducer } from '../gameReducer.js';
-import { isStaleCampaignAction, normalizeChronicleChapter, stampNpcRelationshipArcs, systemMessage } from './shared.js';
+import { isStaleCampaignAction, normalizeChronicleChapter, systemMessage } from './shared.js';
 import { rollHeroTellBeat } from './heroTells.js';
 import { rollDie } from '../../engine/dice.ts';
 import { mintInterlude } from '../../engine/interlude.js';
@@ -364,9 +364,6 @@ export const handlers = {
             // low-salience cards silent for DORMANCY_JOURNAL_CYCLES cadences
             // go dormant (a Scribe re-report revives them).
             storyMemory: applyStoryMemoryDormancy(state.storyMemory, journal),
-            // ...and as the relationship-arc stamp: a disposition shift enters
-            // an NPC's history only if it held until this cadence (2026-08-28).
-            npcs: stampNpcRelationshipArcs(state.npcs),
             heroTells: tells.heroTells,
             session: rollWonderRequest({ ...state, session: tells.session }),
         };

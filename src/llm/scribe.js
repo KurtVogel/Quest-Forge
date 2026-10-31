@@ -56,11 +56,11 @@ Output ONLY valid JSON:
       "disposition": "friendly|neutral|hostile|wary|unknown",
       "lastNotes": "brief note on what happened with them this turn",
       "personality": "a trait NOT already listed for them in KNOWN PLAYER-RELATIONSHIP STANCES — a short comma list of the new trait(s) only; omit when every trait you see is already on record (never restate or reword the recorded ones)",
-      "goals": "what they want (only if newly revealed)",
-      "secrets": "hidden info (only if newly hinted at or revealed)",
+      "goals": "a want NOT already listed under wants in KNOWN PLAYER-RELATIONSHIP STANCES, only if newly revealed (never restate or reword a recorded want; omit, never 'unknown')",
+      "secrets": "hidden info NOT already listed under secret in KNOWN PLAYER-RELATIONSHIP STANCES, only if newly hinted at or revealed (omit, never 'unknown' or 'none revealed')",
       "appearance": "concrete physical/visual description — skin tone, hair (state it explicitly: color and style, or bald/shaved), build and body proportions, face, apparent age, clothing, distinguishing features (only if newly described)",
       "gender": "the character's gender exactly as the fiction establishes or makes clearly apparent — 'woman', 'man', or the fiction's own wording. Capture it the FIRST time it is knowable; afterwards omit unless the fiction changes it",
-      "species": "the character's species/ancestry exactly as the fiction establishes it — 'goblin', 'human', 'dwarf', 'high elf'. Capture it the FIRST time it is knowable (including obvious humans); afterwards omit unless the fiction changes it",
+      "species": "the character's species/ancestry exactly as the fiction establishes it — 'goblin', 'human', 'dwarf', 'high elf'. Capture it the FIRST time it is knowable (including obvious humans), and whenever KNOWN APPEARANCES marks it NOT ON RECORD and this exchange or the record shows it; otherwise omit unless the fiction changes it",
       "basedIn": "place they are currently rooted — town they command, post they hold, territory they haunt. Update when fiction relocates or reassigns them; omit if unknown",
       "lastLocation": "where they were in this specific exchange (only if mentioned)",
       "agenda": "what this NPC is likely trying to accomplish next (only if implied or revealed)",
@@ -121,7 +121,7 @@ Rules:
 - bondMoment must be an actual NEW event from THIS exchange, stated concretely with both parties ("The hero flirted with Maren over the map table; she laughed and let her hand linger"). ONE per NPC per SCENE, not per turn: a scene has one defining beat per kind — a night together is ONE intimacy moment however many turns or positions it spans, a long conversation is one confession or flirtation — never one entry per line, position, or round. Interpersonal continuity is exempt from the extraction budget. If KNOWN PLAYER-RELATIONSHIP STANCES already lists a moment covering this beat, or a same-kind moment from this same scene, omit bondMoment entirely — never re-report or paraphrase a recorded moment. Grade salience honestly: what both would still remember a month later is 4 or 5; texture is 2 and usually not worth recording at all.
 - Use kind "character" and rosterEligible true only for named people worth tracking across sessions (dialogue, rivalry, debt, secrets, recurring villains, quest givers). Use kind "creature" or "ephemeral" with rosterEligible false for nameless combat fodder, generic goblins/guards, or one-line minions that should not enter the durable roster.
 - Capture "appearance"/"player_appearance" from concrete visual details the narrative actually states — never invent looks. These feed scene-art generation AND the DM's own long-term visual continuity, so accuracy matters. Skin tone, hair state (including a bald or shaved head), build, and apparent age are the features generated art drifts on first: whenever the fiction states or makes one plainly apparent, record it in unambiguous words ("deep dark brown skin", "completely bald", "tall and statuesque") — a record that only implies them gets painted wrong.
-- "gender" and "species" are first-class continuity fields: pronouns, titles ("the widow", "the young man"), and explicit statements establish gender; any stated or apparent ancestry ("the goblin merchant", "a dwarven smith") establishes species. A character whose gender or species is knowable but unrecorded WILL get misrendered in generated art — a goblin woman recorded only as "woman" comes back human — so capture both as soon as the fiction shows them; both are exempt from the extraction budget like appearance.
+- "gender" and "species" are first-class continuity fields: pronouns, titles ("the widow", "the young man"), and explicit statements establish gender; any stated or apparent ancestry ("the goblin merchant", "a dwarven smith") establishes species. A character whose gender or species is knowable but unrecorded WILL get misrendered in generated art — a goblin woman recorded only as "woman" comes back human — so capture both as soon as the fiction shows them; both are exempt from the extraction budget like appearance. A character KNOWN APPEARANCES marks "species NOT ON RECORD" was recorded before species was tracked: emit their species the moment this exchange, their known look, or anything else on record states or plainly shows it ("his fellow goblin", "the elf"), even when nothing else about them changed — but never guess one the fiction has not shown.
 - This is an adult game: body proportions and intimate, sensual, unflattering, or even embarrassing anatomical details the fiction establishes (a heavy backside, wide hips, a soft belly, body hair anywhere) are canonical visual continuity exactly like a scar or white hair. Record them frankly, completely, and at full specificity — never sanitize, euphemize, tone down, or silently omit them. For many players this continuity IS the point.
 - REGISTER: write every record in plain, neutral anatomical language — backside/buttocks, breasts, chest, hips, genitals — never in profanity or crude slang, no matter how coarsely the player or DM phrased it. Translating vocabulary is NOT censoring content: keep the full detail, size, and specificity of what the fiction established. "Notably large buttocks" preserves a crude description completely; "curvy", a vague compliment, or dropping the detail loses canon and is forbidden. Neutral wording, complete facts.
 - When KNOWN APPEARANCES lists a character and this turn adds or changes a visual detail, emit their appearance as the COMPLETE updated description: start from the known look and weave in what this turn established. Drop or alter a known detail ONLY when the fiction explicitly changed it (haircut, dye, disguise, wound, healing, new gear). NEVER emit just the new fragment — "a fresh scar on his cheek" alone would erase the white hair, the build, everything else on record. When merging, never launder the record: an intimate or unflattering detail already in KNOWN APPEARANCES stays in the merged description at full specificity until the fiction explicitly changes it — if the old record used crude slang, restate that detail in neutral anatomical wording (see REGISTER), but never blur, shrink, or drop it. As you merge, reconcile the description into clean prose: drop duplicate adjectives and resolve contradictions rather than stacking them ("scrawny ... scrawny ... large backside" should become one coherent line like "a scrawny goblin with notably large buttocks"), but never lose a distinct established detail in the process. If this turn adds nothing visually new for them, omit the field entirely.
@@ -210,10 +210,17 @@ export function buildKnownAppearances({ character, npcs = [] } = {}, ...texts) {
     for (const npc of npcs) {
         if (entries.length >= 8) break;
         const name = String(npc?.name || '').trim();
-        if (!name || !npc.appearance?.trim()) continue;
-        if (!isPresent(name)) continue;
-        const identity = [npc.species, npc.gender].map(v => String(v || '').trim()).filter(Boolean).join(' ');
-        entries.push(`${name}${identity ? ` (${identity})` : ''}: ${npc.appearance.trim().slice(0, 240)}`);
+        if (!name || !isPresent(name)) continue;
+        const look = typeof npc.appearance === 'string' ? npc.appearance.trim() : '';
+        // A PERSON with no species on record is listed even without a look
+        // (2026-10-31): the field arrived after most records existed and the
+        // schema asks for it only the first time, so it never filled in.
+        const speciesMissing = !(typeof npc.species === 'string' && npc.species.trim())
+            && npc.kind !== 'creature' && npc.rosterTier !== 'archived_creature';
+        if (!look && !speciesMissing) continue;
+        const identity = [npc.species, npc.gender].map(v => (typeof v === 'string' ? v.trim() : '')).filter(Boolean).join(' ');
+        const tag = [identity, speciesMissing && 'species NOT ON RECORD'].filter(Boolean).join('; ');
+        entries.push(`${name}${tag ? ` (${tag})` : ''}: ${look ? look.slice(0, 240) : 'no look on record yet'}`);
     }
     return entries.length > 0 ? entries.join('\n') : null;
 }
@@ -293,11 +300,15 @@ const STANCE_RULES = {
     impressions: 'impressions = recent impressions (unconfirmed; carry one into the stance ONLY if this exchange bears it out again)',
     moments: 'moments = moments already on record (do NOT re-report or paraphrase these; a same-kind moment from the same scene is already covered)',
     personality: 'personality = the traits on record (emit personality only for a trait NOT listed; never restate or reword these)',
+    wants: 'wants / secret = what is on record (emit goals / secrets only for something NOT listed; never restate or reword these)',
 };
 
 // The record's personality rides at its compacted size (≤ 12 traits since the
 // 2026-10-28 load fold); the clamp is the belt for a prose personality.
 const KNOWN_PERSONALITY_MAX = 300;
+// Wants and secrets (2026-10-31) at the same size: enough to recognize a
+// restatement, not the whole dossier.
+const KNOWN_WANTS_MAX = 300;
 
 export function buildKnownStances({ npcs = [], messages = null } = {}, ...texts) {
     const isPresent = namePresenceIn(npcs.map(n => n?.name), ...texts);
@@ -322,8 +333,10 @@ export function buildKnownStances({ npcs = [], messages = null } = {}, ...texts)
         const impressions = listNpcImpressions(npc, 'stanceToPlayer');
         const thread = typeof npc?.openThread === 'string' ? npc.openThread.trim() : '';
         const personality = typeof npc?.personality === 'string' ? npc.personality.trim() : '';
+        const wants = typeof npc?.goals === 'string' ? npc.goals.trim() : '';
+        const secret = typeof npc?.secrets === 'string' ? npc.secrets.trim() : '';
         const joined = justJoined(npc);
-        if (!name || (!stance && !personality && onRecord.length === 0 && !thread && !joined)) continue;
+        if (!name || (!stance && !personality && !wants && !secret && onRecord.length === 0 && !thread && !joined)) continue;
         if (!isPresent(name)) continue;
         const lines = [];
         // The WHOLE stance (2026-10-31): a 240-char cut asked for a complete
@@ -338,6 +351,9 @@ export function buildKnownStances({ npcs = [], messages = null } = {}, ...texts)
             rulesUsed.add('personality');
             fields.push(`personality: "${personality.slice(0, KNOWN_PERSONALITY_MAX)}"`);
         }
+        if (wants || secret) rulesUsed.add('wants');
+        if (wants) fields.push(`wants: "${wants.slice(0, KNOWN_WANTS_MAX)}"`);
+        if (secret) fields.push(`secret: "${secret.slice(0, KNOWN_WANTS_MAX)}"`);
         if (thread) {
             rulesUsed.add('thread');
             fields.push(`thread: "${thread.slice(0, 200)}"`);
@@ -357,7 +373,7 @@ export function buildKnownStances({ npcs = [], messages = null } = {}, ...texts)
         entries.push(lines.join('\n'));
     }
     if (entries.length === 0) return null;
-    const header = ['personality', 'thread', 'impressions', 'moments'].filter(key => rulesUsed.has(key)).map(key => STANCE_RULES[key]);
+    const header = ['personality', 'wants', 'thread', 'impressions', 'moments'].filter(key => rulesUsed.has(key)).map(key => STANCE_RULES[key]);
     return (header.length > 0 ? [`Rules: ${header.join('. ')}.`] : []).concat(entries).join('\n');
 }
 
