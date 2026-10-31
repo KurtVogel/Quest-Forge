@@ -4,7 +4,7 @@
  */
 import { computeACFromInventory, normalizeConditionList, normalizeConditionName } from '../../engine/rules.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
-import { itemIdentityMatches } from '../../engine/textMatch.js';
+import { itemIdentityMatches, nameTokensPresent, textWordSet } from '../../engine/textMatch.js';
 import { isArmorItem, isShieldItem, isWeaponItem } from '../../engine/equipment.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName, MAX_ITEM_QUANTITY } from '../../data/items.js';
 import { MAX_CHARACTER_LEVEL, reviveHero } from '../../engine/progression.js';
@@ -836,7 +836,14 @@ export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, pre
             delete update.openThread;
         }
     }
-    if (threadResolved && !update.openThread) {
+    // A thread is settled in the person's presence (2026-10-31): buying
+    // Nib's promised wire a sea away cleared Nib's thread on a turn she was
+    // not in. The Scribe's rule asks for presence; the engine can judge only
+    // the NAME — a per-turn lane (a sighting) may settle the thread of
+    // someone its scene at least names. The cadence's off-screen lanes are
+    // unchanged.
+    const settledInPresence = !seen || !presenceText || nameTokensPresent(textWordSet(presenceText), payload.name || '') !== false;
+    if (threadResolved && !update.openThread && settledInPresence) {
         update.openThread = '';
         update.openThreadMessage = null;
         // Settled, not lost (grand playtest 2026-10-03): the post-journal

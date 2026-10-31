@@ -1053,6 +1053,9 @@ export function createTurnRunner({
             lootAudit: (!latest.combat?.active && finalNarration.id && !recallTurn && !narration) ? {
                 sourceId: `${finalNarration.id}:scribe-loot`,
                 appliedEvents: finalNarration.events || null,
+                // The player's own line (2026-10-31): a payment it NAMES is a
+                // new payment, never a recap of an earlier one.
+                playerMessage: typeof playerMessage === 'string' ? playerMessage : '',
                 getState,
                 auditCasts,
             } : null,

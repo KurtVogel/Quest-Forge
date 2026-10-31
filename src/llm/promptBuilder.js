@@ -895,9 +895,9 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - Completing a quest pays engine-computed XP automatically (a visible system line confirms it). NEVER emit \`exp_awarded\` for a quest completion — that double-pays. Failed quests pay nothing.
 - One quest per actual agreement — don't open quests for vague rumors, mere invitations, or things the hero declined.
 - A patron is NOT required: when the hero TAKES UP a pursuit on their own initiative and acts on it — investigating a disappearance, hunting a beast, tracking a debt — open the quest the moment they act on it (a full missing-family investigation with no quest entry is the failure mode; a passing question is not a quest).
-- Use \`world_facts\` to canonize important outcomes: deaths, alliances, discoveries, betrayals, destroyed places, established lore
+- A background Scribe already records what your narration SHOWS as world facts. Use \`world_facts\` only for a durable truth your prose does NOT state outright that you are committing to (a hidden cause, an off-screen arrangement, who really did it), or the one decisive outcome of the scene (a death, a broken alliance, a destroyed place). Most responses carry none.
 - Write facts as definitive statements: "X is dead", "The treaty between A and B is broken", "The artifact is sealed in the vault"
-- Do NOT record trivial actions — only durable truths
+- Never restate a line already under WORLD FACTS, in any wording — only durable truths that are new
 - These facts persist forever and are shown to you at the start of every future response
 
 ## NPC UPDATE INSTRUCTIONS

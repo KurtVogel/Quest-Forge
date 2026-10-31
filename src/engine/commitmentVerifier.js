@@ -88,6 +88,8 @@ export function hasCommitments(snapshot) {
  * REPLACED thread is not a loss — the cadence may move the beat); a promise
  * card when it is no longer active AND no other active promise or open
  * thread still says it (a reworded successor is not a loss).
+ * A promise the reflection SETTLED on purpose (`settledIds`, its recorded
+ * UPDATE_STORY_MEMORY verdicts, 2026-10-31) is never a loss either.
  *
  * `after` is the snapshot of the lane's recorded writes replayed over the
  * state `before` was taken from (worldJournal.js) — the settled rule that
@@ -96,7 +98,8 @@ export function hasCommitments(snapshot) {
  * never enter the replay, so they need no exemption, and the lane's own
  * settles are no longer hidden behind one.
  */
-export function diffCommitments(before, after) {
+export function diffCommitments(before, after, { settledIds = [] } = {}) {
+    const settled = new Set(Array.isArray(settledIds) ? settledIds : []);
     const losses = [];
     for (const [id, label] of before.quests) {
         if (after.quests.has(id)) continue;
@@ -112,7 +115,7 @@ export function diffCommitments(before, after) {
     }
     const carriers = (after.carriers || []).map(carryTokens).filter(set => set.size > 0);
     for (const [id, label] of before.promises) {
-        if (after.promises.has(id)) continue;
+        if (after.promises.has(id) || settled.has(id)) continue;
         const lost = carryTokens(before.promiseTexts?.get(id) || label);
         if (lost.size > 0 && carriers.some(set => containment(lost, set) >= CARRIED_CONTAINMENT)) continue;
         losses.push({ kind: 'promise', label });
@@ -140,9 +143,9 @@ export function describeCommitmentLosses(losses) {
  * writes have landed; dispatches ONE `kind: 'error'` system line on a loss (an
  * infrastructure line — never retold as saga). Returns the losses.
  */
-export function verifyCommitmentsAfterCadence(before, stateAfter, dispatch) {
+export function verifyCommitmentsAfterCadence(before, stateAfter, dispatch, { settledIds = [] } = {}) {
     if (!before || !stateAfter) return [];
-    const losses = diffCommitments(before, snapshotCommitments(stateAfter));
+    const losses = diffCommitments(before, snapshotCommitments(stateAfter), { settledIds });
     const line = describeCommitmentLosses(losses);
     if (line && typeof dispatch === 'function') {
         dispatch({ type: 'ADD_MESSAGE', payload: { role: 'system', kind: 'error', content: line } });

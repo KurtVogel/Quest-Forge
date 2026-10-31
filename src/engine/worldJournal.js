@@ -540,7 +540,13 @@ export async function maybeAutoSummarize(state, commit, lastSummarizedIndex) {
             try {
                 if (hasCommitments(commitmentsBefore)) {
                     const stateAfterLane = recorded.reduce((s, action) => gameReducer(s, action), state);
-                    verifyCommitmentsAfterCadence(commitmentsBefore, stateAfterLane, dispatch);
+                    // A card the reflection SETTLED on purpose (2026-10-31,
+                    // settled_cards) is the lane's judgement, not a loss.
+                    const settledIds = recorded
+                        .filter(action => action?.type === 'UPDATE_STORY_MEMORY' && typeof action.payload?.id === 'string'
+                            && (action.payload.status === 'resolved' || action.payload.status === 'dormant'))
+                        .map(action => action.payload.id);
+                    verifyCommitmentsAfterCadence(commitmentsBefore, stateAfterLane, dispatch, { settledIds });
                 }
             } catch (e) {
                 console.warn('[Journal] Commitment check failed:', e);

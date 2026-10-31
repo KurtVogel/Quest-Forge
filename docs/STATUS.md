@@ -6,7 +6,13 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-31 (evening: named presence, far friends, story cards retire, the Scribe sees facts, places, dooms abroad; earlier: the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
+_Last updated: 2026-10-31 (night: the third Opus playtest + five fixes; evening: named presence, far friends, story cards retire, the Scribe sees facts, places, dooms abroad; earlier: the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
+
+## 2026-10-31 (night) — the third Opus-played playtest: 57 turns on Flash, five fixes — pushed AND deployed
+
+Played after the evening build as Vesa asked (`docs/OPUS_PLAYTEST_2026-10-31.md`, DECISIONS.md 2026-10-31 night): Brenna Stoutvale, dwarf Cleric, two lands, Nib the goblin as friend and companion, a promise kept across the sea, a front resolved on screen, a lost fight, a level-up. The day's builds held (species, promise cards, the reflection's settles, named presence). Fixed: a heal on an NPC outside the party now spends its slot; a payment the player names to a new person is charged; "X and Y" item names pair with the narration audit; a promise to someone is settled only where it reaches them (the day's own P1 — and the journal check no longer calls a deliberate settle a loss); the DM's `world_facts` became the Scribe's complement. Not fixed: F7 (a second purchase in one reply goes unpaid — the 08-20 coin rule, Vesa's call), F6, F10; Flash verbosity unchanged.
+
+**Next:** Vesa's call on F7 and on Flash verbosity; a live look at the DM's `world_facts` under the new rule (fact count per 100 messages).
 
 ## 2026-10-31 (evening) — what the DM and the Scribe are shown: named presence, far friends leave, story cards retire, the Scribe sees facts, a kind of place is not a place, dooms abroad wait — pushed AND deployed
 

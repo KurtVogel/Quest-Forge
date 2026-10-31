@@ -11,6 +11,12 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
+### A second purchase in one reply goes unpaid — status: `idea` (2026-10-31, Opus playtest F7, measured)
+The DM evented the mace (5 gp) and narrated a second purchase in the same reply ("Twelve silver pieces weighed upon the assayer's scale secure the spool"); the wire was granted, its 12 silver never charged, because the payment audit stands down whenever the event path moved ANY coin for that narration (DECISIONS 2026-08-20 — the direction-misread rule, "never take money on suspicion"). A narrower rule: when the event path applied only SPENDS (no gain), charge the narrated payment's SHORTFALL over the evented spend. The 08-20 misread was a reward read backwards, which a spend-only turn cannot be. Overrides a recorded rule — Vesa's call.
+
+### A handed-over item leaves the pack — status: `idea` (2026-10-31, Opus playtest F6)
+The First Consul's charter, locked by the clerk in the court's dispatch box, stayed in the inventory for the rest of the run: neither the DM's `items_lost` nor the loss audit fired. The loss audit's evidence words ("hands over", "surrenders", "sets it in") may need "locks away" / "takes into custody" / "seals into" — measure on the next run before widening.
+
 ### A ship is a moving place — status: `idea` (2026-10-30, from the Opus playtest's observed P2)
 `findLocationRecord` folds a DM location string into a canonical record by token containment, so
 "The Wren, Tervola Harbor" — the hero's ship, named once at the home quay — was re-used as the

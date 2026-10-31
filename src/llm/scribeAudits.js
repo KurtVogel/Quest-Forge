@@ -469,15 +469,23 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
     // ONE unmatched event grant end in the same head noun they are one object; a
     // head shared by two on either side decides nothing. Over-matching only ever
     // skips a grant.
-    const headNoun = (name) => {
-        const tokens = [...tokenSet(String(name || '').replace(/\([^)]*\)/g, ' '), { minLength: 2 })];
-        return tokens.length ? tokens[tokens.length - 1] : '';
-    };
+    // A name joined by "and" / "&" / "with" has a head per part (2026-10-31,
+    // the Opus playtest: the DM evented "Barge lantern and oil" and the audit
+    // minted the narrated "battered horn-and-tin slip-lantern" beside it — the
+    // one head it read was "oil").
+    const headNouns = (name) => String(name || '').replace(/\([^)]*\)/g, ' ')
+        .split(/\s+(?:and|with)\s+|\s*&\s*/i)
+        .map(part => {
+            const tokens = [...tokenSet(part, { minLength: 2 })];
+            return tokens.length ? tokens[tokens.length - 1] : '';
+        })
+        .filter(Boolean);
+    const hasHead = (name, head) => headNouns(name).includes(head);
     for (const item of [...missingItems]) {
-        const head = headNoun(item.name);
+        const head = headNouns(item.name).at(-1);
         if (!head) continue;
-        const narratedWithHead = missingItems.filter(other => headNoun(other.name) === head);
-        const appliedWithHead = unpairedAppliedNames.filter(name => headNoun(name) === head);
+        const narratedWithHead = missingItems.filter(other => hasHead(other.name, head));
+        const appliedWithHead = unpairedAppliedNames.filter(name => hasHead(name, head));
         if (narratedWithHead.length === 1 && appliedWithHead.length === 1) {
             console.warn(`[Scribe] Narrated item "${item.name}" is the event path's "${appliedWithHead[0]}" by its head noun; skipping.`);
             unpairedAppliedNames.splice(unpairedAppliedNames.indexOf(appliedWithHead[0]), 1);
@@ -647,13 +655,14 @@ function reconcileNarratedPayment(narrated, lootAudit, dispatch) {
         return;
     }
     // The reducer checks the shared recentCoinLosses ledger for OTHER messages'
-    // charges; same-message accounting already happened right here, and audits
-    // get no player-phrasing bypass.
+    // charges; same-message accounting already happened right here. The
+    // player's line rides along for ONE check: a line naming this exact amount
+    // is a new payment, not a recap of another message's (2026-10-31).
     dispatch({
         type: 'AUDIT_COIN_PAYMENT',
         payload: {
             gold, silver, copper,
-            _meta: { sourceId: paymentSourceId, audit: true },
+            _meta: { sourceId: paymentSourceId, audit: true, ...(lootAudit.playerMessage && { playerMessage: lootAudit.playerMessage }) },
         },
     });
     console.log(`[Scribe] Payment audit settled: ${narratedCp} cp (no coin loss was evented for this narration).`);

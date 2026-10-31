@@ -17,6 +17,7 @@ import {
     summarizeSpellSlots,
 } from '../../engine/spellcasting.js';
 import { findExactSourceReplay, findNearbyReplay, rememberLedgerEntry } from '../../engine/replayLedger.js';
+import { isPromptRosterNpc, isRecordedDead, namesMatch } from '../../engine/npcRoster.js';
 import {
     appendRollHistory,
     clearSustainedSpellState,
@@ -136,7 +137,24 @@ export const handlers = {
         const targetRefs = Array.isArray(payload.targets) && payload.targets.length > 0
             ? payload.targets
             : [payload.target];
-        const { recipients, invalid: invalidRefs, overflow, redirected } = resolveSpellRecipients(spell, character, state.party, targetRefs);
+        const resolved = resolveSpellRecipients(spell, character, state.party, targetRefs);
+        let { recipients, invalid: invalidRefs } = resolved;
+        const { overflow, redirected } = resolved;
+        // A heal on a living PERSON of the roster outside the party (2026-10-31,
+        // the Opus playtest: Cure Wounds on the fevered Sister Ottilie was
+        // refused, no slot spent, and the DM narrated the cure — free magic).
+        // The cast happens: the slot is spent, no hit points are tracked for
+        // them, and the DM narrates the effect. Never the dead, never a name
+        // the roster does not know.
+        if (recipients.length === 0 && spell.healing) {
+            const people = invalidRefs
+                .map(ref => (state.npcs || []).find(npc => npc?.name && isPromptRosterNpc(npc) && !isRecordedDead(npc) && namesMatch(npc.name, ref)))
+                .filter(Boolean);
+            if (people.length > 0) {
+                recipients = people.map(npc => ({ type: 'other', name: npc.name }));
+                invalidRefs = invalidRefs.filter(ref => !people.some(npc => namesMatch(npc.name, ref)));
+            }
+        }
         if (recipients.length === 0) {
             return { ...state, messages: [...state.messages, spellLine(`${spell.name} has no valid recipient "${invalidRefs.join('", "')}" — nothing was spent or applied.`)] };
         }
@@ -201,6 +219,10 @@ export const handlers = {
         if (spell.healing) {
             // One roll per recipient — the combat resolver's per-ally pattern.
             for (const recipient of recipients) {
+                if (recipient.type === 'other') {
+                    lines.push(`${recipient.name} is healed — the engine keeps no hit points for them; the DM narrates the cure.`);
+                    continue;
+                }
                 const roll = rollNotation(spellHealingNotation(spell, character, slotLevel), spell.name);
                 healingRolls.push(roll);
                 if (recipient.type === 'companion') {

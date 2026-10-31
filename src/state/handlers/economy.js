@@ -253,6 +253,30 @@ const PAYMENT_RECAP_RE = new RegExp(
     'i'
 );
 
+const AMOUNT_WORDS = {
+    a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, fifty: 50, hundred: 100,
+};
+const AMOUNT_MENTION_RE = /\b(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|hundred)\s+(gold|gp|silver|sp|copper|cp)\b/gi;
+const DENOMINATION_CP = { gold: 100, gp: 100, silver: 10, sp: 10, copper: 1, cp: 1 };
+
+/**
+ * The player's own line NAMES this payment (2026-10-31, the Opus playtest:
+ * "I count out two silver" to Jethro was ignored as a duplicate of the two
+ * silver paid the net-mender two turns earlier). One "<amount> <coin>"
+ * mention whose value equals the charge, in a line that is not a recap.
+ */
+export function playerMessageNamesAmount(playerMessage, costCp) {
+    const text = String(playerMessage || '');
+    if (!text.trim() || PAYMENT_RECAP_RE.test(text)) return false;
+    for (const match of text.matchAll(AMOUNT_MENTION_RE)) {
+        const raw = match[1].toLowerCase();
+        const count = /^\d+$/.test(raw) ? Number(raw) : AMOUNT_WORDS[raw];
+        if (count * DENOMINATION_CP[match[2].toLowerCase()] === costCp) return true;
+    }
+    return false;
+}
+
 function playerMessageSupportsRepeatCoinLoss(playerMessage) {
     const text = String(playerMessage || '');
     if (!text.trim()) return false;
@@ -608,6 +632,9 @@ export const handlers = {
     // player's message on an audited turn is the very message that initiated the
     // already-counted payment, so the old bypass fired on exactly the turns being
     // double-charged (live 2026-07-31 "gave 1 gp, charged twice" finding).
+    // One narrow exception since 2026-10-31: a line that NAMES this exact
+    // amount (playerMessageNamesAmount) — the same-turn double charge is now
+    // closed upstream (the audit stands down whenever the event path charged).
     AUDIT_COIN_PAYMENT(state, action) {
         const meta = action.payload?._meta || {};
         const amounts = coinAmounts(action.payload);
@@ -622,7 +649,15 @@ export const handlers = {
             state.recentCoinLosses, transaction, sourceId, messageIndex, RECENT_SPEND_MESSAGE_WINDOW, state.messages,
             { excludeSameBase: true }
         );
-        if (duplicate) {
+        // The player's own line naming THIS amount is a new payment, not a
+        // recap of another message's (2026-10-31) — but only against a charge
+        // that came BEFORE that line: a charge that answered the same line (the
+        // 07-31 "gave 1 gp, charged twice" turn — the DM's charge on the setup,
+        // the audit on the outcome) is still this payment.
+        const named = playerMessageNamesAmount(meta.playerMessage, costCp);
+        const lastPlayerLine = (state.messages || []).findLastIndex(message => message?.role === 'user' && !message.hidden && !message.deleted);
+        const playerPaysAfter = (entry) => named && !!entry && Number.isFinite(entry.messageIndex) && entry.messageIndex < lastPlayerLine;
+        if (duplicate && !playerPaysAfter(duplicate)) {
             return suppress(state, 'recentCoinLosses', transaction, sourceId, messageIndex,
                 `**Duplicate payment ignored:** ${formatCurrency(costCp)} was already deducted moments ago.`);
         }
@@ -630,7 +665,8 @@ export const handlers = {
         // re-narrated payment with a drifted value must not charge again when a
         // recent applied loss from another message already covers it. The audit
         // is a backstop for pure omissions, never a second payer of record.
-        if (cover(state.recentCoinLosses, { atLeast: true, excludeBase: base })) {
+        const lossCover = cover(state.recentCoinLosses, { atLeast: true, excludeBase: base });
+        if (lossCover && !playerPaysAfter(lossCover)) {
             return suppress(state, 'recentCoinLosses', transaction, sourceId, messageIndex,
                 `**Duplicate payment ignored:** ${formatCurrency(costCp)} repeats payments already taken moments ago.`);
         }
@@ -640,7 +676,7 @@ export const handlers = {
         // later re-narration reaches here, where only the coin-loss ledger was
         // ever consulted. Audit semantics allow a drifted-low recap (`atLeast`).
         const purchaseCover = cover(state.recentPurchases, { atLeast: true, excludeBase: base });
-        if (purchaseCover) {
+        if (purchaseCover && !playerPaysAfter(purchaseCover)) {
             return suppress(state, 'recentCoinLosses', transaction, sourceId, messageIndex,
                 `**Duplicate payment ignored:** ${formatCurrency(costCp)} was already paid when you bought ${purchaseCover.name || 'that'}.`);
         }
