@@ -19,7 +19,8 @@ import {
     GEMINI_EMBED_DIMENSIONS,
     GEMINI_EMBED_SCHEMA,
 } from '../llm/providers/gemini.js';
-import { findSubjectsInText, nameTokensPresent, textWordSet } from './textMatch.js';
+import { findSubjectsInText, textWordSet } from './textMatch.js';
+import { isNameNamedIn, properWordSet } from './npcRoster.js';
 import { formatSecrecyTag } from './storyMemory.js';
 
 // The presence tokenizer lives on the tokenizer shelf (textMatch.js, 2026-10-11);
@@ -877,10 +878,17 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55,
     // the ledger?") rarely repeats the name of the person being spoken to —
     // judged from the query alone, every dialogue went dormant on exactly the
     // person it was about. The embed query itself is untouched.
-    const queryWords = textWordSet(`${query} ${presenceText || ''}`);
+    // A subject is present when the scene NAMES them (2026-10-31): the query
+    // in any case, the narration as a capitalized proper name — the DM's
+    // "scarred" and "heavy" kept dead fodder present and its rows awake.
     // null (no identifying tokens, "The Lady") can't be judged absent — treat
     // as present so the row is never permanently penalized.
-    const subjectsPresent = (subjects) => subjects.some(name => nameTokensPresent(queryWords, name) !== false);
+    const presence = {
+        playerWords: textWordSet(query),
+        sceneWords: textWordSet(presenceText || ''),
+        properWords: properWordSet(presenceText || ''),
+    };
+    const subjectsPresent = (subjects) => subjects.some(name => isNameNamedIn(name, presence) !== false);
 
     const scored = memoryStore
         .map(m => {

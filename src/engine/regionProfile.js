@@ -163,6 +163,26 @@ export function regionForPrompt(locations, currentLocation) {
     return best ? { name: best.name, inherited: true } : null;
 }
 
+/**
+ * The fronts LEFT BEHIND (2026-10-28 load heal, live since 2026-10-31): a
+ * front whose every tagged theater lies in another land than the hero's. Its
+ * doom waits for the hero's return — abroad, the "arrives as NEWS" card
+ * brought the old land's spear-hunters onto the new land's causeway. Ids.
+ */
+export function listFrontsLeftBehind(fronts = [], locations = [], currentLocation = null) {
+    const list = Array.isArray(locations) ? locations : [];
+    const heroLand = regionForPrompt(list, currentLocation)?.name || null;
+    if (!heroLand) return [];
+    return (Array.isArray(fronts) ? fronts : [])
+        .filter(front => {
+            const lands = list
+                .filter(record => Array.isArray(record?.theaterFrontIds) && record.theaterFrontIds.includes(front?.id) && record.region)
+                .map(record => record.region);
+            return lands.length > 0 && !lands.some(land => isSameRegion(land, heroLand));
+        })
+        .map(front => front.id);
+}
+
 /** The faces as `label: text` clauses, in render order, empty faces skipped. */
 function faceClauses(profile) {
     return REGION_PROFILE_FIELDS

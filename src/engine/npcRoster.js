@@ -7,6 +7,8 @@
 import { LOCATION_NAME_MAX, NPC_DOSSIER_FIELD_MAX, NPC_GENDER_MAX, NPC_SPECIES_MAX } from '../config/contentLimits.js';
 import { sanitizePortraitUrl } from './portraitUrl.js';
 import { conversationalAgeSince, conversationalGap } from './replayLedger.js';
+import { findLocationRecord, isSameRegion } from './locationRegistry.js';
+import { regionForPrompt } from './regionProfile.js';
 import { compareCardRecency } from './storyMemory.js';
 import { coverage, identifyingNameTokens, textWordSet, tokenSet } from './textMatch.js';
 import { cleanText } from './text.js';
@@ -858,18 +860,52 @@ export function normalizeCallbackHook(value) {
     return words.slice(0, end).join(' ').trim();
 }
 
+// Two hooks about one thing ("his toast 'to new management' over Riven's
+// dark liquor" / "the toast shared over Riven's dark liquor") share most of
+// the shorter one's meaning-words (2026-10-31: Varnis, Gretka, Torald each
+// carried a pair). The newer wording takes the held one's place.
+const HOOK_FOLD_MIN_SHARED = 3;
+const HOOK_FOLD_OVERLAP = 0.6;
+function sameHook(a, b) {
+    const ta = meaningfulTokens(a);
+    const tb = meaningfulTokens(b);
+    const small = ta.size <= tb.size ? ta : tb;
+    const large = small === ta ? tb : ta;
+    if (small.size === 0) return false;
+    let shared = 0;
+    for (const token of small) if (large.has(token)) shared += 1;
+    return shared >= HOOK_FOLD_MIN_SHARED && shared / small.size >= HOOK_FOLD_OVERLAP;
+}
+
 export function appendCallbackHooks(existing = [], additions = []) {
     // normalizeCallbackHook runs on the EXISTING list too, so a stored
     // truncation fragment self-cleans the next time this NPC's hooks merge.
     const clean = list => (Array.isArray(list) ? list : [])
         .map(hook => normalizeCallbackHook(hook))
         .filter(Boolean);
-    let next = clean(existing);
-    for (const hook of clean(additions)) {
-        if (next.some(existingHook => isNearDuplicateText(hook, existingHook))) continue;
+    let next = [];
+    for (const hook of [...clean(existing), ...clean(additions)]) {
+        if (next.some(held => isNearDuplicateText(hook, held))) continue;
+        const same = next.findIndex(held => sameHook(held, hook));
+        if (same !== -1) {
+            next = next.map((held, i) => (i === same ? hook : held));
+            continue;
+        }
         next = [...next, hook];
     }
     return next.slice(-MAX_NPC_CALLBACK_HOOKS);
+}
+
+/**
+ * A relationship tension of fewer than TENSION_MIN_WORDS words is a label,
+ * not a tension (2026-10-31: "loyalty" on 12 of the megacampaign's people,
+ * the reflection's schema offered a word list) — dropped wherever the record
+ * is composed. A sentence names what pulls against what.
+ */
+export const TENSION_MIN_WORDS = 4;
+export function isLabelTension(text) {
+    const words = String(typeof text === 'string' ? text : '').trim().split(/\s+/).filter(Boolean);
+    return words.length > 0 && words.length < TENSION_MIN_WORDS;
 }
 
 export function clampNpcDossierField(value, max = NPC_DOSSIER_FIELD_MAX) {
@@ -1213,13 +1249,19 @@ function existingRosterRecord(npcs, candidate, meta, messageCount) {
  */
 export function computeNpcImportance(npc = {}) {
     if (npc.pinned) return 5;
+    // Recalibrated 2026-10-31: the old terms were the fields the Scribe fills
+    // for anyone it writes about twice (a tension word, any moment, an agenda,
+    // a hook), so 28 of the megacampaign's 52 people read 5/5. Now the scale
+    // reads DEPTH with the hero: a stance, a moment that mattered (salience
+    // 4+), a strong trust reading either way, and only then the dossier.
     let score = 1;
     if (cleanText(npc.stanceToPlayer)) score += 1;
-    if (cleanText(npc.relationshipTension)) score += 1;
-    if (Array.isArray(npc.bondMoments) && npc.bondMoments.length > 0) score += 1;
-    if (cleanText(npc.agenda) || (Array.isArray(npc.callbackHooks) && npc.callbackHooks.length > 0)) score += 1;
-    if (cleanText(npc.personality) || cleanText(npc.goals) || cleanText(npc.secrets)) score += 0.5;
-    if (Number.isFinite(npc.trust)) score += 0.5;
+    const moments = Array.isArray(npc.bondMoments) ? npc.bondMoments : [];
+    if (moments.some(moment => (Number(moment?.salience) || 0) >= 4)) score += 1;
+    else if (moments.length > 0) score += 0.5;
+    if (Number.isFinite(npc.trust) && (npc.trust >= 70 || npc.trust <= 20)) score += 1;
+    if (cleanText(npc.agenda) || cleanText(npc.goals) || cleanText(npc.secrets)) score += 0.5;
+    if (cleanText(npc.relationshipTension) && !isLabelTension(npc.relationshipTension)) score += 0.5;
     return clampImportance(score, 1);
 }
 
@@ -1301,6 +1343,10 @@ export function migrateLegacyNpc(npc = {}) {
         const species = inferSpeciesFromName(merged.name);
         if (species) merged.species = species;
     }
+    // A one-word tension is a label, not a tension (2026-10-31).
+    if (typeof merged.relationshipTension === 'string' && isLabelTension(merged.relationshipTension)) {
+        merged.relationshipTension = '';
+    }
     // Legacy accretion compacts once, on load (2026-10-28) — idempotent.
     // Every write composes through here (normalizeNpcRecord), so the fold
     // and the placeholder strip hold live as well as on load.
@@ -1344,6 +1390,115 @@ export function normalizeNpcRecord(npc = {}, { legacy = false } = {}) {
         pinned: !!npc.pinned,
         importance: computeNpcImportance({ ...npc, rosterTier, kind }),
     };
+}
+
+/**
+ * The words a text writes CAPITALIZED, lowercased — a proper name in prose.
+ * Exported for the RAG presence gate.
+ */
+export function properWordSet(text) {
+    return new Set(String(text || '').split(/[^\p{L}\p{N}]+/u)
+        .filter(word => word && /^\p{Lu}/u.test(word))
+        .map(word => word.toLowerCase()));
+}
+
+/**
+ * Is this NAME named in the scene (2026-10-31 — the 10-28 idea "a note in
+ * prose is not a person")? The presence tokenizer's any-identifying-token
+ * rule put "Scarred Guard", "The heavy crossbowman" and "Armory Guard
+ * (Spearman)" in a watchtower scene a continent from their deaths, because
+ * the DM wrote "scarred", "heavy" and "armory" — and the callbacks block
+ * offered the crossbowman's 654-turn-old stance as something he could say.
+ * A name is named when one of its PROPER tokens (capitalized in the record,
+ * not a role / species / epithet word, not a word of a known place name)
+ * appears in the player's own words (any case — a player types "ketta") or
+ * CAPITALIZED in the scene; a name with no proper token needs every
+ * identifying token present. `null` = unjudgeable (no identifying tokens).
+ */
+export function isNameNamedIn(name, { playerWords = new Set(), sceneWords = new Set(), properWords = new Set(), placeTokens = new Set() } = {}) {
+    const tokens = identifyingNameTokens(name);
+    if (tokens.length === 0) return null;
+    const recordForms = String(name || '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    const proper = tokens.filter(token => !isGenericNameToken(token) && !placeTokens.has(token)
+        && recordForms.some(form => form.toLowerCase() === token && /^\p{Lu}/u.test(form)));
+    if (proper.length > 0) return proper.some(token => playerWords.has(token) || properWords.has(token));
+    return tokens.every(token => playerWords.has(token) || sceneWords.has(token));
+}
+
+/** The identifying tokens of every known place name — a city's name inside a person's ("Jewelglade Guard") is not that person. */
+export function placeNameTokens(locations = []) {
+    const tokens = new Set();
+    for (const record of Array.isArray(locations) ? locations : []) {
+        for (const name of [record?.name, ...(Array.isArray(record?.aliases) ? record.aliases : [])]) {
+            for (const token of identifyingNameTokens(name)) tokens.add(token);
+        }
+    }
+    return tokens;
+}
+
+/**
+ * The roster people a scene NAMES: never an archived creature, never the
+ * recorded dead, by isNameNamedIn. `playerText` is the player's own line;
+ * `sceneText` the recent narration.
+ */
+export function findNamedPeople(npcs = [], { playerText = '', sceneText = '', locations = [], cap = 8 } = {}) {
+    const options = {
+        playerWords: textWordSet(playerText),
+        sceneWords: textWordSet(sceneText),
+        properWords: properWordSet(sceneText),
+        placeTokens: placeNameTokens(locations),
+    };
+    const found = [];
+    for (const npc of Array.isArray(npcs) ? npcs : []) {
+        if (!npc?.name || !isPromptRosterNpc(npc) || isRecordedDead(npc)) continue;
+        if (isNameNamedIn(npc.name, options) !== true) continue;
+        found.push(npc);
+        if (found.length >= cap) break;
+    }
+    return found;
+}
+
+function withinOneEdit(a, b) {
+    if (a === b) return true;
+    if (Math.abs(a.length - b.length) > 1) return false;
+    let i = 0;
+    let j = 0;
+    let edits = 0;
+    while (i < a.length && j < b.length) {
+        if (a[i] === b[j]) { i += 1; j += 1; continue; }
+        edits += 1;
+        if (edits > 1) return false;
+        if (a.length > b.length) i += 1;
+        else if (b.length > a.length) j += 1;
+        else { i += 1; j += 1; }
+    }
+    return edits + (a.length - i) + (b.length - j) <= 1;
+}
+
+/**
+ * A one-letter slip of a known person's name (2026-10-31): the Scribe wrote
+ * "Ketta Nor" once for the companion Ketta Mor and minted a second person
+ * who carried her own contract thread in KNOWN NPCs. A NEW name whose tokens
+ * equal a bonded record's (a stance or a moment with the hero) in every place
+ * but one non-first token, and that token within one edit (both 3+ letters),
+ * is that record. Exactly one such record, or none. Index or -1.
+ */
+export function findNameTypoTwin(npcs = [], name) {
+    const tokens = String(typeof name === 'string' ? name : '').toLowerCase().split(/\s+/).filter(Boolean);
+    if (tokens.length < 2) return -1;
+    const matches = [];
+    (Array.isArray(npcs) ? npcs : []).forEach((npc, index) => {
+        const bonded = cleanText(npc?.stanceToPlayer) || (Array.isArray(npc?.bondMoments) && npc.bondMoments.length > 0);
+        if (!bonded || typeof npc?.name !== 'string') return;
+        const held = npc.name.toLowerCase().split(/\s+/).filter(Boolean);
+        if (held.length !== tokens.length || held[0] !== tokens[0]) return;
+        const differing = held.map((token, i) => i).filter(i => held[i] !== tokens[i]);
+        if (differing.length !== 1) return;
+        const a = held[differing[0]];
+        const b = tokens[differing[0]];
+        if (a.length >= 3 && b.length >= 3 && withinOneEdit(a, b)) matches.push(index);
+    });
+    return matches.length === 1 ? matches[0] : -1;
 }
 
 export function isPromptRosterNpc(npc = {}) {
@@ -1400,7 +1555,9 @@ export function scoreNpcForPrompt(npc = {}, { location = '', now = Date.now(), m
  * in the capital (44 vs 51) — and the DM narrated the dialogue without her
  * looks, gender, or stance, the fields the block exists to keep consistent.
  */
-export function curateNpcsForPrompt(npcs = [], { location = '', limit = 8, now = Date.now(), presentNames = null, messages = null, messageCount } = {}) {
+export function curateNpcsForPrompt(npcs = [], { location = '', limit = 8, now = Date.now(), presentNames = null, messages = null, messageCount, locations = [] } = {}) {
+    const heroLand = regionForPrompt(locations, location)?.name || null;
+    const far = npc => isFarAndForgotten(npc, { messages, messageCount, locations, heroLand });
     const roster = (npcs || []).filter(isPromptRosterNpc);
     const ranked = roster
         .map(npc => ({ npc, score: scoreNpcForPrompt(npc, { location, now, messages, messageCount }) }))
@@ -1440,7 +1597,7 @@ export function curateNpcsForPrompt(npcs = [], { location = '', limit = 8, now =
     // KNOWN_NPC_STALE_MESSAGES who is not a friend with a bond that mattered —
     // pinned, present and local people are untouched above, and the rest stay
     // reachable through RETRIEVED MEMORIES.
-    take(ranked.filter(npc => !isRecordedDead(npc) && !isFarAndForgotten(npc, { messages, messageCount })));
+    take(ranked.filter(npc => !isRecordedDead(npc) && !far(npc)));
     return chosen;
 }
 
@@ -1457,12 +1614,33 @@ export function isRecordedDead(npc) {
     return RECORDED_DEATH_RE.test(cleanText(npc?.lastNotes));
 }
 
-function isFarAndForgotten(npc, { messages, messageCount }) {
+/**
+ * The land a person was last known in: the region of the record their last
+ * place (else their home) resolves to, or null when neither is tagged.
+ */
+export function npcLand(npc, locations = []) {
+    for (const place of [npc?.lastLocation, npc?.basedIn]) {
+        if (!cleanText(place)) continue;
+        const idx = findLocationRecord(locations || [], place);
+        const region = idx === -1 ? '' : cleanText(locations[idx]?.region);
+        if (region) return region;
+    }
+    return null;
+}
+
+function isFarAndForgotten(npc, { messages, messageCount, locations = [], heroLand = null }) {
     const age = conversationalAgeSince(npc?.lastSeenMessage, { messages, messageCount });
     if (age === null || age < KNOWN_NPC_STALE_MESSAGES) return false;
     const friend = npc?.disposition === 'friendly'
         && ((npc.bondMoments || []).some(moment => (Number(moment?.salience) || 0) >= 4) || (Number(npc.trust) || 0) >= 70);
-    return !friend;
+    if (!friend) return true;
+    // A friend is far only once the hero stands in a named land the friend
+    // is not known to be in (2026-10-31: on the healed megacampaign seven
+    // trusted friends 300–1,200 exchanges and a sea away filled 14k chars of
+    // KNOWN NPCs every turn in Eir-Vael). Named in the scene, they still seat.
+    if (!heroLand) return false;
+    const land = npcLand(npc, locations);
+    return !(land && isSameRegion(land, heroLand));
 }
 
 /**

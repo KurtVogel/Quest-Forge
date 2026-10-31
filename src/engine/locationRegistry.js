@@ -191,8 +191,41 @@ export function isMintableLocationName(name) {
 }
 
 /** "Library landing, Clockwork Tower" names the same place as "Clockwork Tower". */
+/**
+ * Words that name a KIND of place, not a place (2026-10-31). A record whose
+ * every word is one of these — "tunnel", "The basin", "Tavern", "Armory",
+ * "fissure" — claimed every later name containing the word: in Vesa's
+ * megacampaign "Crown Way transit tunnel" resolved to the Jewelglade
+ * "tunnel" and "Submerged Imperial Toll Slip, Crown Way (Eir-Vael Basin)" to
+ * the Jewelglade "The basin" a sea away, which tagged Eir-Vael places with
+ * the old land and chained a "known way" from the Eir-Vael watchtower to a
+ * Jewelglade fissure. Such a name is the same place only by its whole word set.
+ */
+const GENERIC_PLACE_WORDS = new Set([
+    'tunnel', 'tunnels', 'tavern', 'inn', 'armory', 'cabin', 'fissure', 'chokepoint', 'colonnade', 'basin',
+    'cave', 'caves', 'cavern', 'caverns', 'camp', 'campsite', 'road', 'bridge', 'gate', 'hall', 'room', 'chamber',
+    'corridor', 'passage', 'tower', 'watchtower', 'ruin', 'ruins', 'crypt', 'vault', 'shrine', 'temple', 'chapel',
+    'market', 'square', 'street', 'alley', 'dock', 'docks', 'harbor', 'harbour', 'quay', 'pier', 'yard', 'stable',
+    'stables', 'forest', 'woods', 'river', 'ford', 'pass', 'ridge', 'hill', 'hills', 'valley', 'field', 'farm',
+    'mill', 'keep', 'castle', 'fort', 'barracks', 'cell', 'prison', 'sewer', 'sewers', 'well', 'tomb', 'mine',
+    'quarry', 'bailey', 'courtyard', 'garden', 'library', 'kitchen', 'cellar', 'attic', 'shop', 'forge', 'smithy',
+    'warehouse', 'office', 'house', 'home', 'village', 'town', 'city', 'outpost', 'lighthouse', 'beach', 'shore',
+    'coast', 'island', 'cliff', 'cliffs', 'cove', 'swamp', 'marsh', 'bog', 'clearing', 'glade', 'grove', 'wilds',
+    'trail', 'path', 'stair', 'stairs', 'stairwell', 'landing', 'deck', 'hold', 'ship', 'quarters', 'bunks',
+    'workspace', 'antechamber', 'transept', 'hollow', 'gorge', 'canyon', 'encampment', 'checkpoint', 'post',
+    'inner', 'outer', 'upper', 'lower', 'north', 'south', 'east', 'west', 'northern', 'southern', 'eastern',
+    'western', 'old', 'new', 'great', 'small', 'little', 'big', 'high', 'low', 'back', 'front', 'main', 'private',
+    'side', 'central', 'deep', 'dark', 'ruined', 'abandoned', 'hidden', 'secret', 'burial', 'surgical', 'preparation',
+    'common', 'guard', 'captain', 'captains',
+]);
+
 export function isSameLocation(a, b) {
-    return containment(locationTokens(a), locationTokens(b)) >= 0.99;
+    const ta = locationTokens(a);
+    const tb = locationTokens(b);
+    if (containment(ta, tb) < 0.99) return false;
+    if (ta.size === tb.size) return true;
+    const smaller = ta.size < tb.size ? ta : tb;
+    return [...smaller].some(token => !GENERIC_PLACE_WORDS.has(token));
 }
 
 /**
@@ -215,6 +248,15 @@ function namesPlaceWithinSettlement(record, target) {
     const recordTokens = locationTokens(record.name);
     const targetTokens = locationTokens(target);
     if (targetTokens.size <= recordTokens.size) return false;
+    // "<the record>, <its town>" is the record QUALIFIED, not a place within
+    // it (2026-10-31: an inn the Scribe typed "settlement" — "Gatehouse Inn"
+    // — kept a twin "Gatehouse Inn, Bramblecross" record, four pairs in the
+    // megacampaign).
+    const comma = String(target).lastIndexOf(',');
+    if (comma > 0) {
+        const head = locationTokens(String(target).slice(0, comma));
+        if (head.size === recordTokens.size && containment(head, recordTokens) >= 0.99) return false;
+    }
     return coverage(recordTokens, targetTokens) >= 0.99;
 }
 
@@ -451,11 +493,21 @@ export function linkLocations(locations = [], fromId, toId, details = {}) {
  * their geography backfilled without a migration.
  */
 export function seedTravelLinksFromTrail(locations = [], trail = []) {
-    let list = Array.isArray(locations) ? locations : [];
+    // The backfill is rebuilt on every load (2026-10-31): a bare edge with no
+    // stamp and no detail is one this function minted, so it is dropped and
+    // re-derived — a wrong edge from an older resolution does not live forever.
+    let list = (Array.isArray(locations) ? locations : []).map(record => {
+        const links = Array.isArray(record?.links) ? record.links : null;
+        if (!links) return record;
+        const kept = links.filter(link => Number.isFinite(link?.atMessage) || hasLinkDetail(link));
+        return kept.length === links.length ? record : { ...record, links: kept };
+    });
     let prevId = null;
     for (const name of Array.isArray(trail) ? trail : []) {
         const idx = findLocationRecord(list, name);
-        if (idx === -1) continue;
+        // A trail step that names no record is a GAP: the places on either
+        // side of it were not consecutive, so no edge spans it.
+        if (idx === -1) { prevId = null; continue; }
         const id = list[idx].id;
         if (prevId && prevId !== id) list = linkLocations(list, prevId, id);
         prevId = id;

@@ -30,7 +30,7 @@ import { CHARACTER_APPEARANCE_MAX, NPC_DOSSIER_FIELD_MAX } from '../config/conte
 import { HERO_TELL_REPORT_CAP, isHeroTellEstablished } from '../engine/heroTells.js';
 import { liveWorldFacts, planWorldFactAdditions, sanitizeWorldFactPayload } from '../engine/worldFacts.js';
 import { cleanText } from '../engine/text.js';
-import { compareCardRecency, findStoryMemoryMatch, normalizeStoryMemoryCard, stripStoryMemoryEngineStamps } from '../engine/storyMemory.js';
+import { compareCardRecency, findStoryMemoryMatch, normalizeStoryMemoryCard, selectSettleCandidates, stripStoryMemoryEngineStamps } from '../engine/storyMemory.js';
 import {
     CAST_AUDIT_RULES,
     describeAppliedLoot,
@@ -56,22 +56,22 @@ Output ONLY valid JSON:
       "disposition": "friendly|neutral|hostile|wary|unknown",
       "lastNotes": "brief note on what happened with them this turn",
       "personality": "a trait NOT already listed for them in KNOWN PLAYER-RELATIONSHIP STANCES — a short comma list of the new trait(s) only; omit when every trait you see is already on record (never restate or reword the recorded ones)",
-      "goals": "a want NOT already listed under wants in KNOWN PLAYER-RELATIONSHIP STANCES, only if newly revealed (never restate or reword a recorded want; omit, never 'unknown')",
+      "goals": "what they want from their LIFE or this stretch of their story — still true next month, never this scene's task (a scene's errand is lastNotes; their next steps are agenda). Only a want NOT already listed under wants in KNOWN PLAYER-RELATIONSHIP STANCES, only if newly revealed (never restate or reword a recorded want; omit, never 'unknown')",
       "secrets": "hidden info NOT already listed under secret in KNOWN PLAYER-RELATIONSHIP STANCES, only if newly hinted at or revealed (omit, never 'unknown' or 'none revealed')",
       "appearance": "concrete physical/visual description — skin tone, hair (state it explicitly: color and style, or bald/shaved), build and body proportions, face, apparent age, clothing, distinguishing features (only if newly described)",
       "gender": "the character's gender exactly as the fiction establishes or makes clearly apparent — 'woman', 'man', or the fiction's own wording. Capture it the FIRST time it is knowable; afterwards omit unless the fiction changes it",
       "species": "the character's species/ancestry exactly as the fiction establishes it — 'goblin', 'human', 'dwarf', 'high elf'. Capture it the FIRST time it is knowable (including obvious humans), and whenever KNOWN APPEARANCES marks it NOT ON RECORD and this exchange or the record shows it; otherwise omit unless the fiction changes it",
       "basedIn": "place they are currently rooted — town they command, post they hold, territory they haunt. Update when fiction relocates or reassigns them; omit if unknown",
       "lastLocation": "where they were in this specific exchange (only if mentioned)",
-      "agenda": "what this NPC is likely trying to accomplish next (only if implied or revealed)",
-      "relationshipTension": "compact note about attraction, rivalry, resentment, debt, loyalty, fear, or trust strain",
+      "agenda": "their own business over the coming days — what they are working toward next, not this minute's chore (only if implied or revealed)",
+      "relationshipTension": "ONE sentence naming what pulls against what between them and the hero ('owes him her life but hates needing him') — never a single word; omit when nothing strains",
       "stanceToPlayer": "the ENDURING way this NPC regards the HERO as a person — affection, attraction, romantic interest, friendship, gratitude, respect, amusement, resentment, fear, obligation, rivalry — what would still be true a week from now. Written from the NPC's side, complete and current (only when this exchange establishes or shifts it). The heat of one scene (flushed, sated, briefly annoyed, tipsy and generous) belongs in lastNotes or relationshipTension, never here",
       "bondMoment": { "text": "one-line record of the ONE significant personal moment between the hero and this NPC in this exchange — stated concretely with both parties. Omit for ordinary interaction. The REGISTER rule binds THIS field hardest: an intimate moment is recorded in neutral anatomical language, never the scene's own crude diction", "kind": "meeting|flirtation|intimacy|confession|promise|gift|rescue|shared_danger|betrayal|quarrel|reconciliation|farewell|other", "salience": "1-5 — 5 redefines the relationship (a first night together, a betrayal, a life saved, an oath); 4 a beat both would recall years later; 3 memorable; 2 texture (a shared drink, a good joke — usually not worth a moment); 1 trivial (omit)", "voice": "ONLY for salience 4-5: the moment in this NPC's OWN words, one line, as they would tell it later — warm, wry, bitter, cold, or contemptuous as fits THEM (a rival's line is a grudge, an indifferent one's a shrug). Plain language, first person, no stage directions; shown to the player, never to the DM" },
-      "openThread": "the ONE thing currently pending between this NPC and the hero, from the NPC's side, one line — a promise the hero made her, a question she asked and he dodged, a favor owed, a confession she is waiting to hear answered, an invitation left open. Emit only when this exchange opens or changes it; it replaces the recorded thread",
+      "openThread": "the ONE thing currently pending between this NPC and the hero, from the NPC's side, one line — a promise the hero made her, a question she asked and he dodged, a favor owed, a confession she is waiting to hear answered, an invitation left open. Never the next practical step of a task (which way to go, what to carry, who keeps watch) — that is the scene, not something between them. Emit only when this exchange opens or changes it; it replaces the recorded thread",
       "openThreadResolved": "true ONLY when this exchange settles the recorded open thread (the promise kept, the question answered, the debt paid) and nothing new is pending — omit otherwise",
       "trust": "a number 0-100 ONLY when this exchange visibly changes how far they trust the hero — omit otherwise (never echo a placeholder)",
       "privateNotes": "hidden NPC intent or unrevealed motive useful for future consistency",
-      "callbackHooks": ["short hooks this NPC could later bring back naturally — complete phrases in the neutral REGISTER, never crude slang"]
+      "callbackHooks": ["an unresolved THING this NPC could bring back later — an object, a debt, a favor, a line once said, a name — a complete phrase in the neutral REGISTER; never scenery, a sound, a gesture, or the room. Usually omit"]
     }
   ],
   "story_memory": [
@@ -107,6 +107,7 @@ Rules:
 - AN INTENT IS NOT A DEED — a plan, promise, threat, appointment, or expectation ("the baron plans to seize the mill", "Tammo swore to return the knife", "Odo will hang at dawn") is never written as a standing truth. A personal commitment belongs in story_memory (type promise or npcAgenda) or that NPC's agenda / openThread; only a CAMPAIGN-LEVEL plan goes to world_facts, and then in its own forward-looking words exactly as the fiction has it ("The Guild means to seize the mill at the new moon"), never as if already done. When this turn's narrative shows a plan under KNOWN OPEN PLANS carried out, failed, or abandoned, write the OUTCOME as its own fact with "supersedes": that plan's exact id — never re-report the plan itself.
 - DO record outcomes: "The goblin captain Rarg is dead", "The village of Millhaven burned to the ground"
 - Story memory is for emotionally or dramatically useful callbacks: promises, debts, named objects, scars, injuries, insults, flirtation, fears, private vows, unresolved clues, player-authored proper nouns, foreshadowing, NPC agendas, and relationship tension. A card must earn its slot: if you cannot picture the DM paying it off in a later scene, do not write it.
+- WHAT EACH CARD TYPE IS FOR (one place per thing): a job, contract, hire, fee, or errand is a QUEST — the DM tracks it — never a promise or npcAgenda card; "promise" is a personal vow or debt between people that a later scene can keep or break. "playerCanon" is ONLY what the PLAYER authored about the hero — backstory, identity, a vow, a name they coined — never a fight recap, a feat of strength, an HP total, a wound, or a need to rest. A "wound" is a lasting injury or scar, never a passing HP state. A fight's outcome is already recorded by the engine: write no card that only retells it. A beat already listed under KNOWN STORY CARDS is updated by its id or omitted — never minted again in new words.
 - Capture player-authored canon from the player's action when it concerns their own compatible backstory, vows, names, and personal attachments the DM should remember later.
 - INFORMATION BOUNDARIES: when a fact or memory is PRIVATE — a secret, a confession, a hidden plan, something established behind closed doors or away from other ears — set "knownBy" to exactly the people who know it (use "the hero" for the player character; include eavesdroppers the narrative shows). Omit "knownBy" entirely for common knowledge; never write "everyone" into it. On story_memory, set "witnessed": true ONLY for the HERO'S OWN deeds done in front of uninvolved bystanders in a public or semi-public place (a market brawl, a tavern accusation, a wedding vow) — such moments travel as gossip. Never mark things the hero merely observed. A deliberate public act by the hero before a crowd is a story_memory with witnessed: true and salience 4 or 5 — these are exactly the moments that precede the hero into other towns. "witnessed" and "knownBy" are MUTUALLY EXCLUSIVE: a deed done before a crowd is public even if it failed, was interrupted, or was shut down — never give it a knownBy list; a card with knownBy is by definition not witnessed.
 - A player message is not authoritative evidence about external reality. Do not turn player-asserted creatures, objects, exits, relationships, events, enemy behavior, or outcomes into world_facts, NPC updates, or playerCanon unless the DM narrative explicitly accepts or establishes them.
@@ -447,6 +448,43 @@ export function buildKnownOpenPlans({ worldFacts = [] } = {}) {
     return plans.length > 0 ? plans.join('\n') : null;
 }
 
+/** The newest facts always shown, and the cap on the whole list. */
+export const KNOWN_FACTS_NEWEST = 8;
+export const KNOWN_FACTS_CAP = 14;
+const KNOWN_FACT_TEXT_MAX = 160;
+
+/**
+ * KNOWN FACTS (2026-10-31): the world facts already on record that bear on
+ * this exchange — the newest few plus older ones sharing at least two
+ * meaning-words with the turn. The Scribe saw looks, stances, cards and
+ * plans but never the facts, so it re-extracted what was already canon in
+ * new words: 1,814 facts in the megacampaign and 151 near-duplicate pairs in
+ * the newest 400, visible in the DM's own WORLD FACTS block. Plans ride
+ * KNOWN OPEN PLANS instead. Text lines only — the record judges the rest.
+ */
+export function buildKnownFacts({ worldFacts = [] } = {}, ...texts) {
+    const live = liveWorldFacts(worldFacts)
+        .filter(f => f.aspect !== 'intent' && typeof f.fact === 'string' && f.fact.trim());
+    if (live.length === 0) return null;
+    const newestFirst = [...live].sort((a, b) => (b.atMessage || 0) - (a.atMessage || 0));
+    const chosen = newestFirst.slice(0, KNOWN_FACTS_NEWEST);
+    const turnTokens = tokenSet(texts.filter(t => typeof t === 'string').join(' '), { minLength: 4 });
+    if (turnTokens.size > 0) {
+        const related = newestFirst.slice(KNOWN_FACTS_NEWEST)
+            .map(fact => {
+                let shared = 0;
+                for (const token of tokenSet(fact.fact, { minLength: 4 })) if (turnTokens.has(token)) shared += 1;
+                return { fact, shared };
+            })
+            .filter(entry => entry.shared >= 2)
+            .sort((a, b) => b.shared - a.shared)
+            .slice(0, KNOWN_FACTS_CAP - chosen.length)
+            .map(entry => entry.fact);
+        chosen.push(...related);
+    }
+    return chosen.map(fact => `- ${fact.fact.trim().slice(0, KNOWN_FACT_TEXT_MAX)}`).join('\n');
+}
+
 /**
  * The Scribe's merge context, assembled ONCE from the live state and the
  * turn's texts (2026-10-10 scribe P2): the ordinary turn (turnOrchestrator)
@@ -462,6 +500,7 @@ export function buildScribeContext(state, ...texts) {
         knownStances: buildKnownStances(state, ...texts),
         knownStoryCards: buildKnownStoryCards(state, ...texts),
         knownOpenPlans: buildKnownOpenPlans(state),
+        knownFacts: buildKnownFacts(state, ...texts),
         knownHeroTells: buildKnownHeroTells(state),
         knownLocations: buildKnownLocations(state),
         knownLands: buildKnownLands(state),
@@ -581,7 +620,7 @@ export const SCRIBE_ANCHORS = [
     'location_profile', 'travel', 'narrated_loot', 'narrated_payment', 'narrated_losses', 'missing_gear_handoffs', 'narrated_casts', 'hero_tells',
 ];
 /** The reflection schema's keys — a quiet cadence honestly answers with the tempo directive alone. */
-export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'story_memory', 'tempo_directive', 'front_proposals'];
+export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'settled_cards', 'story_memory', 'tempo_directive', 'front_proposals'];
 
 /**
  * The Scribe's contract on a "remember when…" turn (2026-09-18): the DM's
@@ -591,7 +630,7 @@ export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'story_memor
  */
 export const RECALL_TURN_RULE = 'RECALL TURN: the player asked about the PAST and the DM answered from the engine\'s own record of this campaign. Extract NOTHING new from the answer — no world_facts, no story cards, no location change, no loot, no payment, no appearance — everything it recounts is already on record. The ONE exception: if the remembering itself visibly moved someone (warmth, grief, a grudge surfacing), report that as an npc_updates bondMoment or stanceToPlayer for that person. Emit "world_facts": [] and leave every other field empty.';
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch: commit, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownHeroTells = null, knownLocations = null, knownLands = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch: commit, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownFacts = null, knownHeroTells = null, knownLocations = null, knownLands = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null }) {
     // Campaign-stamped writes (2026-10-26, the cadence's rule): when the
     // context names the campaign this pass read, every dispatch below carries
     // it and the dispatcher drops the lot once another campaign is live. A
@@ -651,6 +690,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     : null,
                 knownStoryCards
                     ? `KNOWN STORY CARDS (beats already on record for the people and threads in this exchange — update one by its exact "id" instead of minting a duplicate; a resolved card is paid off and must NOT be re-reported):\n${knownStoryCards}`
+                    : null,
+                knownFacts
+                    ? `KNOWN FACTS (world facts already on record — never restate one, in any wording; write a world_fact only for something genuinely NEW, or for a CHANGE to one of these, stated as the new truth):\n${knownFacts}`
                     : null,
                 knownOpenPlans
                     ? `KNOWN OPEN PLANS (plans, promises, and threats on record that have NOT yet happened — when this turn's narrative shows one carried out, failed, or abandoned, write the outcome as its own world fact with "supersedes": that plan's exact id; never re-report the plan itself):\n${knownOpenPlans}`
@@ -894,11 +936,11 @@ Output ONLY valid JSON:
       "name": "Exact NPC name",
       "basedIn": "current anchor — command post, town, territory. Update when they relocate; omit if unknown",
       "agenda": "what they likely try next",
-      "relationshipTension": "attraction, rivalry, fear, debt, loyalty, distrust, or leverage",
+      "relationshipTension": "ONE sentence naming what pulls against what between them and the hero (attraction, rivalry, fear, debt, distrust, leverage) — never a single word",
       "stanceToPlayer": "their current personal stance toward the hero — affection, attraction, respect, resentment, obligation — complete, written from the NPC's side",
       "trust": "a number 0-100 ONLY when the record's trust should visibly move — omit otherwise (never echo a placeholder)",
       "privateNotes": "hidden intent or secret pressure",
-      "callbackHooks": ["one or two details they could naturally bring back later — complete phrases in neutral anatomical language, never crude slang"]
+      "callbackHooks": ["an unresolved THING they could bring back later — an object, a debt, a favor, a line once said — complete phrases in neutral anatomical language, never scenery or a gesture"]
     }
   ],
   "front_advances": [
@@ -928,6 +970,9 @@ Output ONLY valid JSON:
       "reason": "why this player-engaged threat has EARNED promotion to a real campaign pressure"
     }
   ],
+  "settled_cards": [
+    { "id": "an id from openCards ONLY", "outcome": "resolved|dormant", "reason": "what in the journal or facts settled it, in a few words" }
+  ],
   "story_memory": [
     {
       "type": "callback|promise|wound|relationship|mystery|playerCanon|foreshadow|npcAgenda",
@@ -950,7 +995,8 @@ Rules:
 - Front delta is strictly -1, 0, or +1. Advance only when meaningful fictional time passed, the hero ignored a pressure to pursue something else, or an off-screen faction gained a concrete opportunity. Soften only when canonical player action hindered it. Use 0 when only its symptoms or posture evolve.
 - PACING: fronts are campaign clocks that should take many sessions to fill, not one evening. Advance at most ONE front per reflection, and only with an explicit fictional trigger you can name in "reason". The engine also refuses clock gains for a front that advanced in the previous reflection — the default and most common outcome is that nothing moves.
 - A journal cadence is not itself a reason to move a front. Omit fronts with no meaningful change. Never jump multiple steps, resolve a front, or undo an established grim portent here.
-- Emit at most 2 story_memory cards per reflection, and only for hooks with real future payoff.
+- Emit at most 2 story_memory cards per reflection, and only for hooks with real future payoff — never a job or contract (the DM tracks those as quests), never a fight recap.
+- SETTLE THE RECORD: openCards lists story cards still marked open. For each one the journal, the facts, or the NPC records show is DONE — the promise kept or broken, the debt paid, the contract delivered, the wound healed, the mystery answered, the threat ended — emit settled_cards with outcome "resolved". For one tied only to people or places the hero has left far behind, with nothing still pending for the hero, outcome "dormant". Never settle what is still pending or merely quiet; an empty list is a fine answer. Ids only from openCards.
 - TEMPO DIRECTIVE (always include it): decide whether the coming scenes get a pressure symptom or stay quiet. Quiet (front_id null) is a normal, common, and GOOD answer — slow-burn is a feature. Respect the campaign pace in the context: slow-burn means most reflections stay quiet; standard roughly every other; breakneck may grant most. Ground the choice in the arc: what would make sense given where the hero is, what just happened, and each pressure's reach — a pressure far from its home territory reaches the hero only as news. The engine independently caps intensity to what the clocks justify and delays the landing with its own dice; your job is only what/where would make sense.
 - If RECENT HEAT in the context is high, strongly prefer a quiet directive with a restorative quiet_hook — the table needs air after violence.
 - The inverse binds too: when RECENT HEAT sits BELOW the campaign pace's appetite (calm on a standard campaign, calm OR lively on breakneck) and the scenes since the last fight have already given the table its air, LEAN toward granting a window at whatever intensity the arc supports. On breakneck, consecutive quiet directives need an explicit arc reason in the rationale — the player chose that dial to be pushed.
@@ -960,6 +1006,31 @@ Rules:
 - Keep every field unvarnished: record attraction, resentment, and bodily or intimate canon plainly and completely, never softened into vagueness or omission — but always in neutral anatomical language, never profanity or crude slang.
 - stanceToPlayer evolves slowly off-screen: refine or drift it only when established events support it, and emit the complete stance (it replaces the record). Never invent romance or hostility the canon does not support.
 - Keep everything compact. Omit empty arrays when nothing changes.`;
+
+/** How many cards one cadence may settle — a bounded step through the backlog. */
+export const SETTLE_PER_CADENCE_MAX = 8;
+const SETTLE_OUTCOMES = new Set(['resolved', 'dormant']);
+
+/**
+ * The reflection's settle verdicts, judged (2026-10-31): only an id the
+ * context OFFERED (a template echo or an invented id settles nothing), only
+ * "resolved" / "dormant", one verdict per card, at most SETTLE_PER_CADENCE_MAX.
+ */
+export function settleReflectedCards(verdicts, offered = []) {
+    const offeredIds = new Set((Array.isArray(offered) ? offered : []).map(card => card?.id).filter(Boolean));
+    const out = [];
+    const seen = new Set();
+    for (const verdict of Array.isArray(verdicts) ? verdicts : []) {
+        if (!verdict || typeof verdict !== 'object' || Array.isArray(verdict)) continue;
+        const id = typeof verdict.id === 'string' ? verdict.id.trim() : '';
+        const status = typeof verdict.outcome === 'string' ? verdict.outcome.trim().toLowerCase() : '';
+        if (!offeredIds.has(id) || seen.has(id) || !SETTLE_OUTCOMES.has(status)) continue;
+        seen.add(id);
+        out.push({ id, status });
+        if (out.length >= SETTLE_PER_CADENCE_MAX) break;
+    }
+    return out;
+}
 
 // The reflection's text clamp IS the engine's type-strict shelf (2026-10-10 scribe P2):
 // the private twin stringified an object to "[object Object]".
@@ -1088,6 +1159,12 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
 
     const heat = computeRecentHeat(state);
     const recentJournal = (state.journal || []).slice(-3).map(projectJournalForReflection).filter(Boolean);
+    // The cards this cadence may settle (2026-10-31): touched by the cadence's
+    // own text first, then the longest silent.
+    const openCards = selectSettleCandidates(state.storyMemory, {
+        text: [cadence?.summary, ...recentJournal.map(row => row.summary)].filter(item => typeof item === 'string').join(' '),
+        messages: state.messages || [],
+    });
     const context = {
         location: state.currentLocation,
         // The front proposal needs the premise's factions and stakes, not its
@@ -1101,6 +1178,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
         campaignPace: normalizePaceDial(state.settings?.paceDial),
         recentHeat: { level: heat.level, reasons: heat.reasons },
         recentEncounters: (state.recentEncounters || []).slice(-4),
+        ...(openCards.length > 0 && { openCards }),
         knownLocations: (state.locations || []).slice(-12).map(record => ({
             name: record.name,
             type: record.type,
@@ -1174,6 +1252,10 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
         const reflectedCards = Array.isArray(reflected.story_memory)
             ? reflected.story_memory.filter(memory => memory && typeof memory === 'object' && !Array.isArray(memory)).slice(0, 2)
             : [];
+        const settled = settleReflectedCards(reflected.settled_cards, openCards);
+        for (const { id, status } of settled) {
+            dispatch({ type: 'UPDATE_STORY_MEMORY', payload: { id, status } });
+        }
         if (reflectedCards.length > 0) {
             // No `meta.sourceMessage` by design: the reflection reads a journal
             // BATCH, not one DM message, so a cadence card has no single
@@ -1208,6 +1290,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
             cards: Array.isArray(reflected.story_memory) ? reflected.story_memory.slice(0, 2) : [],
             tempoDirective: reflected.tempo_directive || null,
             frontProposal: reflected.front_proposals?.[0]?.title || null,
+            settledCards: settled,
         });
     } catch (e) {
         console.warn('[Reflection] NPC/front reflection failed:', e.message || e);

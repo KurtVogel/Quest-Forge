@@ -6,7 +6,13 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-31 (the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
+_Last updated: 2026-10-31 (evening: named presence, far friends, story cards retire, the Scribe sees facts, places, dooms abroad; earlier: the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
+
+## 2026-10-31 (evening) — what the DM and the Scribe are shown: named presence, far friends leave, story cards retire, the Scribe sees facts, a kind of place is not a place, dooms abroad wait — pushed AND deployed
+
+Vesa asked for everything bloated or overlapping in the megacampaign appendix; measured on the HEALED save (the 10-28 session had fixed fronts, the Ketta Nor twin and old reminders), then "Fix all" (DECISIONS.md 2026-10-31 evening, seven points). On the healed save's next turn: KNOWN NPCs 14.1k → 8.3k chars, people "present" 8 → 1, active story cards 511 → 139 (the callbacks are this land's beats, not a delivery finished 204 turns ago), the wrong "known way" and four place twins gone, importance spread 1–5. The cadence reflection now settles kept promises and paid debts; the Scribe sees the world facts on record; a full clock in a land the hero left waits for the return. `src/engine/megacampaign1031.test.js`.
+
+**Next:** the real-provider playtest Vesa asked for (running now, Opus as player, Flash as DM) — watch the Scribe's facts under KNOWN FACTS, the reflection's settled_cards, and KNOWN NPCs presence.
 
 ## 2026-10-31 (later) — the relationship arc is derived, missing species get filled, placeholder secrets and repeated wants fold — pushed AND deployed
 

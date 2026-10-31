@@ -8,7 +8,7 @@ import { describeArmorAc, describeShieldAc, formatModifier, getModifier, getProf
 import { SUPPORTED_ENEMY_CONDITIONS_SENTENCE } from '../engine/enemyStats.js';
 import { getDmBonusXpCap, getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalBlocks, describeBondForPrompt } from './journalBlocks.js';
-import { coverage, findSubjectsInText } from '../engine/textMatch.js';
+import { coverage } from '../engine/textMatch.js';
 import { buildWonderBlock } from '../engine/wonder.js';
 import { buildInterludeBlock } from '../engine/interlude.js';
 import { buildPresenceText } from './narrativeMessages.js';
@@ -26,7 +26,7 @@ import { buildRegionalHearsayBlock } from '../engine/regionalHearsay.js';
 import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
 import { describeSpellbookForPrompt, describeSpellSlotsForPrompt, isSpellcaster } from '../engine/spellcasting.js';
 import { describeHeroIncapacity, isLowLevelSolo } from '../engine/combatPredicates.js';
-import { briefNpcFieldForPrompt, findCompanionRecord, resolveCompanionLook } from '../engine/npcRoster.js';
+import { briefNpcFieldForPrompt, findCompanionRecord, findNamedPeople, resolveCompanionLook } from '../engine/npcRoster.js';
 import { buildRelationshipBeatBlock } from '../engine/relationshipArc.js';
 import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
 import { describeStateTag, factTokenSet, hasNegation, isLiveFact, liveWorldFacts } from '../engine/worldFacts.js';
@@ -557,7 +557,7 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
     // can never be ranked out of the block by richer dossiers elsewhere.
     const rosterNames = ctx.npcs.map(n => n?.name).filter(Boolean);
     const presentNames = rosterNames.length > 0 && ctx.messages && ctx.messages.length > 0
-        ? findSubjectsInText(buildPresenceText(ctx.messages), rosterNames, 8)
+        ? findNamedPeople(ctx.npcs, { sceneText: buildPresenceText(ctx.messages), locations: ctx.locations, cap: 8 }).map(npc => npc.name)
         : null;
     const partyNames = ctx.party.map(c => c?.name).filter(Boolean);
     // An empty journal skips SESSION HISTORY and LOCATION TRANSITION HISTORY

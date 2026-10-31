@@ -362,7 +362,11 @@ export function openDoomWindow(fronts = [], { messageCount = 0, delayScenes = 0,
 export function describeFrontDoom(front) {
     const portents = describeFrontPortents(front);
     const lastStep = portents ? portents.last.slice(0, 200) : '';
-    const stakes = bareClause(cleanText(front?.stakes)).slice(0, 240);
+    // A question is not stakes (2026-10-31): the local-pressure template's
+    // "What changes in Vault if nobody interferes? Who becomes desperate…?"
+    // reached the DM's doom card verbatim.
+    const rawStakes = cleanText(front?.stakes);
+    const stakes = rawStakes.includes('?') ? '' : bareClause(rawStakes).slice(0, 240);
     return { lastStep, stakes };
 }
 

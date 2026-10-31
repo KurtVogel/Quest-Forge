@@ -14,7 +14,7 @@ import {
     buildKnownLands,
     buildKnownLocations,
     KNOWN_LANDS_PREMISE_MAX,
-    buildKnownOpenPlans,
+    buildKnownFacts, buildKnownOpenPlans,
     buildKnownStances,
     buildKnownStoryCards,
     buildScribeContext,
@@ -42,13 +42,14 @@ describe('buildScribeContext (scribe P2, 2026-10-10)', () => {
         const texts = ['I ask Mira about the ribbon.', 'Mira wipes her hands. "Not yet," she says.'];
         const context = buildScribeContext(state, ...texts);
         expect(Object.keys(context).sort()).toEqual([
-            'knownAppearances', 'knownHeroTells', 'knownLands', 'knownLocations', 'knownOpenPlans', 'knownStances', 'knownStoryCards', 'memoryContext',
+            'knownAppearances', 'knownFacts', 'knownHeroTells', 'knownLands', 'knownLocations', 'knownOpenPlans', 'knownStances', 'knownStoryCards', 'memoryContext',
         ]);
         expect(context).toEqual({
             knownAppearances: buildKnownAppearances(state, ...texts),
             knownStances: buildKnownStances(state, ...texts),
             knownStoryCards: buildKnownStoryCards(state, ...texts),
             knownOpenPlans: buildKnownOpenPlans(state),
+            knownFacts: buildKnownFacts(state, ...texts),
             knownHeroTells: buildKnownHeroTells(state),
             knownLocations: buildKnownLocations(state),
             knownLands: buildKnownLands(state),

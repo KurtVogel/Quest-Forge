@@ -70,7 +70,9 @@ sequenceDiagram
    (`engine/recallDossier.js`) for "remember when…" questions. Recall
    turns strip every mechanical channel from the reply (`RECALL_STRIPPED_EVENT_KEYS`).
 5. **Retrieval** is presence-aware: `buildPresenceText` (llm/narrativeMessages.js) feeds the
-   last narrative rows so a row about an absent person is penalized. A failed query sets
+   last narrative rows so a row about an absent person is penalized — a person is present when
+   the scene NAMES them (`isNameNamedIn`: a proper name capitalized in the narration or in the
+   player's words), never because a role word ("scarred", "guard") appears. A failed query sets
    `memoryDown` and the prompt carries a memory-unavailable note instead of silence.
 6. **Prompt.** `buildSystemPromptSplit` returns the prefix and dynamic halves. The prefix
    (rules, format, premise, hero identity, spellbook, hero sheet) is byte-identical across

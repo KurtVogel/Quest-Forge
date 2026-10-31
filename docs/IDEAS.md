@@ -23,7 +23,7 @@ tagged place with no region — a vessel is the deliberate case); the fold then 
 record when the DM string names a port AND a ship ("aboard the Wren, at the Cala Meron quay" is
 the quay). Zero calls. Wants a second far-land Opus run to see how Flash names a ship at anchor.
 
-### Doom news a land away is still the doom's own people at the door — status: `idea` (2026-10-28, measured)
+### Doom news a land away is still the doom's own people at the door — status: `built` 2026-10-31 (the HOLD option: a full clock in a land the hero left opens on their return — DECISIONS 2026-10-31 evening, point 6; unproved live) (2026-10-28, measured)
 On the healed megacampaign (DECISIONS 2026-10-28 evening, point 3) a doom window opened for a front
 whose theaters all lay a sea away; the card said its final step "arrives as NEWS — a rider, a
 refugee, a glow on the horizon", and Flash brought three of the front's spear-hunters onto the new
@@ -33,7 +33,7 @@ card when a clock fills while the hero is abroad. Options: render a far doom as 
 name), or hold the window until the hero is back in the front's land. Wants one live doom run
 abroad before choosing.
 
-### A note in prose is not a person — status: `idea` (2026-10-28)
+### A note in prose is not a person — status: `built` 2026-10-31 (`isNameNamedIn` / `findNamedPeople`: proper tokens capitalized in the scene or in the player's words; read by callback curation, KNOWN NPCs and the RAG gate — DECISIONS 2026-10-31 evening, point 1) (2026-10-28)
 `findSubjectsInText` judges presence by any distinctive-looking token, so a role-named record
 ("Armory Guard", "Scarred Guard", "The heavy crossbowman") is "present" whenever the prose says
 "armory", "scarred" or "heavy" — the DM's own tics ("heavy" ×1,251 in the megacampaign) keep dead

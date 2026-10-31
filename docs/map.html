@@ -278,7 +278,7 @@
     Runner-&gt;&gt;Vec: queueMemoryItem(factMemoryItem) for this message's accepted facts
 
     Runner-&gt;&gt;Scribe: runScribe({ ...buildScribeContext(stateAfter, texts), sourceMessageId })
-    Note over Scribe: context = KNOWN appearances, stances, story cards, open plans, hero tells, lands
+    Note over Scribe: context = KNOWN appearances, stances, story cards, facts, open plans, hero tells, lands
     Scribe--&gt;&gt;Runner: facts ≤ cap, npc_updates, cards ≤ cap, hero_tells, appearance, audits
     Scribe-&gt;&gt;Red: ADD_WORLD_FACTS (meta.sourceMessage) → planWorldFactAdditions again
     Scribe-&gt;&gt;Red: UPDATE_NPC → sanitizeNpcLanePayload → resolveNpcRef → upsertNpc (clause merges, impressions)

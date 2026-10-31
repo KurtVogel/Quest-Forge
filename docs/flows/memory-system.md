@@ -40,7 +40,7 @@ sequenceDiagram
     Runner->>Vec: queueMemoryItem(factMemoryItem) for this message's accepted facts
 
     Runner->>Scribe: runScribe({ ...buildScribeContext(stateAfter, texts), sourceMessageId })
-    Note over Scribe: context = KNOWN appearances, stances, story cards, open plans, hero tells, lands
+    Note over Scribe: context = KNOWN appearances, stances, story cards, facts, open plans, hero tells, lands
     Scribe-->>Runner: facts ≤ cap, npc_updates, cards ≤ cap, hero_tells, appearance, audits
     Scribe->>Red: ADD_WORLD_FACTS (meta.sourceMessage) → planWorldFactAdditions again
     Scribe->>Red: UPDATE_NPC → sanitizeNpcLanePayload → resolveNpcRef → upsertNpc (clause merges, impressions)
@@ -129,7 +129,9 @@ in flight when the player loads another save lands nothing.
   instead); a negation flip supersedes its twin; `liveWorldFacts` filters superseded and
   retracted facts for every present-tense reader while the record keeps them.
 - **Cards:** low-salience cards go dormant after a few untouched cadences, engine wound cards
-  after more; `resolved` never revives except by an explicit DM status update.
+  after more, promises and salience-3/4 cards after twelve (the player's canon and salience 5
+  never); the cadence reflection SETTLES the open cards it is offered (`settled_cards`, offered
+  ids only); `resolved` never revives except by an explicit DM status update.
 - **NPCs:** impressions expire; bond moments evict lowest-salience first; descriptive labels
   and fodder are archived, never deleted.
 - **Vectors:** the campaign cap evicts only `player` / `narrative` rows (durable canon never);

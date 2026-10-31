@@ -35,10 +35,10 @@ import { maybeAutoSummarize } from '../engine/worldJournal.js';
 import { buildScribeContext, runScribe } from './scribe.js';
 import { isEpilogueRequest } from './tableTalk.js';
 import { factMemoryItem, flushMemoryQueue, journalMemoryItem, queueMemoryItem, retrieveRelevant, sceneMemoryItem } from '../engine/vectorMemory.js';
-import { findSubjectsInText } from '../engine/textMatch.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
 import { describeMemoryUnavailable, dmCallConfig, getMachineryGeminiKey, PRE_COMMIT_TIMEOUT_MS } from './machinery.js';
 import { curateStoryMemory, detectCallbackPayoff } from '../engine/storyMemory.js';
+import { findNamedPeople } from '../engine/npcRoster.js';
 import { markTurn, turnFlags } from './turnFlags.js';
 import { captureCallbackPayoff, captureInjection, captureProviderNote, captureUsage } from '../debug/memoryInspectorStore.js';
 import { buildMessageWindow, deriveSetupVisibility, dropOrphanCombatExchange } from '../components/Chat/turnVisibility.js';
@@ -160,16 +160,20 @@ export function stripRecallEvents(events) {
  * roster-wide soup of dispositions and notes — a smuggler two towns away
  * scored within a point of the person the hero was talking to. Presence is
  * the same judgement RAG makes: the player's line plus the last narrative
- * messages (`buildPresenceText`), matched by name through `findSubjectsInText`.
+ * messages (`buildPresenceText`), matched by name through `findNamedPeople`.
  * Party companions travel with the hero and are always present.
  */
 export function findPresentNpcs(state, playerMessage = '') {
     const roster = Array.isArray(state?.npcs) ? state.npcs : [];
     if (roster.length === 0) return [];
-    const names = roster.map(n => n?.name).filter(Boolean);
-    const sceneText = `${playerMessage || ''} ${buildPresenceText(state?.messages || [])}`;
-    const present = new Set((findSubjectsInText(sceneText, names, PRESENT_NPC_CAP) || [])
-        .map(name => String(name).toLowerCase()));
+    // Named, not merely worded (2026-10-31): a role word in the narration
+    // ("scarred", "heavy", "armory") no longer seats a dead or archived figure.
+    const present = new Set(findNamedPeople(roster, {
+        playerText: playerMessage || '',
+        sceneText: buildPresenceText(state?.messages || []),
+        locations: state?.locations || [],
+        cap: PRESENT_NPC_CAP,
+    }).map(npc => String(npc.name).toLowerCase()));
     for (const companion of (Array.isArray(state?.party) ? state.party : [])) {
         if (companion?.name) present.add(String(companion.name).toLowerCase());
     }

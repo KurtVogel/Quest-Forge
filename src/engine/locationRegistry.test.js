@@ -386,19 +386,28 @@ describe('dedupeLocationRecords', () => {
     });
 
     it('folds name-level containment fragments into the shorter canonical record', () => {
-        // 2026-07-15 playtest: a rename left "the plague-shrine at a ring of
-        // drowned alders" stranded next to "the shrine".
+        // 2026-07-15 playtest: a rename left a longer name stranded next to
+        // the record it names.
         const shrine = normalizeLocationRecord({
-            name: 'the shrine', type: 'hostile_site', danger: 'deadly',
+            name: 'the Alder shrine', type: 'hostile_site', danger: 'deadly',
         });
         const husk = normalizeLocationRecord({
-            name: 'the plague-shrine at a ring of drowned alders', theaterFrontIds: ['front-v2-1'],
+            name: 'the Alder shrine at a ring of drowned trees', theaterFrontIds: ['front-v2-1'],
         });
         const healed = dedupeLocationRecords([shrine, husk]);
         expect(healed).toHaveLength(1);
-        expect(healed[0].name).toBe('the shrine');
+        expect(healed[0].name).toBe('the Alder shrine');
         expect(healed[0].theaterFrontIds).toEqual(['front-v2-1']);
         expect(healed[0]).toMatchObject({ type: 'hostile_site', danger: 'deadly' });
+    });
+
+    it('a name made only of place-kind words folds nothing by containment (2026-10-31)', () => {
+        // Vesa's megacampaign: the Jewelglade "tunnel" claimed the Eir-Vael
+        // "Crown Way transit tunnel" a sea away.
+        const tunnel = normalizeLocationRecord({ name: 'tunnel', region: 'Jewelglade' });
+        const crownWay = normalizeLocationRecord({ name: 'Crown Way transit tunnel' });
+        expect(dedupeLocationRecords([tunnel, crownWay])).toHaveLength(2);
+        expect(dedupeLocationRecords([tunnel, normalizeLocationRecord({ name: 'The Tunnel' })])).toHaveLength(1);
     });
 
     it('drops scene-description records that match nothing', () => {

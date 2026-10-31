@@ -176,13 +176,13 @@ export function buildTransitionHistoryBlock(journal, currentLocation) {
  * prompt-building P2): their roster record renders ONCE, on their party
  * line — a present companion used to take a reserved slot here beside it.
  */
-export function buildKnownNpcsBlock(npcs, currentLocation, { presentNames = null, partyNames = [], messages = null, storyMemory = [] } = {}) {
+export function buildKnownNpcsBlock(npcs, currentLocation, { presentNames = null, partyNames = [], messages = null, storyMemory = [], locations = [] } = {}) {
     const companionRecords = new Set((Array.isArray(partyNames) ? partyNames : [])
         .map(name => findCompanionRecord(npcs, name))
         .filter(Boolean));
     const rosterNpcs = (npcs || []).filter(n => (n.rosterTier === 'character' || !n.rosterTier) && !companionRecords.has(n));
     if (rosterNpcs.length === 0) return '';
-    const shown = curateNpcsForPrompt(rosterNpcs, { location: currentLocation, limit: MAX_PROMPT_NPCS, presentNames, messages });
+    const shown = curateNpcsForPrompt(rosterNpcs, { location: currentLocation, limit: MAX_PROMPT_NPCS, presentNames, messages, locations });
     const hiddenCount = Math.max(0, rosterNpcs.length - shown.length);
 
     const npcList = shown.map(n => {
@@ -236,7 +236,7 @@ export function buildJournalBlocks(journal, npcs, currentLocation, { presentName
         { name: 'place', text: buildPlaceBlock(currentLocation, { locations, regions }) },
         { name: 'sessionHistory', text: buildSessionHistoryBlock(journal) },
         { name: 'transitionHistory', text: buildTransitionHistoryBlock(journal, currentLocation) },
-        { name: 'knownNpcs', text: buildKnownNpcsBlock(npcs, currentLocation, { presentNames, partyNames, messages, storyMemory }) },
+        { name: 'knownNpcs', text: buildKnownNpcsBlock(npcs, currentLocation, { presentNames, partyNames, messages, storyMemory, locations }) },
     ].filter(block => block.text);
 }
 

@@ -10,6 +10,7 @@ import {
     DEFAULT_MAX_CLOCK,
     DOOM_TIMING_DIE_SIDES,
     FRONTS_VERSION,
+    isFrontClockFull,
     isFrontGenerationClosed,
     normalizeFront,
     normalizeFrontProposal,
@@ -26,7 +27,7 @@ import { conversationalDistance } from '../../engine/replayLedger.js';
 import { DIRECTOR_MAX_ATTEMPTS, getDirectorFailure, RETRYABLE_DIRECTORS } from '../../engine/directorRetry.js';
 import { foldExperience, getFrontResolutionMilestoneXp, isHeroDown } from '../../engine/progression.js';
 import { findLocationRecord, isSameRegion, normalizeLocationRecord, upsertLocation } from '../../engine/locationRegistry.js';
-import { findRegionProfile, recordRegionFaceAttempt, rememberRegionProfile } from '../../engine/regionProfile.js';
+import { findRegionProfile, listFrontsLeftBehind, recordRegionFaceAttempt, rememberRegionProfile } from '../../engine/regionProfile.js';
 import { detectFrontTurning, INTERLUDE_CONCLUSION_DELAY, mintInterlude, openRegionInterlude } from '../../engine/interlude.js';
 import { namesMatch } from '../../engine/npcRoster.js';
 import { rollDie } from '../../engine/dice.ts';
@@ -68,8 +69,19 @@ function openDoomIfFull(state) {
     const { fronts, opened } = openDoomWindow(state.fronts || [], {
         messageCount: (state.messages || []).length,
         delayScenes: rollDie(DOOM_TIMING_DIE_SIDES) - 1,
+        // Live since 2026-10-31 (the 10-28 idea "doom news a land away"): a
+        // front left behind in another land waits for the hero's return —
+        // SETTLE_DOOMS opens it on the first player row back home.
+        skipIds: listFrontsLeftBehind(state.fronts || [], state.locations || [], state.currentLocation),
     });
     return opened ? { ...state, fronts } : state;
+}
+
+/** A full, unopened, active clock that is no longer left behind — the held doom's return. */
+function heldDoomPending(state) {
+    const fronts = state.fronts || [];
+    if (!fronts.some(front => (front?.status || 'active') === 'active' && isFrontClockFull(front) && !Number.isFinite(front?.doomAtMessage))) return false;
+    return openDoomWindow(fronts, { skipIds: listFrontsLeftBehind(fronts, state.locations || [], state.currentLocation) }).opened !== null;
 }
 
 /**
@@ -480,7 +492,9 @@ export const handlers = {
         if (state.combat?.active) return state;
         const messageCount = (state.messages || []).length;
         const closed = listClosedDooms(state.fronts || [], messageCount, state.messages);
-        if (closed.length === 0) return state;
+        // A full clock held back while the hero was abroad opens once they
+        // are home again (2026-10-31) — no clock has to move first.
+        if (closed.length === 0) return heldDoomPending(state) ? openDoomIfFull(state) : state;
         const encounters = sanitizeRecentEncounters(state.recentEncounters);
         let next = state;
         for (const front of closed) {

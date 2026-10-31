@@ -60,8 +60,8 @@ import { sanitizePortraitUrl } from '../engine/portraitUrl.js';
 import { cleanTextField, HERO_TEXT_LIMITS, MAX_COIN_HELD } from '../config/contentLimits.js';
 import { applyEarlyDefeat, isLowLevelSolo, stackIdentity, systemMessage } from './handlers/shared.js';
 import { strictFlag } from '../engine/text.js';
-import { isSameRegion } from '../engine/locationRegistry.js';
-import { regionForPrompt } from '../engine/regionProfile.js';
+import { listFrontsLeftBehind } from '../engine/regionProfile.js';
+import { applyStoryMemoryDormancy } from '../engine/storyMemory.js';
 
 /**
  * Save-format version stamped into every persisted payload (persistence.js
@@ -616,26 +616,31 @@ function healUnopenedDooms(save) {
     // the doom "arrives as NEWS" a sea away, and Flash marched the old land's
     // spear-hunters onto the new land's causeway). A front left behind waits
     // for the hero's return; the live clock lanes judge it there.
-    const locations = Array.isArray(save.locations) ? save.locations : [];
-    const heroLand = regionForPrompt(locations, save.currentLocation)?.name || null;
-    const leftBehind = (front) => {
-        if (!heroLand) return false;
-        const lands = locations
-            .filter(record => Array.isArray(record?.theaterFrontIds) && record.theaterFrontIds.includes(front?.id) && record.region)
-            .map(record => record.region);
-        return lands.length > 0 && !lands.some(land => isSameRegion(land, heroLand));
-    };
     // The left-behind fronts are SKIPPED, never relabeled (2026-10-30 P2): a
     // relabel hid a left-behind front's OPEN window from openDoomWindow's
     // one-window check, and a home-land full clock opened a second one.
-    const skipIds = save.fronts.filter(leftBehind).map(front => front.id);
+    const skipIds = listFrontsLeftBehind(save.fronts, save.locations, save.currentLocation);
     const { opened } = openDoomWindow(save.fronts, { messageCount: Array.isArray(save.messages) ? save.messages.length : 0, skipIds });
     if (!opened) return save;
     return { ...save, fronts: save.fronts.map(front => (front?.id === opened.id ? opened : front)) };
 }
 
+/**
+ * The story-card age-out, once at load (2026-10-31): a long-running campaign
+ * carries cards whose silence already crossed LONG_DORMANCY_JOURNAL_CYCLES
+ * before that rule existed (the megacampaign's first callback was a delivery
+ * finished 204 turns earlier) — the cadence would sleep them on its next
+ * tick; the load does it now. Dormant is not deleted; a re-report revives.
+ */
+function healStaleStoryCards(save) {
+    if (!Array.isArray(save.storyMemory) || !Array.isArray(save.journal)) return save;
+    const storyMemory = applyStoryMemoryDormancy(save.storyMemory, save.journal);
+    return storyMemory === save.storyMemory ? save : { ...save, storyMemory };
+}
+
 const UNCONDITIONAL_HEALS = [
     healLegacyMessageClock,
+    healStaleStoryCards,
     healUnknownClassRace,
     healShadowInventoryRows,
     healStackedInventoryRows,

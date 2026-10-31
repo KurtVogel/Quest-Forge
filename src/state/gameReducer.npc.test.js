@@ -945,7 +945,7 @@ describe('UPDATE_NPC lane trust boundary (2026-09-16 scribe P1/P2 — known keys
                 lastNotes: 'n'.repeat(100000),
                 agenda: 'a'.repeat(50000),
                 privateNotes: 'p'.repeat(50000),
-                relationshipTension: 't'.repeat(50000),
+                relationshipTension: 'tense words between them '.repeat(2500),
                 basedIn: 'b'.repeat(5000),
                 lastLocation: 'l'.repeat(5000),
             },
@@ -955,7 +955,8 @@ describe('UPDATE_NPC lane trust boundary (2026-09-16 scribe P1/P2 — known keys
         expect(record.lastNotes).toHaveLength(600);
         expect(record.agenda).toHaveLength(600);
         expect(record.privateNotes).toHaveLength(600);
-        expect(record.relationshipTension).toHaveLength(600);
+        expect(record.relationshipTension.length).toBeLessThanOrEqual(600);
+        expect(record.relationshipTension.length).toBeGreaterThan(500);
         expect(record.basedIn).toHaveLength(200);
         expect(record.lastLocation).toHaveLength(200);
         expect(JSON.stringify(record).length).toBeLessThan(6000);

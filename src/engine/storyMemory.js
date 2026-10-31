@@ -652,8 +652,18 @@ export function scoreStoryMemory(card, { query = '', location = '', npcs = [], m
 
 /** How many journal cadences of silence age a low-salience card out. */
 export const DORMANCY_JOURNAL_CYCLES = 3;
-/** Long-payoff card types that never decay — their moment may be far away. */
-const DORMANCY_EXEMPT_TYPES = new Set(['promise', 'playerCanon']);
+/**
+ * The player's own canon never decays; a promise and a salience-3/4 card
+ * decay only after a LONG silence (2026-10-31, Vesa's megacampaign: 511 of
+ * 948 cards were active — salience 3+ and every promise were exempt — and the
+ * first callback offered was a wagon delivery finished 204 turns earlier).
+ * Salience 5 stays exempt; dormant is not deleted (a re-report revives it).
+ */
+const DORMANCY_EXEMPT_TYPES = new Set(['playerCanon']);
+export const LONG_DORMANCY_JOURNAL_CYCLES = 12;
+function isLongPayoffCard(card) {
+    return card?.type === 'promise' || (card?.salience || 0) > 2;
+}
 /**
  * An ENGINE-minted `wound` card (END_COMBAT, WOW 2026-09-27) is salience 4 and
  * would otherwise never age: a wound heals unless a later scene keeps touching
@@ -711,18 +721,66 @@ export function applyStoryMemoryDormancy(cards = [], journal = []) {
     const woundCutoff = entries.length >= WOUND_DORMANCY_JOURNAL_CYCLES
         ? journalCutoff(entries[entries.length - WOUND_DORMANCY_JOURNAL_CYCLES])
         : null;
+    const longCutoff = entries.length >= LONG_DORMANCY_JOURNAL_CYCLES
+        ? journalCutoff(entries[entries.length - LONG_DORMANCY_JOURNAL_CYCLES])
+        : null;
 
     let changed = false;
     const next = list.map(card => {
         if (!card || (card.status || 'active') !== 'active') return card;
         const engineWound = isEngineWound(card);
         if (engineWound && !woundCutoff) return card;
-        if (!engineWound && ((card.salience || 0) > 2 || DORMANCY_EXEMPT_TYPES.has(card.type))) return card;
-        if (touchedSince(card, engineWound ? woundCutoff : cutoff) !== false) return card;
+        if (DORMANCY_EXEMPT_TYPES.has(card.type) || (!engineWound && (card.salience || 0) >= 5)) return card;
+        const longPayoff = !engineWound && isLongPayoffCard(card);
+        if (longPayoff && !longCutoff) return card;
+        const cardCutoff = engineWound ? woundCutoff : (longPayoff ? longCutoff : cutoff);
+        if (touchedSince(card, cardCutoff) !== false) return card;
         changed = true;
         return { ...card, status: 'dormant' };
     });
     return changed ? next : list;
+}
+
+/** Card types the journal reflection may SETTLE — never the player's canon or a bond's history. */
+export const SETTLEABLE_CARD_TYPES = new Set(['promise', 'npcAgenda', 'mystery', 'foreshadow', 'wound', 'callback']);
+export const SETTLE_CANDIDATE_MAX = 12;
+
+/**
+ * The open cards the cadence reflection is asked to settle (2026-10-31): a
+ * kept promise, a paid debt, a healed wound or an answered mystery used to
+ * stay active forever — the reflection minted 260 of the megacampaign's 511
+ * active cards and retired none. Cards the cadence's own text touches (a
+ * linked person or the subject named in it) come first, then the longest
+ * untouched — so each cadence works through the backlog a little.
+ */
+export function selectSettleCandidates(cards = [], { text = '', messages = null, limit = SETTLE_CANDIDATE_MAX } = {}) {
+    const words = sharedTokenSet(text);
+    const open = (Array.isArray(cards) ? cards : []).filter(card => card?.id
+        && (card.status || 'active') === 'active' && SETTLEABLE_CARD_TYPES.has(card.type));
+    const touched = (card) => {
+        const names = [card.subject, ...(Array.isArray(card.linkedNpcNames) ? card.linkedNpcNames : [])];
+        return names.some(name => {
+            const tokens = sharedTokenSet(name);
+            return tokens.size > 0 && overlapCount(tokens, words) === tokens.size;
+        });
+    };
+    const lastTouch = (card) => {
+        const stamps = [card.lastSeenMessage, card.lastUsedMessage, card.firstSeenMessage].filter(Number.isFinite);
+        return stamps.length > 0 ? Math.max(...stamps) : -1;
+    };
+    const ranked = open
+        .map(card => ({ card, hit: words.size > 0 && touched(card), touch: lastTouch(card) }))
+        .sort((a, b) => (b.hit - a.hit) || (a.touch - b.touch));
+    return ranked.slice(0, limit).map(({ card }) => ({
+        id: card.id,
+        type: card.type,
+        subject: cleanText(card.subject).slice(0, 80),
+        text: cleanText(card.text).slice(0, 200),
+        turnsAgo: (() => {
+            const age = conversationalAgeSince(lastTouch(card) >= 0 ? lastTouch(card) : null, { messages });
+            return age === null ? undefined : Math.round(age / 2);
+        })(),
+    }));
 }
 
 /**

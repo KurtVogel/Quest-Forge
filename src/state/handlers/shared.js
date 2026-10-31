@@ -18,6 +18,7 @@ import {
     appendBondMoments,
     appendCallbackHooks,
     clampNpcDossierField,
+    findNameTypoTwin,
     classifyNpcCandidate,
     mergeNpcAppearance,
     mergeNpcCoreText,
@@ -866,7 +867,9 @@ export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, pre
         onAmbiguous?.(resolved.ambiguous, payload);
         return npcs;
     }
-    const idx = resolved.index;
+    // A one-letter slip of a bonded person's name is that person (2026-10-31).
+    const idx = resolved.index !== -1 ? resolved.index : findNameTypoTwin(npcs, payload.name);
+    if (resolved.index === -1 && idx !== -1) update.name = npcs[idx].name;
 
     const existing = idx !== -1 ? npcs[idx] : null;
     // Classified from the sanitized update: a DM-lane `pinned: true` must not

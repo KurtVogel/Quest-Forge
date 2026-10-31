@@ -805,12 +805,21 @@ describe('importance is computed from the dossier only (2026-09-06 P2)', () => {
     it('a bare named character is 1, a rich dossier climbs, pinned is 5 — and the stored value is never an input', () => {
         expect(computeNpcImportance({ name: 'Lantern-seller', rosterTier: 'character', lastNotes: 'Sold the hero a lantern.' })).toBe(1);
         expect(computeNpcImportance({ name: 'Lantern-seller', rosterTier: 'character', importance: 5 })).toBe(1);
-        expect(computeNpcImportance({ name: 'Maren', rosterTier: 'character', stanceToPlayer: 'Fond of the hero.', relationshipTension: 'Owes a debt.' })).toBe(3);
+        // Recalibrated 2026-10-31: depth with the hero, not fields filled — a
+        // one-word tension is a label, an ungraded moment is half, a lukewarm
+        // trust reading adds nothing.
+        expect(computeNpcImportance({ name: 'Maren', rosterTier: 'character', stanceToPlayer: 'Fond of the hero.', relationshipTension: 'Owes a debt.' })).toBe(2);
         expect(computeNpcImportance({
             name: 'Maren', rosterTier: 'character',
             stanceToPlayer: 'Fond of the hero.', relationshipTension: 'Owes a debt.',
             bondMoments: [{ text: 'Shared a rooftop sunrise.', at: 1 }], agenda: 'Find the ledger.',
             personality: 'Dry.', trust: 40,
+        })).toBe(3);
+        expect(computeNpcImportance({
+            name: 'Maren', rosterTier: 'character',
+            stanceToPlayer: 'Fond of the hero.', relationshipTension: 'Owes him her life and hates needing him.',
+            bondMoments: [{ text: 'She pulled the hero from the river.', kind: 'rescue', salience: 5, at: 1 }], agenda: 'Find the ledger.',
+            trust: 85,
         })).toBe(5);
         expect(computeNpcImportance({ name: 'Nobody', rosterTier: 'character', pinned: true })).toBe(5);
     });

@@ -103,7 +103,7 @@ export function captureScribePass({ facts = [], npcsUpdated = [], cards = [], pl
 }
 
 /** Summary of the last journal-cadence NPC/front reflection pass. */
-export function captureReflection({ cadenceId = null, npcsUpdated = [], frontAdvances = [], cards = [], tempoDirective = null, frontProposal = null } = {}) {
+export function captureReflection({ cadenceId = null, npcsUpdated = [], frontAdvances = [], cards = [], tempoDirective = null, frontProposal = null, settledCards = [] } = {}) {
     publish({
         lastReflection: {
             at: Date.now(),
@@ -116,6 +116,7 @@ export function captureReflection({ cadenceId = null, npcsUpdated = [], frontAdv
                 symptom: clip(advance?.symptom),
             })),
             cards: (cards || []).map(card => ({ type: card?.type || 'callback', subject: clip(card?.subject, 80), text: clip(card?.text) })),
+            settledCards: (settledCards || []).slice(0, 8).map(entry => ({ id: clip(entry?.id, 60), status: clip(entry?.status, 12) })),
             tempoDirective: tempoDirective && typeof tempoDirective === 'object'
                 ? {
                     frontId: clip(tempoDirective.front_id || tempoDirective.frontId, 60) || null,

@@ -489,7 +489,12 @@ export function tellWitnessedBy(tell, name) {
  * present, never a bystander. Each entry carries the present witnesses.
  */
 export function listVoiceableTells(tells = [], { presentNames = [], messages = null, messageCount, limit = HERO_TELL_PROMPT_CAP } = {}) {
-    const present = (Array.isArray(presentNames) ? presentNames : []).map(n => text(n)).filter(Boolean);
+    // One person is one name (2026-10-31): a companion arrives both as party
+    // and as a name in the prose — the line read "seen by Ketta Mor, Ketta Mor".
+    const present = [];
+    for (const name of (Array.isArray(presentNames) ? presentNames : []).map(n => text(n)).filter(Boolean)) {
+        if (!present.some(held => namesMatch(held, name))) present.push(name);
+    }
     const out = [];
     for (const tell of (Array.isArray(tells) ? tells : [])) {
         if (!isHeroTellLive(tell, { messages, messageCount })) continue;
