@@ -175,16 +175,21 @@ describe('the Scribe user message — KNOWN blocks at their caps', () => {
         expect(count('open thread on record')).toBe(1);
         expect(count('recent impressions (unconfirmed')).toBe(1);
         expect(count('do NOT re-report or paraphrase')).toBe(1);
+        expect(count('the traits on record')).toBe(1);
         expect(block.startsWith('Rules: ')).toBe(true);
         for (const name of present) {
             expect(block).toContain(`${name}: `);
-            expect(block).toContain(`${name} — thread: "`);
+            expect(block).toContain(`${name} — personality: "`);
+            expect(block).toContain('" | thread: "');
             expect(block).toContain('| impressions: "');
             expect(block).toContain('| moments: "');
         }
         // 8 present NPCs at the caps: 14,233 chars with the rules on every
-        // entry; the header form measured under 11k.
-        expect(block.length).toBeLessThan(12000);
+        // entry; the header form measured under 11k. 2026-10-31: the WHOLE
+        // stance (600, was cut at 240) and the personality on record (300)
+        // ride every entry — 14,348 measured; the cut stance was why the
+        // Scribe's "complete" rewrite appended a near-twin.
+        expect(block.length).toBeLessThan(15000);
     });
 
     it('a stance block with no thread / impressions / moments carries no rules header', () => {

@@ -26,7 +26,7 @@ import { containment, tokenSet } from '../engine/textMatch.js';
 import { findSubjectsInText } from '../engine/textMatch.js';
 import { factMemoryItem, queueMemoryItem } from '../engine/vectorMemory.js';
 import { rollDie } from '../engine/dice.ts';
-import { CHARACTER_APPEARANCE_MAX } from '../config/contentLimits.js';
+import { CHARACTER_APPEARANCE_MAX, NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
 import { HERO_TELL_REPORT_CAP, isHeroTellEstablished } from '../engine/heroTells.js';
 import { liveWorldFacts, planWorldFactAdditions, sanitizeWorldFactPayload } from '../engine/worldFacts.js';
 import { cleanText } from '../engine/text.js';
@@ -55,7 +55,7 @@ Output ONLY valid JSON:
       "rosterEligible": true,
       "disposition": "friendly|neutral|hostile|wary|unknown",
       "lastNotes": "brief note on what happened with them this turn",
-      "personality": "trait observed (only if newly revealed)",
+      "personality": "a trait NOT already listed for them in KNOWN PLAYER-RELATIONSHIP STANCES — a short comma list of the new trait(s) only; omit when every trait you see is already on record (never restate or reword the recorded ones)",
       "goals": "what they want (only if newly revealed)",
       "secrets": "hidden info (only if newly hinted at or revealed)",
       "appearance": "concrete physical/visual description — skin tone, hair (state it explicitly: color and style, or bald/shaved), build and body proportions, face, apparent age, clothing, distinguishing features (only if newly described)",
@@ -292,7 +292,12 @@ const STANCE_RULES = {
     thread: 'thread = the open thread on record (emit openThread only if this exchange changes it; openThreadResolved: true only if it settles it)',
     impressions: 'impressions = recent impressions (unconfirmed; carry one into the stance ONLY if this exchange bears it out again)',
     moments: 'moments = moments already on record (do NOT re-report or paraphrase these; a same-kind moment from the same scene is already covered)',
+    personality: 'personality = the traits on record (emit personality only for a trait NOT listed; never restate or reword these)',
 };
+
+// The record's personality rides at its compacted size (≤ 12 traits since the
+// 2026-10-28 load fold); the clamp is the belt for a prose personality.
+const KNOWN_PERSONALITY_MAX = 300;
 
 export function buildKnownStances({ npcs = [], messages = null } = {}, ...texts) {
     const isPresent = namePresenceIn(npcs.map(n => n?.name), ...texts);
@@ -316,14 +321,22 @@ export function buildKnownStances({ npcs = [], messages = null } = {}, ...texts)
         const onRecord = [...key.slice(-3), ...recent.slice(0, 2)];
         const impressions = listNpcImpressions(npc, 'stanceToPlayer');
         const thread = typeof npc?.openThread === 'string' ? npc.openThread.trim() : '';
+        const personality = typeof npc?.personality === 'string' ? npc.personality.trim() : '';
         const joined = justJoined(npc);
-        if (!name || (!stance && onRecord.length === 0 && !thread && !joined)) continue;
+        if (!name || (!stance && !personality && onRecord.length === 0 && !thread && !joined)) continue;
         if (!isPresent(name)) continue;
         const lines = [];
-        if (stance) lines.push(`${name}: ${stance.slice(0, 240)}`);
+        // The WHOLE stance (2026-10-31): a 240-char cut asked for a complete
+        // rewrite of a record the Scribe never saw the end of — its rewrite
+        // could not cover the record, and the merge appended a near-twin.
+        if (stance) lines.push(`${name}: ${stance.slice(0, NPC_DOSSIER_FIELD_MAX)}`);
         const fields = [];
         if (joined) {
             fields.push('JOINED THE PARTY THIS SCENE — emit openThread: what they want from travelling with the hero, in their own words, from the fiction');
+        }
+        if (personality) {
+            rulesUsed.add('personality');
+            fields.push(`personality: "${personality.slice(0, KNOWN_PERSONALITY_MAX)}"`);
         }
         if (thread) {
             rulesUsed.add('thread');
@@ -344,7 +357,7 @@ export function buildKnownStances({ npcs = [], messages = null } = {}, ...texts)
         entries.push(lines.join('\n'));
     }
     if (entries.length === 0) return null;
-    const header = ['thread', 'impressions', 'moments'].filter(key => rulesUsed.has(key)).map(key => STANCE_RULES[key]);
+    const header = ['personality', 'thread', 'impressions', 'moments'].filter(key => rulesUsed.has(key)).map(key => STANCE_RULES[key]);
     return (header.length > 0 ? [`Rules: ${header.join('. ')}.`] : []).concat(entries).join('\n');
 }
 

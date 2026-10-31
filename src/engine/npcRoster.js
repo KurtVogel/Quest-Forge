@@ -447,6 +447,41 @@ function splitDossierClauses(text) {
 const CLAUSE_RESTATEMENT_THRESHOLD = 0.8;
 
 /**
+ * A stance clause that REVISES a held one (2026-10-31, Vesa's megacampaign):
+ * the Scribe writes the stance "complete and current", so each restatement is
+ * the same regard with a new tail — "She views Vesa as her trusted road
+ * partner, equal, lover, and partner in survival, dropping her cynical guard
+ * when …" twice, a different ending each time. Neither sentence covers the
+ * other at 0.8, so the merge appended and the record said it twice. A clause
+ * sharing at least STANCE_REVISION_OVERLAP of the SHORTER clause's meaning
+ * AND at least STANCE_REVISION_MIN_SHARED words takes the held clause's place
+ * (the newest wording wins). The word floor keeps two distinct beats that
+ * share a name and a word ("Trusts Vesa after the bridge" / "Resents Vesa for
+ * the bridge") apart. The stance only: goals and secrets are declared canon
+ * and keep accumulating.
+ */
+export const STANCE_REVISION_OVERLAP = 0.5;
+export const STANCE_REVISION_MIN_SHARED = 4;
+
+function revisesClause(heldTokens, tokens) {
+    const small = heldTokens.size <= tokens.size ? heldTokens : tokens;
+    const large = small === heldTokens ? tokens : heldTokens;
+    if (small.size === 0) return false;
+    let shared = 0;
+    for (const token of small) if (large.has(token)) shared += 1;
+    return shared >= STANCE_REVISION_MIN_SHARED && shared / small.size >= STANCE_REVISION_OVERLAP;
+}
+
+const endsSentence = clause => /[.!?…]["')\]]*$/.test(clause);
+const asSentence = clause => (endsSentence(clause) ? clause : `${clause}.`);
+// A rebuilt record joins clauses as sentences, so a clause split off at a
+// semicolon ("…the larger horde; it merely…") opens with a capital.
+const asRebuiltSentence = clause => {
+    const bare = clause.replace(/[\s,;:]+$/, '');
+    return asSentence(bare.charAt(0).toUpperCase() + bare.slice(1));
+};
+
+/**
  * The load-time cleanup of a dossier field the clause-level merge never
  * touched (2026-10-28, Vesa's megacampaign): records written before
  * 2026-08-28 kept every restatement — one companion's personality was eleven
@@ -454,9 +489,11 @@ const CLAUSE_RESTATEMENT_THRESHOLD = 0.8;
  * resilient…") and another's ended "Nervous, timid, and;; Timid,;;;;". A
  * clause another clause already covers is dropped (a richer later clause
  * takes the earlier one's place), a clause with no meaningful word is junk.
+ * `revise` (the stance, 2026-10-31): a later clause that revises an earlier
+ * one replaces it — see STANCE_REVISION_OVERLAP.
  * Idempotent; a field with nothing to drop comes back byte-identical.
  */
-export function compactDossierText(text) {
+export function compactDossierText(text, { revise = false } = {}) {
     if (typeof text !== 'string' || !text.trim()) return text;
     const clauses = splitDossierClauses(text);
     const kept = [];
@@ -465,7 +502,8 @@ export function compactDossierText(text) {
         const tokens = meaningfulTokens(clause);
         if (tokens.size === 0) { dropped = true; continue; }
         if (kept.some(held => coversTokens(held.tokens, tokens, CLAUSE_RESTATEMENT_THRESHOLD))) { dropped = true; continue; }
-        const covered = kept.findIndex(held => coversTokens(tokens, held.tokens, CLAUSE_RESTATEMENT_THRESHOLD));
+        const covered = kept.findIndex(held => coversTokens(tokens, held.tokens, CLAUSE_RESTATEMENT_THRESHOLD)
+            || (revise && revisesClause(held.tokens, tokens)));
         if (covered !== -1) {
             kept[covered] = { clause, tokens };
             dropped = true;
@@ -474,10 +512,7 @@ export function compactDossierText(text) {
         kept.push({ clause, tokens });
     }
     if (!dropped) return text;
-    return kept
-        .map(({ clause }) => clause.replace(/[\s,;:]+$/, ''))
-        .map(clause => (/[.!?…]["')\]]*$/.test(clause) ? clause : `${clause}.`))
-        .join(' ');
+    return kept.map(({ clause }) => asRebuiltSentence(clause)).join(' ');
 }
 
 /** The dossier fields the clause merge owns — the ones legacy accretion swelled. */
@@ -521,7 +556,7 @@ export function compactTraitList(text) {
     return `${list.charAt(0).toUpperCase()}${list.slice(1)}.`;
 }
 
-export function mergeNpcDossierText(existingText, incomingText, max = NPC_DOSSIER_FIELD_MAX) {
+export function mergeNpcDossierText(existingText, incomingText, max = NPC_DOSSIER_FIELD_MAX, { revise = false } = {}) {
     const prev = clampNpcDossierField(existingText, max);
     const next = clampNpcDossierField(incomingText, max);
     if (!prev) return next;
@@ -537,21 +572,33 @@ export function mergeNpcDossierText(existingText, incomingText, max = NPC_DOSSIE
     // whole-field append kept the restated clauses too, so records accreted the
     // same sentence in slightly different costumes. Append ONLY the clauses no
     // known clause already covers; kept clauses keep their punctuation.
-    const knownClauses = splitDossierClauses(prev).map(clause => meaningfulTokens(clause));
+    const held = splitDossierClauses(prev).map(clause => ({ clause, tokens: meaningfulTokens(clause) }));
+    const knownClauses = held.map(entry => entry.tokens);
     const keptTokenSets = [];
     const novelClauses = [];
+    let revised = false;
     for (const clause of splitDossierClauses(next)) {
         const tokens = meaningfulTokens(clause);
         const restates = [...knownClauses, ...keptTokenSets]
             .some(known => coversTokens(known, tokens, CLAUSE_RESTATEMENT_THRESHOLD));
         if (restates) continue;
+        const revisedIndex = revise ? held.findIndex(entry => revisesClause(entry.tokens, tokens)) : -1;
+        if (revisedIndex !== -1) {
+            held[revisedIndex] = { clause: asSentence(clause), tokens };
+            revised = true;
+            continue;
+        }
         keptTokenSets.push(tokens);
-        novelClauses.push(/[.!?…]["')\]]*$/.test(clause) ? clause : `${clause}.`);
+        novelClauses.push(asSentence(clause));
     }
-    if (novelClauses.length === 0) return prev;
+    if (novelClauses.length === 0 && !revised) return prev;
+    // A revision rebuilds the record clause by clause; a pure append keeps
+    // the record's own punctuation byte-for-byte.
+    const base = revised ? held.map(entry => asRebuiltSentence(entry.clause)).join(' ') : prev;
+    if (novelClauses.length === 0) return clampNpcDossierField(base, max);
     const addition = novelClauses.join(' ');
 
-    let merged = /[.!?…]["')\]]*$/.test(prev) ? `${prev} ${addition}` : `${prev}; ${addition}`;
+    let merged = endsSentence(base) ? `${base} ${addition}` : `${base}; ${addition}`;
     while (merged.length > max) {
         const shorter = dropLeadingSentence(merged);
         if (!shorter) return clampNpcDossierField(merged, max);
@@ -635,7 +682,12 @@ export function mergeNpcCoreText(existingText, incomingText, impressions = [], {
     const next = clampNpcDossierField(incomingText, max);
     const pending = normalizeImpressions(impressions, { messageCount });
     if (!next || !NPC_CORE_TEXT_FIELDS.includes(field)) return { text: prev, impressions: pending };
-    if (!prev) return { text: next, impressions: pending };
+    // A personality is a TRAIT list during play too (2026-10-31): the load
+    // compaction alone let the list swell again between loads, one confirmed
+    // comma list at a time ("Pragmatic, gritty, loyal." beside "Pragmatic,
+    // ribald…"). Every text this merge writes folds at the trait level.
+    const settle = text => (field === 'personality' ? compactTraitList(text) : text);
+    if (!prev) return { text: settle(next), impressions: pending };
 
     const mine = pending.filter(entry => entry.field === field);
     const others = pending.filter(entry => entry.field !== field);
@@ -643,7 +695,7 @@ export function mergeNpcCoreText(existingText, incomingText, impressions = [], {
     const nextTokens = meaningfulTokens(next);
     if (coversTokens(nextTokens, prevTokens, 0.85)) {
         const kept = mine.filter(entry => !coversTokens(nextTokens, meaningfulTokens(entry.text), CLAUSE_RESTATEMENT_THRESHOLD));
-        return { text: next, impressions: [...others, ...kept] };
+        return { text: settle(next), impressions: [...others, ...kept] };
     }
     if (coversTokens(prevTokens, nextTokens, 0.85)) return { text: prev, impressions: pending };
 
@@ -668,7 +720,9 @@ export function mergeNpcCoreText(existingText, incomingText, impressions = [], {
         }
         fresh.push({ field, text: clause, ...(Number.isFinite(messageCount) && { atMessage: Math.max(0, Math.floor(messageCount)) }) });
     }
-    const text = confirmed.length > 0 ? mergeNpcDossierText(prev, confirmed.join(' '), max) : prev;
+    const text = confirmed.length > 0
+        ? settle(mergeNpcDossierText(prev, confirmed.join(' '), max, { revise: field === 'stanceToPlayer' }))
+        : prev;
     return { text, impressions: normalizeImpressions([...others, ...remaining, ...fresh], { messageCount }) };
 }
 
@@ -1204,7 +1258,9 @@ export function migrateLegacyNpc(npc = {}) {
     // Legacy accretion compacts once, on load (2026-10-28) — idempotent.
     for (const field of COMPACTED_DOSSIER_FIELDS) {
         if (typeof merged[field] !== 'string' || !merged[field]) continue;
-        merged[field] = field === 'personality' ? compactTraitList(merged[field]) : compactDossierText(merged[field]);
+        merged[field] = field === 'personality'
+            ? compactTraitList(merged[field])
+            : compactDossierText(merged[field], { revise: field === 'stanceToPlayer' });
     }
     merged.disposition = normalizeDisposition(merged.disposition);
     if (merged.trust !== null && merged.trust !== undefined) {

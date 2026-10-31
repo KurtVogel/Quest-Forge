@@ -8,6 +8,12 @@ lives in git history and the settled outcomes in DECISIONS.md).
 
 _Last updated: 2026-10-30 (night) (the second Opus playtest on Flash + ten fixes from it; the morning's open-queue sweep; the 10-28 Opus playtest and the megacampaign read below)_
 
+## 2026-10-31 — personality / stance repetition: the Scribe sees the record, personality folds during play, a revising stance sentence replaces its twin — pushed AND deployed
+
+Vesa spotted Ketta Mor's personality in the megacampaign appendix as eleven near-repeat trait lists. The appendix was the RAW export (the 10-28 load fold already cleans the personality), but the cause was live: the Scribe never saw the personality on record and saw the stance cut at 240 chars, so it re-composed both fields and the clause merge appended the paraphrases. Fixed (DECISIONS.md 2026-10-31): KNOWN STANCES carries the whole stance + the personality, the schema asks for new traits only, personality folds at the trait level on every merge, and a stance sentence that revises a held one replaces it (live and at load — 8 of the megacampaign's 45 stances fold, Ketta's doubled sentence to one). `src/engine/npcRoster.repetition1031.test.js`.
+
+**Next:** a real-provider run to watch the Scribe's personality emissions under the new rule; the relationship-arc ("friendly → neutral, neutral → friendly ×8") overhaul Vesa asked to be re-thought.
+
 ## 2026-10-30 (night) — the second Opus-played playtest on Flash (74 turns, home → far land → home): ten fixes in — pushed AND deployed
 
 **Ruling: DECISIONS.md 2026-10-30 (night), ten points; the write-up with the rubric is `docs/OPUS_PLAYTEST_2026-10-30.md`.** Vesa, asleep: "Run an Opus 5.5 agent to play test the game on browser … only use the gemini flash DM. Fix every bug you find." Run `opus-flash-2` (an elf Wizard, two lands in the premise): zero page errors, zero failed DM calls, p50 30 s. +12 tests (4,335 / 281), lint clean.
