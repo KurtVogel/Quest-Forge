@@ -86,3 +86,15 @@ max 54 s. Zero page errors, zero failed DM calls. Raw artifacts in `test-results
   pack lists no waterskin to match.
 - **Healing Word is a level-2 spell in this game's catalog** — the DM's call to cast it at level 1
   was converted to Cure Wounds by the engine, correctly; not a bug.
+
+## Run 4 — the same night, after "doubles by construction" and the length limit
+
+`opus-flash-4`: Ilse Varra, human woman Rogue, a dismissed customs clerk in the river port of Holmgard who owes a moneylender twenty gold for her mother's locket. 32 driver calls, 28 DM replies, economy-heavy by design: two purchases in one line, small coin payments, a reward, a debt paid, a sale to a fence, two same-value 4-silver payments to different people, a looted payroll recounted on the next turn, a reward re-mentioned ~25 messages later, three items handed over, one fight (an ambush, a surrender), a reload. DM latency p50 27 s / p90 37 s; zero page errors.
+
+| Column | Verdict | Evidence |
+|---|---|---|
+| Doubles | **PASS** | every coin and item movement checked by hand: zero doubles, zero missed charges; the two-purchase line was evented as one 3 sp payment with both items; the audit stood down on evented replies as designed; the recount and the late recap paid nothing; the second 4 sp payment (to the potboy) was charged |
+| Handovers | **PASS** | the smuggler's ledger, the crowbar and the tally stick each left the pack on handover |
+| Length | **PASS (mostly)** | 22 / 28 at or under 180 words, median 158 (run 3: 5 / 51, median 218); overs: the opening (241), an interlude turn (240), a two-scene reply (235), three at 181–186 |
+| Memory | **PASS** | the reflection resolved nine finished cards; 27 facts in 94 messages (run 3: 55 in ~165 — a modest drop) |
+| Found | **IDEA** | the premise's "twelve gold" vs the class kit's 27 gp (IDEAS: the premise names the purse) |

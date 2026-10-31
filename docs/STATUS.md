@@ -6,7 +6,15 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-31 (night: the third Opus playtest + five fixes; evening: named presence, far friends, story cards retire, the Scribe sees facts, places, dooms abroad; earlier: the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
+_Last updated: 2026-10-31 (late: doubles by construction, the Flash length limit, playtest run 4; night: the third Opus playtest + five fixes; evening: named presence, far friends, story cards retire, the Scribe sees facts, places, dooms abroad; earlier: the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
+
+## 2026-10-31 (late) — doubles prevented by construction, a hard length limit for Flash, and playtest run 4 — pushed AND deployed
+
+Vesa: doubles have been "the worst problem for the game, always — fix it definitively", and "force Flash to be less long-winded". Built (DECISIONS.md 2026-10-31 late): one accountant per narration (when the DM evented any item for a reply, the narration audit adds none — the four name-matching tiers are gone) and one 12-message replay window for every gain (coins, items incl. renamed recaps, XP, sales; an explicit "another…" still pays). FORMAT_REMINDER ends on a countable length limit: Flash 11/20 → 19/19 in band on `eval:turns`, 22/28 live (median 218 → 158). Playtest run 4 (32 turns, economy-heavy, `docs/OPUS_PLAYTEST_2026-10-31.md`): zero doubles, zero missed charges.
+
+**For Vesa's own save:** nothing to do — every heal of the day runs at load; open the site in a fresh tab and Continue.
+
+**Next:** watch a long session for any recap re-pay outside 12 messages (the DM's receipts are the only guard there); the premise-purse idea in IDEAS.
 
 ## 2026-10-31 (night) — the third Opus-played playtest: 57 turns on Flash, five fixes — pushed AND deployed
 
