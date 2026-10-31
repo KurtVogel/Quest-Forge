@@ -30,7 +30,12 @@ import {
 // genuine second sale keeps the item AND withholds the coin), and the observed
 // replay is the next-turn recap. The spend side's window is
 // RECENT_SPEND_MESSAGE_WINDOW below — one window for purchases and losses.
-const RECENT_SALE_MESSAGE_WINDOW = 8;
+// ONE replay window for every gain (2026-10-31, Vesa: doubles are "the worst
+// problem for the game, always"): the 4-message gain windows rested on "never
+// refuse to give on suspicion", and a recap five messages later paid twice.
+// Gains now guard as long as spends (12 conversational messages); an
+// explicit repeat in the player's own words ("another…", "again") still pays.
+const RECENT_SALE_MESSAGE_WINDOW = 12;
 // One transaction event is bounded like coin grants are: quantity so a flat priceCp
 // cannot mint an arbitrary stack, sale proceeds to the same 10,000 gp ceiling as
 // clampCoinAmount — a hallucinated "motivated buyer" must not inject a fortune.
@@ -109,10 +114,10 @@ function coinLine(content) {
     return systemMessage(content, { dmVisible: true });
 }
 
-// Coin grants replay in a tighter window than purchases: the observed failure is the DM
-// re-emitting a reward on the very next turn while narrating the pouch being counted or
-// split. Two identical legitimate finds four+ messages apart stay untouched.
-const RECENT_COIN_GRANT_MESSAGE_WINDOW = 4;
+// Coin grants: the DM re-emitting a reward while narrating the pouch being counted,
+// split, or recapped. Was 4 (a tighter gain window) until 2026-10-31 — see the
+// one-window note above RECENT_SALE_MESSAGE_WINDOW.
+const RECENT_COIN_GRANT_MESSAGE_WINDOW = 12;
 // Audit recoveries and grants riding a quest-completion response guard wider
 // (2026-08-31 P1, live merchant-quest double-pay): the reward is narrated at the
 // handover and re-emitted at quest completion, routinely >4 conversational

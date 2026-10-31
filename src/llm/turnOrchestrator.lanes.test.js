@@ -125,7 +125,7 @@ describe('DM_LANES — every row runs through sendToLLM and the table decides wh
             for (const heading of c.keeps) expect(prompt, `${c.lane} keeps ${heading}`).toContain(heading);
             // The tail: the mode part when the lane has one, else the reminder.
             if (c.tail) expect(prompt.endsWith(c.tail)).toBe(true);
-            else expect(prompt.endsWith('never leave a required event out of the block.')).toBe(true);
+            else expect(prompt.endsWith('cut every other sentence of description before you send.')).toBe(true);
             // Discarded events are null; kept events carry the ENTRY combat flag.
             if (c.events) {
                 expect(events).toBeTruthy();

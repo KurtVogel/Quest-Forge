@@ -48,7 +48,12 @@ function recordDeathOutsideCombat(state, cause) {
 // rare false positive one sentence to fix. Guards only DM-path dispatches
 // (payload carries _meta) — engine-computed XP (combat, quests, fronts) is
 // one-shot by construction and must never be suppressed.
-const RECENT_EXP_AWARD_MESSAGE_WINDOW = 4;
+// ONE replay window for every gain (2026-10-31, Vesa: doubles are "the worst
+// problem for the game, always"): the 4-message gain windows rested on "never
+// refuse to give on suspicion", and a recap five messages later paid twice.
+// Gains now guard as long as spends (12 conversational messages); an
+// explicit repeat in the player's own words ("another…", "again") still pays.
+const RECENT_EXP_AWARD_MESSAGE_WINDOW = 12;
 // Bare alternation for the repeat-intent proximity test ("another 100 xp",
 // "give me the experience again").
 const EXP_NOUN_SRC = /(?:xp|exp|experience)/;

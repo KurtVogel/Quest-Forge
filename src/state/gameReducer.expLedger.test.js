@@ -88,7 +88,7 @@ describe('recentExpAwards replay ledger — the reported double-award', () => {
 
     it('two identical legitimate awards OUTSIDE the window both pay', () => {
         let state = gameReducer(makeState(), dmExp(150, { sourceId: 'msg-10' }));
-        state = passTurns(state, 8); // well past the 4-conversational-message window
+        state = passTurns(state, 14); // past the 12-conversational-message window (2026-10-31)
         const later = gameReducer(state, dmExp(150, { sourceId: 'msg-20' }));
         expect(later.character.exp).toBe(300);
     });
@@ -199,7 +199,7 @@ describe('DM XP lanes are bounded engine-side (2026-09-07)', () => {
         let state = makeState();
         for (let i = 0; i < 4; i++) {
             state = gameReducer(state, dmLevelUp(0, { sourceId: `msg-${10 + i}` }));
-            state = passTurns(state, 5); // outside the 4-message echo window
+            state = passTurns(state, 14); // outside the 12-message echo window (2026-10-31)
         }
         // L3 (1800) crossed by two milestones of 900, L4 (3800) by two of 1900.
         expect(state.character.level).toBe(5);

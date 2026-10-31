@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { runScribe } from './scribe.js';
 import { sendMessage } from './adapter.js';
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
 import { playerMessageNamesAmount } from '../state/handlers/economy.js';
@@ -12,8 +11,7 @@ vi.mock('./adapter.js', () => ({
 
 // The third Opus-played playtest (2026-10-31, Flash DM, 57 turns): a Cure
 // Wounds on a fevered NPC was refused and cost nothing, a second two-silver
-// payment to a different person was ignored as a duplicate, a lantern was
-// granted twice, and buying a promised gift a sea away settled the promise.
+// payment to a different person was ignored as a duplicate, and buying a promised gift a sea away settled the promise.
 
 beforeEach(() => sendMessage.mockReset());
 
@@ -75,27 +73,6 @@ describe('a payment the player names is a new payment', () => {
         expect(purse(guarded)).toBe(purse(first));
         const named = gameReducer(later, { type: 'AUDIT_COIN_PAYMENT', payload: { silver: 2, _meta: { sourceId: 'msg-58:scribe-loot:payment', audit: true, playerMessage: 'I count out two silver for the sled.' } } });
         expect(purse(first) - purse(named)).toBe(20);
-    });
-});
-
-describe('the loot audit reads a head per part of an "X and Y" name', () => {
-    it('the narrated "battered horn-and-tin slip-lantern" IS the evented "Barge lantern and oil"', async () => {
-        sendMessage.mockResolvedValue(JSON.stringify({ world_facts: [], npc_updates: [], story_memory: [], location: null, narrated_loot: { gold: 0, silver: 0, copper: 0, items: [{ name: 'battered horn-and-tin slip-lantern', quantity: 1 }] } }));
-        const dispatch = vi.fn();
-        await runScribe({
-            playerMessage: 'I buy a lantern and oil.',
-            dmNarrative: 'Five silver buys a battered horn-and-tin slip-lantern and a flask of fish oil.',
-            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
-            dispatch,
-            lootAudit: {
-                sourceId: 'msg-71:scribe-loot',
-                appliedEvents: { itemsFound: [{ name: 'Barge lantern and oil' }] },
-                getState: () => ({ appliedLootSourceIds: [], character: { name: 'Brenna' }, combat: { active: false }, messages: [], inventory: [], recentItemGrants: [] }),
-                auditCasts: false,
-            },
-        });
-        const granted = dispatch.mock.calls.map(([action]) => action).filter(a => a.type === 'ADD_ITEM');
-        expect(granted).toEqual([]);
     });
 });
 

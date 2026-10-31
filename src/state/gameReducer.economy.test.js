@@ -603,7 +603,8 @@ describe('ADD_COIN_GRANT', () => {
             type: 'ADD_COIN_GRANT',
             payload: { gold: 10, _meta: { sourceId: 'msg-loot-1' } },
         });
-        const later = addMessages(granted, 6);
+        // One gain window for every lane since 2026-10-31: 12 conversational messages.
+        const later = addMessages(granted, 14);
         const second = gameReducer(later, {
             type: 'ADD_COIN_GRANT',
             payload: { gold: 10, _meta: { sourceId: 'msg-loot-2' } },
@@ -1312,7 +1313,7 @@ describe('coin replay guards: denomination drift + conversational window (2026-0
             payload: { gold: 20, _meta: { sourceId: 'msg-fee-1' } },
         });
         let state = granted;
-        for (let i = 0; i < 6; i++) {
+        for (let i = 0; i < 7; i++) {
             state = addMessage(state, { id: `u${i}`, role: 'user', content: `Later scene beat ${i}.` });
             state = addMessage(state, { id: `a${i}`, role: 'assistant', content: `The story moves on ${i}.` });
         }

@@ -3,7 +3,8 @@
  * equip/unequip including the by-ref resolution used by DM equipment_changes.
  */
 import { normalizeItem, normalizeItemKey, MAX_ITEM_QUANTITY } from '../../data/items.js';
-import { RECENT_ITEM_GRANT_EXTENDED_WINDOW } from '../../engine/replayLedger.js';
+import { conversationalDistance, RECENT_ITEM_GRANT_EXTENDED_WINDOW } from '../../engine/replayLedger.js';
+import { itemIdentityMatches } from '../../engine/textMatch.js';
 import { isEquippableItem, isSlotHeld, normalizeEquippedSlots, shouldAutoEquip } from '../../engine/equipment.js';
 import { rollNotation } from '../../engine/dice.ts';
 import {
@@ -17,6 +18,7 @@ import {
     findInventoryItemByRef,
     healHero,
     findRecentTransactionDuplicate,
+    normalizeRecentTransactions,
     isPlayerCombatTurn,
     mintOwnedItem,
     normalizeCompanion,
@@ -36,7 +38,12 @@ import {
 // existed. Same tight window as coin grants — the failure mode is the recap on
 // the very next turns, and two identical legitimate finds further apart stay
 // untouched.
-const RECENT_ITEM_GRANT_MESSAGE_WINDOW = 4;
+// ONE replay window for every gain (2026-10-31, Vesa: doubles are "the worst
+// problem for the game, always"): the 4-message gain windows rested on "never
+// refuse to give on suspicion", and a recap five messages later paid twice.
+// Gains now guard as long as spends (12 conversational messages); an
+// explicit repeat in the player's own words ("another…", "again") still pays.
+const RECENT_ITEM_GRANT_MESSAGE_WINDOW = 12;
 // Grants riding a quest-completion response guard wider — the shared
 // RECENT_ITEM_GRANT_EXTENDED_WINDOW (engine/replayLedger.js); the
 // ITEM_ACQUIRE_VERB_RE player-phrasing bypass stays intact so a genuine "I grab
@@ -45,6 +52,16 @@ const RECENT_ITEM_GRANT_MESSAGE_WINDOW = 4;
 // broader than the coin-loss commerce set on purpose: "I take/grab/pick up
 // another torch" is a genuine second acquisition.
 const ITEM_ACQUIRE_VERB_RE = /\b(buy|buys|buying|bought|purchase|purchases|purchasing|purchased|take|takes|taking|took|grab|grabs|grabbing|grabbed|pick|picks|picking|picked|pocket|pockets|pocketing|pocketed|loot|loots|looting|looted|collect|collects|collecting|collected|claim|claims|claiming|claimed)\b/i;
+
+/** A recent APPLIED grant of the same item under another name, inside the window. */
+function findRecentItemTwin(state, item, messageIndex, window) {
+    return normalizeRecentTransactions(state.recentItemGrants).slice().reverse().find(entry => {
+        if (entry.status !== 'applied' || !entry.name) return false;
+        const distance = conversationalDistance(state.messages, entry.messageIndex, messageIndex);
+        if (!(distance >= 0 && distance <= window)) return false;
+        return itemIdentityMatches(entry.name, item.name) || (item.itemKey && entry.itemKey === item.itemKey);
+    }) || null;
+}
 
 function isBonusActionConsumable(item) {
     return item?.actionType === 'bonus' || item?.consumableType === 'healing';
@@ -101,10 +118,13 @@ export const handlers = {
             const grantWindow = (isAudit || meta.questCompletionAdjacent === true)
                 ? RECENT_ITEM_GRANT_EXTENDED_WINDOW
                 : RECENT_ITEM_GRANT_MESSAGE_WINDOW;
-            const duplicate = isAudit ? null : findRecentTransactionDuplicate(
+            // A recap rarely repeats the name exactly ("the brass token" for
+            // "Brass toll-token"): a recent grant whose name is the same item by
+            // the audits' own identity rule counts too (2026-10-31).
+            const duplicate = isAudit ? null : (findRecentTransactionDuplicate(
                 state.recentItemGrants, transaction, sourceId, messageIndex,
                 grantWindow, state.messages
-            );
+            ) || findRecentItemTwin(state, item, messageIndex, grantWindow));
             const exactSourceReplay = !!duplicate && duplicate.sourceId === sourceId;
             if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatTransaction(item, meta.playerMessage, ITEM_ACQUIRE_VERB_RE))) {
                 return {

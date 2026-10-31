@@ -621,7 +621,7 @@ describe('items_found replay ledger (live playtest #7: one healing potion grante
     it('applies freely outside the conversational window', () => {
         const state = { ...makeState(), inventory: [] };
         const first = gameReducer(state, { type: 'ADD_ITEM', payload: potionPayload('msg-find') });
-        const second = gameReducer(addMessages(first, 6), {
+        const second = gameReducer(addMessages(first, 14), {
             type: 'ADD_ITEM',
             payload: potionPayload('msg-later', 'I open the second chest.'),
         });
@@ -705,10 +705,10 @@ describe('items_found replay ledger (live playtest #7: one healing potion grante
         expect(completion.messages.at(-1).content).toMatch(/Duplicate item grant ignored/);
     });
 
-    it('an ordinary re-grant beyond the tight window still applies (wide horizon is completion/audit-only)', () => {
+    it('an ordinary re-grant beyond the one 12-message window still applies (one window for every gain since 2026-10-31)', () => {
         const state = { ...makeState(), inventory: [] };
         const first = gameReducer(state, { type: 'ADD_ITEM', payload: potionPayload('msg-find') });
-        const second = gameReducer(addMessages(first, 8), {
+        const second = gameReducer(addMessages(first, 14), {
             type: 'ADD_ITEM',
             payload: potionPayload('msg-later'),
         });

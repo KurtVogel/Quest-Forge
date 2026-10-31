@@ -1074,7 +1074,8 @@ function responseFormatFor(character) {
 // cache-stable prefix); this tiny tail keeps the trailing-JSON habit anchored to
 // the end of the context, where format compliance actually lives.
 const FORMAT_REMINDER = `## FINAL FORMAT REMINDER
-Follow the RESPONSE FORMAT contract above: immersive narrative prose first, then — whenever this turn carries events, requested rolls, or combat intent — exactly one fenced \`\`\`json event block as the very LAST thing in the response. Never narrate mechanics the engine owns, and never leave a required event out of the block.`;
+Follow the RESPONSE FORMAT contract above: immersive narrative prose first, then — whenever this turn carries events, requested rolls, or combat intent — exactly one fenced \`\`\`json event block as the very LAST thing in the response. Never narrate mechanics the engine owns, and never leave a required event out of the block.
+**LENGTH IS A HARD LIMIT.** An ordinary turn is AT MOST two short paragraphs of at most three sentences each — about 150 words. Only a major moment (an opening, a big consequence, a climax) may add a third paragraph, never past 220 words. Choose the ONE consequence, the ONE particular, the ONE motion, and the ask; cut every other sentence of description before you send.`;
 
 /**
  * The combat INTENT call's response mode (JSON only). It lived as a literal

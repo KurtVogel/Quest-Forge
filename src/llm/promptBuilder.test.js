@@ -108,7 +108,7 @@ describe('stable cache prefix (DECISIONS.md 2026-07-18)', () => {
         expect(text.indexOf('## RESPONSE FORMAT')).toBeLessThan(text.indexOf('## CAMPAIGN PREMISE'));
         expect(text.indexOf('## ITEM CATALOG')).toBeLessThan(text.indexOf('## CAMPAIGN PREMISE'));
         expect(text.indexOf('## RESPONSE FORMAT')).toBeLessThan(text.indexOf('## PLAYER CHARACTER'));
-        expect(text.trimEnd().endsWith('never leave a required event out of the block.')).toBe(true);
+        expect(text.trimEnd().endsWith('cut every other sentence of description before you send.')).toBe(true);
     });
 });
 

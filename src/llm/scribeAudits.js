@@ -7,7 +7,7 @@
  * report to runNarrationAudits.
  */
 import { conversationalDistance, RECENT_ITEM_GRANT_EXTENDED_WINDOW } from '../engine/replayLedger.js';
-import { coverage, itemIdentityMatches, overlapCount, tokenSet } from '../engine/textMatch.js';
+import { itemIdentityMatches } from '../engine/textMatch.js';
 import { isSpellcaster, resolveSpellForCharacter } from '../engine/spellcasting.js';
 import { namesMatch } from '../engine/npcRoster.js';
 import { MAX_ITEM_QUANTITY } from '../data/items.js';
@@ -343,30 +343,6 @@ function appliedItemStrings(events, pick) {
 /** Identity strings for every item the event path already granted this narration. */
 const appliedItemIdentities = events => appliedItemStrings(events, entry => [entry.name, entry.itemKey, entry.key, entry.item?.name, entry.item?.itemKey]);
 
-/** Display names (no item keys) of the items the event path granted this narration. */
-const appliedItemNames = events => appliedItemStrings(events, entry => [entry.name || entry.item?.name]);
-
-/**
- * Same-narration NAME DRIFT (live playtest 2026-09-20, Gemini 3.8 Flash: BOTH
- * item rewards in a 30-turn run were granted twice). The DM emits the item under
- * one name ("Brass toll-token", "Smoked salt-chine") and narrates it under
- * another ("a heavy brass token stamped with the three-arched bridge of Merrow",
- * "smoked pig chine"); strict containment fails on the one word that drifted, so
- * the audit "recovered" a second row for the very same object. An event-granted
- * item that no narrated item strictly matches may absorb ONE unmatched narrated
- * item when the two share at least two tokens, cover >= 60% of the applied name,
- * and the applied name's head noun (its last token) survives in the narration.
- * A parenthetical size/count ("(50 ft)") never counts as the head. Over-matching
- * only ever skips a grant — the documented safe direction for audits.
- */
-function looseSameItem(appliedName, narratedName) {
-    const clean = value => String(value || '').replace(/\([^)]*\)/g, ' ');
-    const applied = tokenSet(clean(appliedName), { minLength: 2 });
-    const narrated = tokenSet(clean(narratedName), { minLength: 2 });
-    if (applied.size < 2 || narrated.size === 0) return false;
-    const head = [...applied].pop();
-    return narrated.has(head) && overlapCount(applied, narrated) >= 2 && coverage(applied, narrated) >= 0.6;
-}
 
 /**
  * Reconcile the Scribe's narrated-loot OBSERVATION against the events the engine
@@ -421,7 +397,6 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
         console.log(`[Scribe] Loot audit: event path applied a ${lossCp} cp loss for this narration — payment-shaped turn, treating the reported coin gain as direction confusion and standing down on coins.`);
     }
 
-    const knownIdentities = appliedItemIdentities(appliedEvents);
     // Cross-message ledger check (live playtest #8): the same-message stand-down
     // above cannot see a RE-narration — "you tuck the pages away" one turn after
     // the pages were evented re-granted them. The dedupe happens HERE, with a
@@ -442,86 +417,25 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
             if (value && String(value).trim()) recentGrantIdentities.push(String(value));
         }
     }
-    // Event-granted names no narrated item strictly matches: each may absorb ONE
-    // drifted-name narrated item (looseSameItem above), so one object never
-    // becomes two rows.
-    const unpairedAppliedNames = appliedItemNames(appliedEvents)
-        .filter(name => !items.some(item => itemIdentityMatches(item.name, name)));
-    const missingItems = items.filter(item => {
-        const alreadyApplied = matchesAnyItemIdentity(item, knownIdentities);
+    // ONE ACCOUNTANT PER NARRATION (2026-10-31, Vesa: "the worst problem for
+    // the game, always"): when the event path granted ANY item for this
+    // narration, the DM owns this narration's items and the audit grants none.
+    // Four rounds of name matching (looseSameItem 09-20, the N-for-N count
+    // 10-10, the head noun 10-30, the "X and Y" heads 10-31) each closed one
+    // drifted name and the next playtest found another; a narration the DM
+    // evented can no longer be granted twice by construction. The cost is
+    // stated: a second item the DM forgot in an evented reply is not
+    // recovered — a missing grant is visible and one sentence to fix; a double
+    // is silent.
+    const itemsEvented = appliedItemIdentities(appliedEvents).length > 0;
+    if (items.length > 0 && itemsEvented) {
+        console.log(`[Scribe] Loot audit: the event path granted items for this narration — standing down on items (${items.map(item => `"${item.name}"`).join(', ')}).`);
+    }
+    const missingItems = itemsEvented ? [] : items.filter(item => {
         const recentlyGranted = matchesAnyItemIdentity(item, recentGrantIdentities);
-        if (!alreadyApplied && !recentlyGranted) {
-            const twin = unpairedAppliedNames.findIndex(name => looseSameItem(name, item.name));
-            if (twin !== -1) {
-                console.warn(`[Scribe] Narrated item "${item.name}" is the event path's "${unpairedAppliedNames[twin]}" under a drifted name; skipping.`);
-                unpairedAppliedNames.splice(twin, 1);
-                return false;
-            }
-        }
-        if (alreadyApplied) console.warn(`[Scribe] Narrated item "${item.name}" already granted by the event path; skipping.`);
-        else if (recentlyGranted) console.warn(`[Scribe] Narrated item "${item.name}" was already granted moments ago (ledger); skipping.`);
-        return !alreadyApplied && !recentlyGranted;
+        if (recentlyGranted) console.warn(`[Scribe] Narrated item "${item.name}" was already granted moments ago (ledger); skipping.`);
+        return !recentlyGranted;
     });
-    // A shared HEAD NOUN pairs one-to-one (2026-10-30 Opus playtest, measured):
-    // the DM evented "Tally-Court day token" and narrated "stamped lead token" —
-    // ONE shared token, so looseSameItem (>= 2 shared) passed it by and the audit
-    // minted a second token. When exactly ONE unmatched narrated item and exactly
-    // ONE unmatched event grant end in the same head noun they are one object; a
-    // head shared by two on either side decides nothing. Over-matching only ever
-    // skips a grant.
-    // A name joined by "and" / "&" / "with" has a head per part (2026-10-31,
-    // the Opus playtest: the DM evented "Barge lantern and oil" and the audit
-    // minted the narrated "battered horn-and-tin slip-lantern" beside it — the
-    // one head it read was "oil").
-    const headNouns = (name) => String(name || '').replace(/\([^)]*\)/g, ' ')
-        .split(/\s+(?:and|with)\s+|\s*&\s*/i)
-        .map(part => {
-            const tokens = [...tokenSet(part, { minLength: 2 })];
-            return tokens.length ? tokens[tokens.length - 1] : '';
-        })
-        .filter(Boolean);
-    const hasHead = (name, head) => headNouns(name).includes(head);
-    for (const item of [...missingItems]) {
-        const head = headNouns(item.name).at(-1);
-        if (!head) continue;
-        const narratedWithHead = missingItems.filter(other => hasHead(other.name, head));
-        const appliedWithHead = unpairedAppliedNames.filter(name => hasHead(name, head));
-        if (narratedWithHead.length === 1 && appliedWithHead.length === 1) {
-            console.warn(`[Scribe] Narrated item "${item.name}" is the event path's "${appliedWithHead[0]}" by its head noun; skipping.`);
-            unpairedAppliedNames.splice(unpairedAppliedNames.indexOf(appliedWithHead[0]), 1);
-            missingItems.splice(missingItems.indexOf(item), 1);
-        }
-    }
-    // ONE narrated item nobody matched beside ONE event-granted item nobody
-    // matched is the same object under a name with no shared token: the DM
-    // narrated a "Restorative Draft" flask and evented it as the catalog
-    // `Potion of Healing` (correct), and the audit minted a second potion
-    // (2026-10-10 class playtest, cleric-flash t26). The count is the evidence
-    // where the tokens cannot be; over-matching only ever skips a grant. When
-    // the two names DO share a token, looseSameItem has already judged them
-    // different (a drifted head noun — "rusty iron dagger" / "rusty iron key")
-    // and the count does not overrule it.
-    const shareNoToken = (a, b) => overlapCount(
-        tokenSet(String(a).replace(/\([^)]*\)/g, ' '), { minLength: 2 }),
-        tokenSet(String(b).replace(/\([^)]*\)/g, ' '), { minLength: 2 }),
-    ) === 0;
-    if (missingItems.length === 1 && unpairedAppliedNames.length === 1 && shareNoToken(unpairedAppliedNames[0], missingItems[0].name)) {
-        console.warn(`[Scribe] Narrated item "${missingItems[0].name}" is the event path's lone "${unpairedAppliedNames[0]}" under another name; skipping.`);
-        missingItems.length = 0;
-    }
-    // The same evidence at TWO or more (2026-10-27 Opus playtest, measured): a
-    // chandler's purchase evented as the catalog Healer's Kit, Coil of Silk
-    // Thread and Flask of Oil and narrated as "a leather roll packed with
-    // linen, splints and horn needles", "a spool of waxed silk" and "a flask
-    // of seal-oil" — the oil paired, the other two were granted a second time.
-    // N unmatched narrated items beside exactly N unmatched event grants is
-    // one purchase under two vocabularies; two-for-two is stronger evidence
-    // than the one-for-one above, so no token test overrules it. Over-matching
-    // only ever skips a grant.
-    if (missingItems.length >= 2 && unpairedAppliedNames.length === missingItems.length) {
-        console.warn(`[Scribe] ${missingItems.length} narrated items (${missingItems.map(item => `"${item.name}"`).join(', ')}) are the event path's ${unpairedAppliedNames.length} unmatched grants under other names; skipping.`);
-        missingItems.length = 0;
-    }
 
     // Coins route through the replay-guarded grant so a reward the DM re-narrates on a
     // later turn (already suppressed on the event path) cannot re-enter via the audit.
@@ -707,20 +621,18 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
     const { state } = claimed;
     const { appliedEvents } = lootAudit;
 
-    // Stand-down per item: a loss identity the event path already removed for
-    // this narration is the DM's own accounting, not a missing removal.
-    const appliedLossIdentities = (appliedEvents?.itemsLost || [])
-        .map(entry => (typeof entry === 'string' ? entry : entry?.name))
-        .filter(value => value && String(value).trim())
-        .map(String);
+    // One accountant per narration (2026-10-31): when the event path removed
+    // ANY item for this narration, the DM owns its losses and the audit removes
+    // none — a second removal of a renamed item was the loss twin of the double
+    // grant.
+    if ((appliedEvents?.itemsLost || []).some(entry => entry && (typeof entry === 'string' ? entry.trim() : entry.name))) {
+        console.log('[Scribe] Loss audit: the event path removed items for this narration — standing down.');
+        return;
+    }
 
     const removed = [];
     const removedItemIds = new Set();
     for (const { name, quantity } of items) {
-        if (appliedLossIdentities.some(value => itemIdentityMatches(name, value))) {
-            console.warn(`[Scribe] Narrated loss "${name}" already removed by the event path; skipping.`);
-            continue;
-        }
         // Exact name first; otherwise a fuzzy match is honored only when it is
         // UNAMBIGUOUS — REMOVE_ITEM_BY_NAME takes whole stacks, so "wax candles"
         // matching both a lowercase shadow row and "Wax Candles (x5)" must skip

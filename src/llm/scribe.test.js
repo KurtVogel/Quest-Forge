@@ -1109,7 +1109,7 @@ describe('Scribe loot persistence audit', () => {
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ITEM' }));
     });
 
-    it('never re-grants coins or items the event path already applied for the same narration', async () => {
+    it('one accountant per narration: when the event path granted ANY item or coin, the audit grants nothing more (2026-10-31)', async () => {
         sendMessage.mockResolvedValue(scribeResponse({
             gold: 23,
             items: [{ name: 'Jeweled circlet', quantity: 1 }, { name: 'Silver ring', quantity: 1 }],
@@ -1127,12 +1127,11 @@ describe('Scribe loot persistence audit', () => {
         });
 
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_COIN_GRANT' }));
-        const addItemCalls = dispatch.mock.calls.filter(([action]) => action.type === 'ADD_ITEM');
-        expect(addItemCalls).toHaveLength(1);
-        expect(addItemCalls[0][0].payload.name).toBe('Silver ring');
+        // The ring the DM forgot is the stated cost: an evented narration is the DM's alone.
+        expect(dispatch.mock.calls.filter(([action]) => action.type === 'ADD_ITEM')).toHaveLength(0);
     });
 
-    describe('same-narration item-name drift (live playtest 2026-09-20, Gemini 3.8 Flash)', () => {
+    describe('one accountant per narration replaces the name-drift pairing (2026-10-31)', () => {
         async function auditWith(applied, narratedItems) {
             sendMessage.mockResolvedValue(scribeResponse({ items: narratedItems.map(name => ({ name, quantity: 1 })) }));
             const dispatch = vi.fn();
@@ -1148,41 +1147,16 @@ describe('Scribe loot persistence audit', () => {
             return dispatch.mock.calls.map(([action]) => action).filter(action => action.type === 'ADD_ITEM').map(action => action.payload.name);
         }
 
-        it('does not mint a second row when the DM narrates its evented item under a drifted name', async () => {
+        it('every drift the pairing tiers chased is closed by construction', async () => {
             expect(await auditWith(['Brass toll-token'], ['heavy brass token stamped with the three-arched bridge of Merrow'])).toEqual([]);
-            expect(await auditWith(['Smoked salt-chine'], ['smoked pig chine'])).toEqual([]);
-        });
-
-        it('still grants a genuinely different item that only shares descriptive words', async () => {
-            expect(await auditWith(['Rusty iron dagger'], ['rusty iron key'])).toEqual(['rusty iron key']);
-            // the parenthetical "(50 ft)" is not a shared token; the rope itself is narrated so the ring is the lone stranger and is granted
-            expect(await auditWith(['Hempen Rope (50 ft)'], ['hempen rope', 'iron ft ring'])).toEqual(['iron ft ring']);
-        });
-
-        it('a LONE unmatched narrated item beside a LONE unmatched evented item is the same object even with no shared token (cleric-flash t26, 2026-10-10)', async () => {
             expect(await auditWith(['Potion of Healing'], ['Restorative Draft'])).toEqual([]);
-            // two narrated strangers beside one evented item: the count no longer says which — both are granted
-            expect(await auditWith(['Potion of Healing'], ['Restorative Draft', 'bone whistle'])).toEqual(['Restorative Draft', 'bone whistle']);
+            expect(await auditWith(["Healer's Kit", 'Coil of Silk Thread', 'Flask of Oil'], ['leather roll of linen and splints', 'spool of waxed silk', 'clay flask of seal-oil'])).toEqual([]);
+            expect(await auditWith(['Tally-Court day token'], ['stamped lead token'])).toEqual([]);
+            expect(await auditWith(['Barge lantern and oil'], ['battered horn-and-tin slip-lantern'])).toEqual([]);
         });
 
-        it('N unmatched narrated items beside exactly N unmatched evented items are one purchase under two vocabularies (Opus playtest, 2026-10-27)', async () => {
-            expect(await auditWith(
-                ["Healer's Kit", 'Coil of Silk Thread', 'Flask of Oil'],
-                ['leather roll packed with clean linen rolls, wooden splints, and horn needles', 'spool of waxed silk', 'clay flask of seal-oil'],
-            )).toEqual([]);
-            // a count mismatch says nothing: three strangers beside two grants are all granted
-            expect(await auditWith(
-                ["Healer's Kit", 'Coil of Silk Thread'],
-                ['leather roll of needles', 'spool of waxed silk', 'bone whistle'],
-            )).toEqual(['leather roll of needles', 'spool of waxed silk', 'bone whistle']);
-        });
-
-        it('pairs one event item with one narrated item — a second same-kind object is still granted', async () => {
-            const granted = await auditWith(
-                ['Brass toll-token'],
-                ['heavy brass token stamped with the bridge', 'brass token etched with a wolf'],
-            );
-            expect(granted).toEqual(['brass token etched with a wolf']);
+        it('a narration the DM left item-silent is still recovered', async () => {
+            expect(await auditWith([], ['rusty iron key', 'bone whistle'])).toEqual(['rusty iron key', 'bone whistle']);
         });
     });
 
