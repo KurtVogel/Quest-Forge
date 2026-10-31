@@ -6,7 +6,7 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-30 (night) (the second Opus playtest on Flash + ten fixes from it; the morning's open-queue sweep; the 10-28 Opus playtest and the megacampaign read below)_
+_Last updated: 2026-10-31 (the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
 
 ## 2026-10-31 (later) — the relationship arc is derived, missing species get filled, placeholder secrets and repeated wants fold — pushed AND deployed
 
@@ -19,6 +19,12 @@ Vesa's two follow-ups on the megacampaign appendix, both built (DECISIONS.md 202
 Vesa spotted Ketta Mor's personality in the megacampaign appendix as eleven near-repeat trait lists. The appendix was the RAW export (the 10-28 load fold already cleans the personality), but the cause was live: the Scribe never saw the personality on record and saw the stance cut at 240 chars, so it re-composed both fields and the clause merge appended the paraphrases. Fixed (DECISIONS.md 2026-10-31): KNOWN STANCES carries the whole stance + the personality, the schema asks for new traits only, personality folds at the trait level on every merge, and a stance sentence that revises a held one replaces it (live and at load — 8 of the megacampaign's 45 stances fold, Ketta's doubled sentence to one). `src/engine/npcRoster.repetition1031.test.js`.
 
 **Next:** a real-provider run to watch the Scribe's personality emissions under the new rule; the relationship-arc ("friendly → neutral, neutral → friendly ×8") overhaul Vesa asked to be re-thought.
+
+## 2026-10-31 — the two-layer architecture map: `docs/ARCHITECTURE.md` + `docs/flows/` + `docs/map.html`, and the lean CLAUDE.md / AGENTS.md — pushed (docs only, nothing to deploy)
+
+Vesa: "Build a two-layer map of this project: one layer optimized for AI agents, one for humans." Seven parallel explorers mapped the subsystems from the code (never from CLAUDE.md); the map was written matklad-style, then a fresh verifier checked ~250 claims against the code (3 wrong, 5 imprecise — all fixed). **Agent layer:** `docs/ARCHITECTURE.md` (bird's-eye, container diagram, codemap, invariants + deliberate absences, boundaries, cross-cutting) and `docs/flows/` — `player-turn.md`, `combat-round.md`, `memory-system.md`, `hidden-fronts.md`, `session-lifecycle.md`, each a Mermaid sequence / state diagram grounded in named functions. **Human layer:** `docs/map.html`, GENERATED from those Markdown files by `node scripts/build-docs-map.mjs` (Mermaid from a CDN, light/dark, fit / actual-size toggle per diagram) — edit the Markdown, re-run the script. **The lean CLAUDE.md / AGENTS.md are APPLIED (Vesa's OK, DECISIONS.md 2026-10-31):** ~150 lines each — identity, handshake, commands, the contract, layout, Always / Never, gotchas, plain-path pointers to the map; the old 250 KB guide is `git show 6b8278f:CLAUDE.md`. Found on the way: `llm/turnOrchestrator.js` imports three pure helpers from `components/Chat/` (the arrow points the wrong way; noted in ARCHITECTURE.md, not moved).
+
+**Next:** keep `docs/map.html` regenerated whenever a flow changes; consider moving `turnVisibility.js` / `eventRouting.js` / `missingEventsNudge.js` from `components/Chat/` to `llm/` (the wart in ARCHITECTURE.md); the third Opus run and the doom arm on Sol stay next from the 10-30 entry.
 
 ## 2026-10-30 (night) — the second Opus-played playtest on Flash (74 turns, home → far land → home): ten fixes in — pushed AND deployed
 

@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quest Forge — Architecture Map</title>
+<meta name="description" content="The human-readable view of docs/ARCHITECTURE.md and docs/flows/: the bird's-eye view, the container diagram and every flow diagram, rendered with Mermaid.">
+<style>
+  :root {
+    --bg: #f7f5f0; --fg: #1d1c1a; --muted: #5d5a55; --card: #ffffff; --line: #d9d4ca;
+    --accent: #7a3e1d; --code-bg: #efebe3; --link: #1f4e79;
+  }
+  :root:not([data-theme="light"]) { color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17171f; --fg: #e8e4dc; --muted: #a9a49b; --card: #21212b; --line: #343442;
+      --accent: #e0a070; --code-bg: #2a2a36; --link: #8db4e2;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17171f; --fg: #e8e4dc; --muted: #a9a49b; --card: #21212b; --line: #343442;
+    --accent: #e0a070; --code-bg: #2a2a36; --link: #8db4e2;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  a { color: var(--link); }
+  code { background: var(--code-bg); padding: 0.05em 0.35em; border-radius: 4px; font-size: 0.92em; }
+  header { padding: 28px 16px 12px; max-width: 1180px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; justify-content: space-between; }
+  header h1 { margin: 0; font-size: 1.6rem; }
+  header p { margin: 0; color: var(--muted); }
+  .toggle { border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 999px; padding: 6px 14px; cursor: pointer; font: inherit; }
+  .layout { max-width: 1180px; margin: 0 auto; padding: 0 16px 48px; display: grid; grid-template-columns: 220px 1fr; gap: 28px; }
+  nav { position: sticky; top: 16px; align-self: start; border-right: 1px solid var(--line); padding-right: 12px; }
+  nav h2 { font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 8px 0; }
+  nav ol { list-style: none; padding: 0; margin: 0; }
+  nav li { margin: 6px 0; } nav a { text-decoration: none; }
+  section { margin: 0 0 40px; }
+  h2 { margin: 0 0 8px; font-size: 1.35rem; color: var(--accent); }
+  h3 { margin: 24px 0 8px; font-size: 1.05rem; }
+  .intro, .more { color: var(--muted); }
+  .diagram { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; overflow-x: auto; margin: 8px 0 16px; }
+  .fig { margin: 0; }
+  .diagram svg { height: auto; }
+  .diagram.fit svg { max-width: 100%; }
+  .fit-toggle { border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 0.8em; cursor: pointer; margin: -8px 0 16px; }
+  .diagram.error { color: #b00020; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 0.85em; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92em; margin: 8px 0 16px; display: block; overflow-x: auto; }
+  th, td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  ul.birds li { margin: 8px 0; }
+  @media (max-width: 820px) {
+    .layout { grid-template-columns: 1fr; }
+    nav { position: static; border-right: 0; border-bottom: 1px solid var(--line); padding: 0 0 12px; }
+    nav ol { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Quest Forge — Architecture Map</h1>
+    <p>Generated from <code>docs/ARCHITECTURE.md</code> and <code>docs/flows/</code> by <code>scripts/build-docs-map.mjs</code>. Edit the Markdown, not this page.</p>
+  </div>
+  <button class="toggle" id="theme" type="button" aria-label="Toggle light or dark theme">Theme: auto</button>
+</header>
+<div class="layout">
+<nav aria-label="Contents">
+  <h2>Contents</h2>
+  <ol><li><a href="#birds-eye">Bird's-eye view</a></li><li><a href="#container">Container diagram</a></li><li><a href="#invariants">Invariants</a></li><li><a href="#player-turn">One player turn</a></li><li><a href="#combat-round">A combat round</a></li><li><a href="#memory-system">The memory system</a></li><li><a href="#hidden-fronts">Hidden fronts and the living world</a></li><li><a href="#session-lifecycle">Session lifecycle — start, continue, load, new campaign, save</a></li></ol>
+</nav>
+<main>
+<section id="birds-eye">
+  <h2>Bird's-eye view</h2>
+  <ul class="birds"><li><strong>A single-player tabletop RPG in the browser where an LLM plays Dungeon Master.</strong> React 19 + Vite, almost all plain JavaScript. No server of its own: the browser calls Gemini, OpenAI or xAI directly with the player's own keys and is deployed as static files on Firebase Hosting.</li><li><strong>The engine owns truth; the LLM owns feeling.</strong> Every die is rolled client-side with <code>crypto.getRandomValues</code>; HP, XP, AC, inventory, quests and combat live in one reducer. The DM streams prose plus a trailing JSON event block that <em>declares</em> what happened; the engine validates, clamps and applies it. The DM never rolls and never does math.</li><li><strong>One turn is one pipeline.</strong> Player text → memory retrieval → system prompt (a byte-stable cached prefix + live state) → provider stream → parse → detectors → <code>applyEvents</code> → reducer → a background Scribe pass that extracts durable memory. Combat swaps the free-form event block for a bounded <code>combat_exchange</code> intent that the engine resolves atomically.</li><li><strong>Memory is layered so long campaigns fit the token budget and feel remembered.</strong> World facts, a journal summarizing pruned chat, story-memory callback cards, NPC dossiers, hero tells, and a Gemini-embedded vector store. The engine judges every write (dedupe, supersession, dormancy, retraction); the LLM only proposes.</li><li><strong>A hidden living world.</strong> Private campaign &quot;fronts&quot; with clocks the player and the DM never see as a dossier; the engine leaks only symptoms, rumor, and one permission card per scene. Background &quot;directors&quot; (one-shot LLM calls keyed on <code>session.pending*</code> markers) grow it.</li></ul>
+</section>
+<section id="container">
+  <h2>Container diagram</h2>
+  <p class="intro">What runs where. Everything inside the browser box ships as static files; the player's own keys reach the providers directly.</p>
+  <figure class="fig"><pre class="mermaid-src" hidden>flowchart TB
+    subgraph Browser[&quot;Browser (static SPA, no backend)&quot;]
+        UI[&quot;UI&lt;br/&gt;src/components, App.jsx&quot;]
+        STATE[&quot;Game state&lt;br/&gt;gameReducer + handlers, applyEvents&quot;]
+        TURN[&quot;Turn pipeline&lt;br/&gt;llm/turnOrchestrator&quot;]
+        PROMPT[&quot;Prompt builder&lt;br/&gt;llm/promptBuilder, journalBlocks&quot;]
+        PARSE[&quot;Response parser&lt;br/&gt;llm/responseParser, eventChannels&quot;]
+        ENGINE[&quot;Mechanics engine&lt;br/&gt;engine/dice, rules, combatExchange, rollResolver&quot;]
+        MEMORY[&quot;Memory engine&lt;br/&gt;engine/worldFacts, worldJournal, storyMemory, vectorMemory&quot;]
+        WORLD[&quot;Living world&lt;br/&gt;engine/fronts, worldTempo, locationRegistry&quot;]
+        SCRIBE[&quot;Scribe + directors&lt;br/&gt;llm/scribe, directorUtils, front*&quot;]
+        ADAPTER[&quot;Provider adapter&lt;br/&gt;llm/adapter, providers/*&quot;]
+        PERSIST[&quot;Persistence&lt;br/&gt;state/persistence, idb, portraitStore, cloudSync&quot;]
+    end
+    subgraph Providers[&quot;LLM providers (player's keys)&quot;]
+        GEMINI[&quot;Gemini&lt;br/&gt;DM option + mandatory machinery + embeddings&quot;]
+        OTHER[&quot;OpenAI / xAI&lt;br/&gt;DM options&quot;]
+        IMG[&quot;Image tiers&lt;br/&gt;xAI Imagine → Gemini image → Pollinations&quot;]
+    end
+    subgraph Storage[&quot;Storage&quot;]
+        IDB[&quot;IndexedDB&lt;br/&gt;saves, blobs, roster, embeddings&quot;]
+        LS[&quot;localStorage&lt;br/&gt;settings + API keys&quot;]
+        FB[&quot;User's Firebase&lt;br/&gt;Auth + Firestore manual saves&quot;]
+    end
+    HOST[&quot;Firebase Hosting&lt;br/&gt;quest-forge-99ab1 (static files only)&quot;]
+
+    UI --&gt;|dispatch| STATE
+    UI --&gt; TURN
+    TURN --&gt; PROMPT --&gt; ADAPTER
+    TURN --&gt; PARSE --&gt; STATE
+    TURN --&gt; MEMORY
+    STATE --&gt; ENGINE
+    STATE --&gt; WORLD
+    MEMORY --&gt; PROMPT
+    WORLD --&gt; PROMPT
+    TURN --&gt; SCRIBE --&gt; STATE
+    SCRIBE --&gt; ADAPTER
+    ADAPTER --&gt; GEMINI
+    ADAPTER --&gt; OTHER
+    UI --&gt; IMG
+    MEMORY --&gt; IDB
+    STATE --&gt; PERSIST
+    PERSIST --&gt; IDB
+    PERSIST --&gt; LS
+    PERSIST --&gt; FB
+    HOST -.serves.-&gt; Browser</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+</section>
+<section id="invariants">
+  <h2>Invariants</h2>
+  <ul><li><strong>The LLM never rolls and never mutates state.</strong> Dice come only from <code>dice.ts</code>; a requested roll's <code>modifier</code> is ignored for the hero; <code>applyEvents</code> drops every non-exchange event while combat is active; <code>handleRequestedRolls</code> refuses to run in combat.</li><li><strong>The engine is the single source of truth; the prompt describes it.</strong> If the DM &quot;should&quot; do math, the client already does it. A feature is a JSON field → a normalizer in <code>eventChannels.js</code> → a reducer action → a prompt line saying the field exists.</li><li><strong>Every DM-writable mechanical channel ships with a replay ledger</strong> (coin, purchases, sales, spells, rests, XP, item grants; combat uses <code>exchangeId</code>). The DM re-emitting an applied event on a later turn is a proven failure mode. Windows are measured in conversational distance.</li><li><strong>Every LLM lane is a trust boundary.</strong> A reducer fed by any lane projects the payload to known keys and clamps every text it stores; engine-owned stamps can never arrive from a lane.</li><li><strong>The prompt prefix is byte-stable.</strong> Live state never enters a prefix block; the response mode is the tail. Tests pin the split and each dynamic block's ceiling.</li><li><strong>Persistence is by construction.</strong> <code>serializeGameState</code> strips three fields and keeps the rest; autosave fires on any persisted-field change; a new state field needs no wiring. Settings and API keys are device-local and never in a save.</li><li><strong>Resolved is terminal</strong> for story cards and for fronts. <code>LOAD_GAME</code> keeps the live user and the device's settings; Continue never calls the DM.</li><li><strong>Fronts are private.</strong> The player never sees them; the DM sees id and faction stubs and at most one permission or doom card per scene. Resolution is the one moment a title is revealed.</li><li><strong>The world's timing is dice, its content is directors.</strong> Arc reasoning (an LLM) decides what and where; a crypto die decides when; the reducer re-validates every install.</li><li><strong>Records are frank in content, clinical in register.</strong> Durable text is written in neutral vocabulary at full specificity; nothing established is quietly tidied away.</li></ul>
+  <p class="more">Deliberate absences, layer boundaries and cross-cutting concerns: <code>docs/ARCHITECTURE.md</code></p>
+</section>
+<section id="player-turn"><h2>One player turn</h2>
+<p class="intro">The ordinary out-of-combat turn on the <code>standard</code> lane, end to end. Combat and dice have their own flows (<code>combat-round.md</code>; the roll proposal is covered at the end of this file). Every participant below is a real module; every arrow is a real call or dispatch. Anything inferred rather than read is marked &quot;(inferred)&quot;.</p>
+<figure class="fig"><pre class="mermaid-src" hidden>sequenceDiagram
+    autonumber
+    actor Player
+    participant Chat as ChatPanel.jsx
+    participant Runner as turnOrchestrator.js&lt;br/&gt;createTurnRunner → sendToLLM
+    participant Mem as vectorMemory.js / storyMemory.js
+    participant Prompt as promptBuilder.js
+    participant Adapter as adapter.js → provider
+    participant Parser as responseParser.js / eventChannels.js
+    participant Apply as applyEvents.js → gameReducer
+    participant Scribe as scribe.js (Gemini machinery)
+
+    Player-&gt;&gt;Chat: types an action, Send
+    Chat-&gt;&gt;Chat: submitPlayerMessage: isTableTalkMessage? pick lane
+    Chat-&gt;&gt;Apply: dispatch ADD_MESSAGE (player row)
+    Chat-&gt;&gt;Mem: addMemories(sceneMemoryItem) — the player line, embedded alone
+    Chat-&gt;&gt;Runner: runner.sendToLLM(text, text, { lane })
+
+    Runner-&gt;&gt;Runner: dmLane(lane), then findRecallIntent → buildRecallDossier (recall turns only)
+    Runner-&gt;&gt;Mem: retrieveRelevant(machineryKey, query, topN, minScore, { presenceText })
+    Mem--&gt;&gt;Runner: scored rows (or memoryDown)
+    Runner-&gt;&gt;Mem: curateStoryMemory(cards, scene with findPresentNpcs)
+    Runner-&gt;&gt;Prompt: buildSystemPromptSplit(promptState, { retrievedMemories, storyMemory, recallRecord, narrationOnly / intentOnly, mode })
+    Prompt--&gt;&gt;Runner: { prefix (byte-stable), dynamic }
+    Runner-&gt;&gt;Runner: buildMessageWindow(messages, MESSAGE_WINDOW, { pendingUserMessage })
+    Runner-&gt;&gt;Adapter: streamMessage({ systemPromptParts, messageHistory, userMessage, onChunk, onUsage })
+    Adapter--&gt;&gt;Chat: onChunk → streaming text (cut at the JSON fence by displayCutIndex)
+    Adapter--&gt;&gt;Runner: full reply + usage
+
+    Runner-&gt;&gt;Parser: parseResponse(reply) → narrative + normalizeEvents(json)
+    Runner-&gt;&gt;Parser: detectors: detectSemanticTextRolls, reviewOutsideCombatRolls, detectPreNarratedOutcome
+    Runner-&gt;&gt;Runner: deriveSetupVisibility → { setupPhase, hideSetup }
+    Runner-&gt;&gt;Apply: dispatch ADD_MESSAGE (assistant row, only if prose)
+    Runner-&gt;&gt;Apply: applyEvents(events, record, getState, { setupPhase, sourceMessageId, ... })
+    Apply-&gt;&gt;Apply: one dispatch per channel → handlers/*.js (ledgers, clamps)
+    Runner-&gt;&gt;Apply: SET_LOCATION, MARK_CALLBACK_PAYOFF (detectCallbackPayoff)
+    Runner-&gt;&gt;Runner: stateAfter = turnActions.reduce(gameReducer, promptState)
+    Runner-&gt;&gt;Mem: queueMemoryItem(factMemoryItem) for facts this message minted
+    Runner--&gt;&gt;Chat: events (+ lastCommittedTurn)
+
+    Chat-&gt;&gt;Chat: routeTurnEvents(events) → TURN_ROUTES
+    Chat-&gt;&gt;Runner: runner.runPostTurnExtraction(playerLine, { auditCasts })
+    Runner-&gt;&gt;Scribe: runScribe({ ...buildScribeContext(stateAfter, texts), sourceMessageId })
+    Scribe-&gt;&gt;Apply: ADD_WORLD_FACTS, UPDATE_NPC, ADD_STORY_MEMORY_CARDS, ADD_HERO_TELLS, audits
+    Runner-&gt;&gt;Mem: queueMemoryItem(sceneMemoryItem), then flushMemoryQueue() → one embedTexts batch
+    Chat-&gt;&gt;Runner: runner.runAutoSummarize() → maybeAutoSummarize (fires on cadence only)</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+<h3>The roll proposal branch</h3>
+<figure class="fig"><pre class="mermaid-src" hidden>sequenceDiagram
+    participant Chat as ChatPanel.jsx
+    participant Runner as turnOrchestrator.js
+    participant RP as roleplayCheck.js
+    participant Resolver as rollResolver.js (dice.ts)
+    participant Red as gameReducer
+
+    Chat-&gt;&gt;Runner: stageRoleplayCheck(rolls, action, { events, narrative, ... })
+    Runner-&gt;&gt;RP: buildRoleplayCheckProposal
+    Runner-&gt;&gt;Red: PROPOSE_ROLEPLAY_CHECK → pendingRoleplayCheck (setup prose withheld)
+    Note over Chat: card shows the odds (describeCheckOdds) and three buttons
+    alt Roll
+        Chat-&gt;&gt;Runner: acceptRoleplayCheck
+        Runner-&gt;&gt;Resolver: handleRequestedRolls → resolveRolls (crypto dice)
+        Resolver-&gt;&gt;Runner: sendToLLM(buildRollOutcomePrompt(result), action) — the injected dep, a first-class turn
+    else Challenge ruling (once)
+        Chat-&gt;&gt;Runner: challengeRoleplayCheck → buildRoleplayChallengePrompt
+        Runner-&gt;&gt;Red: re-stage with challengeUsed, or RECORD_ROLL_RULING 'withdrawn'
+    else Change approach
+        Chat-&gt;&gt;Runner: changeRoleplayApproach
+        Runner-&gt;&gt;Red: REVEAL_MESSAGE (the withheld setup), RECORD_ROLL_RULING 'set_aside', CLEAR_ROLEPLAY_CHECK
+    end</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+<p class="more">Step-by-step notes and invariants: <code>docs/flows/player-turn.md</code></p></section>
+<section id="combat-round"><h2>A combat round</h2>
+<p class="intro">Active combat never uses the free-form roll path. The DM emits a bounded <code>combat_exchange</code> intent; <code>engine/combatExchange.js</code> validates it against live state, rolls every die, and seals one plan; the reducer commits it atomically by <code>exchangeId</code>; a separate narration-only call reads the stored result and cannot change it. Phases are <code>COMBAT_PHASES</code> in <code>engine/combatPredicates.js</code>.</p>
+<h3>Phase machine</h3>
+<figure class="fig"><pre class="mermaid-src" hidden>stateDiagram-v2
+    [*] --&gt; idle
+    idle --&gt; opening: START_COMBAT (someone beat the hero's initiative)
+    idle --&gt; awaiting_player: START_COMBAT (hero acts first)
+    opening --&gt; awaiting_narration: planOpeningExchange → APPLY_COMBAT_EXCHANGE
+    awaiting_player --&gt; awaiting_intent: BEGIN_COMBAT_INTENT (player sent an action)
+    awaiting_intent --&gt; awaiting_narration: planCombatExchange → APPLY_COMBAT_EXCHANGE
+    awaiting_intent --&gt; awaiting_player: REJECT_COMBAT_EXCHANGE / CANCEL_COMBAT_INTENT
+    awaiting_narration --&gt; awaiting_player: COMPLETE_COMBAT_NARRATION (fight continues)
+    awaiting_narration --&gt; idle: COMPLETE_COMBAT_NARRATION → END_COMBAT (victory / defeat / escaped)
+    note right of awaiting_intent
+        A reload returns this phase to awaiting_player:
+        no dice or HP existed yet.
+    end note</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+<h3>One round, end to end</h3>
+<figure class="fig"><pre class="mermaid-src" hidden>sequenceDiagram
+    autonumber
+    actor Player
+    participant Chat as ChatPanel.jsx
+    participant Runner as turnOrchestrator.js (lane combatIntent)
+    participant Wire as combatWire.js
+    participant Ex as combatExchange.js
+    participant Red as handlers/combat.js
+    participant Narr as turnOrchestrator.js (lane combatNarration)
+
+    Player-&gt;&gt;Chat: &quot;I swing at the ghoul and shout for Tammo to cover me&quot;
+    Chat-&gt;&gt;Red: BEGIN_COMBAT_INTENT → phase awaiting_intent (UI resources locked)
+    Chat-&gt;&gt;Runner: sendToLLM(text, text, { lane: 'combatIntent' })
+    Note over Runner: intentOnly projection, JSON-only, no memories, no detectors
+    Runner-&gt;&gt;Wire: normalizeCombatExchange(envelope) — via normalizeEvents
+    Runner--&gt;&gt;Chat: events.combatExchange
+    Chat-&gt;&gt;Chat: routeTurnEvents → COMBAT_EXCHANGE, then reconcileDeclaredSpells
+    Chat-&gt;&gt;Ex: planCombatExchange(state, exchange)
+    Ex-&gt;&gt;Ex: validatePlayerSlots / validateTurnShape (targets, weapons, slots, incapacity)
+    Ex-&gt;&gt;Ex: resolvePlayerSlots → resolveCompanions → resolveEnemies (crypto dice via combatMath)
+    Ex-&gt;&gt;Ex: sealExchange → { exchangeId, events, postState, heroRolls, terminal }
+    alt plan rejected
+        Chat-&gt;&gt;Red: REJECT_COMBAT_EXCHANGE (visible reason) → awaiting_player
+    else plan sealed
+        Chat-&gt;&gt;Red: APPLY_COMBAT_EXCHANGE (commitCombatPlan) → awaiting_narration
+        Red-&gt;&gt;Red: HP, conditions, death saves, flanks, fightTally, exchange lines posted
+        Chat-&gt;&gt;Narr: combatNarrationPrompt(result) → sendToLLM(…, { lane: 'combatNarration' })
+        Note over Narr: narrationOnly projection, events discarded, RESOLVED EVENTS is the one carrier
+        Narr--&gt;&gt;Chat: prose bound to each combatant's alive / fled / surrendered state
+        Chat-&gt;&gt;Red: COMPLETE_COMBAT_NARRATION { exchangeId }
+        alt terminal (victory / defeat / escaped)
+            Red-&gt;&gt;Red: END_COMBAT → XP for foes overcome, encounter ledger, wound card, fight memories
+            Chat-&gt;&gt;Chat: shouldScribeCombatBeat → runScribe (terminal, or a beat naming an out-of-party NPC), queueMemoryItem (terminal only)
+        else fight continues
+            Red-&gt;&gt;Red: phase awaiting_player
+        end
+    end</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+<p class="more">Step-by-step notes and invariants: <code>docs/flows/combat-round.md</code></p></section>
+<section id="memory-system"><h2>The memory system</h2>
+<p class="intro">How campaign memory is written, stored, retrieved and pruned. The DM's raw window is short (<code>MESSAGE_WINDOW</code> rows in <code>llm/turnOrchestrator.js</code>); everything older survives only as one of the tiers below. The engine judges every write; the LLM lanes only propose. Design rationale: <code>docs/LLM_WOW_LAYER.md</code>; settled calls: <code>docs/DECISIONS.md</code>; the research doctrine: <code>docs/MEMORY_RESEARCH.md</code>.</p>
+<h3>The tiers at a glance</h3>
+<table><thead><tr><th>Tier</th><th>State field</th><th>Written by</th><th>Read into the prompt as</th><th>Retired by</th></tr></thead><tbody><tr><td>World facts</td><td><code>worldFacts</code></td><td>DM <code>world_facts</code> events, the Scribe, the journal cadence, engine (front resolution) — all through <code>planWorldFactAdditions</code></td><td><code>## WORLD FACTS</code> (pinned first, newest next; state/intent facts tagged with age)</td><td>supersession (a negation flip), retraction; never deleted</td></tr><tr><td>Journal</td><td><code>journal</code></td><td><code>maybeAutoSummarize</code> → <code>ADD_JOURNAL_ENTRY</code></td><td><code>## SESSION HISTORY</code>, LOCATION TRANSITION HISTORY, the place line (<code>journalBlocks.js</code>)</td><td>never; the summarized chat rows leave the window via <code>MARK_MESSAGES_SUMMARIZED</code></td></tr><tr><td>Story-memory cards</td><td><code>storyMemory</code></td><td>Scribe and reflection (<code>ADD_STORY_MEMORY_CARDS</code>), engine (fight wound card, <code>MARK_CALLBACK_PAYOFF</code>), DM <code>memory_updates</code> (status/salience only)</td><td><code>## DRAMATIC CALLBACK OPPORTUNITIES</code> via <code>curateStoryMemory</code></td><td><code>applyStoryMemoryDormancy</code> on the cadence, callback cooldown, retraction → dormant; <code>resolved</code> is terminal</td></tr><tr><td>NPC roster</td><td><code>npcs</code></td><td>every lane through <code>UPDATE_NPC</code> → <code>upsertNpc</code> (<code>state/handlers/shared.js</code>), merges in <code>engine/npcRoster.js</code></td><td><code>## KNOWN NPCs</code> (presence-first), the party line, an <code>npc</code> vector row</td><td>archive, impression TTL, bond-moment cap, retraction drops impressions</td></tr><tr><td>Hero tells</td><td><code>heroTells</code></td><td>the Scribe's <code>ADD_HERO_TELLS</code> → <code>recordHeroTells</code></td><td><code>## WHAT THEY HAVE NOTICED ABOUT THE HERO</code> + beat blocks</td><td>fade after long silence; the player's &quot;That's not me&quot; strike (<code>SET_HERO_TELL_DORMANT</code>)</td></tr><tr><td>Vectors (RAG)</td><td>not in the save: in-memory <code>memoryStore</code> + IndexedDB <code>rpg-vector-memory</code> / store <code>embeddings</code>, keyed <code>[sessionId, text]</code></td><td><code>seedMemories</code> on mount; <code>queueMemoryItem</code> + <code>flushMemoryQueue</code> after a turn; <code>addMemories</code> for the player line</td><td><code>## RETRIEVED MEMORIES</code> via <code>retrieveRelevant</code> → <code>buildRetrievedMemoriesBlock</code></td><td>transient-row eviction at the campaign cap, branch pruning on seed, <code>retractMemoriesFromMessage</code></td></tr></tbody></table>
+<h3>Write path: after a turn</h3>
+<figure class="fig"><pre class="mermaid-src" hidden>sequenceDiagram
+    autonumber
+    participant Runner as turnOrchestrator.js
+    participant Red as gameReducer (handlers/worldMemory, npcs, heroTells)
+    participant Facts as engine/worldFacts.js
+    participant Cards as engine/storyMemory.js
+    participant Scribe as llm/scribe.js (Gemini Flash)
+    participant Vec as engine/vectorMemory.js
+    participant IDB as IndexedDB rpg-vector-memory
+
+    Note over Runner: the DM's own events landed in applyEvents, and stateAfter is replayed
+    Runner-&gt;&gt;Red: ADD_WORLD_FACTS (DM lane, meta.sourceMessage)
+    Red-&gt;&gt;Facts: planWorldFactAdditions → added / duplicate (re-stamp, witness) / flip (supersedes)
+    Runner-&gt;&gt;Cards: detectCallbackPayoff(curated, narrative, scene) → MARK_CALLBACK_PAYOFF
+    Runner-&gt;&gt;Vec: queueMemoryItem(factMemoryItem) for this message's accepted facts
+
+    Runner-&gt;&gt;Scribe: runScribe({ ...buildScribeContext(stateAfter, texts), sourceMessageId })
+    Note over Scribe: context = KNOWN appearances, stances, story cards, open plans, hero tells, lands
+    Scribe--&gt;&gt;Runner: facts ≤ cap, npc_updates, cards ≤ cap, hero_tells, appearance, audits
+    Scribe-&gt;&gt;Red: ADD_WORLD_FACTS (meta.sourceMessage) → planWorldFactAdditions again
+    Scribe-&gt;&gt;Red: UPDATE_NPC → sanitizeNpcLanePayload → resolveNpcRef → upsertNpc (clause merges, impressions)
+    Scribe-&gt;&gt;Red: ADD_STORY_MEMORY_CARDS → findStoryMemoryMatch (merge or mint)
+    Scribe-&gt;&gt;Red: ADD_HERO_TELLS → recordHeroTells, MERGE_CHARACTER_APPEARANCE, SET_LOCATION
+    Scribe-&gt;&gt;Vec: queueMemoryItem(factMemoryItem, { carry }) for its accepted facts
+
+    Runner-&gt;&gt;Vec: queueMemoryItem(sceneMemoryItem) — the narrative
+    Runner-&gt;&gt;Vec: flushMemoryQueue() → addMemories → embedTexts (one batch)
+    Vec-&gt;&gt;IDB: syncPersistedEmbeddings (one readwrite transaction, campaign key range)</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+<h3>Read path: before a turn</h3>
+<figure class="fig"><pre class="mermaid-src" hidden>sequenceDiagram
+    autonumber
+    participant Runner as turnOrchestrator.js sendToLLM
+    participant Recall as findRecallIntent (turnOrchestrator.js) → recallIntent.js / recallDossier.js
+    participant Vec as engine/vectorMemory.js
+    participant Cards as engine/storyMemory.js
+    participant Prompt as promptBuilder.js / journalBlocks.js
+
+    Runner-&gt;&gt;Recall: findRecallIntent(state, playerLine)
+    Recall--&gt;&gt;Runner: subjects + buildRecallDossier (ledgers, journal, cards, people, verbatim lines) or null
+    Runner-&gt;&gt;Vec: retrieveRelevant(key, sceneQuery, topN, minScore, { presenceText, atMessage })
+    Note over Vec: cosine over the campaign's rows, absent-subject penalty, category boost, near-duplicate collapse
+    Vec--&gt;&gt;Runner: rows with atMessage
+    Runner-&gt;&gt;Cards: curateStoryMemory(cards, { memories, query, location, npcs, messages, locations })
+    Note over Cards: a card seen inside the window scores 0, age past it is a bonus, cooldown by conversational distance
+    Cards--&gt;&gt;Runner: ≤ 5 cards with ageTurns and speakers
+    Runner-&gt;&gt;Prompt: buildSystemPromptSplit(state, { retrievedMemories, storyMemory, storyMemoryPool, recallRecord, memoryUnavailable })
+    Prompt-&gt;&gt;Prompt: buildWorldFactsBlock (liveWorldFacts), buildRetrievedMemoriesBlock (ages, &quot;since changed&quot; tags)
+    Prompt-&gt;&gt;Prompt: buildJournalBlocks → place line, SESSION HISTORY, KNOWN NPCs (pinned → present → located → score)
+    Prompt--&gt;&gt;Runner: dynamic half, MEMORY_UNAVAILABLE_NOTE when retrieval failed</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+<h3>The journal cadence</h3>
+<figure class="fig"><pre class="mermaid-src" hidden>sequenceDiagram
+    autonumber
+    participant Chat as ChatPanel / runAutoSummarize
+    participant WJ as engine/worldJournal.js maybeAutoSummarize
+    participant Flash as Gemini Flash (machinery)
+    participant Red as gameReducer
+    participant Refl as scribe.js runNpcFrontReflection
+    participant Ver as engine/commitmentVerifier.js
+
+    Chat-&gt;&gt;WJ: maybeAutoSummarize(state, deps, { getState })
+    WJ-&gt;&gt;WJ: enough narrative rows before the KEEP_TAIL tail? not in combat? fight-safe cut
+    WJ-&gt;&gt;Ver: snapshotCommitments(state) (active quests, pinned facts, open threads, promise cards)
+    WJ-&gt;&gt;Flash: summarize the batch (sendMessage, getBackgroundConfig)
+    Flash--&gt;&gt;WJ: { summary, key_decisions, consequences, location, npcs_encountered, world_facts }
+    WJ-&gt;&gt;Red: ADD_JOURNAL_ENTRY + MARK_MESSAGES_SUMMARIZED together (campaign-stamped, recorded)
+    Red-&gt;&gt;Red: ADD_JOURNAL_ENTRY ticks: applyStoryMemoryDormancy, rollRelationshipBeat, rollHeroTellBeat, rollWonderRequest
+    WJ-&gt;&gt;Red: UPDATE_NPC (_seen: false), ADD_WORLD_FACTS, SET_LOCATION { fillOnly } — each in its own try
+    WJ-&gt;&gt;Refl: reflection over the fresh summary + projected fronts
+    Refl-&gt;&gt;Red: UPDATE_NPC, APPLY_FRONT_ADVANCE_BATCH, APPLY_TEMPO_DIRECTIVE, ADD_STORY_MEMORY_CARDS, ADD_EMERGENT_FRONT
+    WJ-&gt;&gt;Ver: verifyCommitmentsAfterCadence(snapshot, recorded writes replayed over the read state)
+    Ver--&gt;&gt;Red: one &quot;📓 Journal check&quot; error-kind line if a commitment vanished (nothing restored)
+    Note over WJ: the new entry's embed is carried onto the next turn's batch</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+<p class="more">Step-by-step notes and invariants: <code>docs/flows/memory-system.md</code></p></section>
+<section id="hidden-fronts"><h2>Hidden fronts and the living world</h2>
+<p class="intro">A front is a private campaign clock: a faction or force, a goal, a clock from 0 to full, derived portent stages, and authored portents. The player never sees one. The DM never sees one as a dossier either: it reads id-and-faction stubs, one permission card (or one doom card) per scene, and in-world symptoms. The engine owns every number and every timing die; LLM directors only propose content, and each reducer installer re-validates it.</p>
+<h3>Front lifecycle</h3>
+<figure class="fig"><pre class="mermaid-src" hidden>stateDiagram-v2
+    [*] --&gt; proposed
+    proposed --&gt; active: normalizeFrontProposal passes → INSTALL_* / ADD_EMERGENT_FRONT (clock 0, stage 0)
+    active --&gt; active: clock moves — cadence APPLY_FRONT_ADVANCE_BATCH (±1, one gain per cadence) or DM front_updates clock_delta / stage_delta (±1, throttled per front)
+    active --&gt; doom_open: openDoomWindow — clock full, crypto die picks the scene
+    doom_open --&gt; prevailed: SETTLE_DOOMS on the player's row after the window shut → concludeFront(outcome 'prevailed')
+    doom_open --&gt; resolved: DM front_updates status 'resolved' inside the window (the hero answered it)
+    active --&gt; resolved: DM front_updates status 'resolved' (the hero ended it on screen)
+    active --&gt; dormant: sleepFrontLeftBehind — a new land needs a slot, this front has no ground there
+    dormant --&gt; active: wakeFrontsReturnedTo — the hero arrives in a land where it holds ground
+    resolved --&gt; [*]: terminal — UPDATE_FRONT strips status, clock and stage, and a pinned fact reveals the title
+    prevailed --&gt; [*]: terminal — a pinned fact says it came to pass, no XP, pendingFrontDoom set
+    note right of resolved
+        concludeFront (handlers/fronts.js) is the one ceremony:
+        reveal line, milestone XP, freed theaters, cancelled window,
+        chapterCloseSuggested, pendingFrontAftermath.
+    end note</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+<h3>Where the world moves: engine seams and what they mint</h3>
+<table><thead><tr><th>Seam (reducer action)</th><th>Mints</th></tr></thead><tbody><tr><td><code>SET_LOCATION</code> arriving at a different canonical place</td><td>travel edge (<code>linkLocations</code>); <code>wakeFrontsReturnedTo</code>; regional seed marker (<code>pendingRegionalFronts</code>) or a deferred land; the establishing-shot interlude (<code>openRegionInterlude</code>); traveling rumor (<code>selectRegionalHearsay</code> → <code>session.regionalHearsay</code>); the absence-drift marker after a long time away</td></tr><tr><td><code>UPDATE_LOCATION_PROFILE</code> (the Scribe's place classification)</td><td>motif tally; region face request; sleep-to-make-room / wake; deferred regions</td></tr><tr><td><code>ADD_JOURNAL_ENTRY</code> (the cadence)</td><td><code>rollRelationshipBeat</code>, <code>rollHeroTellBeat</code>, <code>rollWonderRequest</code> (<code>pendingWonder</code>); story-card dormancy</td></tr><tr><td>the cadence reflection (from <code>scribe.js</code>)</td><td><code>APPLY_TEMPO_DIRECTIVE</code> (which front may surface, where, how loud), <code>APPLY_FRONT_ADVANCE_BATCH</code>, at most one <code>ADD_EMERGENT_FRONT</code></td></tr><tr><td><code>END_COMBAT</code></td><td>encounter ledger (<code>appendRecentEncounter</code>), motif families, fight memories and the wound card, hearsay window</td></tr><tr><td><code>UPDATE_NPC</code></td><td><code>detectBondTurn</code> → <code>mintTurnBeat</code> (a bond turning into a scene)</td></tr><tr><td><code>ADD_MESSAGE</code></td><td>a player row settles an expired doom (<code>SETTLE_DOOMS</code>); a narrative DM row spends an open interlude (<code>consumeInterlude</code>)</td></tr><tr><td>either clock lane</td><td><code>openDoomWindow</code> when a clock is full; <code>detectFrontTurning</code> → an interlude on a stage crossing</td></tr></tbody></table>
+<h3>The director pattern</h3>
+<figure class="fig"><pre class="mermaid-src" hidden>sequenceDiagram
+    autonumber
+    participant Red as reducer (a seam above)
+    participant Chat as ChatPanel.jsx BACKGROUND_DIRECTORS effect
+    participant Dir as llm/&lt;director&gt;.js via directorUtils.runDirector
+    participant DM as DM model (dmCallConfig)
+    participant Inst as reducer INSTALL_* handler
+
+    Red-&gt;&gt;Red: stamp session.pending&lt;Marker&gt; (one-shot, typed at load)
+    Chat-&gt;&gt;Chat: isDirectorReady(state, marker)? not combat? not backing off (isDirectorBackingOff)?
+    Chat-&gt;&gt;Dir: generate*(state)
+    Dir-&gt;&gt;DM: sendMessage({ system prompt, context JSON }) — background, while play continues
+    DM--&gt;&gt;Dir: JSON proposal
+    Dir-&gt;&gt;Dir: parseDirectorJson (anchors, repair)
+    alt success (possibly empty)
+        Chat-&gt;&gt;Inst: RETRYABLE_DIRECTORS[name].install(sessionId, key, result)
+        Inst-&gt;&gt;Inst: re-validate (normalizeFrontProposal, bands, roster names), crypto timing die, clear the marker
+    else failure
+        Chat-&gt;&gt;Red: DIRECTOR_ATTEMPT_FAILED → session.directorFailures[name]
+        Note over Red: hold back DIRECTOR_RETRY_MIN_DISTANCE rows, and on the third failure install the EMPTY result
+    end</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+<table><thead><tr><th>Director</th><th>Marker</th><th>Install</th><th>Empty result</th></tr></thead><tbody><tr><td>campaign fronts (<code>frontDirector.js</code>)</td><td>none — keyed on a fresh session id</td><td><code>INSTALL_GENERATED_FRONTS</code></td><td>not retried; the deterministic fallback front stays</td></tr><tr><td>front aftermath (<code>frontAftermath.js</code>)</td><td><code>pendingFrontAftermath</code></td><td><code>INSTALL_AFTERMATH_FRONTS</code></td><td><code>[]</code> (a clean victory)</td></tr><tr><td>front doom (<code>frontDoom.js</code>)</td><td><code>pendingFrontDoom</code></td><td><code>INSTALL_DOOM_AFTERMATH</code></td><td><code>{}</code></td></tr><tr><td>absence drift (<code>absenceDrift.js</code>)</td><td><code>pendingAbsenceDrift</code></td><td><code>INSTALL_ABSENCE_DRIFT</code></td><td><code>{}</code> (nothing changed)</td></tr><tr><td>regional fronts (<code>regionalFronts.js</code>)</td><td><code>pendingRegionalFronts</code></td><td><code>INSTALL_REGIONAL_FRONTS</code></td><td><code>{ fronts: [], profile: null }</code></td></tr><tr><td>wonder (<code>wonderDirector.js</code>)</td><td><code>pendingWonder</code></td><td><code>INSTALL_WONDER</code></td><td><code>[]</code></td></tr><tr><td>v2 upgrade (<code>frontUpgrade.js</code>)</td><td>player-triggered from Settings</td><td><code>UPGRADE_FRONTS_V2</code></td><td>n/a</td></tr></tbody></table>
+<h3>What reaches the DM, and what it may write back</h3>
+<table><thead><tr><th>Block</th><th>Builder</th></tr></thead><tbody><tr><td><code>## WORLD TEMPO — PRIVATE PACING STATE</code> — pace dial vs measured heat, front stubs, ONE permission card or the doom card, victory / came-to-pass echoes, recent fights, worn motifs</td><td><code>buildWorldTempoBlock</code> (engine/worldTempo.js)</td></tr><tr><td><code>## REGIONAL HEARSAY — PRIVATE</code></td><td><code>buildRegionalHearsayBlock</code></td></tr><tr><td><code>## WHILE YOU WERE AWAY — PRIVATE</code></td><td><code>buildWhileYouWereAwayBlock</code> (llm/absenceDrift.js)</td></tr><tr><td><code>## SOMETHING STRANGE ARRIVES — PRIVATE</code></td><td><code>buildWonderBlock</code></td></tr><tr><td><code>## SOMEONE REACHES OUT</code> / <code>## THE BOND HAS TURNED</code></td><td><code>buildRelationshipBeatBlock</code></td></tr><tr><td><code>## WHAT THEY HAVE NOTICED ABOUT THE HERO</code> and the two hero-tell beat headers</td><td><code>buildHeroTellsBlock</code>, <code>buildHeroTellBeatBlock</code></td></tr><tr><td><code>## AN INTERLUDE — THE WORLD TURNS (PRIVATE)</code></td><td><code>buildInterludeBlock</code></td></tr><tr><td><code>## RECENT TABLE RULINGS — BINDING</code></td><td><code>buildRecentRulingsBlock</code></td></tr></tbody></table>
+<p class="more">Step-by-step notes and invariants: <code>docs/flows/hidden-fronts.md</code></p></section>
+<section id="session-lifecycle"><h2>Session lifecycle — start, continue, load, new campaign, save</h2>
+<p class="intro">Where a campaign comes from and where it goes. One rule shapes all of it: Continue and Load restore the exact conversational handoff and never call the DM; only a fresh campaign with a premise triggers one automatic DM call, the opening scene.</p>
+<h3>Start screen</h3>
+<figure class="fig"><pre class="mermaid-src" hidden>sequenceDiagram
+    autonumber
+    actor Player
+    participant App as App.jsx StartScreen
+    participant P as state/persistence.js
+    participant Cloud as state/cloudSync.js
+    participant Red as handlers/session.js
+    participant Mig as state/migrations.js
+    participant Chat as ChatPanel.jsx
+
+    App-&gt;&gt;P: checkSaves: loadAutoSave() + listSaves() in parallel (a storage failure is shown, not &quot;no saves&quot;)
+    App-&gt;&gt;Cloud: listCloudSaves() when signed in
+    alt Continue
+        Player-&gt;&gt;App: handleContinue
+        App-&gt;&gt;Red: LOAD_GAME(autosave payload)
+    else Load a slot
+        Player-&gt;&gt;App: handleLoadSave(slotId, isCloud)
+        App-&gt;&gt;P: loadGame(slotId) — reads savePayloads, restoreLanes (portraits, chapters)
+        App-&gt;&gt;Cloud: or loadGameFromCloud(uid, slotId) — reassemble chunks, rehydrateBlobs
+        App-&gt;&gt;Red: LOAD_GAME(payload)
+    else New Game
+        Player-&gt;&gt;App: handleNewGame → CharacterCreation
+    end
+    Red-&gt;&gt;Red: validateSaveState (type every record, drop narrationCue, awaiting_intent → awaiting_player)
+    Red-&gt;&gt;Mig: migrateLoadedSave: UNCONDITIONAL_HEALS → versioned MIGRATIONS → deriveSessionBoundaries, reseedMissingFronts, healUnopenedDooms
+    Red-&gt;&gt;Red: keep live user and the device's settings, bump session.loadNonce, reset ui
+    Red--&gt;&gt;App: AppShell remounts (keyed by session id + loadNonce)
+    Chat-&gt;&gt;Chat: mounts: seedMemories (rebuild the embedding cache from the record), return card if away long enough
+    Note over Chat: no DM call — the player's next line is the first call</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+<h3>New campaign</h3>
+<figure class="fig"><pre class="mermaid-src" hidden>sequenceDiagram
+    autonumber
+    actor Player
+    participant CC as CharacterCreation.jsx
+    participant Red as reducer
+    participant Chat as ChatPanel.jsx
+    participant Runner as turnOrchestrator.js (lane opening)
+    participant Dir as frontDirector.js (background)
+
+    Player-&gt;&gt;CC: Forge a New Hero, or Use an Existing Hero (roster / hero file via characterVault)
+    CC-&gt;&gt;CC: identity, class, stats, skills, premise (&quot;Set the stage&quot;: starters or Draft from my hero)
+    Player-&gt;&gt;CC: Begin
+    CC-&gt;&gt;Red: START_CHARACTER { character, inventory } (derived fields rebuilt, AC from inventory)
+    CC-&gt;&gt;Red: UPDATE_SESSION { id, name, premise, openingScenePending: !!premise, createdAt }
+    Red-&gt;&gt;Red: a new session id seeds createInitialFronts (the deterministic fallback pressure)
+    CC-&gt;&gt;Red: ADD_MESSAGE &quot;Your tale begins&quot;, SET_UI close creation
+    Chat-&gt;&gt;Chat: shouldPrimeCampaignOpening? (openingScenePending and no DM row yet)
+    Chat-&gt;&gt;Runner: sendToLLM(buildCampaignOpeningPrompt(), null, { lane: 'opening' })
+    Note over Runner: normal-life-first opening, starting_items reconciled against the kit, retries capped by MAX_PRIMING_ATTEMPTS
+    Runner--&gt;&gt;Chat: committed opening → UPDATE_SESSION { openingScenePending: false }
+    Chat-&gt;&gt;Dir: generateCampaignFronts(state) while play continues → INSTALL_GENERATED_FRONTS (only while the fallback front is untouched)</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+<h3>Save</h3>
+<figure class="fig"><pre class="mermaid-src" hidden>sequenceDiagram
+    autonumber
+    participant GC as GameContext.jsx
+    participant RT as autosaveRuntime.js
+    participant Pol as autosavePolicy.js
+    participant P as persistence.js
+    participant IDB as IndexedDB rpg-client-saves
+    participant Cloud as cloudSync.js → Firestore
+
+    GC-&gt;&gt;RT: noteStateChange(prev, state) on every reducer change
+    RT-&gt;&gt;Pol: hasGameplayChange? (ignores user / ui / settings) isBackgroundOnlyChange?
+    alt foreground field changed (messages, character, combat, inventory)
+        RT-&gt;&gt;RT: debounce AUTOSAVE_DEBOUNCE_MS
+    else anything else
+        RT-&gt;&gt;RT: debounce AUTOSAVE_BACKGROUND_DEBOUNCE_MS (a foreground change supersedes it)
+    end
+    RT-&gt;&gt;P: autoSave(state) → saveGame('__autosave__', state)
+    P-&gt;&gt;P: serializeGameState: spread, strip user / ui / settings, stamp saveVersion + savedAt
+    P-&gt;&gt;P: prepareSavePayload: extractLanes swaps portrait and chapter bytes for content-addressed refs
+    P-&gt;&gt;IDB: one readwrite tx: ensureLaneBlobs (write a blob only if absent), put saves metadata + savePayloads, sweepOrphanBlobs if a ref was released
+    Note over GC,RT: visibilitychange / pagehide → flushOnHide. A panel's flush({ action }) waits for the action's own re-render, else replays it through gameReducer
+    opt manual cloud save (Settings)
+        Cloud-&gt;&gt;P: prepareSavePayload (the same prologue)
+        Cloud-&gt;&gt;Cloud: byte pre-flight (CLOUD_SAVE_BYTE_LIMIT) → chunks, blobs to users/{uid}/portraits and chronicleChapters, runTransaction writes metadata + chunks
+        Cloud--&gt;&gt;GC: { ok, uploaded } or { ok: false, reason, message }
+    end</pre><div class="diagram fit"></div><button class="fit-toggle" type="button" aria-pressed="false">Actual size</button></figure>
+<h3>Storage map</h3>
+<table><thead><tr><th>Where</th><th>What</th></tr></thead><tbody><tr><td>localStorage <code>rpg-client-settings</code></td><td>device settings incl. the three API keys, through <code>sanitizeSettings</code></td></tr><tr><td>localStorage <code>qf-return-card-dismissed:&lt;sessionId&gt;</code></td><td>return-card dismissal</td></tr><tr><td>IndexedDB <code>rpg-client-saves</code> → <code>saves</code></td><td>slot metadata (projected by <code>projectSaveMetadata</code>), <code>portraitRefs</code>, <code>chapterRefs</code></td></tr><tr><td>→ <code>savePayloads</code></td><td>the slim state per slot (<code>__autosave__</code> included)</td></tr><tr><td>→ <code>portraits</code>, <code>chronicleChapters</code></td><td>content-addressed blobs (<code>BLOB_LANES</code>)</td></tr><tr><td>→ <code>characters</code></td><td>the hero roster</td></tr><tr><td>IndexedDB <code>rpg-vector-memory</code> → <code>embeddings</code></td><td>the RAG cache, keyed <code>[sessionId, text]</code>; rebuildable from the save</td></tr><tr><td>Firestore <code>users/{uid}/saves/{slotId}</code> + <code>chunks/{index}</code></td><td>manual cloud saves (metadata + payload slices)</td></tr><tr><td>Firestore <code>users/{uid}/portraits/{key}</code>, <code>chronicleChapters/{key}</code></td><td>the same blob lanes</td></tr></tbody></table>
+<p class="more">Step-by-step notes and invariants: <code>docs/flows/session-lifecycle.md</code></p></section>
+</main>
+</div>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs';
+  const root = document.documentElement;
+  const button = document.getElementById('theme');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const stored = (() => { try { return localStorage.getItem('qf-map-theme'); } catch { return null; } })();
+  let mode = stored === 'light' || stored === 'dark' ? stored : 'auto';
+
+  const isDark = () => mode === 'dark' || (mode === 'auto' && media.matches);
+
+  async function render() {
+    if (mode === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', mode);
+    button.textContent = 'Theme: ' + mode;
+    mermaid.initialize({ startOnLoad: false, theme: isDark() ? 'dark' : 'default', securityLevel: 'loose', flowchart: { htmlLabels: true, useMaxWidth: false }, sequence: { useMaxWidth: false }, state: { useMaxWidth: false } });
+    const sources = Array.from(document.querySelectorAll('.mermaid-src'));
+    for (const [index, src] of sources.entries()) {
+      const target = src.nextElementSibling;
+      target.classList.remove('error');
+      try {
+        const { svg, bindFunctions } = await mermaid.render('d' + index + '-' + Date.now(), src.textContent);
+        target.innerHTML = svg;
+        bindFunctions?.(target);
+      } catch (err) {
+        target.classList.add('error');
+        target.textContent = 'Mermaid could not render this diagram: ' + (err?.message || err);
+        console.error('map.html diagram', index, err);
+      }
+    }
+  }
+
+  button.addEventListener('click', () => {
+    mode = mode === 'auto' ? 'dark' : mode === 'dark' ? 'light' : 'auto';
+    try { if (mode === 'auto') localStorage.removeItem('qf-map-theme'); else localStorage.setItem('qf-map-theme', mode); } catch { /* private window */ }
+    render();
+  });
+  media.addEventListener('change', () => { if (mode === 'auto') render(); });
+  document.addEventListener('click', (event) => {
+    const toggle = event.target.closest('.fit-toggle');
+    if (!toggle) return;
+    const diagram = toggle.previousElementSibling;
+    const fit = diagram.classList.toggle('fit');
+    toggle.textContent = fit ? 'Actual size' : 'Fit to width';
+    toggle.setAttribute('aria-pressed', String(!fit));
+  });
+  render();
+</script>
+</body>
+</html>
