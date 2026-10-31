@@ -4103,3 +4103,35 @@ reply needs a shape check (length, fences, refusal) before it is another call's 
 deterministic fallback prompt exists for exactly the null. Payoff: a pressure the hero can come back
 to, a clock the DM can only nudge in the direction the fiction earned, a hero in an old coat painted
 their own age, and a scene prompt that is always a scene.
+
+### [strengthening] A membership rule is decided at every dispatcher; a loaded list has two dimensions; one grammar wants one reader; a typed row has no raw field; a dropped record is still a claim — status: `idea` (2026-10-31)
+Five rules from the dice-engine + persistence pass of 2026-10-31 (Lap 2, hostile input), each
+reproduced with a throwaway probe over the real resolver, reducer, prompt builder and recall
+dossier. **(1)** `appendRollHistory` states the ledger's membership ("dice other actors rolled …
+never do") and is the ONE writer — yet the out-of-combat resolver dispatches `ADD_ROLL` for an NPC's
+attack, save and damage and for a companion's swing (`rollResolver.js:506,562`): four foreign rows
+from one batch, the recall dossier answering "remember when the goblin stabbed at me?" with
+`DICE: The goblin stabs at Astra rolled 17` as the hero's own record, and a pin
+(`rollResolver.test.js:325`) enshrining it. The 10-17 pass grepped the pushes inside the exchange
+and called the resolver sound because the writer was one. Rule: for a collection with a membership
+rule, list every DISPATCHER of its write action by the actor whose item it carries. **(2)** the
+loaded roll row is capped at 50 rows and each face clamped, but the faces LIST, the modifier and the
+total are unbounded and the natural flags are read raw: a 100,000-face row puts 400 KB into RECENT
+DICE ROLLS on every turn while the block's size pin, fed live-shaped fixtures, holds at 1,000. Rule:
+every array a load types gets a length cap on its inner lists too, and one size-fixture row goes
+through the load typing, not the mint. **(3)** the dice notation is parsed by three regexes
+(`enemyStats.js:126`, `items.js:352`, `dice.ts:147`) and 5e's own shorthand `d8` is read by none —
+a default die, a fallback heal, a dropped roll, three different failures for one spelling. Rule: one
+tolerant reader per grammar (optional count, trailing damage word, case / space), each boundary
+applying its own band AFTER it, and the plausible wrong spelling as the first fixture. **(4)**
+`projectSaveMetadata` types sixteen fields through `SAVE_METADATA_FIELDS` and spreads the
+seventeenth (`savedAt`) raw: "Invalid Date" on three renderers. Rule: a typed-row composer has no
+passthrough — a field with two legitimate shapes folds both to one. **(5)** the list projection's
+DROP of a non-string key (the 09-10 crash fix) leaves a record that cannot be listed or deleted and
+whose blob refs the sweep counts live forever; a metadata record whose refs list is not an array
+contributes nothing to the live set and loses its pictures on the next release by any slot. Rule:
+when a projection drops a record, name the path that deletes it — or make the store's own key the
+fallback id (the cloud rule) so nothing is dropped; and a sweep's live set reads a typed list
+(`typedLaneRefs`) with the payload as the belt. Payoff: a hero's record that holds the hero's dice,
+a prompt that cannot be stuffed through a saved roll, a goblin that swings the die the DM wrote, a
+Saves list with real dates, and no row that is both invisible and immortal.
