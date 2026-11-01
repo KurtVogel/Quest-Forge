@@ -333,12 +333,6 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
 
     const transactionMeta = buildTransactionMeta(events, opts);
     const withTransactionMeta = (entry) => withMeta(entry, transactionMeta);
-    // Coin and item movements also carry the reply's narration (2026-11-01
-    // run 6): the judge reads the DM's own counting ("another silver", "five
-    // more coins") as a NEW movement, not a replay of the last one.
-    const moneyMeta = typeof opts?.narrative === 'string' && opts.narrative.trim()
-        ? { ...transactionMeta, narrative: opts.narrative.slice(0, 8000) }
-        : transactionMeta;
 
     for (const item of itemsFound) {
         if (lootAlreadyClaimed) break;
@@ -386,15 +380,15 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
             };
         // The transaction log judges the grant by its source message, the
         // player's phrasing and who the item came from.
-        dispatch({ type: 'ADD_ITEM', payload: withMeta(itemData, withParty(moneyMeta, partyOf(item.from))) });
+        dispatch({ type: 'ADD_ITEM', payload: withMeta(itemData, withParty(transactionMeta, partyOf(item.from))) });
     }
 
     for (const purchase of events.purchases) {
-        dispatch({ type: 'PURCHASE_ITEM', payload: withMeta(purchase, withParty(moneyMeta, partyOf(purchase?.seller))) });
+        dispatch({ type: 'PURCHASE_ITEM', payload: withMeta(purchase, withParty(transactionMeta, partyOf(purchase?.seller))) });
     }
 
     for (const sale of events.sells) {
-        dispatch({ type: 'SELL_ITEM', payload: withMeta(sale, withParty(moneyMeta, partyOf(sale?.buyer))) });
+        dispatch({ type: 'SELL_ITEM', payload: withMeta(sale, withParty(transactionMeta, partyOf(sale?.buyer))) });
     }
 
     // Same-identity items_lost entries travel as ONE removal (the items_found
@@ -434,7 +428,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
             payload: {
                 name: lostName,
                 ...(lostQuantity !== null && { quantity: lostQuantity }),
-                ...(Object.keys(moneyMeta).length > 0 && { _meta: withParty(moneyMeta, partyOf(itemName.to)) }),
+                ...(Object.keys(transactionMeta).length > 0 && { _meta: withParty(transactionMeta, partyOf(itemName.to)) }),
             },
         });
     }
@@ -472,7 +466,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
                 gold: goldFound,
                 silver: silverFound,
                 copper: copperFound,
-                _meta: withParty(moneyMeta, partyOf(events.coinFrom)),
+                _meta: withParty(transactionMeta, partyOf(events.coinFrom)),
             },
         });
     }
@@ -486,7 +480,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
                 gold: goldLost,
                 silver: silverLost,
                 copper: copperLost,
-                _meta: withParty(moneyMeta, partyOf(events.coinTo)),
+                _meta: withParty(transactionMeta, partyOf(events.coinTo)),
             },
         });
     }

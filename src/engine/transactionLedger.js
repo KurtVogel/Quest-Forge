@@ -11,7 +11,8 @@
  *
  * An entry is one judged movement:
  *   kind     coin | purchase | sale | item | handoff
- *   lane     dm | audit | player | engine — who asked
+ *   lane     dm | audit | player | engine | judge — who asked (judge: the
+ *            repeat judge's verdict, llm/repeatJudge.js)
  *   status   applied | ignored (an ignored entry keeps its CLAIM, so a
  *            re-emission of a re-emission is still a replay)
  *   cp       the signed coin CLAIMED (+ in, − out)
@@ -42,7 +43,7 @@ export const LONG_WINDOW = 40;
 export const LEDGER_PROMPT_ROWS = 8;
 
 const KINDS = new Set(['coin', 'purchase', 'sale', 'item', 'handoff']);
-const LANES = new Set(['dm', 'audit', 'player', 'engine']);
+const LANES = new Set(['dm', 'audit', 'player', 'engine', 'judge']);
 const PARTY_MAX = 60;
 
 const clampText = (value, max) => (typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, max) : '');

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
+import { judgeLatest } from './repeatJudge.testUtils.js';
 
 function makeState() {
     return {
@@ -606,13 +607,13 @@ describe('items_found replay ledger (live playtest #7: one healing potion grante
         expect(recap.ledger.at(-1).status).toBe('ignored');
     });
 
-    it('honors the player explicitly taking another copy', () => {
+    it('honors the player explicitly taking another copy — once the repeat judge reads it as new', () => {
         const state = { ...makeState(), inventory: [] };
         const first = gameReducer(state, { type: 'ADD_ITEM', payload: potionPayload('msg-find') });
-        const second = gameReducer(addMessages(first, 2), {
+        const second = judgeLatest(gameReducer(addMessages(first, 2), {
             type: 'ADD_ITEM',
             payload: potionPayload('msg-second', 'I take another potion of healing from the shelf.'),
-        });
+        }));
         // Same-identity consumables stack (2026-09-03): one row, two potions.
         expect(second.inventory).toHaveLength(1);
         expect(second.inventory[0].quantity).toBe(2);
@@ -745,16 +746,16 @@ describe('items_found quantity drift (playtest #8: the item twin of coin denomin
         expect(recap.messages.at(-1).content).toMatch(/Duplicate item grant ignored — Arrow/);
     });
 
-    it('still honors explicit player re-acquisition at a new quantity', () => {
+    it('still honors explicit player re-acquisition at a new quantity — once the repeat judge reads it as new', () => {
         const state = { ...makeState(), inventory: [] };
         const first = gameReducer(state, {
             type: 'ADD_ITEM',
             payload: { name: 'Arrow', quantity: 3, _meta: { sourceId: 'msg-find' } },
         });
-        const second = gameReducer(addMessages(first, 2), {
+        const second = judgeLatest(gameReducer(addMessages(first, 2), {
             type: 'ADD_ITEM',
             payload: { name: 'Arrow', quantity: 5, _meta: { sourceId: 'msg-buy', playerMessage: 'I take the rest of the arrows too.' } },
-        });
+        }));
         expect(second.inventory).toHaveLength(1);
         expect(second.inventory[0].quantity).toBe(8); // 3 + 5, one stack
     });

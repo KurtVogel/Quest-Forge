@@ -74,7 +74,7 @@ export const handlers = {
                         // dmVisible: the DM must learn its re-emission was suppressed
                         // (the item is already owned) or it keeps trying. A
                         // cross-message twin asks the player instead (repeatCard).
-                        repeatCard(state, ctx, verdict, line, { type: 'ADD_ITEM', payload: { ...ref, type: item.type } })
+                        repeatCard(state, ctx, verdict.twin, line, { type: 'ADD_ITEM', payload: { ...ref, type: item.type, description: item.description, valueCp: item.valueCp } })
                             || systemMessage(line, { dmVisible: true }),
                     ],
                 };
@@ -270,7 +270,7 @@ export const handlers = {
                     ledger: logMovement(state, ctx, { kind: 'item', itemsOut: [probe], status: 'ignored' }),
                     messages: [
                         ...state.messages,
-                        repeatCard(state, ctx, verdict, line, { type: 'REMOVE_ITEM_BY_NAME', payload: { name: probe.name } })
+                        repeatCard(state, ctx, verdict.twin, line, { type: 'REMOVE_ITEM_BY_NAME', payload: { name: probe.name } })
                             || systemMessage(line, { dmVisible: true }),
                     ],
                 };

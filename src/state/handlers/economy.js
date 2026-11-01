@@ -150,15 +150,20 @@ const itemsOf = (entry) => (entry?.itemsOut?.length ? entry.itemsOut : entry?.it
  * re-emission of the re-emission is still a replay) and the reason is posted
  * as a purse receipt the DM reads.
  */
-// `ask` ({ verdict, replay }) turns a cross-message duplicate into a
-// "Recorded once" card (ledger.js repeatCard); anything certain stays a note.
+// `ask` ({ twin, replay }) turns a twin from an earlier message into a
+// "Recorded once" card the repeat judge reads (ledger.js repeatCard);
+// anything certain stays a note.
 function ignore(state, ctx, fields, line, ask = null) {
-    const card = ask ? repeatCard(state, ctx, ask.verdict, line, ask.replay) : null;
     return {
         ...state,
         ledger: logMovement(state, ctx, { ...fields, status: 'ignored' }),
-        messages: [...state.messages, card || coinLine(line)],
+        messages: [...state.messages, receipt(state, ctx, line, ask)],
     };
+}
+
+/** The purse receipt for a judgment — or, when it is the judge's to settle, its card. */
+function receipt(state, ctx, line, ask) {
+    return (ask && repeatCard(state, ctx, ask.twin, line, ask.replay)) || coinLine(line);
 }
 
 const GRANT_LINES = {
@@ -189,7 +194,7 @@ export const handlers = {
         const verdict = judgeCoinIn(state, ctx, amounts);
         if (verdict.suppress) {
             return ignore(state, ctx, { kind: 'coin', cp: amounts.totalCp }, GRANT_LINES[verdict.suppress](name, verdict.twin),
-                { verdict, replay: { type: 'ADD_COIN_GRANT', payload: { copper: amounts.totalCp } } });
+                { twin: verdict.twin, replay: { type: 'ADD_COIN_GRANT', payload: { copper: amounts.totalCp } } });
         }
         const bundled = verdict.bundled;
         const grant = bundled ? bundled.remainder : amounts;
@@ -227,12 +232,13 @@ export const handlers = {
         const verdict = judgeCoinOut(state, ctx, amounts);
         if (verdict.suppress === 'purchaseCover') {
             return ignore(state, ctx, { kind: 'coin', cp: -amounts.totalCp },
-                `Duplicate coin charge ignored — ${name} was already paid when you bought ${itemsOf(verdict.twin) || 'that'}.`);
+                `Duplicate coin charge ignored — ${name} was already paid when you bought ${itemsOf(verdict.twin) || 'that'}.`,
+                { twin: verdict.twin, replay: { type: 'APPLY_COIN_LOSS', payload: { copper: amounts.totalCp } } });
         }
         if (verdict.suppress) {
             return ignore(state, ctx, { kind: 'coin', cp: -amounts.totalCp },
                 `Duplicate coin charge ignored — ${name} was already paid${withParty(verdict.twin, 'to')} moments ago.`,
-                { verdict, replay: { type: 'APPLY_COIN_LOSS', payload: { copper: amounts.totalCp } } });
+                { twin: verdict.twin, replay: { type: 'APPLY_COIN_LOSS', payload: { copper: amounts.totalCp } } });
         }
         const result = spendCurrency(state.character, amounts);
         if (!result.paid) {
@@ -325,15 +331,17 @@ export const handlers = {
         const ctx = ledgerContext(state, meta);
         const claim = { kind: 'purchase', cp: -priceCp, itemsIn: [itemRef(item, quantity)] };
         const verdict = judgePurchase(state, ctx, transaction);
+        const purchaseReplay = { type: 'PURCHASE_ITEM', payload: { name: item.name, itemKey: item.itemKey, quantity, priceCp } };
         if (verdict.suppress) {
             return ignore(state, ctx, claim, `Duplicate purchase ignored — ${item.name} was already bought recently.`,
-                { verdict, replay: { type: 'PURCHASE_ITEM', payload: { name: item.name, itemKey: item.itemKey, quantity, priceCp } } });
+                { twin: verdict.twin, replay: purchaseReplay });
         }
         const label = `${quantity > 1 ? `${quantity}x ` : ''}${item.name}`;
         // Both halves already happened as loose events (the price as a coin
         // loss, the goods as loot): this purchase is that trade retold.
         if (verdict.coinTwin && verdict.itemTwin) {
-            return ignore(state, ctx, claim, `Duplicate purchase ignored — ${item.name} was already paid for and received moments ago.`);
+            return ignore(state, ctx, claim, `Duplicate purchase ignored — ${item.name} was already paid for and received moments ago.`,
+                { twin: verdict.coinTwin, replay: purchaseReplay });
         }
         const newItem = autoEquipped(state.inventory, mintOwnedItem(item, { quantity }));
         // The price already left as loose coin: deliver the goods WITHOUT
@@ -342,7 +350,8 @@ export const handlers = {
             const delivered = {
                 ...state,
                 ledger: logMovement(state, ctx, { ...claim, movedCp: 0 }),
-                messages: [...state.messages, coinLine(`${label} added — its ${formatCurrency(priceCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`)],
+                messages: [...state.messages, receipt(state, ctx, `${label} added — its ${formatCurrency(priceCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`,
+                    { twin: verdict.coinTwin, replay: { type: 'APPLY_COIN_LOSS', payload: { copper: priceCp } } })],
             };
             return withInventoryAndAC(delivered, addOrStackItem(state.inventory, newItem));
         }
@@ -364,7 +373,8 @@ export const handlers = {
                 ...state,
                 character: payment.character,
                 ledger: logMovement(state, ctx, { ...claim, itemsMoved: false }),
-                messages: [...state.messages, coinLine(`Paid ${formatCurrency(priceCp)} for ${label} — it already reached your pack moments ago, so no second one was added; purse: ${purseLine(payment.character)}.`)],
+                messages: [...state.messages, receipt(state, ctx, `Paid ${formatCurrency(priceCp)} for ${label} — it already reached your pack moments ago, so no second one was added; purse: ${purseLine(payment.character)}.`,
+                    { twin: verdict.itemTwin, replay: { type: 'ADD_ITEM', payload: { name: item.name, itemKey: item.itemKey, quantity, type: item.type } } })],
             };
         }
         // The purchase receipt carries the purse like the coin lines do
@@ -423,7 +433,7 @@ export const handlers = {
         const verdict = judgeSale(state, ctx, item, quantity, proceedsCp);
         if (verdict.suppress) {
             return ignore(state, ctx, claim, `Duplicate sale ignored — ${item.name} was already sold recently.`,
-                { verdict, replay: { type: 'SELL_ITEM', payload: { itemId: item.id, name: item.name, itemKey: item.itemKey, quantity, priceCp: proceedsCp } } });
+                { twin: verdict.twin, replay: { type: 'SELL_ITEM', payload: { itemId: item.id, name: item.name, itemKey: item.itemKey, quantity, priceCp: proceedsCp } } });
         }
         const label = `${quantity > 1 ? `${quantity}x ` : ''}${item.name}`;
         // The proceeds already arrived as loose found coin: the goods leave,
@@ -432,7 +442,8 @@ export const handlers = {
             const settled = {
                 ...state,
                 ledger: logMovement(state, ctx, { ...claim, movedCp: 0 }),
-                messages: [...state.messages, coinLine(`Sold ${label} — its ${formatCurrency(proceedsCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`)],
+                messages: [...state.messages, receipt(state, ctx, `Sold ${label} — its ${formatCurrency(proceedsCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`,
+                    { twin: verdict.coinTwin, replay: { type: 'ADD_COIN_GRANT', payload: { copper: proceedsCp } } })],
             };
             return withInventoryAndAC(settled, consumeItem(state.inventory, item.id, quantity));
         }
@@ -459,7 +470,9 @@ export const handlers = {
         if (index === -1) return state;
         const card = state.messages[index];
         const recovery = card.recovery || {};
-        if (recovery.status !== 'open') return state;
+        // A card the repeat judge is still reading is the player's to answer
+        // first: the late verdict then finds it settled and lands nothing.
+        if (recovery.status !== 'open' && recovery.status !== 'judging') return state;
         const marked = (base, status) => ({
             ...base,
             messages: base.messages.map((message, i) => (i === index ? { ...message, recovery: { ...recovery, status } } : message)),
@@ -490,4 +503,100 @@ export const handlers = {
         }
         return next;
     },
+
+    /**
+     * The repeat judge's verdict on a "Recorded once" card (llm/repeatJudge.js,
+     * 2026-11-01 night). "new" books exactly the declined movement on the
+     * judge lane and keeps its inverse for Undo; "same" says it was checked
+     * and leaves "Record it again"; anything else leaves the card as it was.
+     * A card the player already answered (or a booking that could not land —
+     * an empty purse, a stack gone) keeps the player's buttons. Payload:
+     * { messageId, verdict, reason }; `meta` is the campaign stamp.
+     */
+    JUDGE_REPEAT(state, action) {
+        const { messageId, verdict, sourceId: askedFor } = action.payload || {};
+        const messages = state.messages || [];
+        // The judge read the turn's projected state; the live row's id can
+        // differ if another lane posted between — the card is also found by
+        // the movement it holds.
+        let index = messages.findIndex(message => message?.id === messageId && message.kind === 'recovery');
+        if (index === -1 && askedFor) {
+            index = messages.findIndex(message => message?.kind === 'recovery' && message.recovery?.status === 'judging' && message.recovery?.judge?.sourceId === askedFor);
+        }
+        if (index === -1) return state;
+        const card = state.messages[index];
+        const recovery = card.recovery || {};
+        if (recovery.mode !== 'repeat' || recovery.status !== 'judging') return state;
+        const reason = typeof action.payload.reason === 'string' ? action.payload.reason.replace(/\s+/g, ' ').trim().slice(0, 160) : '';
+        const line = typeof recovery.line === 'string' ? recovery.line : '';
+        const settle = (base, patch, content = card.content) => ({
+            ...base,
+            messages: base.messages.map((message, i) => (i === index ? { ...message, content, recovery: { ...recovery, ...patch } } : message)),
+        });
+        if (verdict === 'same') {
+            return settle(state, { status: 'open', verdict: 'same', reason },
+                `**Recorded once:** ${line} Checked: this reads as the same one${reason ? ` (${reason})` : ''}. If it was new, record it.`);
+        }
+        const replay = projectRepeatReplay(recovery.replay);
+        const run = verdict === 'new' && replay && (handlers[replay.type] || inventoryHandlers[replay.type]);
+        if (!run) return settle(state, { status: 'open', verdict: verdict === 'new' ? 'new' : 'unsure' });
+        const sourceId = `${card.id}:judge`;
+        const undo = inverseReplays(state, replay);
+        const booked = run(state, { type: replay.type, payload: { ...replay.payload, _meta: { lane: 'judge', sourceId, party: recovery.party || '' } } });
+        const landed = (booked.ledger || []).some(entry => entry?.sourceId === sourceId && entry.status === 'applied');
+        if (!landed) return settle(booked, { status: 'open', verdict: 'new', reason });
+        return settle(booked, { status: 'booked', verdict: 'new', reason, undo },
+            `**Booked as a new one:** ${line} The turn reads as a new one${reason ? ` (${reason})` : ''}, so it was recorded after all.`);
+    },
+
+    /** "Undo — same one" on a card the judge booked: the inverse movements, on the player lane. Payload: { messageId }. */
+    UNDO_REPEAT(state, action) {
+        const { messageId } = action.payload || {};
+        const index = (state.messages || []).findIndex(message => message?.id === messageId && message.kind === 'recovery');
+        if (index === -1) return state;
+        const card = state.messages[index];
+        const recovery = card.recovery || {};
+        if (recovery.mode !== 'repeat' || recovery.status !== 'booked') return state;
+        let next = {
+            ...state,
+            messages: state.messages.map((message, i) => (i === index ? { ...message, recovery: { ...recovery, status: 'undone' } } : message)),
+        };
+        const steps = Array.isArray(recovery.undo) ? recovery.undo.slice(0, 2) : [];
+        steps.forEach((step, i) => {
+            const replay = projectRepeatReplay(step);
+            const run = replay && (handlers[replay.type] || inventoryHandlers[replay.type]);
+            if (run) next = run(next, { type: replay.type, payload: { ...replay.payload, _meta: { lane: 'player', sourceId: `${messageId}:undo:${i}`, party: recovery.party || '' } } });
+        });
+        return next;
+    },
 };
+
+/**
+ * The movements that take a judge-booked repeat back out, read BEFORE it
+ * books (a removed or sold item's own fields come from the pack as it was).
+ */
+function inverseReplays(state, replay) {
+    const { type, payload } = replay;
+    const held = () => {
+        const name = String(payload.name || '').toLowerCase();
+        const item = (state.inventory || []).find(entry => (payload.itemId && entry.id === payload.itemId) || String(entry.name || '').toLowerCase() === name);
+        return {
+            name: item?.name || payload.name,
+            itemKey: item?.itemKey || payload.itemKey,
+            quantity: payload.quantity || 1,
+            type: item?.type,
+            description: item?.description,
+            valueCp: item?.valueCp,
+        };
+    };
+    const coin = (kind) => ({ type: kind, payload: { copper: payload.copper ?? payload.priceCp } });
+    switch (type) {
+        case 'ADD_COIN_GRANT': return [coin('APPLY_COIN_LOSS')];
+        case 'APPLY_COIN_LOSS': return [coin('ADD_COIN_GRANT')];
+        case 'ADD_ITEM': return [{ type: 'REMOVE_ITEM_BY_NAME', payload: { name: payload.name, quantity: payload.quantity || 1 } }];
+        case 'REMOVE_ITEM_BY_NAME': return [{ type: 'ADD_ITEM', payload: held() }];
+        case 'PURCHASE_ITEM': return [coin('ADD_COIN_GRANT'), { type: 'REMOVE_ITEM_BY_NAME', payload: { name: payload.name, quantity: payload.quantity || 1 } }];
+        case 'SELL_ITEM': return [coin('APPLY_COIN_LOSS'), { type: 'ADD_ITEM', payload: held() }];
+        default: return [];
+    }
+}

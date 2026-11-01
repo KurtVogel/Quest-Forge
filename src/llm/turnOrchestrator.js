@@ -33,6 +33,7 @@ import { handleRequestedRolls } from '../engine/rollResolver.js';
 import { attackAsCheckCorrectionPrompt, playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls } from '../engine/outOfCombatRollPolicy.js';
 import { maybeAutoSummarize } from '../engine/worldJournal.js';
 import { buildScribeContext, runScribe } from './scribe.js';
+import { judgePendingRepeats } from './repeatJudge.js';
 import { isEpilogueRequest } from './tableTalk.js';
 import { factMemoryItem, flushMemoryQueue, journalMemoryItem, queueMemoryItem, retrieveRelevant, sceneMemoryItem } from '../engine/vectorMemory.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
@@ -751,8 +752,6 @@ export function createTurnRunner({
                 // The DM's own facts remember this message (2026-10-11).
                 sourceMessageId: msgId,
                 playerMessage: originalPlayerMessage || playerActionContext,
-                // The reply's own words for the transaction judge (2026-11-01 run 6).
-                narrative,
                 // The scene's text for the NPC lane (M0, 2026-10-13): a short
                 // name the roster holds twice resolves to the person named
                 // in full here, or to nobody.
@@ -1005,6 +1004,10 @@ export function createTurnRunner({
      */
     const runPostTurnExtraction = (playerMessage, { auditCasts = true, narration = null } = {}) => {
         const committed = getLastCommittedTurn();
+        // A movement the transaction judge could not settle is read by the
+        // repeat judge (2026-11-01 night) — on every turn that left one,
+        // fight starts included: the card is in the state the turn left.
+        judgePendingRepeats({ state: (narration || committed)?.stateAfter || getState(), dispatch }).catch(() => {});
         const finalNarration = narration
             || (committed && !committed.hidden && committed.content?.trim() ? committed : null);
         if (!finalNarration) return false;

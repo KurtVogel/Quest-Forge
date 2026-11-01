@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
+import { judgeLatest } from './repeatJudge.testUtils.js';
 
 // Doubles — "the worst problem for the game, always" (Vesa, 2026-10-31). Two
 // structural rules replace the per-name heuristics: one accountant per
@@ -37,9 +38,9 @@ describe('one replay window for every gain', () => {
         expect(other.inventory.map(item => item.name)).toContain('Silver ring');
     });
 
-    it('the player asking again in their own words still pays', () => {
+    it('the player asking again in their own words still pays — once the repeat judge reads it as new', () => {
         const first = gameReducer(base(), { type: 'ADD_COIN_GRANT', payload: { gold: 20, _meta: { sourceId: 'msg-1' } } });
-        const again = gameReducer(turns(first, 3), { type: 'ADD_COIN_GRANT', payload: { gold: 20, _meta: { sourceId: 'msg-2', playerMessage: 'I take another twenty gold from the second chest.' } } });
+        const again = judgeLatest(gameReducer(turns(first, 3), { type: 'ADD_COIN_GRANT', payload: { gold: 20, _meta: { sourceId: 'msg-2', playerMessage: 'I take another twenty gold from the second chest.' } } }));
         expect(again.character.gold).toBe(40);
     });
 });

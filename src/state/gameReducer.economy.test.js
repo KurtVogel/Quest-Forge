@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
+import { judgeLatest } from './repeatJudge.testUtils.js';
 
 function makeState(overrides = {}) {
     return {
@@ -224,7 +225,7 @@ describe('PURCHASE_ITEM', () => {
         expect(replayed.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(1);
     });
 
-    it('allows a nearby repeat purchase when the player explicitly buys another copy', () => {
+    it('allows a nearby repeat purchase when the player explicitly buys another copy — once the repeat judge reads it as new', () => {
         const state = makeState();
         const bought = gameReducer(state, {
             type: 'PURCHASE_ITEM',
@@ -237,13 +238,13 @@ describe('PURCHASE_ITEM', () => {
             type: 'ADD_MESSAGE',
             payload: { id: 'msg-buy-2', role: 'assistant', content: 'The merchant waits.' },
         });
-        const second = gameReducer(nextAssistant, {
+        const second = judgeLatest(gameReducer(nextAssistant, {
             type: 'PURCHASE_ITEM',
             payload: {
                 itemKey: 'dagger',
                 _meta: { sourceId: 'msg-buy-2', playerMessage: 'I buy another dagger.' },
             },
-        });
+        }));
 
         expect(second.character.gold).toBe(1);
         expect(second.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(2);
@@ -360,7 +361,7 @@ describe('SELL_ITEM', () => {
         expect(replayed.messages.at(-1).content).toMatch(/Duplicate sale ignored/);
     });
 
-    it('allows a nearby repeat sale when the player explicitly sells the other copy', () => {
+    it('allows a nearby repeat sale when the player explicitly sells the other copy — once the repeat judge reads it as new', () => {
         const twoDaggers = [
             { id: 'd1', itemKey: 'dagger', name: 'Dagger', type: 'weapon', valueCp: 200, quantity: 1 },
             { id: 'd2', itemKey: 'dagger', name: 'Dagger', type: 'weapon', valueCp: 200, quantity: 1 },
@@ -374,10 +375,10 @@ describe('SELL_ITEM', () => {
             type: 'ADD_MESSAGE',
             payload: { id: 'msg-sell-2', role: 'assistant', content: 'The fence waits.' },
         });
-        const second = gameReducer(nextAssistant, {
+        const second = judgeLatest(gameReducer(nextAssistant, {
             type: 'SELL_ITEM',
             payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-sell-2', playerMessage: 'I sell the other dagger too.' } },
-        });
+        }));
 
         expect(second.character.gold).toBe(7);
         expect(second.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(0);
@@ -385,7 +386,7 @@ describe('SELL_ITEM', () => {
 });
 
 describe('transaction replay phrasing', () => {
-    it('honors quantified repeat phrasing like "a few more of those"', () => {
+    it('honors quantified repeat phrasing like "a few more of those" — once the repeat judge reads it as new', () => {
         const state = makeState();
         const bought = gameReducer(state, {
             type: 'PURCHASE_ITEM',
@@ -395,10 +396,10 @@ describe('transaction replay phrasing', () => {
             type: 'ADD_MESSAGE',
             payload: { id: 'msg-buy-2', role: 'assistant', content: 'The smith raises an eyebrow.' },
         });
-        const second = gameReducer(nextAssistant, {
+        const second = judgeLatest(gameReducer(nextAssistant, {
             type: 'PURCHASE_ITEM',
             payload: { itemKey: 'dagger', _meta: { sourceId: 'msg-buy-2', playerMessage: 'A few more of those, please.' } },
-        });
+        }));
 
         expect(second.character.gold).toBe(1); // both purchases charged
         expect(second.inventory.filter(i => i.itemKey === 'dagger')).toHaveLength(2);
@@ -530,17 +531,17 @@ describe('ADD_COIN_GRANT', () => {
         expect(replayed.ledger.at(-1).status).toBe('ignored');
     });
 
-    it('allows the identical grant when the player explicitly asked for more coin', () => {
+    it('allows the identical grant when the player explicitly asked for more coin — once the repeat judge reads it as new', () => {
         const state = makeState();
         const granted = gameReducer(state, {
             type: 'ADD_COIN_GRANT',
             payload: { gold: 20, _meta: { sourceId: 'msg-reward-1' } },
         });
         const later = addMessages(granted, 2);
-        const repeat = gameReducer(later, {
+        const repeat = judgeLatest(gameReducer(later, {
             type: 'ADD_COIN_GRANT',
             payload: { gold: 20, _meta: { sourceId: 'msg-reward-2', playerMessage: 'I demand another 20 gold for the second wagon.' } },
-        });
+        }));
         expect(repeat.character.gold).toBe(45);
     });
 
@@ -570,17 +571,17 @@ describe('ADD_COIN_GRANT', () => {
         expect(replayed.messages.at(-1).content).toMatch(/Duplicate coin grant ignored/);
     });
 
-    it('still allows a repeat when the quantifier attaches to the coins ("pay me the rest")', () => {
+    it('still allows a repeat when the quantifier attaches to the coins ("pay me the rest") — once the repeat judge reads it as new', () => {
         const state = makeState();
         const granted = gameReducer(state, {
             type: 'ADD_COIN_GRANT',
             payload: { gold: 20, _meta: { sourceId: 'msg-reward-1' } },
         });
         const later = addMessages(granted, 2);
-        const repeat = gameReducer(later, {
+        const repeat = judgeLatest(gameReducer(later, {
             type: 'ADD_COIN_GRANT',
             payload: { gold: 20, _meta: { sourceId: 'msg-reward-2', playerMessage: 'That was half. Now pay me the rest.' } },
-        });
+        }));
         expect(repeat.character.gold).toBe(45);
     });
 
@@ -633,20 +634,20 @@ describe('ADD_COIN_GRANT', () => {
         expect(replayed.messages.at(-1).content).toMatch(/Duplicate coin grant ignored/);
     });
 
-    it('a quest-completion-adjacent grant still pays on explicit repeat phrasing (never refuse to give)', () => {
+    it('a quest-completion-adjacent grant still pays on explicit repeat phrasing (never refuse to give) — once the repeat judge reads it as new', () => {
         const state = makeState();
         const granted = gameReducer(state, {
             type: 'ADD_COIN_GRANT',
             payload: { gold: 20, _meta: { sourceId: 'msg-handover' } },
         });
         const later = addMessages(granted, 8);
-        const repeat = gameReducer(later, {
+        const repeat = judgeLatest(gameReducer(later, {
             type: 'ADD_COIN_GRANT',
             payload: {
                 gold: 20,
                 _meta: { sourceId: 'msg-completion', questCompletionAdjacent: true, playerMessage: 'You promised another 20 gold on completion — pay up.' },
             },
-        });
+        }));
         expect(repeat.character.gold).toBe(45);
     });
 
@@ -741,21 +742,21 @@ describe('APPLY_COIN_LOSS', () => {
         expect(replayed.ledger.at(-1).status).toBe('ignored');
     });
 
-    it('allows an identical loss when the player initiates a new payment this turn', () => {
+    it('allows an identical loss when the player initiates a new payment this turn — once the repeat judge reads it as new', () => {
         const state = makeState({ character: { gold: 0, silver: 10, copper: 0 } });
         const paid = gameReducer(state, {
             type: 'APPLY_COIN_LOSS',
             payload: { silver: 2, _meta: { sourceId: 'msg-pay-1', playerMessage: 'I tip the barmaid two silver.' } },
         });
         const later = addMessages(paid, 2);
-        const second = gameReducer(later, {
+        const second = judgeLatest(gameReducer(later, {
             type: 'APPLY_COIN_LOSS',
             payload: { silver: 2, _meta: { sourceId: 'msg-pay-2', playerMessage: 'I tip the stable boy as well.' } },
-        });
+        }));
         expect(second.character.silver).toBe(6);
     });
 
-    it('allows a same-value loss when the player message itself makes a purchase (live 2026-08-06)', () => {
+    it('allows a same-value loss when the player message itself makes a purchase (live 2026-08-06) — once the repeat judge reads it as new', () => {
         // 1 sp caravan passage, then "I buy a bowl of mutton stew" (also 1 sp)
         // two messages later — the second charge was suppressed even though the
         // player explicitly initiated a new purchase with no coin word in it.
@@ -765,10 +766,10 @@ describe('APPLY_COIN_LOSS', () => {
             payload: { silver: 1, _meta: { sourceId: 'msg-pay-1', playerMessage: 'I pay for passage with the caravan.' } },
         });
         const later = addMessages(paid, 2);
-        const second = gameReducer(later, {
+        const second = judgeLatest(gameReducer(later, {
             type: 'APPLY_COIN_LOSS',
             payload: { silver: 1, _meta: { sourceId: 'msg-pay-2', playerMessage: 'I buy a bowl of mutton stew.' } },
-        });
+        }));
         expect(second.character.silver).toBe(8); // both charges land
         expect(second.ledger.at(-1).status).toBe('applied');
     });
@@ -1560,17 +1561,20 @@ describe('2026-08-25 player report: "money removed multiple turns after I paid, 
         expect(purseCp(disputed)).toBe(afterPayment);
     });
 
+    // 2026-11-01 night: no phrasing authorizes a second identical charge on
+    // its own any more — the engine books nothing and asks the repeat judge,
+    // which reads the two turns (llm/repeatJudge.js).
     it.each([
-        ['I pay him two silver.', true],
-        ['I hand over twenty gold for the room.', true],
-        ['I buy another round — two more gold.', true],
-        ['I pay the toll again.', true],
-        ['Wait — I already paid you for that!', false],
-        ["Didn't I pay for this already?", false],
-        ['You already took my gold.', false],
-        ['I paid earlier, at the gate.', false],
-        ['We ride north through the pass.', false],
-    ])('repeat-charge phrasing %j authorizes a second identical charge: %s', (playerMessage, authorizes) => {
+        ['I pay him two silver.'],
+        ['I hand over twenty gold for the room.'],
+        ['I buy another round — two more gold.'],
+        ['I pay the toll again.'],
+        ['Wait — I already paid you for that!'],
+        ["Didn't I pay for this already?"],
+        ['You already took my gold.'],
+        ['I paid earlier, at the gate.'],
+        ['We ride north through the pass.'],
+    ])('a same-value charge after %j books nothing and asks the repeat judge', (playerMessage) => {
         const paid = gameReducer(richState(), {
             type: 'APPLY_COIN_LOSS',
             payload: { gold: 20, _meta: { sourceId: 'msg-pay', playerMessage: 'I settle up with the smith.' } },
@@ -1582,7 +1586,8 @@ describe('2026-08-25 player report: "money removed multiple turns after I paid, 
             payload: { gold: 20, _meta: { sourceId: 'msg-second', playerMessage } },
         });
 
-        expect(purseCp(second)).toBe(authorizes ? afterPayment - 2000 : afterPayment);
+        expect(purseCp(second)).toBe(afterPayment);
+        expect(second.messages.at(-1).recovery).toMatchObject({ status: 'judging', mode: 'repeat', replay: { type: 'APPLY_COIN_LOSS', payload: { copper: 2000 } } });
     });
 
     it('announces every applied coin loss and gain with the resulting purse', () => {
@@ -1635,17 +1640,17 @@ describe('2026-08-25 player report: "money removed multiple turns after I paid, 
         expect(purseCp(tipped)).toBe(afterPurchase - 50);
     });
 
-    it('still charges an explicit repeat the player asks for', () => {
+    it('still charges an explicit repeat the player asks for — once the repeat judge reads it as new', () => {
         const paid = gameReducer(richState(), {
             type: 'APPLY_COIN_LOSS',
             payload: { gold: 2, _meta: { sourceId: 'msg-round-1', playerMessage: 'I buy a round for the table — two gold.' } },
         });
         const afterFirst = purseCp(paid);
 
-        const second = gameReducer(addMessage(paid, { id: 'm1', role: 'assistant', content: 'Cheers go up.' }), {
+        const second = judgeLatest(gameReducer(addMessage(paid, { id: 'm1', role: 'assistant', content: 'Cheers go up.' }), {
             type: 'APPLY_COIN_LOSS',
             payload: { gold: 2, _meta: { sourceId: 'msg-round-2', playerMessage: 'Another two gold for a second round!' } },
-        });
+        }));
 
         expect(purseCp(second)).toBe(afterFirst - 200);
     });

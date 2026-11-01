@@ -164,8 +164,10 @@ export default function ChatPanel() {
     // (it reads stateRef at click time, never a render-time field).
     // "Narrated, not recorded" (2026-11-01): the player books or dismisses a
     // movement the Scribe saw in a reply the DM evented — the player lane.
+    // "Undo" takes back a repeat the repeat judge booked (2026-11-01 night).
     const handleResolveRecovery = useCallback((id, accept) => {
-        dispatch({ type: 'RESOLVE_RECOVERY', payload: { messageId: id, accept } });
+        if (accept === 'undo') dispatch({ type: 'UNDO_REPEAT', payload: { messageId: id } });
+        else dispatch({ type: 'RESOLVE_RECOVERY', payload: { messageId: id, accept } });
     }, [dispatch]);
     const handleDeleteMessage = useCallback((id) => {
         // Source-stamped retraction (memory-research M0, 2026-09-30): the
@@ -1320,7 +1322,7 @@ const ChatMessage = memo(function ChatMessage({ message, onDelete, onResolveReco
                 </div>
                 {message.kind === 'recovery' && message.recovery && (
                     <div className="recovery-actions">
-                        {message.recovery.status === 'open' ? (
+                        {message.recovery.status === 'open' || message.recovery.status === 'judging' ? (
                             <>
                                 <button type="button" className="recovery-accept" onClick={() => onResolveRecovery?.(message.id, true)}>
                                     {recoveryActionLabel(message.recovery)}
@@ -1328,11 +1330,17 @@ const ChatMessage = memo(function ChatMessage({ message, onDelete, onResolveReco
                                 <button type="button" className="recovery-dismiss" onClick={() => onResolveRecovery?.(message.id, false)}>
                                     {message.recovery.mode === 'repeat' ? 'Same one' : 'Dismiss'}
                                 </button>
+                                {message.recovery.status === 'judging' && <span className="recovery-status">Checking the two turns…</span>}
                             </>
+                        ) : message.recovery.status === 'booked' ? (
+                            <button type="button" className="recovery-dismiss" onClick={() => onResolveRecovery?.(message.id, 'undo')}>
+                                Undo — same one
+                            </button>
                         ) : (
                             <span className="recovery-status">
                                 {message.recovery.status === 'accepted'
                                     ? 'Recorded.'
+                                    : message.recovery.status === 'undone' ? 'Undone — kept as one.'
                                     : (message.recovery.mode === 'repeat' ? 'Kept as one.' : 'Dismissed — nothing changed.')}
                             </span>
                         )}

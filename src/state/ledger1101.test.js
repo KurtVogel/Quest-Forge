@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { judgeLatest } from './repeatJudge.testUtils.js';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { applyEvents } from './applyEvents.js';
 import { parseResponse } from '../llm/responseParser.js';
@@ -77,7 +78,8 @@ describe('the five holes close by construction', () => {
         const recap = burn(turns(first, 2), 'msg-2', 'I press on down the corridor.');
         expect(recap.inventory[0].quantity).toBe(4);
         expect(recap.messages.at(-1).content).toMatch(/Duplicate item loss ignored/);
-        const another = burn(turns(first, 2), 'msg-3', 'The torch gutters, so I light another torch.');
+        // A second torch is the repeat judge's call (2026-11-01 night), not a phrase rule's.
+        const another = judgeLatest(burn(turns(first, 2), 'msg-3', 'The torch gutters, so I light another torch.'));
         expect(another.inventory[0].quantity).toBe(3);
     });
 
