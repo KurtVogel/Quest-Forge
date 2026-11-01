@@ -4144,3 +4144,31 @@ fallback id (the cloud rule) so nothing is dropped; and a sweep's live set reads
 (`typedLaneRefs`) with the payload as the belt. Payoff: a hero's record that holds the hero's dice,
 a prompt that cannot be stuffed through a saved roll, a goblin that swings the die the DM wrote, a
 Saves list with real dates, and no row that is both invisible and immortal.
+
+### [strengthening] A null that means "the hero" comes only from inputs that mean the hero; a verdict is a tri-state; a symmetric similarity is a superset test; a fuzzy field is not identity; a cap is also an order — status: `idea` (2026-11-01)
+Five rules from the roll-resolution + hero-tells pass of 2026-11-01 (Lap 2, hostile input), each
+reproduced with a throwaway probe over the real resolver, arbiter, engine and reducer. **(1)** The
+out-of-combat resolver's `targetCompanion` answers "a companion or null" and null means THE PLAYER
+downstream — so an `npc_attack` aimed at "the merchant" is priced against the hero's AC and its
+damage lands on the hero, with a receipt telling the DM to narrate the hero's wound. A fallback
+actor is chosen by a predicate on the INPUT (`null` / `player` / `self` / the hero's name), never
+by the absence of another match; an untracked target is a note or a damage-less to-hit. **(2)** The
+roll arbiter's `approved` is read under three rules — lenient true, strict everything-else-is-a-
+rejection, missing-entry approves — and its sibling `pre_narrated_outcome_detected` under a fourth
+(`=== true`), so an entry with the field omitted (Flash's habit) rejects a check the arbiter's own
+reason approved and sends the DM a false "you overrode the player's authored sincerity" correction.
+Every LLM verdict read states what junk means (no verdict → the deterministic floor) and the flags
+of one reply go through the one helper (`toFlag`). **(3)** `containment(small, large)` is the
+smaller set's share inside the larger, so a report that contains an established tell's wording PLUS
+a new clause matches it by text and, being longer, replaces the text under the "richer wording"
+rule — a claim no witness saw, rendered as the three-scene pattern they watched form. A match that
+REPLACES text needs both directions (a rewording, not a superset); a match that only reads may stay
+one-directional. **(4)** `kind` (`habit` / `manner` / `principle`) is the Scribe's adjective and the
+id claim makes it a key, so a synonym flip under the held id forks the pattern into two records
+that never establish; identity keys are the fields with one right answer (id, the text's tokens,
+intimate / not) and adjectives stay the held record's. **(5)** The witness union is
+`[report.witnesses, voicedBy, party]` under a cap of 8 that stops first-come, so eight named
+bystanders lock the hero's own companion out of a tell for its life; every capped union names who
+yields, and the names the engine needs later (party, roster) go first. Payoff: a merchant's beating
+that is the merchant's, a check the arbiter approved that rolls, a reputation that says only what
+was seen, one record per habit, and a companion who can say what she watched.
