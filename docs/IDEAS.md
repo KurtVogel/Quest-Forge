@@ -11,7 +11,13 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
-### Count the WORK, not only the coin — status: `idea` (2026-11-01, playtest run 6)
+### The repeat judge for XP and spells too — status: `idea` (2026-11-02)
+`character.js` (playerMessageSupportsRepeatExpAward) and `spellcasting.js` still decide a repeat award / cast by phrase rules — the same weakness Vesa named for coins. The repeat judge's card + JUDGE_REPEAT pattern fits them (a replay type each). Not built: no live misfire seen; do it the first time one shows.
+
+### The "Recorded once" judge for the bundle strip (R5) — status: `idea` (2026-11-02)
+A bundle that swallows recent movements whole still spares a piece when the player's line names its denomination (a word rule). The judge could answer "is the 30 gp the 2 gp + 28 gp retold?" instead. Not built: R5 has not misfired since 10-12.
+
+### Count the WORK, not only the coin — status: `superseded` (2026-11-02: the repeat judge reads the turn; no word rule decides it) (2026-11-01, playtest run 6)
 The fifth crate's narration said "you shoulder another brine-heavy crate … slaps a single, cold silver piece" — the counting attached to the crate, not the coin, so the wage went to a "Recorded once" card instead of paying. An additive quantifier on the object of the work the payment is FOR (crate, round, shift, cast) is the same evidence. Not built: "another" near any noun is broad ("another round of ale"), and the card already makes the miss one tap. Worth it if live play shows the card firing mostly on wages.
 
 ### The DM narrates the engine's count over its own story — status: `idea` (2026-11-01, playtest run 6)

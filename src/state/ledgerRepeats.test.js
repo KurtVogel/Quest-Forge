@@ -97,7 +97,7 @@ describe('the verdict', () => {
         expect(purse(booked) - purse(base())).toBe(20);
         expect(booked.ledger.at(-1)).toMatchObject({ lane: 'judge', kind: 'coin', status: 'applied', party: 'Hesk Varro' });
         expect(card(booked).recovery.status).toBe('booked');
-        expect(card(booked).content).toMatch(/^\*\*Booked as a new one:\*\*.*a second crate carried and paid/);
+        expect(card(booked).content).toBe('**Checked — a new one:** 1 sp from Hesk Varro (a second crate carried and paid).');
         // A late second verdict, or the player's old buttons, move nothing more.
         expect(judgeLatest(booked)).toBe(booked);
         expect(resolve(booked, true)).toBe(booked);
@@ -107,7 +107,7 @@ describe('the verdict', () => {
         const kept = judgeLatest(secondWage(), 'same', 'the earlier wage retold');
         expect(purse(kept) - purse(base())).toBe(10);
         expect(card(kept).recovery).toMatchObject({ status: 'open', verdict: 'same' });
-        expect(card(kept).content).toMatch(/Checked: this reads as the same one \(the earlier wage retold\)/);
+        expect(card(kept).content).toBe('**Recorded once:** 1 sp from Hesk Varro matches an earlier turn — checked: the same one (the earlier wage retold). If it was new, record it.');
         expect(purse(resolve(kept, true)) - purse(base())).toBe(20);
     });
 

@@ -65,7 +65,7 @@ export const handlers = {
             const ctx = ledgerContext(state, meta);
             const verdict = judgeItemIn(state, ctx, ref);
             if (verdict.suppress) {
-                const line = `Duplicate item grant ignored — ${item.name} was already added moments ago.`;
+                const line = `Duplicate item grant ignored — ${item.name} was already added recently.`;
                 return {
                     ...state,
                     ledger: logMovement(state, ctx, { kind: 'item', itemsIn: [ref], status: 'ignored' }),
@@ -264,7 +264,7 @@ export const handlers = {
                 : { name: ref, itemKey: '', quantity: 1 };
             const verdict = judgeItemOut(state, ctx, probe);
             if (verdict.suppress) {
-                const line = `Duplicate item loss ignored — ${probe.name} already left your pack moments ago.`;
+                const line = `Duplicate item loss ignored — ${probe.name} already left your pack recently.`;
                 return {
                     ...state,
                     ledger: logMovement(state, ctx, { kind: 'item', itemsOut: [probe], status: 'ignored' }),

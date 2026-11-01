@@ -124,3 +124,19 @@ max 54 s. Zero page errors, zero failed DM calls. Raw artifacts in `test-results
 | Three items in one line | **PASS** | rope, whetstone and socks evented with one 1 gp 1 sp payment — the DM recorded it all, no card needed |
 | Dice | **PASS** | stake, win, win after a rest, loss on a natural 1 — each moved once |
 | Found | **minor** | socks handed to Tuva stayed in the pack (Tuva never joined the party roster); the opening purse differed between two boots of one premise (27 gp vs 20 gp — the premise-purse idea) |
+
+## Runs 7 and 8 — 2026-11-02 (small hours), the repeat judge live
+
+The phrase rules were replaced by the repeat judge (DECISIONS 2026-11-02); these runs test it. Both on Flash (GPT could not run: the OpenAI key has no credits).
+
+`opus-flash-7`: Saila Venn, elf Fighter left behind in Kesselford — 3 cp a flour sack, a 2 cp ferry each way, 4 cp ale, one-silver card hands, furs at 6 sp, then a caravan job paid 6 sp at the gate and 6 sp at Greyfell two days later. 33 player lines, a wonder beat, a long rest, a reload. `opus-flash-8`: Hild Orrasdottir, dwarf Fighter in Brennick — pies at 3 cp, iron ingots at 5 sp, a 5 sp debt and a dispute about it, 2 sp quarry carts. 12 player lines.
+
+| Column | Verdict | Evidence |
+|---|---|---|
+| Genuine repeats | **PASS** | 10 of 10 booked by the judge: "nxet sack … hand out" (typo, no counting word), the second fur ("Just one more"), the return ferry, "Same again." (no noun at all), a second card win across a dice turn, Jarkko's second 6 sp two days and a rest later, a second pie ("one more, wrap it"), a second ingot ("I thunk a second bar down"), the "secnd cart" |
+| Doubles | **PASS** | none in 45 lines; recaps ("Six so far … just making sure we're square", "Twelve silver for two pelts", "Four silver so far, Ulf?") and a dispute ("You did take the five silver, yeah?") moved nothing — Flash re-emitted nothing, so the "same" verdict was exercised by `eval:repeats` only (16/16 retellings kept once) |
+| Undo | **PASS** | "Undo — same one" booked the inverse on the player lane (the driver clicks the first match, so it undid the oldest card — Mirja's second wage, −3 cp; the run's purse is 3 cp short of its fiction from that test) |
+| Reload / rest | **PASS** | the cards and the log survive a reload; the Greyfell twin was judged inside the same-party window after the rest |
+| Items | **PASS** | three wonder gifts added once; a torch lit and a pie eaten, each once |
+| Found → fixed | **minor** | the booked card was three clauses ("Duplicate … ignored … recorded after all") — now one line; the judge's reason said "The player…"/"DM pays…" — now speaks to "you"; "moments ago" on a two-day-old twin — now "recently" |
+| Found | **note** | the elf premise "coin is tight" still opened with 23 gp (the premise-purse idea); the dwarf "broke" premise opened with 3 gp |

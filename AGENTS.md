@@ -81,7 +81,8 @@ src/
               shelves (text.js, textMatch.js, replayLedger.js)
   llm/        turnOrchestrator.js (the turn pipeline), promptBuilder.js, journalBlocks.js,
               responseParser.js, eventChannels.js, adapter.js + providers/, machinery.js (the mandatory
-              Gemini lane), scribe.js + scribeAudits.js, the directors (front*, absenceDrift, wonder…),
+              Gemini lane), scribe.js + scribeAudits.js, repeatJudge.js (new-vs-retold transactions),
+              the directors (front*, absenceDrift, wonder…),
               chronicler.js, sceneDirector.js, utils/jsonExtractor.js
   components/ Chat (ChatPanel hosts the runner; pure helpers beside it), Combat, CharacterSheet,
               Inventory, Quests, Journal, Companions, DiceRoller, SceneArt, Settings, Layout, Debug

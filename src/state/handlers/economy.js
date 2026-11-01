@@ -167,16 +167,16 @@ function receipt(state, ctx, line, ask) {
 }
 
 const GRANT_LINES = {
-    duplicate: (name, twin) => `Duplicate coin grant ignored — ${name} was already received${withParty(twin, 'from')} moments ago.`,
-    cover: (name) => `Duplicate coin grant ignored — ${name} repeats rewards already received moments ago.`,
+    duplicate: (name, twin) => `Duplicate coin grant ignored — ${name} was already received${withParty(twin, 'from')} recently.`,
+    cover: (name) => `Duplicate coin grant ignored — ${name} repeats rewards already received recently.`,
     echo: (name) => `Coin recovery ignored — ${name} matches a payment you just made; treated as the same handover retold.`,
     sameSale: (name, twin) => `Duplicate coin grant ignored — ${name} is the payout of the sale in this same turn (${itemsOf(twin) || 'sold goods'}).`,
     saleCover: (name, twin) => `Duplicate coin grant ignored — ${name} was already paid out when you sold ${itemsOf(twin) || 'that'}.`,
 };
 
 const PAYMENT_LINES = {
-    duplicate: (name) => `**Duplicate payment ignored:** ${name} was already deducted moments ago.`,
-    cover: (name) => `**Duplicate payment ignored:** ${name} repeats payments already taken moments ago.`,
+    duplicate: (name) => `**Duplicate payment ignored:** ${name} was already deducted recently.`,
+    cover: (name) => `**Duplicate payment ignored:** ${name} repeats payments already taken recently.`,
     purchaseCover: (name, twin) => `**Duplicate payment ignored:** ${name} was already paid when you bought ${itemsOf(twin) || 'that'}.`,
     echo: (name) => `**Payment report ignored:** ${name} matches coins you just received — treated as the same handover, not a new charge.`,
 };
@@ -213,7 +213,7 @@ export const handlers = {
             ledger: logMovement(state, ctx, { kind: 'coin', cp: grantCp }),
             messages: [
                 ...state.messages,
-                ...(bundled ? [coinLine(`Adjusted a bundled coin grant — ${formatCurrency(bundled.strippedCp)} of it repeats a reward already received moments ago; granted ${formatCurrency(grantCp)}.`)] : []),
+                ...(bundled ? [coinLine(`Adjusted a bundled coin grant — ${formatCurrency(bundled.strippedCp)} of it repeats a reward already received recently; granted ${formatCurrency(grantCp)}.`)] : []),
                 meta.announce === 'audit'
                     ? coinLine(`**Coins recovered from narration:** ${formatCurrency(grantCp)} added to your purse — purse: ${purseLine(character)}.`)
                     : coinLine(`**+${formatCurrency(grantCp)}** received — purse: ${purseLine(character)}.`),
@@ -237,7 +237,7 @@ export const handlers = {
         }
         if (verdict.suppress) {
             return ignore(state, ctx, { kind: 'coin', cp: -amounts.totalCp },
-                `Duplicate coin charge ignored — ${name} was already paid${withParty(verdict.twin, 'to')} moments ago.`,
+                `Duplicate coin charge ignored — ${name} was already paid${withParty(verdict.twin, 'to')} recently.`,
                 { twin: verdict.twin, replay: { type: 'APPLY_COIN_LOSS', payload: { copper: amounts.totalCp } } });
         }
         const result = spendCurrency(state.character, amounts);
@@ -280,7 +280,7 @@ export const handlers = {
         }
         const chargeCp = charge.gold * 100 + charge.silver * 10 + charge.copper;
         const strippedNote = bundled
-            ? [coinLine(`Adjusted an audited payment — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken moments ago.`)]
+            ? [coinLine(`Adjusted an audited payment — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken recently.`)]
             : [];
         const result = spendCurrency(state.character, charge);
         if (result.paid) {
@@ -340,7 +340,7 @@ export const handlers = {
         // Both halves already happened as loose events (the price as a coin
         // loss, the goods as loot): this purchase is that trade retold.
         if (verdict.coinTwin && verdict.itemTwin) {
-            return ignore(state, ctx, claim, `Duplicate purchase ignored — ${item.name} was already paid for and received moments ago.`,
+            return ignore(state, ctx, claim, `Duplicate purchase ignored — ${item.name} was already paid for and received recently.`,
                 { twin: verdict.coinTwin, replay: purchaseReplay });
         }
         const newItem = autoEquipped(state.inventory, mintOwnedItem(item, { quantity }));
@@ -350,7 +350,7 @@ export const handlers = {
             const delivered = {
                 ...state,
                 ledger: logMovement(state, ctx, { ...claim, movedCp: 0 }),
-                messages: [...state.messages, receipt(state, ctx, `${label} added — its ${formatCurrency(priceCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`,
+                messages: [...state.messages, receipt(state, ctx, `${label} added — its ${formatCurrency(priceCp)} was already paid recently; purse unchanged at ${purseLine(state.character)}.`,
                     { twin: verdict.coinTwin, replay: { type: 'APPLY_COIN_LOSS', payload: { copper: priceCp } } })],
             };
             return withInventoryAndAC(delivered, addOrStackItem(state.inventory, newItem));
@@ -373,7 +373,7 @@ export const handlers = {
                 ...state,
                 character: payment.character,
                 ledger: logMovement(state, ctx, { ...claim, itemsMoved: false }),
-                messages: [...state.messages, receipt(state, ctx, `Paid ${formatCurrency(priceCp)} for ${label} — it already reached your pack moments ago, so no second one was added; purse: ${purseLine(payment.character)}.`,
+                messages: [...state.messages, receipt(state, ctx, `Paid ${formatCurrency(priceCp)} for ${label} — it already reached your pack recently, so no second one was added; purse: ${purseLine(payment.character)}.`,
                     { twin: verdict.itemTwin, replay: { type: 'ADD_ITEM', payload: { name: item.name, itemKey: item.itemKey, quantity, type: item.type } } })],
             };
         }
@@ -442,7 +442,7 @@ export const handlers = {
             const settled = {
                 ...state,
                 ledger: logMovement(state, ctx, { ...claim, movedCp: 0 }),
-                messages: [...state.messages, receipt(state, ctx, `Sold ${label} — its ${formatCurrency(proceedsCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`,
+                messages: [...state.messages, receipt(state, ctx, `Sold ${label} — its ${formatCurrency(proceedsCp)} was already paid recently; purse unchanged at ${purseLine(state.character)}.`,
                     { twin: verdict.coinTwin, replay: { type: 'ADD_COIN_GRANT', payload: { copper: proceedsCp } } })],
             };
             return withInventoryAndAC(settled, consumeItem(state.inventory, item.id, quantity));
@@ -528,14 +528,14 @@ export const handlers = {
         const recovery = card.recovery || {};
         if (recovery.mode !== 'repeat' || recovery.status !== 'judging') return state;
         const reason = typeof action.payload.reason === 'string' ? action.payload.reason.replace(/\s+/g, ' ').trim().slice(0, 160) : '';
-        const line = typeof recovery.line === 'string' ? recovery.line : '';
+        const what = typeof recovery.what === 'string' && recovery.what ? recovery.what : 'This movement';
         const settle = (base, patch, content = card.content) => ({
             ...base,
             messages: base.messages.map((message, i) => (i === index ? { ...message, content, recovery: { ...recovery, ...patch } } : message)),
         });
         if (verdict === 'same') {
             return settle(state, { status: 'open', verdict: 'same', reason },
-                `**Recorded once:** ${line} Checked: this reads as the same one${reason ? ` (${reason})` : ''}. If it was new, record it.`);
+                `**Recorded once:** ${what} matches an earlier turn — checked: the same one${reason ? ` (${reason.replace(/\.$/, '')})` : ''}. If it was new, record it.`);
         }
         const replay = projectRepeatReplay(recovery.replay);
         const run = verdict === 'new' && replay && (handlers[replay.type] || inventoryHandlers[replay.type]);
@@ -545,8 +545,9 @@ export const handlers = {
         const booked = run(state, { type: replay.type, payload: { ...replay.payload, _meta: { lane: 'judge', sourceId, party: recovery.party || '' } } });
         const landed = (booked.ledger || []).some(entry => entry?.sourceId === sourceId && entry.status === 'applied');
         if (!landed) return settle(booked, { status: 'open', verdict: 'new', reason });
+        // One short line: a genuine repeat is ordinary play (run 7: four in eight turns).
         return settle(booked, { status: 'booked', verdict: 'new', reason, undo },
-            `**Booked as a new one:** ${line} The turn reads as a new one${reason ? ` (${reason})` : ''}, so it was recorded after all.`);
+            `**Checked — a new one:** ${what}${reason ? ` (${reason.replace(/\.$/, '')})` : ''}.`);
     },
 
     /** "Undo — same one" on a card the judge booked: the inverse movements, on the player lane. Payload: { messageId }. */

@@ -6,7 +6,17 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-11-01 (night: playtest run 6 — genuine repeats were dropped; the DM's counting, "Recorded once" cards, late-roster counterparties; earlier: one transaction log, one judge, the counterparty, "Narrated, not recorded" cards, playtest run 5); 2026-10-31 (late: doubles by construction, the Flash length limit, playtest run 4; night: the third Opus playtest + five fixes; evening: named presence, far friends, story cards retire, the Scribe sees facts, places, dooms abroad; earlier: the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
+_Last updated: 2026-11-02 (small hours: the repeat judge replaces the phrase rules; playtest runs 7–8; `eval:repeats` 32/32); 2026-11-01 (night: playtest run 6 — genuine repeats were dropped; the DM's counting, "Recorded once" cards, late-roster counterparties; earlier: one transaction log, one judge, the counterparty, "Narrated, not recorded" cards, playtest run 5); 2026-10-31 (late: doubles by construction, the Flash length limit, playtest run 4; night: the third Opus playtest + five fixes; evening: named presence, far friends, story cards retire, the Scribe sees facts, places, dooms abroad; earlier: the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
+
+## 2026-11-02 (small hours) — the repeat judge: Gemini reads the two turns; the phrase rules are gone — pushed AND deployed
+
+Vesa: "I really don't trust these phrase and regex rules… things can be said in so many ways, typos etc." Built (DECISIONS.md 2026-11-02): every word list that decided new-vs-retold on the DM lane is deleted; a same-value twin from an earlier turn books nothing and the machinery Flash reads both turns (`llm/repeatJudge.js`). "new" books it with **Undo — same one**; otherwise **Record it again** / **Same one**. Measured: `npm run eval:repeats` 32/32 (no retelling booked, every genuine repeat booked). Played: run 7 (elf caravan guard, Flash, 33 lines) and run 8 (dwarf day-labourer, Flash, 12 lines) in `docs/OPUS_PLAYTEST_2026-10-31.md` — 10 genuine repeats (wages, a second fur, the return ferry, "Same again.", a second card win across a dice turn, a fee's second half two days later, a second pie, a second ingot, a second cart) all booked by the judge, typos included; zero doubles. Fixed from the runs: the booked card is one line now; the reason speaks to the player ("you hauled a second sack…"); "moments ago" → "recently" (a window can span a day).
+
+**For Vesa's own save:** nothing to do. A "Recorded once" card from before today keeps its buttons.
+
+**Not done:** GPT could not be played — the OpenAI key has no credits (HTTP 429 at the opening). XP and spell repeats still use phrase rules (next if they misfire).
+
+**Next:** watch the card in ordinary play — the "Checked — a new one" line should appear on genuine repeats only; a "same" verdict live (Flash re-emitted nothing in 45 lines, so only the eval has exercised it).
 
 ## 2026-11-01 (night) — playtest run 6: the judge was dropping genuine repeats; "Recorded once" cards — pushed AND deployed
 
@@ -14,7 +24,7 @@ Vesa asked for one more playtest angle; this one hunted the opposite of doubles 
 
 **For Vesa's own save:** nothing to do. An old "Duplicate … ignored" line stays a plain line; new ones that could be a real repeat come with the buttons.
 
-**Next:** watch how often "Recorded once" appears in ordinary play (the card should be rare; frequent cards mean the narration signal needs another look); the premise-purse idea in IDEAS (run 6 opened with 27 gp and 20 gp in two boots of one premise).
+**Next:** superseded the same night — the narration counting and the put-down rule are gone (the repeat judge above).
 
 ## 2026-11-01 — one transaction log, one judge, the counterparty, and "Narrated, not recorded" cards — pushed AND deployed
 

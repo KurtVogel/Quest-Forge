@@ -20,7 +20,8 @@
     "eval:bakeoff": "node scripts/dmBakeoff.mjs",
     "eval:consequence": "node scripts/rollConsequenceEval.mjs",
     "eval:openings": "node scripts/openingEval.mjs",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "eval:repeats": "node scripts/repeatJudgeEval.mjs"
   },
   "dependencies": {
     "firebase": "^12.9.0",

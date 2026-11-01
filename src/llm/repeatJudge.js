@@ -27,7 +27,9 @@ export const REPEAT_JUDGE_SYSTEM_PROMPT = `You are the bookkeeper of a single-pl
 Decide which, from what the player said and what the DM narrated in each turn. Read meaning, not keywords: players and DMs phrase things every way, make typos, and leave words out. Quoted offers and haggling are not hand-overs. A hand-over the current narration shows happening NOW, after the earlier one, is "new". A turn that only refers back to it, or never shows it happening again, is "same". If you cannot tell, say "unsure". Answer unvarnished.
 
 Output ONLY JSON, no markdown:
-{"verdict": "new" | "same" | "unsure", "reason": "at most 15 words"}`;
+{"verdict": "new" | "same" | "unsure", "reason": "at most 12 words"}
+
+The reason is shown to the player: say what happened in the story, to "you" ("you hauled a second sack and were paid for it"), never "the player", "the hero" or "the DM".`;
 
 /** A replay ({ type, payload }) in plain words. */
 export function describeReplay(replay, party = '') {

@@ -142,6 +142,23 @@ export function describeEntry(entry) {
     return `a ${entry.kind} movement${party}`;
 }
 
+/** A replayable movement as the player reads it: "3 cp from Mirja", "River-fox fur sold to Tuomas for 6 sp". */
+export function movementLabel(replay, party = '') {
+    const p = replay?.payload || {};
+    const coin = formatCurrency(Number(p.copper ?? p.priceCp) || 0);
+    const items = `${p.quantity > 1 ? `${p.quantity}x ` : ''}${p.name || 'an item'}`;
+    const to = (word) => (party ? ` ${word} ${party}` : '');
+    switch (replay?.type) {
+        case 'ADD_COIN_GRANT': return party ? `${coin} from ${party}` : `${coin} received`;
+        case 'APPLY_COIN_LOSS': return party ? `${coin} to ${party}` : `${coin} paid`;
+        case 'PURCHASE_ITEM': return `${items} bought${to('from')} for ${coin}`;
+        case 'SELL_ITEM': return `${items} sold${to('to')} for ${coin}`;
+        case 'ADD_ITEM': return `${items} added to your pack`;
+        case 'REMOVE_ITEM_BY_NAME': return `${items} taken from your pack`;
+        default: return 'a movement';
+    }
+}
+
 /**
  * A twin from an EARLIER message, on the DM lane, is the one judgment the
  * log cannot settle: a second crate's wage and the first one's retold read
@@ -172,7 +189,7 @@ export function repeatCard(state, ctx, twin, line, replay) {
             mode: 'repeat',
             replay: projected,
             party: ctx.party || '',
-            line: String(line || '').slice(0, 400),
+            what: movementLabel(projected, ctx.party || '').slice(0, 200),
             judge: { sourceId: ctx.sourceId, twinSourceId: twin.sourceId || '', earlier: describeEntry(twin).slice(0, 240) },
         },
     };
