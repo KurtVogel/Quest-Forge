@@ -98,3 +98,15 @@ max 54 s. Zero page errors, zero failed DM calls. Raw artifacts in `test-results
 | Length | **PASS (mostly)** | 22 / 28 at or under 180 words, median 158 (run 3: 5 / 51, median 218); overs: the opening (241), an interlude turn (240), a two-scene reply (235), three at 181–186 |
 | Memory | **PASS** | the reflection resolved nine finished cards; 27 facts in 94 messages (run 3: 55 in ~165 — a modest drop) |
 | Found | **IDEA** | the premise's "twelve gold" vs the class kit's 27 gp (IDEAS: the premise names the purse) |
+
+## Run 5 — 2026-11-01, after "one transaction log"
+
+`opus-flash-5`: Pip Tallowmere, human Rogue busker in Ashby Ford who owes Marta Vell five silver and the fiddler Jory Quill three; the reeve Odo Barrow pays ten gold for a letter to the toll-keeper at Greywater Bridge. 30 turns (26 driver calls), economy-heavy: debts to two people, a 2 gp advance and the 8 gp balance from the same man, loose purchases from three named stall-keepers, a 1-copper ferry twice ("another copper"), a sale to Jory, a long rest, two purchases in one line (twice — before and after the Scribe change), a dagger handed to Jory and taken back, a reward recounted aloud, a reload. Zero page errors.
+
+| Column | Verdict | Evidence |
+|---|---|---|
+| Counterparty | **PASS** | the DM named the person on every coin and item movement from the first reply (`coin_to: Marta Vell`, `Gam`, `Cull`, `Kester`, `Jory Quill`; `from: Odo Barrow`); RECENT TRANSACTIONS read e.g. "3 turns ago: paid 3 sp to Jory Quill" |
+| Doubles | **PASS** | every movement booked once; no "Duplicate" line all run (the DM never re-emitted); the recounted 8 gp paid nothing; the dagger came back once; the second copper to Cull paid on "another copper" |
+| Two purchases in one line | **PARTIAL → fixed** | run before the fix: the dagger was charged, the cloak granted but its price never charged, and the Scribe reported NOTHING — it was told never to report purchases. After the fix (the Scribe reports them): rope + tinderbox evented and audited, nothing doubled. The card itself verified by hand in the production build (Add to my pack, Deduct 5 sp → player-lane log entries with the party) |
+| Reload | **PASS** | state identical, the log intact |
+| Found | **minor** | a rope lashed to a bell clapper and left behind stayed in the pack — the DM's call, not the ledger's |

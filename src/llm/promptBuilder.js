@@ -2,6 +2,7 @@
  * System prompt builder.
  * Constructs dynamic system prompts that inject character state, rules, and context.
  */
+import { formatLedgerForPrompt } from '../engine/transactionLedger.js';
 import { PRESETS, DEFAULT_PRESET } from '../data/presets.js';
 import { ABILITY_SHORT, classDisplayName, getFightingStyleLabel, getMartialArchetypeLabel, raceDisplayName } from '../engine/characterUtils.js';
 import { describeArmorAc, describeShieldAc, formatModifier, getModifier, getProficiencyBonus, getSavingThrowModifier, hasListEntry, isProficientWithWeapon } from '../engine/rules.js';
@@ -238,7 +239,7 @@ export function buildSystemPromptSplit(options) {
  * every dynamic block has a ceiling from its inputs' caps, and a test that can
  * read the blocks by name can pin each one instead of only the total.
  */
-export function buildSystemPromptParts({ character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, regions = null, worldMotifs = null, interlude = null, memoryUnavailable = false, narrationOnly = false, intentOnly = false, nudgeOnly = false, mode = null, storyMemoryPool = null }) {
+export function buildSystemPromptParts({ ledger = null, character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, regions = null, worldMotifs = null, interlude = null, memoryUnavailable = false, narrationOnly = false, intentOnly = false, nudgeOnly = false, mode = null, storyMemoryPool = null }) {
     // `intentOnly` (2026-09-30 prompt-building Lap-3 P2): the combat INTENT
     // call translates one committed action into a bounded combat_exchange
     // whose targets are enemy ids and whose actions are the slot whitelist —
@@ -521,6 +522,14 @@ export function buildSystemPromptParts({ character, inventory, quests, rollHisto
     // Inventory
     if (inventory && inventory.length > 0 && !narrationOnly) {
         parts.push(buildInventoryBlock(inventory, character), 'inventory');
+    }
+
+    // The transaction log's last movements (2026-11-01) — the receipts a
+    // turn's window may have scrolled away, in one place, with whom. Never in
+    // the lean lanes: none of them emits a coin or item event.
+    if (!lean) {
+        const ledgerBlock = formatLedgerForPrompt(ledger, ctx.messages);
+        if (ledgerBlock) parts.push(ledgerBlock, 'ledger');
     }
 
     // Active quests — the nudge's whole reason (update, never duplicate).
@@ -823,6 +832,8 @@ When game events occur, include a structured JSON block at the END of your respo
   "silver_lost": 0,
   "copper_found": 0,
   "copper_lost": 0,
+  "coin_from": "",
+  "coin_to": "",
   "exp_awarded": 0,
   "level_up": false,
   "rest_taken": null,
@@ -1003,8 +1014,10 @@ ECONOMY & HEALING:
 - **The reverse is equally binding: items_found is ONLY for items NEWLY entering the hero's possession** (looted, received, stolen, gifted, crafted). NEVER emit items_found for gear the hero already owns and is merely using, drawing, lighting, striking, wearing, or retrieving from their own pack — using their own flint and steel, torch, or rope grants NOTHING. The INVENTORY section lists what they already own; check it before granting an item. Emit items_lost only when an owned item is consumed, destroyed, or leaves their possession — as { "name": "<item>", "quantity": <count> }: a bare name (or quantity 1) removes ONE unit of a stack, so one torch burned or one ration eaten never empties the pack; give the count for more, or "quantity": "all" when the whole stack goes (confiscated, burned with the wagon).
 - For purchases, prefer one atomic "purchase" event instead of separate money/item fields: { "itemKey": "longsword", "quantity": 1, "priceCp": 1500 }. The client validates funds, subtracts coin, and adds the item. Do NOT also emit gold_lost/silver_lost/copper_lost or items_found for the same purchase — not in that response, and not in ANY later one. A purchase is fully paid the moment it is emitted; re-narrating the hero counting out that same price on a following turn emits NOTHING.
 - For sales (the player sells loot to a merchant), use one atomic "sell" event: { "itemKey": "longsword", "quantity": 1 } — or identify the item by "name" if it has no catalog key; "quantity": "all" sells the whole stack. The client values it (about half the catalog price), removes it, and adds the coin. Set "priceCp" (total) to model haggling or a stingy/eager buyer — and ALWAYS for an item with no catalog key, at the amount you narrate (the engine cannot value it otherwise and refuses the sale). Do NOT also emit items_lost or gold_found/silver_found/copper_found for the same sale.
+- **Name who.** A coin or item movement with a person names them: "coin_from" (who the found coins came from) and "coin_to" (who the lost coins went to), "seller" on a purchase, "buyer" on a sale, and "from" / "to" on an items_found / items_lost object ({ "name": "Brass key", "from": "Odo" }). The engine's ledger keeps two payments to two different people apart and knows one person's reward when it is recapped later. Leave them empty when no person is involved (a find, a toll box, a cutpurse never seen).
 - Purchases and sales are one-shot transaction events. Once a transaction has been narrated and emitted, do NOT emit it again in later responses unless the player explicitly buys/sells another copy or starts a new trade.
 - **Loose coin events are equally one-shot and EXACT.** A payment, toll, fine, tip, bribe, wage, or theft is emitted ONCE, in the same response that first narrates the coins changing hands, and the event amount MUST equal the narrated amount exactly — "six silver" is silver_lost: 6, never a different number, never a partial amount, never split across responses. NEVER re-emit a coin loss or gain in a later response that recaps, confirms, or reflects on money already exchanged — the engine already applied it, and re-emitting charges or pays the player twice. If you discover a past response under-charged or under-paid, emit only the exact missing difference, once.
+- **RECENT TRANSACTIONS is the engine's ledger.** Every row there already happened. Before you emit any coin, item, purchase, or sale event, check it: a movement that matches a row (the same coins with the same person, the same item) is a recap and emits NOTHING.
 - **Engine coin/loot lines are receipts.** System lines in the conversation like "+2 gp received — purse: …", "−5 sp paid — purse: …", "Bought/Sold …", "Coins recovered from narration", "Payment settled from narration", or "Loot recovered from narration" mean the engine ALREADY moved that money or item — including rewards recovered from a victory narration whose events were discarded. NEVER emit a coin or item event for anything such a receipt already confirmed, even many turns later: completing a quest whose reward was already banked at the handover emits the quest_updates completion and NOTHING else. A "Duplicate … ignored" line means your event was a replay and was suppressed — do not re-emit it.
 - **Restating the hero's wealth is NEVER a coin event.** "Leaving you with fourteen gold", counting the pouch, checking the purse, or recalling an earlier reward emits NOTHING — the engine already tracks the total, and re-emitting it pays the hero twice. Coin events exist only for coin actually changing hands in THIS scene. When the hero pays and receives change, emit ONE net loss for the true cost (paying 1 gold for an 8-silver bill is silver_lost: 8, or gold_lost: 1 plus silver_found: 2 — never the change alone).
 - For ordinary equipment loot or shop goods, use catalog "itemKey" values when possible. For unusual story objects, use a plain item name/type.

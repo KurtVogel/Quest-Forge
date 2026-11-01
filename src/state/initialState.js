@@ -28,14 +28,10 @@ export const initialGameState = {
     worldTempo: null, // Engine-owned pacing state: the current cadence tempo directive (window, intensity, timing die)
     pendingRoleplayCheck: null, // Reload-safe out-of-combat check proposal; no dice exist yet
     appliedLootSourceIds: [], // Message IDs whose gold/item loot has already been applied — prevents double-grant
-    recentPurchases: [], // Recent one-shot purchase signatures — prevents cross-turn LLM replays from double-charging
-    recentSales: [], // Sale twin of recentPurchases — prevents replayed sells from double-removing/double-paying
-    recentCoinGrants: [], // Coin twin of recentPurchases — prevents a reward re-emitted on a later turn from paying twice
-    recentCoinLosses: [], // Spend-side twin of recentCoinGrants — prevents a payment re-emitted on a later turn from charging twice
-    recentItemGrants: [], // Item twin of recentCoinGrants — prevents an items_found re-emitted on a later turn from granting twice
+    ledger: [], // THE transaction log (2026-11-01): every judged coin / item movement with its lane, counterparty and message — engine/transactionLedger.js; replaced the five recent* trade ledgers
     recentRulings: [], // Roleplay-check rulings that ended without dice — injected so the DM cannot re-propose overruled/set-aside checks from scratch
     recentChecks: [], // Compact out-of-combat check-proposal ledger — heat input for diceless-but-tense arcs (chases, heists)
-    recentExpAwards: [], // XP twin of recentCoinGrants — prevents an exp_awarded/level_up re-emitted on a later turn from paying twice
+    recentExpAwards: [], // XP replay ledger — prevents an exp_awarded/level_up re-emitted on a later turn from paying twice
     recentSpellCasts: [], // "sourceId|spellKey" replay guard so a re-parsed spell_cast never double-spends a slot
     recentRests: [], // "sourceId|restType|messageIndex" replay guard — a DM re-emitting rest_taken must not re-run the rest
     recentHearsay: [], // "deedKey|locationKey|messageIndex" — a hero deed is offered as traveling rumor at a given place only once

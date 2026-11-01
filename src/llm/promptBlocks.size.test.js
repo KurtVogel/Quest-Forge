@@ -111,6 +111,8 @@ function maxedState({ messageCount = 400, live = 0, inCombat = false } = {}) {
         regions: { 'the Toll Country': { terrain: fill('terrain', 120), people: fill('people', 120), built: fill('built', 120), dread: fill('dread', 120), names: fill('names', 120), atMessage: 2 } },
         worldMotifs: Object.fromEntries(Array.from({ length: 40 }, (_, i) => [fill(`motif ${i}`, 40), { count: 3 + i, lastMessage: i }])),
         interlude: { key: `region|${messageCount - 1}`, reason: 'region', mintedAtMessage: messageCount - 1, opensAtMessage: messageCount - 1, region: 'the Toll Country', frontId: null, title: null, material: fill('material', 300) },
+        // The transaction log at its cap, every row a trade with a long-named party (2026-11-01).
+        ledger: Array.from({ length: 60 }, (_, i) => ({ seq: i + 1, kind: 'purchase', lane: 'dm', status: 'applied', cp: -1250, movedCp: -1250, itemsIn: [{ name: fill(`Trade good ${i}`, 160), quantity: 3 }], itemsMoved: true, party: fill('Merchant', 60), sourceId: `m${messageCount - 2}`, atMessage: messageCount - 2 })),
         messages,
         messageCount,
     };
@@ -143,6 +145,7 @@ const DYNAMIC_CEILINGS = {
     character: 1500,       // 1,108
     party: 14000,          // 12,728 — four companions, every bond field at its cap (one bond composer + Wants / Their business now since 2026-10-13)
     inventory: 3000,       // 2,551 — 60 rows, names + values only
+    ledger: 1500,          // RECENT TRANSACTIONS (2026-11-01): 8 rows clamped at 160 chars + the header
     quests: 7500,          // 6,554 — the block's own row cap + the 8-name overflow tail
     recentRolls: 1000,     // 744
     recentRulings: 1000,   // 876

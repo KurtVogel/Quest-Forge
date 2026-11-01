@@ -2,9 +2,7 @@
  * Inventory: add/remove items, consumable use (engine-rolled healing), and
  * equip/unequip including the by-ref resolution used by DM equipment_changes.
  */
-import { normalizeItem, normalizeItemKey, MAX_ITEM_QUANTITY } from '../../data/items.js';
-import { conversationalDistance, RECENT_ITEM_GRANT_EXTENDED_WINDOW } from '../../engine/replayLedger.js';
-import { itemIdentityMatches } from '../../engine/textMatch.js';
+import { normalizeItem, MAX_ITEM_QUANTITY } from '../../data/items.js';
 import { isEquippableItem, isSlotHeld, normalizeEquippedSlots, shouldAutoEquip } from '../../engine/equipment.js';
 import { rollNotation } from '../../engine/dice.ts';
 import {
@@ -13,55 +11,24 @@ import {
     companionStatus,
     consumeItem,
     appendRollHistory,
-    currentMessageIndex,
     describeFaces,
     findInventoryItemByRef,
     healHero,
-    findRecentTransactionDuplicate,
-    normalizeRecentTransactions,
     isPlayerCombatTurn,
     mintOwnedItem,
     normalizeCompanion,
-    normalizeRefToken,
-    playerMessageSupportsRepeatTransaction,
-    rememberTransaction,
     resolveInventoryItemRef,
     systemMessage,
     withInventoryAndAC,
 } from './shared.js';
+import { judgeItemIn, judgeItemOut, ledgerContext, logMovement } from './ledger.js';
 
-// Cross-message replay ledger for DM items_found (the one-shot mechanics
-// invariant, DECISIONS.md 2026-07-21 — this channel was its missing sibling):
-// live playtest #7 watched the DM grant the same healing potion on three
-// separate messages (the find, the counting recap, and a later scene recap) and
-// every one applied, because only same-message CLAIM_LOOT_SOURCE idempotency
-// existed. Same tight window as coin grants — the failure mode is the recap on
-// the very next turns, and two identical legitimate finds further apart stay
-// untouched.
-// ONE replay window for every gain (2026-10-31, Vesa: doubles are "the worst
-// problem for the game, always"): the 4-message gain windows rested on "never
-// refuse to give on suspicion", and a recap five messages later paid twice.
-// Gains now guard as long as spends (12 conversational messages); an
-// explicit repeat in the player's own words ("another…", "again") still pays.
-const RECENT_ITEM_GRANT_MESSAGE_WINDOW = 12;
-// Grants riding a quest-completion response guard wider — the shared
-// RECENT_ITEM_GRANT_EXTENDED_WINDOW (engine/replayLedger.js); the
-// ITEM_ACQUIRE_VERB_RE player-phrasing bypass stays intact so a genuine "I grab
-// another torch" still applies.
-// Verbs that show the player's own message re-acquiring an item this turn —
-// broader than the coin-loss commerce set on purpose: "I take/grab/pick up
-// another torch" is a genuine second acquisition.
-const ITEM_ACQUIRE_VERB_RE = /\b(buy|buys|buying|bought|purchase|purchases|purchasing|purchased|take|takes|taking|took|grab|grabs|grabbing|grabbed|pick|picks|picking|picked|pocket|pockets|pocketing|pocketed|loot|loots|looting|looted|collect|collects|collecting|collected|claim|claims|claiming|claimed)\b/i;
-
-/** A recent APPLIED grant of the same item under another name, inside the window. */
-function findRecentItemTwin(state, item, messageIndex, window) {
-    return normalizeRecentTransactions(state.recentItemGrants).slice().reverse().find(entry => {
-        if (entry.status !== 'applied' || !entry.name) return false;
-        const distance = conversationalDistance(state.messages, entry.messageIndex, messageIndex);
-        if (!(distance >= 0 && distance <= window)) return false;
-        return itemIdentityMatches(entry.name, item.name) || (item.itemKey && entry.itemKey === item.itemKey);
-    }) || null;
-}
+// Item grants and losses are judged against the one transaction log
+// (state/handlers/ledger.js, 2026-11-01): the DM re-granting a potion on the
+// find, the counting recap and a later scene recap (live playtest #7), an
+// items_lost re-emitted for a torch already burned, a bought item recapped as
+// found — each is the same movement retold, inside its counterparty window,
+// unless the player's own words ask for it again.
 
 function isBonusActionConsumable(item) {
     return item?.actionType === 'bonus' || item?.consumableType === 'healing';
@@ -91,45 +58,16 @@ export const handlers = {
         // Only DM-event dispatches carry a sourceId — manual UI adds and internal
         // grants stay unguarded (a user click is always deliberate).
         const sourceId = String(meta.sourceId || '').slice(0, 160);
-        let recentItemGrants = state.recentItemGrants;
+        let ledger = state.ledger;
         if (sourceId) {
-            const identity = normalizeItemKey(item.itemKey || item.name) || normalizeRefToken(item.name);
             const quantity = Math.max(1, Math.trunc(item.quantity || 1));
-            // Identity-only signature (playtest #8): quantity drift is the item
-            // twin of coin denomination drift — a "3 arrows" grant recapped as
-            // "arrows" (x1) is the same find, and a quantity-bearing signature
-            // let it through. A genuine second find of the same item type inside
-            // the window still applies via the player-phrasing bypass, visibly.
-            const transaction = {
-                item: { itemKey: item.itemKey, name: item.name },
-                quantity,
-                priceCp: 0,
-                signature: `item|${identity}`,
-            };
-            const messageIndex = currentMessageIndex(state);
-            // Scribe-audit grants skip the reducer's duplicate check — scribeAudits
-            // already pre-filtered against this same ledger with a FUZZY identity
-            // match (strictly broader than the exact signature here) and announces
-            // the recovery itself — but they DO enter the ledger, so a later DM
-            // re-emission of an audit-granted reward is guarded (2026-08-31 P1:
-            // audit grants were never ledgered, leaving the victory-loot →
-            // quest-completion replay invisible to this guard).
-            const isAudit = meta.audit === true;
-            const grantWindow = (isAudit || meta.questCompletionAdjacent === true)
-                ? RECENT_ITEM_GRANT_EXTENDED_WINDOW
-                : RECENT_ITEM_GRANT_MESSAGE_WINDOW;
-            // A recap rarely repeats the name exactly ("the brass token" for
-            // "Brass toll-token"): a recent grant whose name is the same item by
-            // the audits' own identity rule counts too (2026-10-31).
-            const duplicate = isAudit ? null : (findRecentTransactionDuplicate(
-                state.recentItemGrants, transaction, sourceId, messageIndex,
-                grantWindow, state.messages
-            ) || findRecentItemTwin(state, item, messageIndex, grantWindow));
-            const exactSourceReplay = !!duplicate && duplicate.sourceId === sourceId;
-            if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatTransaction(item, meta.playerMessage, ITEM_ACQUIRE_VERB_RE))) {
+            const ref = { name: item.name, itemKey: item.itemKey, quantity };
+            const ctx = ledgerContext(state, meta);
+            const verdict = judgeItemIn(state, ctx, ref);
+            if (verdict.suppress) {
                 return {
                     ...state,
-                    recentItemGrants: rememberTransaction(state.recentItemGrants, transaction, sourceId, messageIndex, 'ignored'),
+                    ledger: logMovement(state, ctx, { kind: 'item', itemsIn: [ref], status: 'ignored' }),
                     messages: [
                         ...state.messages,
                         // dmVisible: the DM must learn its re-emission was suppressed
@@ -138,7 +76,7 @@ export const handlers = {
                     ],
                 };
             }
-            recentItemGrants = rememberTransaction(state.recentItemGrants, transaction, sourceId, messageIndex);
+            ledger = logMovement(state, ctx, { kind: 'item', itemsIn: [ref] });
         }
 
         // Premise equip fills EMPTY slots only (live playtest #10, 2026-08-22):
@@ -149,7 +87,7 @@ export const handlers = {
         const newItem = mintOwnedItem(item, { equipOnAdd: equipOnAdd && !isSlotHeld(state.inventory, item) });
         // Armor / shields fill an empty slot — the load heal's own rule.
         if (shouldAutoEquip(state.inventory, newItem)) newItem.equipped = true;
-        let guarded = recentItemGrants === state.recentItemGrants ? state : { ...state, recentItemGrants };
+        let guarded = ledger === state.ledger ? state : { ...state, ledger };
         // The stack ceiling is visible, never silent (2026-09-25): the DM and
         // the player both learn that part of a grant did not land.
         const overflow = stackOverflow(state.inventory, newItem);
@@ -297,6 +235,7 @@ export const handlers = {
         const payload = action.payload && typeof action.payload === 'object' ? action.payload : { name: action.payload };
         const ref = String(payload.name || '').trim();
         if (!ref) return state;
+        const meta = payload._meta || {};
         const rawQuantity = payload.quantity;
         const removeAll = typeof rawQuantity === 'string' && /^all$/i.test(rawQuantity.trim());
         const requestedQuantity = Number.isFinite(Number(rawQuantity)) && Number(rawQuantity) > 0
@@ -309,6 +248,26 @@ export const handlers = {
         // audits' fuzzy token-containment, UNAMBIGUOUS only, because removal
         // takes whole stacks and must never guess between two candidates.
         const { item: matchToRemove, ambiguous } = resolveInventoryItemRef(state.inventory, ref);
+        // A DM / audit / player removal is judged against the transaction log
+        // (2026-11-01 — the one economic channel that had no replay guard): an
+        // items_lost re-emitted for a torch already burned, or for the letter
+        // the player already handed over from the Inventory panel, took a
+        // second unit of a stack.
+        const sourceId = String(meta.sourceId || '').slice(0, 160);
+        const ctx = sourceId ? ledgerContext(state, meta) : null;
+        if (ctx) {
+            const probe = matchToRemove
+                ? { name: matchToRemove.name, itemKey: matchToRemove.itemKey, quantity: 1 }
+                : { name: ref, itemKey: '', quantity: 1 };
+            const verdict = judgeItemOut(state, ctx, probe);
+            if (verdict.suppress) {
+                return {
+                    ...state,
+                    ledger: logMovement(state, ctx, { kind: 'item', itemsOut: [probe], status: 'ignored' }),
+                    messages: [...state.messages, systemMessage(`Duplicate item loss ignored — ${probe.name} already left your pack moments ago.`, { dmVisible: true })],
+                };
+            }
+        }
         if (!matchToRemove) {
             // Visible failure — a silent console warn left the sheet and the
             // fiction disagreeing with no trace the player could dispute.
@@ -325,7 +284,10 @@ export const handlers = {
             : requestedQuantity !== null
                 ? Math.min(owned, requestedQuantity)
                 : 1;
-        return withInventoryAndAC(state, consumeItem(state.inventory, matchToRemove.id, units));
+        const removed = ctx
+            ? { ...state, ledger: logMovement(state, ctx, { kind: 'item', itemsOut: [{ name: matchToRemove.name, itemKey: matchToRemove.itemKey, quantity: units }] }) }
+            : state;
+        return withInventoryAndAC(removed, consumeItem(state.inventory, matchToRemove.id, units));
     },
 
     EQUIP_ITEM(state, action) {

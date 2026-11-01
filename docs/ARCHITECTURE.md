@@ -226,7 +226,8 @@ measured heat, one permission or doom card, the encounter ledger), `worldMotifs.
 `regionProfile.js`, `regionalHearsay.js`, `interlude.js`, `wonder.js`, `heroDeath.js`,
 `livingWorldSession.js` (load sanitizers for the one-shot markers), `directorRetry.js`.
 Shelves used everywhere: `text.js` (type-strict `cleanText`, flags), `replayLedger.js`
-(pipe-string ledgers, conversational distance), `currency.js`. See
+(pipe-string ledgers, conversational distance), `transactionLedger.js` (the coin / item log, its
+windows and the RECENT TRANSACTIONS block), `currency.js`. See
 `docs/flows/hidden-fronts.md`.
 
 ### `src/data/`, `src/config/`, `src/debug/`, `src/dev/`
@@ -254,9 +255,11 @@ dated eval and playtest reports, and `agent-dialogues/`.
 - **The engine is the single source of truth; the prompt describes it.** If the DM "should" do
   math, the client already does it. A feature is a JSON field → a normalizer in
   `eventChannels.js` → a reducer action → a prompt line saying the field exists.
-- **Every DM-writable mechanical channel ships with a replay ledger** (coin, purchases, sales,
-  spells, rests, XP, item grants; combat uses `exchangeId`). The DM re-emitting an applied event
-  on a later turn is a proven failure mode. Windows are measured in conversational distance.
+- **Every DM-writable mechanical channel ships with a replay ledger.** Coins and items share ONE
+  transaction log (`state.ledger`, `engine/transactionLedger.js`) judged by ONE judge
+  (`state/handlers/ledger.js`) with the counterparty as the window key (2026-11-01); spells,
+  rests and XP keep their own; combat uses `exchangeId`. The DM re-emitting an applied event on a
+  later turn is a proven failure mode. Windows are measured in conversational distance.
 - **Every LLM lane is a trust boundary.** A reducer fed by any lane projects the payload to known
   keys and clamps every text it stores; engine-owned stamps can never arrive from a lane.
 - **The prompt prefix is byte-stable.** Live state never enters a prefix block; the response

@@ -603,7 +603,7 @@ describe('items_found replay ledger (live playtest #7: one healing potion grante
         });
         expect(recap.inventory).toHaveLength(1); // still one potion
         expect(recap.messages.at(-1).content).toMatch(/Duplicate item grant ignored — Potion of Healing/);
-        expect(recap.recentItemGrants.at(-1).status).toBe('ignored');
+        expect(recap.ledger.at(-1).status).toBe('ignored');
     });
 
     it('honors the player explicitly taking another copy', () => {
@@ -635,7 +635,7 @@ describe('items_found replay ledger (live playtest #7: one healing potion grante
         const second = gameReducer(first, { type: 'ADD_ITEM', payload: { name: 'Torch' } });
         expect(second.inventory).toHaveLength(1);
         expect(second.inventory[0].quantity).toBe(2); // stacked, not suppressed
-        expect(second.recentItemGrants).toHaveLength(0);
+        expect(second.ledger).toHaveLength(0);
     });
 
     it('different items in the window both apply', () => {
@@ -692,7 +692,7 @@ describe('items_found replay ledger (live playtest #7: one healing potion grante
             },
         });
         expect(audited.inventory).toHaveLength(1);
-        expect(audited.recentItemGrants).toHaveLength(1);
+        expect(audited.ledger).toHaveLength(1);
         const completion = gameReducer(addMessages(audited, 8), {
             type: 'ADD_ITEM',
             payload: {

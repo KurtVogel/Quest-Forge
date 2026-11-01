@@ -64,7 +64,7 @@ describe('a payment the player names is a new payment', () => {
     });
 
     it('the audit charges a named repeat amount to a new payee; without the player\'s words the ledger still guards', () => {
-        const base = { ...clericState(), recentCoinLosses: [], messages: [{ id: 'm1', role: 'user', content: 'x' }, { id: 'm2', role: 'assistant', content: 'y' }] };
+        const base = { ...clericState(), ledger: [], messages: [{ id: 'm1', role: 'user', content: 'x' }, { id: 'm2', role: 'assistant', content: 'y' }] };
         const first = gameReducer(base, { type: 'AUDIT_COIN_PAYMENT', payload: { silver: 2, _meta: { sourceId: 'msg-52:scribe-loot:payment', audit: true } } });
         const purse = state => state.character.gold * 100 + state.character.silver * 10 + state.character.copper;
         expect(purse(base) - purse(first)).toBe(20);

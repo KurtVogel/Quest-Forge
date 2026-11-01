@@ -291,7 +291,7 @@ describe('saveGame / loadGame (IndexedDB)', () => {
 
     // Regression for the lost-fronts bug: the old field whitelist silently dropped
     // fronts and pendingRoleplayCheck, killing the hidden-fronts system on reload.
-    it('persists fronts, pendingRoleplayCheck, appliedLootSourceIds, and recentPurchases', async () => {
+    it('persists fronts, pendingRoleplayCheck, appliedLootSourceIds, and the transaction log', async () => {
         await saveGame('slot-1', makeGameState({
             fronts: [{ id: 'front-1', title: 'The Withering Tide', goal: 'Drown the coast', stakes: 'The port falls', clock: 3, grimPortents: ['a', 'b', 'c'] }],
             pendingRoleplayCheck: {
@@ -300,8 +300,7 @@ describe('saveGame / loadGame (IndexedDB)', () => {
                 playerAction: 'I sneak by',
             },
             appliedLootSourceIds: ['msg-1'],
-            recentPurchases: [{ signature: 'dagger|1|200', itemKey: 'dagger', name: 'Dagger', quantity: 1, priceCp: 200, sourceId: 'msg-buy-1', messageIndex: 4 }],
-            recentSales: [{ signature: 'torch|2|1', itemKey: 'torch', name: 'Torch', quantity: 2, priceCp: 1, sourceId: 'msg-sell-1', messageIndex: 5 }],
+            ledger: [{ seq: 1, kind: 'purchase', lane: 'dm', status: 'applied', cp: -200, movedCp: -200, itemsIn: [{ name: 'Dagger', itemKey: 'dagger', quantity: 1 }], itemsOut: [], itemsMoved: true, sourceId: 'msg-buy-1', atMessage: 4, party: 'Hobb' }],
         }));
         const loaded = await loadGame('slot-1');
         expect(loaded.fronts).toHaveLength(1);
@@ -309,8 +308,7 @@ describe('saveGame / loadGame (IndexedDB)', () => {
         expect(loaded.fronts[0].clock).toBe(3);
         expect(loaded.pendingRoleplayCheck.rolls).toHaveLength(1);
         expect(loaded.appliedLootSourceIds).toEqual(['msg-1']);
-        expect(loaded.recentPurchases).toEqual([expect.objectContaining({ signature: 'dagger|1|200', itemKey: 'dagger' })]);
-        expect(loaded.recentSales).toEqual([expect.objectContaining({ signature: 'torch|2|1', itemKey: 'torch' })]);
+        expect(loaded.ledger).toEqual([expect.objectContaining({ kind: 'purchase', cp: -200, party: 'Hobb' })]);
         expect(loaded.saveVersion).toBe(CURRENT_SAVE_VERSION);
     });
 

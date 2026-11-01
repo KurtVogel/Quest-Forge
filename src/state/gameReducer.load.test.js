@@ -504,7 +504,7 @@ describe('LOAD_GAME progression migrations', () => {
         expect(stored).toMatchObject({ name: 'Cave-Worg', hp: 9, maxHp: 32, status: 'active' });
     });
 
-    it('hydrates appliedLootSourceIds and recentPurchases from save state and backfills missing arrays', () => {
+    it('hydrates appliedLootSourceIds, folds the retired recentPurchases into the transaction log, and backfills missing arrays', () => {
         const withIds = gameReducer(initialGameState, {
             type: 'LOAD_GAME',
             payload: {
@@ -525,12 +525,17 @@ describe('LOAD_GAME progression migrations', () => {
             },
         });
         expect(withIds.appliedLootSourceIds).toEqual(['msg-1', 'msg-2']);
-        expect(withIds.recentPurchases).toEqual([expect.objectContaining({
-            signature: 'dagger|1|200',
-            itemKey: 'dagger',
-            priceCp: 200,
+        // The five trade ledgers were retired 2026-11-01: a save that still
+        // carries one is folded into the one transaction log and dropped.
+        expect(withIds.ledger).toEqual([expect.objectContaining({
+            kind: 'purchase',
+            cp: -200,
+            movedCp: -200,
+            sourceId: 'msg-buy-1',
+            atMessage: 4,
+            itemsIn: [{ name: 'Dagger', itemKey: 'dagger', quantity: 1 }],
         })]);
-        expect(withIds.recentSales).toEqual([]);
+        expect(withIds.recentPurchases).toBeUndefined();
 
         const withoutIds = gameReducer(initialGameState, {
             type: 'LOAD_GAME',
@@ -541,8 +546,7 @@ describe('LOAD_GAME progression migrations', () => {
             },
         });
         expect(withoutIds.appliedLootSourceIds).toEqual([]);
-        expect(withoutIds.recentPurchases).toEqual([]);
-        expect(withoutIds.recentSales).toEqual([]);
+        expect(withoutIds.ledger).toEqual([]);
     });
 });
 

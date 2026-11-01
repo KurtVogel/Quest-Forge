@@ -510,8 +510,8 @@ describe('ADD_COIN_GRANT', () => {
         });
         expect(next.character.gold).toBe(25);
         expect(next.character.silver).toBe(5);
-        expect(next.recentCoinGrants).toHaveLength(1);
-        expect(next.recentCoinGrants[0].status).toBe('applied');
+        expect(next.ledger).toHaveLength(1);
+        expect(next.ledger[0].status).toBe('applied');
     });
 
     it('suppresses an identical grant re-emitted within the replay window', () => {
@@ -527,7 +527,7 @@ describe('ADD_COIN_GRANT', () => {
         });
         expect(replayed.character.gold).toBe(25); // 5 base + one 20gp grant, not two
         expect(replayed.messages.at(-1).content).toMatch(/Duplicate coin grant ignored/);
-        expect(replayed.recentCoinGrants.at(-1).status).toBe('ignored');
+        expect(replayed.ledger.at(-1).status).toBe('ignored');
     });
 
     it('allows the identical grant when the player explicitly asked for more coin', () => {
@@ -662,7 +662,7 @@ describe('ADD_COIN_GRANT', () => {
             payload: { gold: 20, _meta: { sourceId: 'msg-recap:scribe-loot', announce: 'audit', audit: true } },
         });
         expect(audited.character.gold).toBe(25);
-        expect(audited.recentCoinGrants.at(-1).status).toBe('ignored');
+        expect(audited.ledger.at(-1).status).toBe('ignored');
     });
 
     it('coin lines are stamped dmVisible so the DM window carries the receipt (P1 root fix)', () => {
@@ -721,8 +721,8 @@ describe('APPLY_COIN_LOSS', () => {
             payload: { silver: 6, _meta: { sourceId: 'msg-pay-1', playerMessage: 'I pay the innkeeper.' } },
         });
         expect(next.character.silver).toBe(4);
-        expect(next.recentCoinLosses).toHaveLength(1);
-        expect(next.recentCoinLosses[0].status).toBe('applied');
+        expect(next.ledger).toHaveLength(1);
+        expect(next.ledger[0].status).toBe('applied');
     });
 
     it('suppresses an identical loss re-emitted on a later turn (the payment echo)', () => {
@@ -738,7 +738,7 @@ describe('APPLY_COIN_LOSS', () => {
         });
         expect(replayed.character.silver).toBe(8); // one 2-silver charge, not two
         expect(replayed.messages.at(-1).content).toMatch(/Duplicate coin charge ignored/);
-        expect(replayed.recentCoinLosses.at(-1).status).toBe('ignored');
+        expect(replayed.ledger.at(-1).status).toBe('ignored');
     });
 
     it('allows an identical loss when the player initiates a new payment this turn', () => {
@@ -770,7 +770,7 @@ describe('APPLY_COIN_LOSS', () => {
             payload: { silver: 1, _meta: { sourceId: 'msg-pay-2', playerMessage: 'I buy a bowl of mutton stew.' } },
         });
         expect(second.character.silver).toBe(8); // both charges land
-        expect(second.recentCoinLosses.at(-1).status).toBe('applied');
+        expect(second.ledger.at(-1).status).toBe('applied');
     });
 
     it('still suppresses a same-value recap when the message has no purchase phrasing', () => {
@@ -785,7 +785,7 @@ describe('APPLY_COIN_LOSS', () => {
             payload: { silver: 1, _meta: { sourceId: 'msg-pay-2', playerMessage: 'I climb aboard the wagon.' } },
         });
         expect(replayed.character.silver).toBe(9); // recap eaten
-        expect(replayed.recentCoinLosses.at(-1).status).toBe('ignored');
+        expect(replayed.ledger.at(-1).status).toBe('ignored');
     });
 
     it('always suppresses an exact same-source replay, even with payment phrasing', () => {
@@ -829,7 +829,7 @@ describe('APPLY_COIN_LOSS', () => {
         });
         expect(next.character.silver).toBe(1);
         expect(next.messages.at(-1).content).toMatch(/Not enough coin/);
-        expect(next.recentCoinLosses).toHaveLength(0);
+        expect(next.ledger).toHaveLength(0);
     });
 
     it('a never-paid debt can be charged again once the hero can pay (no false "already paid")', () => {
@@ -946,7 +946,7 @@ describe('AUDIT_COIN_PAYMENT', () => {
             type: 'AUDIT_COIN_PAYMENT',
             payload: { gold: 3, _meta: { sourceId: 'msg-a1:scribe-loot:payment' } },
         });
-        expect(next.recentCoinLosses).toHaveLength(0);
+        expect(next.ledger).toHaveLength(0);
     });
 
     it('a partial settle ledgers the value actually deducted, not the narrated charge', () => {
@@ -956,10 +956,10 @@ describe('AUDIT_COIN_PAYMENT', () => {
             payload: { gold: 5, _meta: { sourceId: 'msg-a2:scribe-loot:payment' } },
         });
         expect(next.character.gold).toBe(0);
-        expect(next.recentCoinLosses).toHaveLength(1);
+        expect(next.ledger).toHaveLength(1);
         // 100 cp was all the purse held — that is the movement of record, so a
         // later cover/strip can never pretend the full 500 cp charge happened.
-        expect(next.recentCoinLosses[0].priceCp).toBe(100);
+        expect(next.ledger[0].cp).toBe(-100);
     });
 });
 
@@ -1020,7 +1020,7 @@ describe('audit ledger policy: no player-phrasing bypass, same-base reconciliati
             payload: { gold: 10, _meta: { sourceId: 'msg-r-2:scribe-loot', announce: 'audit', audit: true, playerMessage: 'I collect another 10 gold reward.' } },
         });
         expect(audited.character.gold).toBe(state.character.gold + 10); // once, not twice
-        expect(audited.recentCoinGrants.at(-1).status).toBe('ignored');
+        expect(audited.ledger.at(-1).status).toBe('ignored');
     });
 
     it('a same-base reconciled audit grant is not eaten by its event-path twin', () => {
@@ -1064,7 +1064,7 @@ describe('direction covers (2026-08-20 playtest: reward misread as payment nette
         });
         expect(totalCp(audited.character)).toBe(500); // reward kept, nothing deducted
         expect(audited.messages.at(-1).content).toMatch(/Payment report ignored/);
-        expect(audited.recentCoinLosses.at(-1).status).toBe('ignored');
+        expect(audited.ledger.at(-1).status).toBe('ignored');
     });
 
     it('still settles a genuine smaller unevented payment right after a windfall (exact-value match only)', () => {
@@ -1109,7 +1109,7 @@ describe('direction covers (2026-08-20 playtest: reward misread as payment nette
         });
         expect(audited.character.gold).toBe(5); // the toll stays paid
         expect(audited.messages.at(-1).content).toMatch(/Coin recovery ignored/);
-        expect(audited.recentCoinGrants.at(-1).status).toBe('ignored');
+        expect(audited.ledger.at(-1).status).toBe('ignored');
     });
 
     it('never blocks a DM event-path grant equal to a recent loss — an explicit refund is authoritative', () => {
@@ -1235,7 +1235,7 @@ describe('recap-bundle guard (2026-07-31 playtest: fountain turn charged the beg
         expect(recap.character.silver).toBe(silverAfterBoth);
         expect(recap.messages.at(-1).content).toMatch(/Duplicate coin grant ignored/);
         // The recap is remembered as ignored, not as a fresh applied grant.
-        expect(recap.recentCoinGrants.at(-1).status).toBe('ignored');
+        expect(recap.ledger.at(-1).status).toBe('ignored');
     });
 
     it('a recap that bundles two prior payments plus new coin is charged in full on the DM lane (the accepted cost of dropping the strip, 2026-10-12)', () => {
@@ -1279,7 +1279,7 @@ describe('coin replay guards: denomination drift + conversational window (2026-0
 
         const endCp = replayed.character.gold * 100 + replayed.character.silver * 10 + (replayed.character.copper || 0);
         expect(endCp).toBe(startCp); // same 120 cp value — the drifted recap charges nothing
-        expect(replayed.recentCoinLosses.at(-1).status).toBe('ignored');
+        expect(replayed.ledger.at(-1).status).toBe('ignored');
     });
 
     it('keeps the grant guard alive across a dice turn: system and hidden messages do not age the window', () => {
@@ -1304,7 +1304,7 @@ describe('coin replay guards: denomination drift + conversational window (2026-0
         });
 
         expect(replayed.character.gold).toBe(granted.character.gold); // no second 20 gp
-        expect(replayed.recentCoinGrants.at(-1).status).toBe('ignored');
+        expect(replayed.ledger.at(-1).status).toBe('ignored');
     });
 
     it('still allows an identical grant once genuine conversation has moved on', () => {
@@ -1353,7 +1353,7 @@ describe('playtest #8: audit value drift — a re-narrated reward/payment must n
         });
         expect(audited.character.gold).toBe(state.character.gold + 7); // the 7 gp, once
         expect(audited.character.silver).toBe(0);
-        expect(audited.recentCoinGrants.at(-1).status).toBe('ignored');
+        expect(audited.ledger.at(-1).status).toBe('ignored');
         expect(audited.messages.at(-1).content).toMatch(/repeats rewards already received/);
     });
 
@@ -1683,7 +1683,7 @@ describe('2026-09-03 audit: sale quantity coercion, covered-purchase ledger stat
         expect(string.inventory.find(i => i.id === 'r1').quantity).toBe(2);
     });
 
-    it('a loss-covered purchase is ledgered `ignored`, so a later genuine charge is not doubly stripped (P2)', () => {
+    it('a loss-covered purchase logs its goods with NO coin moved, so a later genuine charge is not doubly stripped (P2)', () => {
         const state = makeState({ character: { gold: 20, silver: 0, copper: 0 } });
         const paid = gameReducer(state, {
             type: 'APPLY_COIN_LOSS',
@@ -1697,7 +1697,8 @@ describe('2026-09-03 audit: sale quantity coercion, covered-purchase ledger stat
         // Delivered without charging again — the earlier loose loss covers it.
         expect(covered.character.gold).toBe(15);
         expect(covered.inventory.some(i => i.name === 'Brass Lantern')).toBe(true);
-        expect(covered.recentPurchases.at(-1).status).toBe('ignored');
+        // The transaction log (2026-11-01): the goods moved, the coin did not.
+        expect(covered.ledger.at(-1)).toMatchObject({ kind: 'purchase', status: 'applied', movedCp: 0, itemsMoved: true });
         // The purchase replay guard still holds (the duplicate check is status-blind).
         const replayed = gameReducer(addMessages(covered, 1), {
             type: 'PURCHASE_ITEM',

@@ -11,10 +11,13 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
+### A card for a narrated coin GAIN beyond what the reply evented — status: `idea` (2026-11-01)
+The recovery card covers items the evented reply left out, payments above what it charged and losses beside an evented one — not coins RECEIVED beyond an evented grant (two rewards in one reply, one evented). Left out on purpose: gross-vs-net change-making makes the gain side the noisier one. Worth it if a playtest shows a second reward going missing.
+
 ### The premise names the purse — status: `idea` (2026-10-31, playtest run 4)
 The premise said Ilse "has twelve gold to her name"; the character started with the class kit's 27 gp and nothing reconciled them (the opening's `starting_items` reconciles ITEMS only). The cheap path: the one-time opening may emit a `starting_purse` (gold / silver / copper) honored only with `opts.openingScene`, clamped, ledger-free because the marker is one-shot — an eventChannels entry like `starting_items`. Fidelity, not a double; worth it the next time the opening lane is touched.
 
-### A second purchase in one reply goes unpaid — status: `decided` 2026-10-31 late (one accountant per narration: an evented reply is the DM's alone, by design — the stated cost of making doubles impossible; run 4's two-purchase line was evented as one 3 sp payment and both items, correctly) (2026-10-31, Opus playtest F7, measured)
+### A second purchase in one reply goes unpaid — status: `built` 2026-11-01 (a "Narrated, not recorded" card: the player books the missed price, and the Scribe now reports purchases at all — DECISIONS 2026-11-01); earlier `decided` 2026-10-31 late (one accountant per narration: an evented reply is the DM's alone, by design — the stated cost of making doubles impossible; run 4's two-purchase line was evented as one 3 sp payment and both items, correctly) (2026-10-31, Opus playtest F7, measured)
 The DM evented the mace (5 gp) and narrated a second purchase in the same reply ("Twelve silver pieces weighed upon the assayer's scale secure the spool"); the wire was granted, its 12 silver never charged, because the payment audit stands down whenever the event path moved ANY coin for that narration (DECISIONS 2026-08-20 — the direction-misread rule, "never take money on suspicion"). A narrower rule: when the event path applied only SPENDS (no gain), charge the narrated payment's SHORTFALL over the evented spend. The 08-20 misread was a reward read backwards, which a spend-only turn cannot be. Overrides a recorded rule — Vesa's call.
 
 ### A handed-over item leaves the pack — status: `idea` (2026-10-31, Opus playtest F6)

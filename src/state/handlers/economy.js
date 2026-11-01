@@ -1,48 +1,33 @@
 /**
- * Coin and trade: replay-guarded coin grants/losses, the Scribe payment audit,
- * and one-shot purchase/sale transactions.
+ * Coin and trade: every movement is judged against the one transaction log
+ * (state/handlers/ledger.js — the judge; engine/transactionLedger.js — the
+ * log) before anything moves: coin grants and losses, the Scribe payment
+ * audit, atomic purchases and sales, and the player's "Narrated, not
+ * recorded" confirmations.
  */
 import { MAX_ITEM_QUANTITY, normalizeItem, normalizeItemKey, toFiniteNumber } from '../../data/items.js';
 import { addCurrency, characterCurrencyToCopper, formatCurrency, spendCurrency } from '../../engine/currency.js';
 import { MAX_COIN_EVENT } from '../../config/contentLimits.js';
-import { conversationalDistance } from '../../engine/replayLedger.js';
 import { shouldAutoEquip } from '../../engine/equipment.js';
 import {
     addOrStackItem,
     consumeItem,
     stackOverflow,
-    currentMessageIndex,
     resolveInventoryItemRef,
-    findRecentTransactionDuplicate,
     mintOwnedItem,
-    normalizeRecentTransactions,
-    normalizeRefToken,
-    playerMessageSupportsRepeatTransaction,
-    rememberTransaction,
-    repeatIntentNearNoun,
-    sourceBaseOf,
     systemMessage,
     withInventoryAndAC,
 } from './shared.js';
+import { judgeAuditPayment, judgeCoinIn, judgeCoinOut, judgePurchase, judgeSale, ledgerContext, logMovement } from './ledger.js';
+import { handlers as inventoryHandlers } from './inventory.js';
 
-// Sales keep a tight window of their own: a sale sits on the GAIN side of the
-// purse, where the engine never refuses to give on suspicion (a suppressed
-// genuine second sale keeps the item AND withholds the coin), and the observed
-// replay is the next-turn recap. The spend side's window is
-// RECENT_SPEND_MESSAGE_WINDOW below — one window for purchases and losses.
-// ONE replay window for every gain (2026-10-31, Vesa: doubles are "the worst
-// problem for the game, always"): the 4-message gain windows rested on "never
-// refuse to give on suspicion", and a recap five messages later paid twice.
-// Gains now guard as long as spends (12 conversational messages); an
-// explicit repeat in the player's own words ("another…", "again") still pays.
-const RECENT_SALE_MESSAGE_WINDOW = 12;
+export { playerMessageNamesAmount } from './ledger.js';
+
 // One transaction event is bounded like coin grants are: quantity so a flat priceCp
 // cannot mint an arbitrary stack, sale proceeds to the same 10,000 gp ceiling as
 // clampCoinAmount — a hallucinated "motivated buyer" must not inject a fortune.
 const MAX_PURCHASE_QUANTITY = 100;
 const MAX_SALE_PROCEEDS_CP = 1000000;
-const PURCHASE_VERB_RE = /\b(buy|buys|buying|bought|purchase|purchases|purchasing|purchased|pay|pays|paying|paid|order|orders|ordering|ordered|take|takes|taking|grab|grabs|grabbing|get|gets|getting)\b/i;
-const SALE_VERB_RE = /\b(sell|sells|selling|sold|pawn|pawns|pawning|pawned|trade|trades|trading|traded|offer|offers|offering|offered|unload|unloads|unloading|fence|fences|fencing|fenced)\b/i;
 
 function buildPurchaseTransaction(payload = {}) {
     const root = payload && typeof payload === 'object'
@@ -76,8 +61,6 @@ function buildPurchaseTransaction(payload = {}) {
             ? item.valueCp * quantity
             : 0;
     const priceCp = Math.max(0, Math.trunc(rawPriceCp));
-    const identity = normalizeItemKey(item.itemKey || item.key || item.name)
-        || normalizeRefToken(item.itemKey || item.name);
     // An itemKey the catalog does not know, after every fuzzy rung (the
     // inverted-word-order typo now resolves). With no name beside it the DM
     // named nothing the engine can sell back or the player can use — refused
@@ -100,7 +83,6 @@ function buildPurchaseTransaction(payload = {}) {
         // to buy "Unknown item" for the stated price — refused visibly instead.
         nameless: (!itemKeyRef || !!unknownKey) && !nameRef,
         unknownKey,
-        signature: `${identity || normalizeRefToken(item.name)}|${quantity}|${Math.max(0, Math.trunc(priceCp))}`,
     };
 }
 
@@ -113,19 +95,6 @@ function buildPurchaseTransaction(payload = {}) {
 function coinLine(content) {
     return systemMessage(content, { dmVisible: true });
 }
-
-// Coin grants: the DM re-emitting a reward while narrating the pouch being counted,
-// split, or recapped. Was 4 (a tighter gain window) until 2026-10-31 — see the
-// one-window note above RECENT_SALE_MESSAGE_WINDOW.
-const RECENT_COIN_GRANT_MESSAGE_WINDOW = 12;
-// Audit recoveries and grants riding a quest-completion response guard wider
-// (2026-08-31 P1, live merchant-quest double-pay): the reward is narrated at the
-// handover and re-emitted at quest completion, routinely >4 conversational
-// messages later (travel + report-back). Matches the spend side's 12. The
-// player-phrasing bypass still applies to DM event grants, so "never refuse to
-// give on suspicion" survives — an explicit repeat request always pays.
-const RECENT_COIN_GRANT_EXTENDED_WINDOW = 12;
-const COIN_WORD_RE = /\b(gold|silver|copper|coins?|gp|sp|cp|payment|reward|wages?|bounty|purse)\b/i;
 
 function clampCoinAmount(value) {
     return Number.isFinite(value) ? Math.max(0, Math.min(MAX_COIN_EVENT, Math.trunc(value))) : 0;
@@ -165,596 +134,166 @@ function autoEquipped(inventory, newItem) {
 }
 
 const isEmptyCoin = ({ gold, silver, copper }) => gold <= 0 && silver <= 0 && copper <= 0;
-
-// One coin transaction shape for both sides of the purse (2026-10-07 P2: the
-// grant and loss builders differed only in their prefix). Value-based
-// signature: a re-emission with drifted denominations ("12 silver" recapped as
-// "1 gold 2 silver") is the SAME movement (2026-07-22).
-const COIN_KINDS = {
-    grant: { signature: 'coins', itemKey: 'coin-grant' },
-    loss: { signature: 'coin-loss', itemKey: 'coin-loss' },
-};
-
-function coinTransaction(kind, amounts) {
-    const totalCp = amounts.gold * 100 + amounts.silver * 10 + amounts.copper;
-    return {
-        signature: `${COIN_KINDS[kind].signature}|${totalCp}cp`,
-        item: { itemKey: COIN_KINDS[kind].itemKey, name: formatCurrency(totalCp) },
-        quantity: 1,
-        priceCp: totalCp,
-    };
-}
-
-/**
- * The one suppression return (2026-10-07 P2 — it was written longhand 17×):
- * the transaction enters `ledgerKey` as `ignored` (so a re-emission of the
- * re-emission is still an exact-source replay) and the reason is posted as a
- * purse receipt the DM reads.
- */
-function suppress(state, ledgerKey, transaction, sourceId, messageIndex, line) {
-    return {
-        ...state,
-        [ledgerKey]: rememberTransaction(state[ledgerKey], transaction, sourceId, messageIndex, 'ignored'),
-        messages: [...state.messages, coinLine(line)],
-    };
-}
-
-// Bare alternation for proximity tests (COIN_WORD_RE keeps its own \b anchors).
-const COIN_NOUN_SRC = /(?:gold|silver|copper|coins?|gp|sp|cp|payment|reward|wages?|bounty|purse|money)/;
-// "the rest of my payment", "pay me again/more/the rest" — repeat-grant intent
-// phrased without a quantifier-noun pair.
-const OWED_REMAINDER_RE = /\b(?:the\s+)?rest of (?:my|the|our) (?:payment|reward|wages?|bounty|coin|money|pay|share)\b|\bpay (?:me|us) (?:again|more|the rest)\b/i;
-
-function playerMessageSupportsRepeatCoinGrant(playerMessage) {
-    const text = String(playerMessage || '');
-    if (!text.trim()) return false;
-    // "another 20 gold", "the rest of my payment" — the repeat intent must attach
-    // to the coin words. Mere co-occurrence ("Another time, Odo… three silver out
-    // of my purse") authorized a live replayed reward on 2026-08-22.
-    return repeatIntentNearNoun(text, COIN_NOUN_SRC) || OWED_REMAINDER_RE.test(text);
-}
-
-// The SPEND side guards FAR wider than grants (2026-08-25 player report: "money
-// is still being removed multiple turns after I've paid"). The old 4-message
-// window covered barely two turns; a DM recapping a payment three turns later
-// escaped it completely and the coin vanished silently. The asymmetry with the
-// grant window above is the deliberate rule: **the engine may refuse to take
-// money on suspicion, but never refuses to give it on suspicion.** An
-// over-suppressed charge is visible ("Duplicate coin charge ignored") and favors
-// the player, who can simply tell the DM to charge again; an over-suppressed
-// reward silently robs them. ONE window for losses AND purchases since
-// 2026-10-07 (P2): only the loss ledger had moved to 12, so a purchase recapped
-// as `gold_lost` nine messages later was suppressed by the loss cover while the
-// same purchase re-emitted as `purchase` charged again and minted a second row.
-const RECENT_SPEND_MESSAGE_WINDOW = 12;
-// Verbs that inherently mean handing money over — on their own they show the
-// player initiating a (possibly repeat) payment this turn.
-const STRONG_PAYMENT_VERB_RE = /\b(pay|pays|paying|paid|repay|repays|repaying|repaid|tip|tips|tipping|tipped|bribe|bribes|bribing|bribed|donate|donates|donating|donated)\b/i;
-// Broader transfer verbs count only when the message also names coin.
-const COIN_TRANSFER_VERB_RE = /\b(give|gives|giving|gave|hand|hands|handing|handed|toss|tosses|tossing|tossed|drop|drops|dropping|dropped|leave|leaves|leaving|left|slip|slips|slipping|slipped|slide|slides|sliding|slid|spend|spends|spending|spent|count|counts|counting|counted|settle|settles|settling|settled|offer|offers|offering|offered)\b/i;
-// A message that itself initiates a purchase is a NEW spend even at a
-// coincidentally identical price — live 2026-08-06: a 1 sp stew right after a
-// 1 sp passage was suppressed despite "I buy a bowl of mutton stew". Narrower
-// than PURCHASE_VERB_RE on purpose: take/grab/get appear in ordinary movement
-// and loot prose, where a same-value DM recap really is a replay.
-const COMMERCE_VERB_RE = /\b(buy|buys|buying|bought|purchase|purchases|purchasing|purchased|order|orders|ordering|ordered)\b/i;
-
-// A message RECAPPING or DISPUTING an earlier payment ("I already paid you",
-// "didn't I pay for this?", "you took my gold twice") is the opposite of repeat
-// intent — yet it contains a payment verb, so the bypass below used to fire on
-// precisely the turns a player was objecting to being charged twice, unlocking
-// the very second charge they were complaining about (2026-08-25 report).
-// Deliberately does NOT include "again"/"another": those are genuine repeat
-// quantifiers the bypass exists to honor.
-const PAYMENT_RECAP_RE = new RegExp(
-    // "already paid", "just handed over", "earlier I bought"
-    `\\b(?:already|just|earlier|previously|before)\\b(?:\\W+\\w+){0,3}\\W+\\b(?:paid|pay|pays|paying|gave|give|given|handed|hand|bought|buy|purchased|settled|spent|owe[ds]?)\\b`
-    // "paid you already", "handed it over twice", "charged me twice"
-    + `|\\b(?:paid|gave|handed|bought|purchased|settled|spent|charged|took|deducted)\\b(?:\\W+\\w+){0,4}\\W+\\b(?:already|earlier|previously|twice|before)\\b`
-    // "didn't I pay", "haven't I already paid", "why did I pay again"
-    // (the optional n['’]t rides inside the word: "didn't" has no boundary
-    // between "did" and "n", so an anchored \b after the verb never matches it)
-    + `|\\b(?:did|do|does|have|has|had|was|were|is|are)(?:n['’]?t)?\\b\\W+(?:i|we|you|it|that|this)\\b(?:\\W+\\w+){0,3}\\W+\\b(?:pay|paid|charged|deducted|taken|took|billed)\\b`,
-    'i'
-);
-
-const AMOUNT_WORDS = {
-    a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-    eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, fifty: 50, hundred: 100,
-};
-const AMOUNT_MENTION_RE = /\b(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|hundred)\s+(gold|gp|silver|sp|copper|cp)\b/gi;
-const DENOMINATION_CP = { gold: 100, gp: 100, silver: 10, sp: 10, copper: 1, cp: 1 };
-
-/**
- * The player's own line NAMES this payment (2026-10-31, the Opus playtest:
- * "I count out two silver" to Jethro was ignored as a duplicate of the two
- * silver paid the net-mender two turns earlier). One "<amount> <coin>"
- * mention whose value equals the charge, in a line that is not a recap.
- */
-export function playerMessageNamesAmount(playerMessage, costCp) {
-    const text = String(playerMessage || '');
-    if (!text.trim() || PAYMENT_RECAP_RE.test(text)) return false;
-    for (const match of text.matchAll(AMOUNT_MENTION_RE)) {
-        const raw = match[1].toLowerCase();
-        const count = /^\d+$/.test(raw) ? Number(raw) : AMOUNT_WORDS[raw];
-        if (count * DENOMINATION_CP[match[2].toLowerCase()] === costCp) return true;
-    }
-    return false;
-}
-
-function playerMessageSupportsRepeatCoinLoss(playerMessage) {
-    const text = String(playerMessage || '');
-    if (!text.trim()) return false;
-    // Explicit repeat intent is always honored, recap words or not: "another two
-    // gold", "pay the toll again" genuinely authorize a second identical charge.
-    if (repeatIntentNearNoun(text, COIN_NOUN_SRC)) return true;
-    // Otherwise a recap/dispute never unlocks a repeat charge.
-    if (PAYMENT_RECAP_RE.test(text)) return false;
-    if (STRONG_PAYMENT_VERB_RE.test(text)) return true;
-    if (COMMERCE_VERB_RE.test(text)) return true;
-    return COIN_TRANSFER_VERB_RE.test(text) && COIN_WORD_RE.test(text);
-}
-
-const DENOMINATION_WORD_RE = {
-    gold: /\b(gold|gp)\b/i,
-    silver: /\b(silver|sp)\b/i,
-    copper: /\b(copper|coppers|cp)\b/i,
-};
-
-/** Decompose `targetCp` exactly into the payload's available denominations.
- * Greedy is exact here because 100/10/1 divide each other. Returns the component
- * coins, or null when the payload's coins cannot express the value. */
-function decomposeWithin(targetCp, { gold, silver, copper }) {
-    const g = Math.min(gold, Math.floor(targetCp / 100));
-    let rem = targetCp - g * 100;
-    const s = Math.min(silver, Math.floor(rem / 10));
-    rem -= s * 10;
-    const c = Math.min(copper, rem);
-    rem -= c;
-    return rem === 0 ? { gold: g, silver: s, copper: c } : null;
-}
-
-/**
- * Recap-bundle guard (2026-07-31 playtest): the DM sometimes bundles a coin
- * movement it already evented on a recent turn INTO a new event ("gold_lost": 1
- * re-recapping the beggar's gold + "copper_lost": 3 for the fountain), producing
- * a novel total the value-signature duplicate check cannot match. When a recent
- * APPLIED ledger entry's value fits entirely inside the incoming amounts, strip
- * that component and apply only the remainder — unless the player's own message
- * names a denomination of the stripped part (an intentional repeat names its
- * coin). Player-favorable by design: a false positive under-moves coin visibly;
- * the old behavior silently double-charged.
- */
-function stripBundledReplay(entries, amounts, playerMessage, currentIndex, window, messages) {
-    const text = String(playerMessage || '');
-    let remainder = { ...amounts };
-    let strippedCp = 0;
-    // Strip EVERY recent applied entry the bundle swallows, each at most once —
-    // a split grant (2 gp then 28 gp) recapped as one 30 gp bundle used to match
-    // only the largest piece and leak the complement on every re-emission (live
-    // playtest #7: the ledger held 2 gp + 28 gp, a recap emitted 30 gp, and the
-    // hero pocketed 2 gp from nothing). An entry equal to the WHOLE incoming
-    // amount is only strippable after something else already was: the untouched
-    // exact-total case belongs to the signature duplicate check, whose player-
-    // phrasing bypass must not be silently overridden here.
-    for (const entry of normalizeRecentTransactions(entries).slice().reverse()) {
-        const remainderCp = remainder.gold * 100 + remainder.silver * 10 + remainder.copper;
-        if (remainderCp <= 0) break;
-        if (entry.status !== 'applied') continue;
-        if (!(entry.priceCp > 0)) continue;
-        if (strippedCp === 0 ? entry.priceCp >= remainderCp : entry.priceCp > remainderCp) continue;
-        const distance = messages
-            ? conversationalDistance(messages, entry.messageIndex, currentIndex)
-            : currentIndex - entry.messageIndex;
-        if (!(distance >= 0 && distance <= window)) continue;
-        const component = decomposeWithin(entry.priceCp, remainder);
-        if (!component) continue;
-        const namesStrippedCoin = ['gold', 'silver', 'copper'].some(
-            denom => component[denom] > 0 && DENOMINATION_WORD_RE[denom].test(text)
-        );
-        if (namesStrippedCoin) continue;
-        remainder = {
-            gold: remainder.gold - component.gold,
-            silver: remainder.silver - component.silver,
-            copper: remainder.copper - component.copper,
-        };
-        strippedCp += entry.priceCp;
-    }
-    return strippedCp > 0 ? { strippedCp, remainder } : null;
-}
-
-/**
- * ONE PURSE, ONE VIEW (2026-08-25). Coin leaves the hero's purse through TWO
- * channels — an atomic `purchase` and a loose `X_lost` — and arrives through two
- * more (`sell`, `X_found`), each with its own ledger. Every replay guard only
- * ever consulted its own ledger, so the commonest real-world sequence was
- * unguarded end to end: the hero BUYS something (recentPurchases, coin
- * deducted), and a turn or two later the DM recaps the handover as loose
- * `gold_lost` — a channel whose ledger has never heard of that purchase — and
- * the money goes again. "Paid for something, charged again later" was the
- * literal shape of the bug report. These views hand every guard the whole side
- * of the purse instead of one channel's slice.
- */
-function spendLedgerView(state) {
-    return [
-        ...normalizeRecentTransactions(state.recentCoinLosses),
-        ...normalizeRecentTransactions(state.recentPurchases),
-    ].sort((a, b) => a.messageIndex - b.messageIndex);
-}
-
-// (No gain-side union view on purpose: the spend side unions its two channels for
-// the bundle strip because an over-suppressed charge is player-favorable, while
-// the gain side gets only the exact-value sale cover below. Stripping suspected
-// duplicates out of a bundled REWARD would take money from the player on a guess
-// — the asymmetry documented at RECENT_SPEND_MESSAGE_WINDOW.)
-
-/**
- * THE cover predicate (2026-10-07 P2 — it was inline four times beside this
- * function): the newest APPLIED movement in `entries` that covers `totalCp`
- * inside `window` conversational messages — this movement is that one
- * retold. `atLeast` is the audit's recap semantics (a retelling may drift
- * low); the DM event path demands an EXACT value so a genuine smaller
- * follow-up (buy armor, then tip the smith) still settles. `excludeBase`
- * skips the SAME narration's entries (the cross-channel covers, and the
- * audits, which scribe.js already reconciled against their own narration);
- * the direction echoes (a loss that is this grant seen backwards) pass none.
- */
-function findAppliedCover(entries, totalCp, { messages, messageIndex, window, atLeast = false, excludeBase = null }) {
-    if (!(totalCp > 0)) return null;
-    return normalizeRecentTransactions(entries).slice().reverse().find(entry => (
-        entry.status === 'applied'
-        && entry.priceCp > 0
-        && (atLeast ? entry.priceCp >= totalCp : entry.priceCp === totalCp)
-        && (!excludeBase || sourceBaseOf(entry.sourceId) !== excludeBase)
-        && conversationalDistance(messages, entry.messageIndex, messageIndex) <= window
-    )) || null;
-}
+const coinsOf = (cp) => ({ gold: 0, silver: 0, copper: cp, totalCp: cp });
 
 /** Purse total after a movement, so every coin line is self-reconciling. */
 function purseLine(character) {
     return formatCurrency(characterCurrencyToCopper(character));
 }
 
+const itemRef = (item, quantity) => ({ name: item.name, itemKey: item.itemKey, quantity });
+const withParty = (twin, word) => (twin?.party ? ` ${word} ${twin.party}` : '');
+const itemsOf = (entry) => (entry?.itemsOut?.length ? entry.itemsOut : entry?.itemsIn || []).map(item => item.name).join(', ');
+
+/**
+ * The one suppression return: the CLAIM enters the log as `ignored` (so a
+ * re-emission of the re-emission is still a replay) and the reason is posted
+ * as a purse receipt the DM reads.
+ */
+function ignore(state, ctx, fields, line) {
+    return {
+        ...state,
+        ledger: logMovement(state, ctx, { ...fields, status: 'ignored' }),
+        messages: [...state.messages, coinLine(line)],
+    };
+}
+
+const GRANT_LINES = {
+    duplicate: (name, twin) => `Duplicate coin grant ignored — ${name} was already received${withParty(twin, 'from')} moments ago.`,
+    cover: (name) => `Duplicate coin grant ignored — ${name} repeats rewards already received moments ago.`,
+    echo: (name) => `Coin recovery ignored — ${name} matches a payment you just made; treated as the same handover retold.`,
+    sameSale: (name, twin) => `Duplicate coin grant ignored — ${name} is the payout of the sale in this same turn (${itemsOf(twin) || 'sold goods'}).`,
+    saleCover: (name, twin) => `Duplicate coin grant ignored — ${name} was already paid out when you sold ${itemsOf(twin) || 'that'}.`,
+};
+
+const PAYMENT_LINES = {
+    duplicate: (name) => `**Duplicate payment ignored:** ${name} was already deducted moments ago.`,
+    cover: (name) => `**Duplicate payment ignored:** ${name} repeats payments already taken moments ago.`,
+    purchaseCover: (name, twin) => `**Duplicate payment ignored:** ${name} was already paid when you bought ${itemsOf(twin) || 'that'}.`,
+    echo: (name) => `**Payment report ignored:** ${name} matches coins you just received — treated as the same handover, not a new charge.`,
+};
+
 export const handlers = {
-    // One narrative coin grant (found/received coins) as a single replay-guarded unit.
-    // The DM sometimes re-emits an already-paid reward on a later turn while narrating
-    // the pouch being counted or split — the recentCoinGrants ledger suppresses an
-    // identical grant inside a short message window unless the player explicitly asked
-    // for more coin. The Scribe loot audit routes its coin recoveries through here too,
-    // so a re-narrated reward cannot sneak back in through the audit backstop.
+    // One coin grant (found / received coins) judged against the transaction
+    // log (state/handlers/ledger.js): a reward the DM re-emits while the pouch
+    // is counted, split or recapped — or the audit re-reports — pays once.
     ADD_COIN_GRANT(state, action) {
         const meta = action.payload?._meta || {};
         const amounts = coinAmounts(action.payload);
         if (isEmptyCoin(amounts)) return state;
-        const transaction = coinTransaction('grant', amounts);
-        const sourceId = String(meta.sourceId || '').slice(0, 160);
-        const messageIndex = currentMessageIndex(state);
-        const cover = (entries, totalCp, options) => findAppliedCover(entries, totalCp, { messages: state.messages, messageIndex, ...options });
-        // Audit grants are engine-reconciled shortfalls: same-message entries are
-        // already subtracted (skip them as duplicates), and no player-phrasing
-        // bypass applies — the repeat-intent escape hatch is for the DM event path,
-        // where the player explicitly asks for more coin on a later turn.
-        const isAudit = meta.audit === true || meta.announce === 'audit';
-        // Audit recaps and completion-turn grants dedupe across the wide window;
-        // ordinary DM grants keep the tight one (two identical legitimate finds
-        // a scene apart must still both pay).
-        const grantWindow = (isAudit || meta.questCompletionAdjacent === true)
-            ? RECENT_COIN_GRANT_EXTENDED_WINDOW
-            : RECENT_COIN_GRANT_MESSAGE_WINDOW;
-        const duplicate = findRecentTransactionDuplicate(
-            state.recentCoinGrants, transaction, sourceId, messageIndex, grantWindow, state.messages,
-            { excludeSameBase: isAudit }
-        );
-        const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
-        if (duplicate && (exactSourceReplay || isAudit || !playerMessageSupportsRepeatCoinGrant(meta.playerMessage))) {
-            return suppress(state, 'recentCoinGrants', transaction, sourceId, messageIndex,
-                `Duplicate coin grant ignored — ${transaction.item.name} was already received moments ago.`);
+        const ctx = ledgerContext(state, meta);
+        const name = formatCurrency(amounts.totalCp);
+        const verdict = judgeCoinIn(state, ctx, amounts);
+        if (verdict.suppress) {
+            return ignore(state, ctx, { kind: 'coin', cp: amounts.totalCp }, GRANT_LINES[verdict.suppress](name, verdict.twin));
         }
-        // Audit cover rule (live playtest #8): scribe.js only stands down against
-        // the SAME narration's applied events, so a next-turn re-narration with a
-        // drifted value (event granted 7 gp, recap says "5 gold and 12 silver" =
-        // 620 cp) reaches here as a novel signature and used to re-grant. An audit
-        // is a recap by nature: when any recent applied grant from ANOTHER message
-        // is at least this large, the narration is recounting that reward — suppress
-        // outright. DM event grants keep #7 semantics (a genuine smaller follow-up
-        // reward must not be eaten; the player-phrasing bypass covers repeats).
-        if (isAudit) {
-            if (cover(state.recentCoinGrants, transaction.priceCp, { window: grantWindow, atLeast: true, excludeBase: sourceBaseOf(sourceId) })) {
-                return suppress(state, 'recentCoinGrants', transaction, sourceId, messageIndex,
-                    `Duplicate coin grant ignored — ${transaction.item.name} repeats rewards already received moments ago.`);
-            }
-            // Direction cover, gain side (2026-08-20 twin of AUDIT_COIN_PAYMENT's
-            // grant echo): a recap of the hero HANDING coins over can be misread
-            // as the hero receiving them — the audit would silently refund a
-            // payment the DM's own event already took. A recent APPLIED coin
-            // LOSS of exactly this value is that payment retold, not a find.
-            // DM event grants are untouched: an explicit refund is authoritative.
-            if (cover(state.recentCoinLosses, transaction.priceCp, { window: grantWindow })) {
-                return suppress(state, 'recentCoinGrants', transaction, sourceId, messageIndex,
-                    `Coin recovery ignored — ${transaction.item.name} matches a payment you just made; treated as the same handover retold.`);
-            }
-        }
-        // Same-message sale duplicate: the DM emitted an atomic `sell` AND a loose
-        // coin gain for the one transaction in the same response. Only a gain whose
-        // value matches this response's sale proceeds (one sale, or all of them
-        // together) is that duplicate; a different value is a genuinely separate
-        // payment riding the same reply (a bounty paid beside a sale — the
-        // 2026-09-03 money playtest lost one to the old blanket suppression).
-        // The cross-channel cover below deliberately skips same-base entries.
-        const grantBase = sourceBaseOf(sourceId);
-        if (grantBase && !isAudit) {
-            const sameMessageSales = normalizeRecentTransactions(state.recentSales)
-                .filter(entry => entry.status === 'applied' && entry.priceCp > 0 && sourceBaseOf(entry.sourceId) === grantBase);
-            const soldTotalCp = sameMessageSales.reduce((sum, entry) => sum + entry.priceCp, 0);
-            const duplicateOf = sameMessageSales.find(entry => entry.priceCp === transaction.priceCp)
-                || (sameMessageSales.length > 1 && soldTotalCp === transaction.priceCp ? sameMessageSales[0] : null);
-            if (duplicateOf) {
-                return suppress(state, 'recentCoinGrants', transaction, sourceId, messageIndex,
-                    `Duplicate coin grant ignored — ${transaction.item.name} is the payout of the sale in this same turn (${duplicateOf.name || 'sold goods'}).`);
-            }
-        }
-        // Cross-channel cover, gain side: the twin of the purchase cover. A sale
-        // already credited these exact proceeds through the other inbound channel
-        // and the DM is re-narrating the payout as loose found coin. Exact value,
-        // and never against an explicit player repeat.
-        const saleCover = cover(state.recentSales, transaction.priceCp, { window: grantWindow, excludeBase: grantBase });
-        if (saleCover && (isAudit || !playerMessageSupportsRepeatCoinGrant(meta.playerMessage))) {
-            return suppress(state, 'recentCoinGrants', transaction, sourceId, messageIndex,
-                `Duplicate coin grant ignored — ${transaction.item.name} was already paid out when you sold ${saleCover.name || 'that'}.`);
-        }
-        // Recap-bundle guard, gain side: a new grant that swallows a recent reward
-        // whole ("the 10 gold reward plus 5 silver you find now") must only pay the
-        // new part. Audit grants run it too (playtest #8) — a recap can bundle
-        // several smaller already-paid pieces; audits carry no playerMessage, so
-        // the denomination-naming bypass never blocks their strip. Same-base
-        // entries stay OUT of an audit's strip pool: scribe.js already subtracted
-        // that narration's applied events, and stripping them again would eat a
-        // legitimately reconciled shortfall.
-        const grantStripPool = isAudit
-            ? normalizeRecentTransactions(state.recentCoinGrants)
-                .filter(entry => !grantBase || sourceBaseOf(entry.sourceId) !== grantBase)
-            : state.recentCoinGrants;
-        const bundled = stripBundledReplay(
-            grantStripPool, amounts, meta.playerMessage,
-            messageIndex, RECENT_COIN_GRANT_MESSAGE_WINDOW, state.messages
-        );
+        const bundled = verdict.bundled;
         const grant = bundled ? bundled.remainder : amounts;
         // The whole bundle can be an assembly of already-paid pieces (split
         // grants recapped as one total) — then there is nothing left to grant.
         if (bundled && isEmptyCoin(grant)) {
-            return suppress(state, 'recentCoinGrants', transaction, sourceId, messageIndex,
-                `Duplicate coin grant ignored — ${transaction.item.name} repeats rewards already received moments ago.`);
+            return ignore(state, ctx, { kind: 'coin', cp: amounts.totalCp }, GRANT_LINES.cover(name));
         }
-        const grantTransaction = bundled ? coinTransaction('grant', grant) : transaction;
+        const grantCp = grant.gold * 100 + grant.silver * 10 + grant.copper;
         const character = addCurrency(state.character, grant);
         // Coin entering the purse announces itself too — the spend line's twin, so
         // the purse total in chat always matches the sheet.
-        const messages = [
-            ...state.messages,
-            ...(bundled ? [coinLine(`Adjusted a bundled coin grant — ${formatCurrency(bundled.strippedCp)} of it repeats a reward already received moments ago; granted ${formatCurrency(grantTransaction.priceCp)}.`)] : []),
-            meta.announce === 'audit'
-                ? coinLine(`**Coins recovered from narration:** ${grantTransaction.item.name} added to your purse — purse: ${purseLine(character)}.`)
-                : coinLine(`**+${formatCurrency(grantTransaction.priceCp)}** received — purse: ${purseLine(character)}.`),
-        ];
         return {
             ...state,
             character,
-            recentCoinGrants: rememberTransaction(state.recentCoinGrants, grantTransaction, sourceId, messageIndex),
-            messages,
-        };
-    },
-
-    // The spend-side twin of ADD_COIN_GRANT: one narrative coin loss (payment, toll,
-    // fine, tip, theft) as a single replay-guarded unit. The DM tends to re-emit a
-    // payment's coin loss on a later turn while recapping or confirming money already
-    // taken (live finding 2026-07-21: a 2-silver correction was charged again on the
-    // next turn) — the recentCoinLosses ledger suppresses an identical loss inside a
-    // short message window unless the player's own message initiates a payment this
-    // turn. The Scribe payment audit shares this ledger, so the event path and the
-    // audit backstop can never both charge the same narrated payment.
-    APPLY_COIN_LOSS(state, action) {
-        const meta = action.payload?._meta || {};
-        const amounts = coinAmounts(action.payload);
-        if (isEmptyCoin(amounts)) return state;
-        const transaction = coinTransaction('loss', amounts);
-        const sourceId = String(meta.sourceId || '').slice(0, 160);
-        const messageIndex = currentMessageIndex(state);
-        const duplicate = findRecentTransactionDuplicate(
-            state.recentCoinLosses, transaction, sourceId, messageIndex, RECENT_SPEND_MESSAGE_WINDOW, state.messages
-        );
-        const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
-        if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatCoinLoss(meta.playerMessage))) {
-            return suppress(state, 'recentCoinLosses', transaction, sourceId, messageIndex,
-                `Duplicate coin charge ignored — ${transaction.item.name} was already paid moments ago.`);
-        }
-        // Cross-channel cover: the hero already paid this exact amount through the
-        // OTHER spend channel (an atomic purchase) and the DM is now re-narrating
-        // that handover as loose coin. The purchase ledger is the only record of
-        // it, which is why this charge sailed through every guard before
-        // 2026-08-25. Exact value only — a genuine differently-priced payment
-        // right after a purchase must still settle.
-        const purchaseCover = findAppliedCover(state.recentPurchases, transaction.priceCp, {
-            messages: state.messages, messageIndex, window: RECENT_SPEND_MESSAGE_WINDOW, excludeBase: sourceBaseOf(sourceId),
-        });
-        if (purchaseCover && !playerMessageSupportsRepeatCoinLoss(meta.playerMessage)) {
-            return suppress(state, 'recentCoinLosses', transaction, sourceId, messageIndex,
-                `Duplicate coin charge ignored — ${transaction.item.name} was already paid when you bought ${purchaseCover.name || 'that'}.`);
-        }
-        // NO recap-bundle strip on the DM's spend lane (Vesa, 2026-10-12 —
-        // DECISIONS.md): the 2026-07-31 guard carved any recent payment that
-        // fit inside a novel charge out of it, and the class playtest measured
-        // the ACCEPTED false positive (2026-08-22) at 6 of 6 Gemini openings —
-        // pay 1 gp for room + stew, then buy rope + lantern for 6 gp, charged
-        // 5. The reducer never sees the goods a loose coin loss paid for, so
-        // no discriminator lives here; the receipts rule (2026-08-31: every
-        // movement is a `−N paid — purse:` line the DM reads) attacks the
-        // re-emission at its source, and the exact-value signature guard plus
-        // the purchase cover above still catch a straight replay. The grant
-        // lane and the audit lane keep their strips (the grant lane refuses to
-        // GIVE on suspicion, the safe direction; the audit fires only on a
-        // coin-silent narration and carries no player message).
-        const charge = amounts;
-        const chargeTransaction = transaction;
-        const bundleNote = [];
-        const result = spendCurrency(state.character, charge);
-        if (!result.paid) {
-            // An unpayable charge is NOT ledgered (2026-08-28 P1): no coin moved,
-            // so recording an "applied" spend fed every cover/strip with a
-            // movement that never happened — an exact-price purchase later
-            // delivered FREE via the loss cover, and a legitimate re-charge of
-            // the never-paid debt was suppressed as "already paid".
-            return {
-                ...state,
-                messages: [...state.messages, ...bundleNote, coinLine(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)],
-            };
-        }
-        const recentCoinLosses = rememberTransaction(state.recentCoinLosses, chargeTransaction, sourceId, messageIndex);
-        // Coin leaving the purse ALWAYS says so (D6, and the other half of the
-        // 2026-08-25 report: "this happens silently"). Before this, the DM event
-        // path was the one coin channel with no system line at all — purchases,
-        // sales and audited payments all announced — so a charge that slipped a
-        // guard was invisible until the player noticed a lighter purse with no
-        // idea which turn took it. Every line carries the resulting purse so any
-        // future leak is immediately legible and disputable.
-        return {
-            ...state,
-            character: result.character,
-            recentCoinLosses,
+            ledger: logMovement(state, ctx, { kind: 'coin', cp: grantCp }),
             messages: [
                 ...state.messages,
-                ...bundleNote,
-                coinLine(`**−${formatCurrency(chargeTransaction.priceCp)}** paid — purse: ${purseLine(result.character)}.`),
+                ...(bundled ? [coinLine(`Adjusted a bundled coin grant — ${formatCurrency(bundled.strippedCp)} of it repeats a reward already received moments ago; granted ${formatCurrency(grantCp)}.`)] : []),
+                meta.announce === 'audit'
+                    ? coinLine(`**Coins recovered from narration:** ${formatCurrency(grantCp)} added to your purse — purse: ${purseLine(character)}.`)
+                    : coinLine(`**+${formatCurrency(grantCp)}** received — purse: ${purseLine(character)}.`),
             ],
         };
     },
 
-    // Scribe payment audit: the narrative showed the hero completing a payment that the
-    // event path never fully deducted. The dispatched amount is ALREADY the engine-
-    // reconciled shortfall for its own narration message (scribe.js subtracts the
-    // applied losses in code), so same-base ledger entries are excluded from duplicate
-    // matching. Cross-message duplicates suppress UNCONDITIONALLY — the audit is a
-    // backstop, never a payer of record, and it gets no player-phrasing bypass: the
-    // player's message on an audited turn is the very message that initiated the
-    // already-counted payment, so the old bypass fired on exactly the turns being
-    // double-charged (live 2026-07-31 "gave 1 gp, charged twice" finding).
-    // One narrow exception since 2026-10-31: a line that NAMES this exact
-    // amount (playerMessageNamesAmount) — the same-turn double charge is now
-    // closed upstream (the audit stands down whenever the event path charged).
+    // The spend-side twin: one payment, toll, fine, tip or theft the DM evented
+    // (or the player confirmed on a "Narrated, not recorded" card).
+    APPLY_COIN_LOSS(state, action) {
+        const meta = action.payload?._meta || {};
+        const amounts = coinAmounts(action.payload);
+        if (isEmptyCoin(amounts)) return state;
+        const ctx = ledgerContext(state, meta);
+        const name = formatCurrency(amounts.totalCp);
+        const verdict = judgeCoinOut(state, ctx, amounts);
+        if (verdict.suppress === 'purchaseCover') {
+            return ignore(state, ctx, { kind: 'coin', cp: -amounts.totalCp },
+                `Duplicate coin charge ignored — ${name} was already paid when you bought ${itemsOf(verdict.twin) || 'that'}.`);
+        }
+        if (verdict.suppress) {
+            return ignore(state, ctx, { kind: 'coin', cp: -amounts.totalCp },
+                `Duplicate coin charge ignored — ${name} was already paid${withParty(verdict.twin, 'to')} moments ago.`);
+        }
+        const result = spendCurrency(state.character, amounts);
+        if (!result.paid) {
+            // An unpayable charge is NOT logged (2026-08-28 P1): no coin moved,
+            // and an "applied" spend that never happened would cover a later
+            // exact-price purchase (delivered free) or suppress the re-charge.
+            return { ...state, messages: [...state.messages, coinLine(`Not enough coin — missing ${formatCurrency(result.missingCp)}.`)] };
+        }
+        // Coin leaving the purse ALWAYS says so (D6; 2026-08-25 "this happens
+        // silently"), with the resulting purse so any leak is legible.
+        return {
+            ...state,
+            character: result.character,
+            ledger: logMovement(state, ctx, { kind: 'coin', cp: -amounts.totalCp }),
+            messages: [...state.messages, coinLine(`**−${name}** paid — purse: ${purseLine(result.character)}.`)],
+        };
+    },
+
+    // Scribe payment audit: the narration showed the hero completing a payment
+    // no event charged. The dispatched amount is ALREADY reconciled against its
+    // own narration (scribeAudits stands down whenever the event path moved
+    // coin), so the judge reads only OTHER messages' movements — and gives the
+    // audit no player-phrasing bypass but one: a line that NAMES this amount.
     AUDIT_COIN_PAYMENT(state, action) {
         const meta = action.payload?._meta || {};
         const amounts = coinAmounts(action.payload);
         const costCp = amounts.totalCp;
         if (costCp <= 0) return state;
-        const transaction = coinTransaction('loss', amounts);
-        const sourceId = String(meta.sourceId || '').slice(0, 160);
-        const messageIndex = currentMessageIndex(state);
-        const base = sourceBaseOf(sourceId);
-        const cover = (entries, options) => findAppliedCover(entries, costCp, { messages: state.messages, messageIndex, window: RECENT_SPEND_MESSAGE_WINDOW, ...options });
-        const duplicate = findRecentTransactionDuplicate(
-            state.recentCoinLosses, transaction, sourceId, messageIndex, RECENT_SPEND_MESSAGE_WINDOW, state.messages,
-            { excludeSameBase: true }
-        );
-        // The player's own line naming THIS amount is a new payment, not a
-        // recap of another message's (2026-10-31) — but only against a charge
-        // that came BEFORE that line: a charge that answered the same line (the
-        // 07-31 "gave 1 gp, charged twice" turn — the DM's charge on the setup,
-        // the audit on the outcome) is still this payment.
-        const named = playerMessageNamesAmount(meta.playerMessage, costCp);
-        const lastPlayerLine = (state.messages || []).findLastIndex(message => message?.role === 'user' && !message.hidden && !message.deleted);
-        const playerPaysAfter = (entry) => named && !!entry && Number.isFinite(entry.messageIndex) && entry.messageIndex < lastPlayerLine;
-        if (duplicate && !playerPaysAfter(duplicate)) {
-            return suppress(state, 'recentCoinLosses', transaction, sourceId, messageIndex,
-                `**Duplicate payment ignored:** ${formatCurrency(costCp)} was already deducted moments ago.`);
+        const ctx = ledgerContext(state, { ...meta, lane: 'audit' });
+        const name = formatCurrency(costCp);
+        const verdict = judgeAuditPayment(state, ctx, amounts);
+        if (verdict.suppress) {
+            return ignore(state, ctx, { kind: 'coin', cp: -costCp }, PAYMENT_LINES[verdict.suppress](name, verdict.twin));
         }
-        // Cover rule, spend side (playtest #8 twin of the audit grant cover): a
-        // re-narrated payment with a drifted value must not charge again when a
-        // recent applied loss from another message already covers it. The audit
-        // is a backstop for pure omissions, never a second payer of record.
-        const lossCover = cover(state.recentCoinLosses, { atLeast: true, excludeBase: base });
-        if (lossCover && !playerPaysAfter(lossCover)) {
-            return suppress(state, 'recentCoinLosses', transaction, sourceId, messageIndex,
-                `**Duplicate payment ignored:** ${formatCurrency(costCp)} repeats payments already taken moments ago.`);
-        }
-        // Cross-channel cover (2026-08-25): the narration is re-telling a handover
-        // the hero already paid as an atomic purchase. scribe.js stands down on
-        // the purchase's OWN narration (appliedCoinCp counts purchases), but a
-        // later re-narration reaches here, where only the coin-loss ledger was
-        // ever consulted. Audit semantics allow a drifted-low recap (`atLeast`).
-        const purchaseCover = cover(state.recentPurchases, { atLeast: true, excludeBase: base });
-        if (purchaseCover && !playerPaysAfter(purchaseCover)) {
-            return suppress(state, 'recentCoinLosses', transaction, sourceId, messageIndex,
-                `**Duplicate payment ignored:** ${formatCurrency(costCp)} was already paid when you bought ${purchaseCover.name || 'that'}.`);
-        }
-        // Direction cover (live playtest 2026-08-20): the Scribe read Branock
-        // counting the hero's REWARD into her palm as the hero paying out, and
-        // the loss ledger knew nothing about the grant — the audit deducted the
-        // exact coins the DM's own event had just added, netting the reward to
-        // zero. A recent APPLIED coin GRANT of exactly this value is that same
-        // handover seen backwards, never a payment. Exact value match by
-        // design: a genuine unevented smaller payment right after a windfall
-        // must still settle. scribe.js stands down same-narration gains; this
-        // is the cross-message belt for next-turn re-narrations.
-        if (cover(state.recentCoinGrants, {})) {
-            return suppress(state, 'recentCoinLosses', transaction, sourceId, messageIndex,
-                `**Payment report ignored:** ${formatCurrency(costCp)} matches coins you just received — treated as the same handover, not a new charge.`);
-        }
-        // Bundle strip for audited payments: a recap can assemble several smaller
-        // already-taken charges into one novel total. No playerMessage rides an
-        // audit, so the denomination-naming bypass never blocks the strip. Same-
-        // base entries stay out of the pool — scribe.js already reconciled this
-        // narration's own applied losses.
-        const lossStripPool = spendLedgerView(state)
-            .filter(entry => !base || sourceBaseOf(entry.sourceId) !== base);
-        const bundled = stripBundledReplay(
-            lossStripPool, amounts, meta.playerMessage,
-            messageIndex, RECENT_SPEND_MESSAGE_WINDOW, state.messages
-        );
+        const bundled = verdict.bundled;
         const charge = bundled ? bundled.remainder : amounts;
         if (bundled && isEmptyCoin(charge)) {
-            return suppress(state, 'recentCoinLosses', transaction, sourceId, messageIndex,
-                `**Duplicate payment ignored:** ${formatCurrency(costCp)} repeats payments already taken moments ago.`);
+            return ignore(state, ctx, { kind: 'coin', cp: -costCp }, PAYMENT_LINES.cover(name));
         }
-        const chargeTransaction = bundled ? coinTransaction('loss', charge) : transaction;
-        const chargeCp = chargeTransaction.priceCp;
-        const result = spendCurrency(state.character, charge);
+        const chargeCp = charge.gold * 100 + charge.silver * 10 + charge.copper;
         const strippedNote = bundled
             ? [coinLine(`Adjusted an audited payment — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken moments ago.`)]
             : [];
+        const result = spendCurrency(state.character, charge);
         if (result.paid) {
             return {
                 ...state,
                 character: result.character,
-                recentCoinLosses: rememberTransaction(state.recentCoinLosses, chargeTransaction, sourceId, messageIndex),
-                messages: [
-                    ...state.messages,
-                    ...strippedNote,
-                    coinLine(`**Payment settled from narration:** ${formatCurrency(chargeCp)} deducted from your purse.`),
-                ],
+                ledger: logMovement(state, ctx, { kind: 'coin', cp: -chargeCp }),
+                messages: [...state.messages, ...strippedNote, coinLine(`**Payment settled from narration:** ${formatCurrency(chargeCp)} deducted from your purse.`)],
             };
         }
         const availableCp = chargeCp - result.missingCp;
         if (availableCp <= 0) {
-            // Empty purse: nothing moved, so nothing is ledgered (2026-08-28 P1 —
-            // a phantom "applied" spend fed the covers/strips and suppressed a
-            // legitimate later charge of the same debt).
+            // Empty purse: nothing moved, so nothing is logged (2026-08-28 P1).
             return {
                 ...state,
-                messages: [
-                    ...state.messages,
-                    ...strippedNote,
-                    coinLine(`**Payment noted from narration:** ${formatCurrency(chargeCp)} was owed, but your purse is empty — nothing deducted.`),
-                ],
+                messages: [...state.messages, ...strippedNote, coinLine(`**Payment noted from narration:** ${formatCurrency(chargeCp)} was owed, but your purse is empty — nothing deducted.`)],
             };
         }
-        const partial = spendCurrency(state.character, { copper: availableCp });
-        // Partial settle: the ledger remembers the value ACTUALLY deducted, not
-        // the narrated charge — covers and strips must only ever see real coin
-        // movement (2026-08-28 P1).
-        const partialTransaction = coinTransaction('loss', { gold: 0, silver: 0, copper: availableCp });
+        // Partial settle: the log holds the value ACTUALLY deducted.
+        const partial = spendCurrency(state.character, coinsOf(availableCp));
         return {
             ...state,
             character: partial.character,
-            recentCoinLosses: rememberTransaction(state.recentCoinLosses, partialTransaction, sourceId, messageIndex),
+            ledger: logMovement(state, ctx, { kind: 'coin', cp: -availableCp }),
             messages: [
                 ...state.messages,
                 ...strippedNote,
@@ -778,71 +317,59 @@ export const handlers = {
             };
         }
         const meta = action.payload?._meta || {};
-        const sourceId = String(meta.sourceId || '').slice(0, 160);
-        const messageIndex = currentMessageIndex(state);
-        // Pass messages so the window measures conversational distance — without
-        // them the helper silently falls back to raw index distance, the exact
-        // dice-turn expiry bug fixed for coins on 2026-07-22.
-        const duplicate = findRecentTransactionDuplicate(state.recentPurchases, transaction, sourceId, messageIndex, RECENT_SPEND_MESSAGE_WINDOW, state.messages);
-        const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
-        if (duplicate && (exactSourceReplay || !playerMessageSupportsRepeatTransaction(item, meta.playerMessage, PURCHASE_VERB_RE))) {
-            return suppress(state, 'recentPurchases', transaction, sourceId, messageIndex,
-                `Duplicate purchase ignored — ${item.name} was already bought recently.`);
+        const ctx = ledgerContext(state, meta);
+        const claim = { kind: 'purchase', cp: -priceCp, itemsIn: [itemRef(item, quantity)] };
+        const verdict = judgePurchase(state, ctx, transaction);
+        if (verdict.suppress) {
+            return ignore(state, ctx, claim, `Duplicate purchase ignored — ${item.name} was already bought recently.`);
         }
-        // Mirror of the coin-loss purchase cover: the DM narrated the handover as
-        // loose coin on an earlier turn and only now emits the atomic purchase.
-        // The price is already out of the purse, so deliver the goods WITHOUT
-        // charging again — suppressing the whole event would swallow the item.
-        const lossCover = findAppliedCover(state.recentCoinLosses, priceCp, {
-            messages: state.messages, messageIndex, window: RECENT_SPEND_MESSAGE_WINDOW, excludeBase: sourceBaseOf(sourceId),
-        });
-        if (lossCover && !playerMessageSupportsRepeatTransaction(item, meta.playerMessage, PURCHASE_VERB_RE)) {
-            // Ledgered as `ignored`, not `applied` (2026-09-03 P2): no coin moved
-            // in THIS action — the covering loss entry already holds the spend.
-            // An `applied` twin put the same payment in spendLedgerView twice,
-            // and stripBundledReplay then stripped both out of a genuine later
-            // charge. The replay guard survives: findRecentTransactionDuplicate
-            // is status-blind, so a re-emitted purchase is still suppressed.
-            const coveredState = suppress(state, 'recentPurchases', transaction, sourceId, messageIndex,
-                `${quantity > 1 ? `${quantity}x ` : ''}${item.name} added — its ${formatCurrency(priceCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`);
-            return withInventoryAndAC(coveredState, addOrStackItem(state.inventory, autoEquipped(state.inventory, mintOwnedItem(item, { quantity }))));
+        const label = `${quantity > 1 ? `${quantity}x ` : ''}${item.name}`;
+        // Both halves already happened as loose events (the price as a coin
+        // loss, the goods as loot): this purchase is that trade retold.
+        if (verdict.coinTwin && verdict.itemTwin) {
+            return ignore(state, ctx, claim, `Duplicate purchase ignored — ${item.name} was already paid for and received moments ago.`);
         }
-
         const newItem = autoEquipped(state.inventory, mintOwnedItem(item, { quantity }));
+        // The price already left as loose coin: deliver the goods WITHOUT
+        // charging again — suppressing the whole event would swallow the item.
+        if (verdict.coinTwin) {
+            const delivered = {
+                ...state,
+                ledger: logMovement(state, ctx, { ...claim, movedCp: 0 }),
+                messages: [...state.messages, coinLine(`${label} added — its ${formatCurrency(priceCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`)],
+            };
+            return withInventoryAndAC(delivered, addOrStackItem(state.inventory, newItem));
+        }
         // The stack ceiling (2026-09-25): a purchase none of which fits is
         // refused before any coin moves; a partial fit is bought (the DM's
         // priceCp is a flat total, not pro-rated) and the discard is visible.
-        const overflow = stackOverflow(state.inventory, newItem);
+        const overflow = verdict.itemTwin ? 0 : stackOverflow(state.inventory, newItem);
         if (overflow >= quantity) {
-            return {
-                ...state,
-                messages: [
-                    ...state.messages,
-                    coinLine(`Cannot buy ${item.name} — the stack is full at ${MAX_ITEM_QUANTITY}; nothing charged.`),
-                ],
-            };
+            return { ...state, messages: [...state.messages, coinLine(`Cannot buy ${item.name} — the stack is full at ${MAX_ITEM_QUANTITY}; nothing charged.`)] };
         }
-
         const payment = spendCurrency(state.character, priceCp);
         if (!payment.paid) {
+            return { ...state, messages: [...state.messages, coinLine(`Cannot buy ${item.name} — price is ${formatCurrency(priceCp)}, missing ${formatCurrency(payment.missingCp)}.`)] };
+        }
+        // The goods already arrived as loot: the price is owed, the item is not
+        // owed twice (a purchase retold after an items_found — 2026-11-01).
+        if (verdict.itemTwin) {
             return {
                 ...state,
-                messages: [
-                    ...state.messages,
-                    coinLine(`Cannot buy ${item.name} — price is ${formatCurrency(priceCp)}, missing ${formatCurrency(payment.missingCp)}.`),
-                ],
+                character: payment.character,
+                ledger: logMovement(state, ctx, { ...claim, itemsMoved: false }),
+                messages: [...state.messages, coinLine(`Paid ${formatCurrency(priceCp)} for ${label} — it already reached your pack moments ago, so no second one was added; purse: ${purseLine(payment.character)}.`)],
             };
         }
-
         // The purchase receipt carries the purse like the coin lines do
         // (2026-09-25): the DM reads what the hero has left from ONE line.
         const nextState = {
             ...state,
             character: payment.character,
-            recentPurchases: rememberTransaction(state.recentPurchases, transaction, sourceId, messageIndex),
+            ledger: logMovement(state, ctx, claim),
             messages: [
                 ...state.messages,
-                coinLine(`Bought ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(priceCp)} — purse: ${purseLine(payment.character)}.`),
+                coinLine(`Bought ${label} for ${formatCurrency(priceCp)} — purse: ${purseLine(payment.character)}.`),
                 ...(overflow > 0 ? [coinLine(`${item.name} stack is full at ${MAX_ITEM_QUANTITY} — ${overflow} of the ${quantity} bought could not be carried.`)] : []),
             ],
         };
@@ -856,13 +383,8 @@ export const handlers = {
         // fence, or a motivated buyer.
         const payload = action.payload || {};
         const ref = payload.itemId || payload.itemKey || payload.name || '';
-        // Same resolution ladder as equip/remove (2026-08-28 audit): a drifted
-        // DM name ("hempen rope" for "Hempen Rope (50 ft)") resolves through
-        // catalog keys and descriptor prefixes instead of failing on exact-name.
-        // The sale reads the ladder's `ambiguous` like REMOVE_ITEM_BY_NAME does
-        // (2026-10-20 inventory-economy P2): "fire potion" against two fire
-        // potions used to be told "not in your inventory" — a receipt the DM
-        // acts on (another spelling, or a pack narrated as lacking the potion).
+        // Same resolution ladder as equip/remove (2026-08-28 audit), reading
+        // `ambiguous` like REMOVE_ITEM_BY_NAME (2026-10-20 P2).
         const { item, ambiguous } = resolveInventoryItemRef(state.inventory, payload);
         if (!item) {
             return {
@@ -872,27 +394,15 @@ export const handlers = {
                     : `Can't sell "${ref}" — it's not in your inventory.`)],
             };
         }
-
-        // Finite + trunc like buildPurchaseTransaction (2026-09-03 P2): a
-        // fractional/string DM quantity left "Rations ×2.5" and paid 1.5×.
-        // "all" sells the whole stack — contract parity with items_lost
-        // (2026-09-12 P2: it used to sell ONE unit).
+        // Finite + trunc (2026-09-03 P2); "all" sells the whole stack (2026-09-12 P2).
         const heldQuantity = Math.max(1, Math.trunc(item.quantity || 1));
         const sellsAll = typeof payload.quantity === 'string' && payload.quantity.trim().toLowerCase() === 'all';
         const requestedQuantity = sellsAll ? heldQuantity : toFiniteNumber(payload.quantity);
-        const quantity = Math.max(1, Math.min(
-            heldQuantity,
-            requestedQuantity !== null ? Math.trunc(requestedQuantity) : 1
-        ));
-        // Proceeds share the coin-grant ceiling whichever path priced them: the DM's
-        // override is unbounded LLM input, and legacy save items may carry an
-        // unclamped valueCp.
+        const quantity = Math.max(1, Math.min(heldQuantity, requestedQuantity !== null ? Math.trunc(requestedQuantity) : 1));
+        // Proceeds share the coin-grant ceiling whichever path priced them.
         const overridePriceCp = toFiniteNumber(payload.priceCp);
-        // No price the engine can see — no catalog value and none on the
-        // event — is refused, the item kept (grand playtest 2026-10-02): the
-        // sale paid 0 cp and took the hammer while the narration counted out
-        // four silver, and the Scribe's audit is told sales are the engine's.
-        // The receipt rides the DM's window, so the DM can re-emit it priced.
+        // No price the engine can see is refused, the item kept (grand
+        // playtest 2026-10-02); the receipt lets the DM re-emit it priced.
         if (overridePriceCp === null && !(Number.isFinite(item.valueCp) && item.valueCp > 0)) {
             return {
                 ...state,
@@ -902,34 +412,67 @@ export const handlers = {
         const proceedsCp = Math.min(MAX_SALE_PROCEEDS_CP, overridePriceCp !== null
             ? Math.max(0, Math.trunc(overridePriceCp))
             : Math.floor((item.valueCp || 0) / 2) * quantity);
-
-        // Sales get the same one-shot replay protection as purchases: a re-emitted
-        // sell event must not remove the item twice or pay out twice.
-        const saleTransaction = {
-            item: { itemKey: item.itemKey, name: item.name },
-            quantity,
-            priceCp: proceedsCp,
-            signature: `${normalizeItemKey(item.itemKey || item.name) || normalizeRefToken(item.name)}|${quantity}|${proceedsCp}`,
-        };
-        const saleMeta = payload._meta || {};
-        const saleSourceId = String(saleMeta.sourceId || '').slice(0, 160);
-        const messageIndex = currentMessageIndex(state);
-        const saleDuplicate = findRecentTransactionDuplicate(state.recentSales, saleTransaction, saleSourceId, messageIndex, RECENT_SALE_MESSAGE_WINDOW, state.messages);
-        const exactSaleReplay = !!saleSourceId && saleDuplicate?.sourceId === saleSourceId;
-        if (saleDuplicate && (exactSaleReplay || !playerMessageSupportsRepeatTransaction(item, saleMeta.playerMessage, SALE_VERB_RE))) {
-            return suppress(state, 'recentSales', saleTransaction, saleSourceId, messageIndex,
-                `Duplicate sale ignored — ${item.name} was already sold recently.`);
+        const ctx = ledgerContext(state, payload._meta || {});
+        const claim = { kind: 'sale', cp: proceedsCp, itemsOut: [itemRef(item, quantity)] };
+        const verdict = judgeSale(state, ctx, item, quantity, proceedsCp);
+        if (verdict.suppress) {
+            return ignore(state, ctx, claim, `Duplicate sale ignored — ${item.name} was already sold recently.`);
         }
-
+        const label = `${quantity > 1 ? `${quantity}x ` : ''}${item.name}`;
+        // The proceeds already arrived as loose found coin: the goods leave,
+        // the money is not paid twice.
+        if (verdict.coinTwin) {
+            const settled = {
+                ...state,
+                ledger: logMovement(state, ctx, { ...claim, movedCp: 0 }),
+                messages: [...state.messages, coinLine(`Sold ${label} — its ${formatCurrency(proceedsCp)} was already paid moments ago; purse unchanged at ${purseLine(state.character)}.`)],
+            };
+            return withInventoryAndAC(settled, consumeItem(state.inventory, item.id, quantity));
+        }
+        const character = addCurrency(state.character, { copper: proceedsCp });
         const nextState = {
             ...state,
-            character: addCurrency(state.character, { copper: proceedsCp }),
-            recentSales: rememberTransaction(state.recentSales, saleTransaction, saleSourceId, messageIndex),
-            messages: [
-                ...state.messages,
-                coinLine(`Sold ${quantity > 1 ? `${quantity}x ` : ''}${item.name} for ${formatCurrency(proceedsCp)} — purse: ${purseLine(addCurrency(state.character, { copper: proceedsCp }))}.`),
-            ],
+            character,
+            ledger: logMovement(state, ctx, claim),
+            messages: [...state.messages, coinLine(`Sold ${label} for ${formatCurrency(proceedsCp)} — purse: ${purseLine(character)}.`)],
         };
         return withInventoryAndAC(nextState, consumeItem(state.inventory, item.id, quantity));
+    },
+
+    /**
+     * "Narrated, not recorded" (2026-11-01): the Scribe saw a movement in a
+     * reply the DM DID event, and one accountant per narration keeps the
+     * audit from booking it on its own. The card asks the player; their
+     * answer is the player lane — logged, never second-guessed. Payload:
+     * { messageId, accept }.
+     */
+    RESOLVE_RECOVERY(state, action) {
+        const { messageId, accept } = action.payload || {};
+        const index = (state.messages || []).findIndex(message => message?.id === messageId && message.kind === 'recovery');
+        if (index === -1) return state;
+        const card = state.messages[index];
+        const recovery = card.recovery || {};
+        if (recovery.status !== 'open') return state;
+        const marked = (base, status) => ({
+            ...base,
+            messages: base.messages.map((message, i) => (i === index ? { ...message, recovery: { ...recovery, status } } : message)),
+        });
+        if (accept !== true) return marked(state, 'dismissed');
+        let next = marked(state, 'accepted');
+        const meta = { lane: 'player', sourceId: `${messageId}:recovery`, party: recovery.party || '' };
+        const coinCp = Math.max(0, Math.trunc(Number(recovery.coinCp) || 0));
+        const items = Array.isArray(recovery.items) ? recovery.items.slice(0, 4) : [];
+        if (recovery.direction === 'out') {
+            if (coinCp > 0) next = handlers.APPLY_COIN_LOSS(next, { payload: { copper: coinCp, _meta: meta } });
+            for (const entry of items) {
+                next = inventoryHandlers.REMOVE_ITEM_BY_NAME(next, { payload: { name: entry.name, ...(entry.quantity > 1 && { quantity: entry.quantity }), _meta: meta } });
+            }
+        } else {
+            if (coinCp > 0) next = handlers.ADD_COIN_GRANT(next, { payload: { copper: coinCp, _meta: meta } });
+            for (const entry of items) {
+                next = inventoryHandlers.ADD_ITEM(next, { payload: { ...entry, _meta: meta } });
+            }
+        }
+        return next;
     },
 };

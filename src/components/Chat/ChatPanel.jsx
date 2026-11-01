@@ -37,6 +37,7 @@ import ReturnCard from './ReturnCard.jsx';
 import { buildReturnCard, returnCardDismissKey } from './returnCard.js';
 import EndingCard from './EndingCard.jsx';
 import { buildEndingCard } from './endingCard.js';
+import { formatCurrency } from '../../engine/currency.js';
 import './Chat.css';
 
 /**
@@ -161,6 +162,11 @@ export default function ChatPanel() {
     stateRef.current = state;
     // Stable so the memoized ChatMessage rows don't re-render per panel paint
     // (it reads stateRef at click time, never a render-time field).
+    // "Narrated, not recorded" (2026-11-01): the player books or dismisses a
+    // movement the Scribe saw in a reply the DM evented — the player lane.
+    const handleResolveRecovery = useCallback((id, accept) => {
+        dispatch({ type: 'RESOLVE_RECOVERY', payload: { messageId: id, accept } });
+    }, [dispatch]);
     const handleDeleteMessage = useCallback((id) => {
         // Source-stamped retraction (memory-research M0, 2026-09-30): the
         // reducer retracts the facts / cards / impressions this message
@@ -1041,7 +1047,7 @@ export default function ChatPanel() {
                     ? state.messages.slice(-renderWindow)
                     : state.messages
                 ).map((msg) => (
-                    <ChatMessage key={msg.id} message={msg} onDelete={handleDeleteMessage} />
+                    <ChatMessage key={msg.id} message={msg} onDelete={handleDeleteMessage} onResolveRecovery={handleResolveRecovery} />
                 ))}
 
                 {isLoading && streamingMessage && (
@@ -1238,7 +1244,14 @@ function RoleplayCheckPanel({
 // Memoized: message objects are immutable once appended, so a streaming-paint
 // re-render of the panel must not re-render (and re-parse markdown for) every
 // transcript message — that was O(campaign × chunks) per DM turn.
-const ChatMessage = memo(function ChatMessage({ message, onDelete }) {
+/** The one button that books a "Narrated, not recorded" card, worded by what it moves. */
+function recoveryActionLabel(recovery) {
+    const coin = recovery.coinCp > 0 ? formatCurrency(recovery.coinCp) : '';
+    if (recovery.direction === 'out') return coin ? `Deduct ${coin}` : 'Remove from my pack';
+    return coin && !(recovery.items || []).length ? `Add ${coin}` : 'Add to my pack';
+}
+
+const ChatMessage = memo(function ChatMessage({ message, onDelete, onResolveRecovery }) {
     // Two-click delete confirm (armed state resets after a moment) — a single
     // misclick must never expunge a turn from the record.
     const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -1303,6 +1316,22 @@ const ChatMessage = memo(function ChatMessage({ message, onDelete }) {
                 <div className="message-text">
                     <MarkdownText text={cleanDisplayText(message.content)} />
                 </div>
+                {message.kind === 'recovery' && message.recovery && (
+                    <div className="recovery-actions">
+                        {message.recovery.status === 'open' ? (
+                            <>
+                                <button type="button" className="recovery-accept" onClick={() => onResolveRecovery?.(message.id, true)}>
+                                    {recoveryActionLabel(message.recovery)}
+                                </button>
+                                <button type="button" className="recovery-dismiss" onClick={() => onResolveRecovery?.(message.id, false)}>
+                                    Dismiss
+                                </button>
+                            </>
+                        ) : (
+                            <span className="recovery-status">{message.recovery.status === 'accepted' ? 'Recorded.' : 'Dismissed — nothing changed.'}</span>
+                        )}
+                    </div>
+                )}
             </div>
         </div>
     );

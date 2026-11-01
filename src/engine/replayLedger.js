@@ -2,10 +2,9 @@
  * Pipe-string replay ledgers — the cross-message idempotency guard behind the
  * one-shot mechanics invariant (DECISIONS.md 2026-07-21) for channels that
  * track "sourceId|key|messageIndex" strings: spell casts (key = spell key) and
- * rests (key = rest type). The richer structured-transaction ledger
- * (purchases/sales/coin grants/losses) stays in gameReducer, but shares
- * `conversationalDistance` from here so both generations measure replay
- * windows the same way.
+ * rests (key = rest type). The coin and item transaction log
+ * (engine/transactionLedger.js, 2026-11-01) shares `conversationalDistance`
+ * from here so every generation measures replay windows the same way.
  */
 
 /**
@@ -15,16 +14,6 @@
  * the raw-index coin windows — the DM's "very next turn" re-emission landed 8
  * raw messages later and re-paid a 20 gp fee (live finding 2026-07-22).
  */
-/**
- * The wider item-grant replay window (2026-08-31 P1): a reward item granted at
- * the handover is re-emitted at quest completion > 4 conversational messages
- * later. Read by the reducer's grant ledger (quest-completion responses) AND
- * the Scribe loot audit's own dedupe — one constant since 2026-10-10 (scribe
- * P2: the audit kept a private 12 the 10-07 spend-window unification missed).
- * Matches the spend side's RECENT_SPEND_MESSAGE_WINDOW.
- */
-export const RECENT_ITEM_GRANT_EXTENDED_WINDOW = 12;
-
 export function conversationalDistance(messages, fromIndex, toIndex) {
     if (!Array.isArray(messages)) return Math.max(0, toIndex - fromIndex);
     const lo = Math.max(0, Math.floor(fromIndex + 1));

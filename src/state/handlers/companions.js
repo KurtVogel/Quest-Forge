@@ -5,6 +5,7 @@
 import { deriveGiftAC } from '../../engine/companionGear.js';
 import { appendBondMoments, findCompanionRecord, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { ensureCompanionRosterRecord, normalizeCompanion, systemMessage, withInventoryAndAC } from './shared.js';
+import { ledgerContext, logMovement } from './ledger.js';
 import { isShieldItem, isWeaponItem } from '../../engine/equipment.js';
 
 const MAX_PARTY_SIZE = 4;
@@ -195,7 +196,12 @@ export const handlers = {
             gearPayload = { id: companion.id, ac: newAc, ...(isShield ? { shieldBonus: shieldValue } : {}) };
         }
 
-        const updated = handlers.UPDATE_COMPANION(state, { type: 'UPDATE_COMPANION', payload: gearPayload });
+        const handed = handlers.UPDATE_COMPANION(state, { type: 'UPDATE_COMPANION', payload: gearPayload });
+        // The handoff enters the transaction log (2026-11-01): the DM's
+        // items_lost for the same gear on its next reply is that handoff
+        // retold, never a second unit out of a stack.
+        const ctx = ledgerContext(state, { lane: 'player', sourceId: `handoff:${item.id}:${(state.messages || []).length}` }, companion.name);
+        const updated = { ...handed, ledger: logMovement(handed, ctx, { kind: 'handoff', itemsOut: [{ name: item.name, itemKey: item.itemKey, quantity: 1 }] }) };
         // Exactly one unit leaves the hero's possession; AC recomputes in case
         // the hero handed over their own equipped protection.
         const remaining = (item.quantity || 1) > 1

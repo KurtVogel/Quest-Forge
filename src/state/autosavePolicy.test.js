@@ -67,7 +67,7 @@ describe('isBackgroundOnlyChange (two-tier debounce, 2026-09-23 audit P2)', () =
 
     it('the Scribe / cadence / reflection / ledger fields are background — and so is any field nobody listed', () => {
         const prev = liveState();
-        for (const key of ['npcs', 'worldFacts', 'storyMemory', 'journal', 'locations', 'fronts', 'heroTells', 'recentCoinGrants', 'appliedLootSourceIds']) {
+        for (const key of ['npcs', 'worldFacts', 'storyMemory', 'journal', 'locations', 'fronts', 'heroTells', 'ledger', 'appliedLootSourceIds']) {
             expect(isBackgroundOnlyChange(prev, { ...prev, [key]: [{ id: 'x' }] }), key).toBe(true);
         }
         expect(isBackgroundOnlyChange(prev, { ...prev, worldTempo: { directive: 'lull' } })).toBe(true);

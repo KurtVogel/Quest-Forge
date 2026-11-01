@@ -283,6 +283,7 @@ export function createTurnRunner({
             memoryUnavailable: memoryDown,
             character: s.character,
             inventory: s.inventory,
+            ledger: s.ledger || [],
             quests: s.quests,
             rollHistory: s.rollHistory,
             preset: s.settings.preset,

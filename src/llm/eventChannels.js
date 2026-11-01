@@ -489,6 +489,11 @@ export const EVENT_CHANNELS = [
     { wire: 'silver_lost', key: 'silverLost', read: raw => clampInt(raw.silver_lost, 0, MAX_COIN_EVENT) },
     { wire: 'copper_found', key: 'copperFound', read: raw => clampInt(raw.copper_found, 0, MAX_COIN_EVENT) },
     { wire: 'copper_lost', key: 'copperLost', read: raw => clampInt(raw.copper_lost, 0, MAX_COIN_EVENT) },
+    // Who the loose coin came from / went to (2026-11-01): the transaction
+    // log's counterparty — two payments to two people are never one payment
+    // retold, and one person's reward recapped much later still is.
+    { wire: 'coin_from', key: 'coinFrom', read: raw => (typeof raw.coin_from === 'string' ? raw.coin_from.trim().slice(0, 60) : '') },
+    { wire: 'coin_to', key: 'coinTo', read: raw => (typeof raw.coin_to === 'string' ? raw.coin_to.trim().slice(0, 60) : '') },
     { wire: 'exp_awarded', key: 'expAwarded', read: raw => clampInt(raw.exp_awarded, 0, 10000) },
     // A flag wire is a toFlag wire (2026-09-19 audit P1): `!!` read the string
     // `"false"` most models emit for "no" as true and PAID the story milestone.

@@ -742,17 +742,10 @@ describe('applyEvents dispatch coverage', () => {
             sells: ['junk-string-entry', { itemKey: 'dagger' }],
             quest_updates: [{ name: 'Buy supplies', status: 'completed' }],
         });
-        // The same-response quest completion stamps questCompletionAdjacent
-        // meta on the transactions (2026-08-31 P1: wide replay horizon for
-        // completion-adjacent grants).
-        expect(dispatch).toHaveBeenCalledWith({
-            type: 'PURCHASE_ITEM',
-            payload: { itemKey: 'torch', _meta: { questCompletionAdjacent: true } },
-        });
-        expect(dispatch).toHaveBeenCalledWith({
-            type: 'SELL_ITEM',
-            payload: { itemKey: 'dagger', _meta: { questCompletionAdjacent: true } },
-        });
+        // No completion-adjacent window any more (2026-11-01): every gain
+        // shares one window, and the counterparty widens it, not the quest.
+        expect(dispatch).toHaveBeenCalledWith({ type: 'PURCHASE_ITEM', payload: { itemKey: 'torch' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'SELL_ITEM', payload: { itemKey: 'dagger' } });
         expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'COMPLETE_QUEST' }));
     });
 
@@ -797,7 +790,7 @@ describe('applyEvents dispatch coverage', () => {
     it('dispatches a found item and a lost item by name', () => {
         const dispatch = run({ items_found: ['Rusty Key'], items_lost: ['Torch'] });
         expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_ITEM', payload: { name: 'Rusty Key' } });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: 'Torch' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Torch' } });
     });
 
     it('suppresses a loose coin loss emitted alongside an atomic purchase', () => {
@@ -1317,18 +1310,18 @@ describe('applyEvents carries an items_lost quantity (2026-09-03 P1)', () => {
         return dispatch;
     }
 
-    it('forwards a count and "all" as { name, quantity }, and a bare name as a string', () => {
+    it('forwards a count and "all" as { name, quantity }, and a bare name as { name }', () => {
         const dispatch = run({ items_lost: [{ name: 'Torch', quantity: 2 }, { name: 'Rations (1 day)', quantity: 'ALL' }, 'Rope', { name: 'Arrow', quantity: 1 }] });
         expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Torch', quantity: 2 } });
         expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Rations (1 day)', quantity: 'all' } });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: 'Rope' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Rope' } });
         expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Arrow', quantity: 1 } });
     });
 
     it('drops junk quantities back to the bare-name default', () => {
         const dispatch = run({ items_lost: [{ name: 'Torch', quantity: 'some' }, { name: 'Dart', quantity: -3 }] });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: 'Torch' });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: 'Dart' });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Torch' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Dart' } });
     });
 });
 

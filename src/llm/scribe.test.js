@@ -824,7 +824,7 @@ describe('Scribe loot persistence audit', () => {
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'CLAIM_LOOT_SOURCE' }));
     });
 
-    it('skips a narrated item the recentItemGrants ledger shows granted moments ago (playtest #8)', async () => {
+    it('skips a narrated item the transaction log shows granted moments ago (playtest #8)', async () => {
         // The live re-narration: "you tuck the pages away" one turn after the
         // pages were evented. Audit ADD_ITEMs stay meta-less by design, so the
         // cross-message dedupe lives in scribe.js against the item-grant ledger.
@@ -843,16 +843,7 @@ describe('Scribe loot persistence audit', () => {
                 getState: () => ({
                     appliedLootSourceIds: [],
                     messages,
-                    recentItemGrants: [{
-                        signature: 'item|missingledgerpages',
-                        itemKey: '',
-                        name: 'Missing ledger pages',
-                        quantity: 1,
-                        priceCp: 0,
-                        sourceId: 'msg-earlier',
-                        messageIndex: 118,
-                        status: 'applied',
-                    }],
+                    ledger: [{ kind: 'item', status: 'applied', itemsIn: [{ name: 'Missing ledger pages', quantity: 1 }], sourceId: 'msg-earlier', atMessage: 118 }],
                 }),
             }),
         });
@@ -1098,10 +1089,7 @@ describe('Scribe loot persistence audit', () => {
                 getState: () => ({
                     appliedLootSourceIds: [],
                     messages: [{ role: 'user' }, { role: 'assistant' }],
-                    recentItemGrants: [{
-                        signature: 'item|brasstransittoken', name: 'Brass transit token', itemKey: '',
-                        status: 'applied', messageIndex: 1, priceCp: 0, quantity: 1, sourceId: 'msg-0', timestamp: 1,
-                    }],
+                    ledger: [{ kind: 'item', status: 'applied', itemsIn: [{ name: 'Brass transit token', quantity: 1 }], sourceId: 'msg-0', atMessage: 1 }],
                 }),
             }),
         });
@@ -1565,7 +1553,7 @@ describe('Scribe narrated-loss audit (queue P2, live playtest #8)', () => {
         const actions = dispatch.mock.calls.map(c => c[0]);
         expect(actions.find(a => a.type === 'CLAIM_LOOT_SOURCE')?.payload).toBe('msg-12:scribe-loot:losses');
         const removal = actions.find(a => a.type === 'REMOVE_ITEM_BY_NAME');
-        expect(removal?.payload).toBe('Rusted iron keys');
+        expect(removal?.payload).toEqual({ name: 'Rusted iron keys', _meta: { sourceId: 'msg-12:scribe-loot:losses', audit: true } });
         const notice = actions.find(a => a.type === 'ADD_MESSAGE');
         expect(notice?.payload.content).toContain('Losses recorded from narration');
         expect(notice?.payload.content).toContain('Rusted iron keys');
@@ -1611,7 +1599,7 @@ describe('Scribe narrated-loss audit (queue P2, live playtest #8)', () => {
             }),
         });
         const removal = dispatch.mock.calls.map(c => c[0]).find(a => a.type === 'REMOVE_ITEM_BY_NAME');
-        expect(removal?.payload).toBe('Wax Candles (x5)');
+        expect(removal?.payload?.name).toBe('Wax Candles (x5)');
     });
 
     it('prefers an exact-name stack over a fuzzy twin when both exist', async () => {
@@ -1631,7 +1619,7 @@ describe('Scribe narrated-loss audit (queue P2, live playtest #8)', () => {
             }),
         });
         const removal = dispatch.mock.calls.map(c => c[0]).find(a => a.type === 'REMOVE_ITEM_BY_NAME');
-        expect(removal?.payload).toBe('wax candles');
+        expect(removal?.payload?.name).toBe('wax candles');
     });
 
     it('skips a fuzzy loss matching multiple stacks — whole-stack removal must never guess', async () => {
@@ -1947,7 +1935,7 @@ describe('loss audit dedupe on the resolved stack (2026-09-01 scribe P2)', () =>
         });
         const removals = dispatch.mock.calls.filter(([a]) => a.type === 'REMOVE_ITEM_BY_NAME');
         expect(removals).toHaveLength(1);
-        expect(removals[0][0].payload).toBe('Rusted iron keys');
+        expect(removals[0][0].payload.name).toBe('Rusted iron keys');
         const notice = dispatch.mock.calls.find(([a]) => a.type === 'ADD_MESSAGE')?.[0];
         expect(notice.payload.content).toBe('**Losses recorded from narration:** Rusted iron keys removed from your possessions.');
     });
@@ -2098,11 +2086,13 @@ describe('loss audit carries the narrated quantity (2026-09-03 P1: one torch bur
                 }),
             },
         });
-        const removals = dispatch.mock.calls.filter(([a]) => a.type === 'REMOVE_ITEM_BY_NAME').map(([a]) => a.payload);
+        // Every audit removal carries its claimed source (2026-11-01) — the
+        // transaction log judges it like any other movement.
+        const removals = dispatch.mock.calls.filter(([a]) => a.type === 'REMOVE_ITEM_BY_NAME').map(([a]) => (({ _meta, ...rest }) => rest)(a.payload));
         expect(removals).toEqual([
             { name: 'Torch', quantity: 2 },
             { name: 'Rations (1 day)', quantity: 'all' },
-            'Hempen Rope (50 ft)',
+            { name: 'Hempen Rope (50 ft)' },
         ]);
     });
 });
@@ -2216,7 +2206,7 @@ describe('loot audit item identity is name-only (2026-09-16 scribe P2: itemKey m
             lootAudit: {
                 sourceId: 'msg-2:scribe-loot',
                 appliedEvents: { goldFound: 0, itemsFound: [], purchases: [], sells: [], startingItems: [] },
-                getState: () => ({ appliedLootSourceIds: [], messages: [], recentItemGrants: [] }),
+                getState: () => ({ appliedLootSourceIds: [], messages: [], ledger: [] }),
             },
         });
         const add = dispatch.mock.calls.find(([a]) => a.type === 'ADD_ITEM')?.[0];

@@ -6,11 +6,12 @@
  * injects the *_AUDIT_RULES into the extraction prompt and hands the parsed
  * report to runNarrationAudits.
  */
-import { conversationalDistance, RECENT_ITEM_GRANT_EXTENDED_WINDOW } from '../engine/replayLedger.js';
+import { cleanParty, lastLongRestAt, movedItems, normalizeLedger, resolvePartyId, withinWindow } from '../engine/transactionLedger.js';
+import { formatCurrency } from '../engine/currency.js';
 import { itemIdentityMatches } from '../engine/textMatch.js';
 import { isSpellcaster, resolveSpellForCharacter } from '../engine/spellcasting.js';
 import { namesMatch } from '../engine/npcRoster.js';
-import { MAX_ITEM_QUANTITY } from '../data/items.js';
+import { MAX_ITEM_QUANTITY, normalizeItem } from '../data/items.js';
 import { MAX_COIN_EVENT } from '../config/contentLimits.js';
 
 // The PARTY COMPANIONS' CURRENT GEAR context line: a name + weapon + AC +
@@ -22,9 +23,9 @@ export const LOOT_AUDIT_RULES = `
 ADDITIONAL TASK — LOOT & PAYMENT PERSISTENCE AUDIT:
 The game engine persists coins and items ONLY from structured events; anything narrated but not emitted as an event silently vanishes. Your task here is pure OBSERVATION: report what THIS DM narrative shows changing hands, at the full narrated amounts. The engine deterministically reconciles your report against the events it already applied — NEVER do that subtraction yourself, and never omit a coin movement just because EVENTS ALREADY APPLIED lists it.
 Report the coins and items the narrative shows the hero ACQUIRING, as one extra top-level field:
-"narrated_loot": { "gold": 0, "silver": 0, "copper": 0, "items": [{ "name": "exact item name from the narrative", "quantity": 1 }] }
+"narrated_loot": { "gold": 0, "silver": 0, "copper": 0, "items": [{ "name": "exact item name from the narrative", "quantity": 1 }], "from": "the person who handed it to the hero, or empty" }
 Also report the coins the narrative shows the hero PAYING OUT, as another top-level field:
-"narrated_payment": { "gold": 0, "silver": 0, "copper": 0 }
+"narrated_payment": { "gold": 0, "silver": 0, "copper": 0, "to": "the person who received it, or empty" }
 
 DIRECTION DECIDES THE LANE — check who holds the coins at the END before anything else:
 - narrated_loot is ONLY what flows TO the hero: coins or items the HERO ends up holding.
@@ -38,7 +39,7 @@ Loot rules:
 - Hospitality consumed on the spot is not an acquisition: a poured drink, a served meal, food and ale enjoyed at the table never become inventory. Report provisions only when the narrative has the hero pack, pocket, or carry them away.
 - Exact amounts only. If the narrative gives no specific number ("a handful of coins"), omit that coin field entirely — never estimate.
 - Denominations are sacred: report coins in the EXACT denomination the narrative names and NEVER convert between them — "thirty silver pieces" is "silver": 30 (never "gold": 30), "fifty silver" is "silver": 50, "two gold crowns" is "gold": 2. This applies to narrated_payment identically.
-- Purchases and sales are engine transactions handled elsewhere; never report coins or goods exchanged in a purchase or sale — in either direction.
+- Purchases and sales are movements like any other: report the goods the hero buys in narrated_loot and the price paid in narrated_payment; the coins a sale brings in in narrated_loot and the goods sold in narrated_losses. The engine reconciles them against the purchase and sale events it applied — never leave one out because EVENTS ALREADY APPLIED lists a purchase.
 - Change returned from the hero's own payment is never an acquisition: when the hero pays with a larger coin and gets change back, report nothing in narrated_loot for the change.
 - The HERO'S CURRENT INVENTORY line lists what the hero already owns. Using, drawing, lighting, striking, wearing, or retrieving an owned item is NOT an acquisition — "she takes out her flint and steel and strikes a spark" grants nothing. Report an item the hero already owns ONLY when the narrative explicitly completes acquiring an ADDITIONAL copy (a second rope, another potion).
 - Identifying, appraising, examining, or recognizing an item the hero ALREADY carries is NOT an acquisition — realizing the corked vial in her pack is a healing potion, or that the old ring is silver, changes what the item IS, never what the hero HAS. Report nothing for it, under either name.
@@ -50,6 +51,7 @@ Payment rules:
 - Change-making: when the hero pays with a larger coin and receives change (hands over a gold piece for a 2-silver fare and gets 8 silver back), report the NET price actually paid — "silver": 2 — never the gross coin handed over, and never add the fare on top of the coin.
 - Never re-report a payment the narrative merely recalls, confirms, defends, or references from an EARLIER scene — only payments completed for the first time in THIS narrative. "You already paid the six silver" is a recollection, not a new payment.
 - Exact amounts only; never estimate. A wrongly reported coin is worse than a missed one — certainty is required.
+- "from" / "to": the one person on the other side of the movement, by the name the narrative uses ("Odo", "the ferryman"); empty when no person is involved (a chest, a toll box, a cutpurse never seen).
 - When in doubt, omit. Omit "narrated_loot" and "narrated_payment" entirely when this narrative moves no coins or items.
 
 Also report gear the narrative shows the hero handing to a COMPANION that the companion accepts and takes up, when the engine applied no matching companion update, as another top-level field:
@@ -301,9 +303,81 @@ function appliedCoinCp(events) {
     if (!events) return { gainCp: 0, lossCp: 0 };
     let gainCp = n(events.goldFound) * 100 + n(events.silverFound) * 10 + n(events.copperFound);
     let lossCp = n(events.goldLost) * 100 + n(events.silverLost) * 10 + n(events.copperLost);
-    for (const purchase of events.purchases || []) lossCp += n(purchase?.priceCp);
-    for (const sale of events.sells || []) gainCp += n(sale?.priceCp);
+    // A catalog trade with no priceCp moves its catalog value (2026-11-01):
+    // counted as 0 it left a "bought the longsword" reply looking coin-silent,
+    // and the payment audit charged the narrated price a second time.
+    const catalogCp = (entry, share) => {
+        const item = normalizeItem(entry?.item && typeof entry.item === 'object' ? { ...entry.item, quantity: entry.quantity } : entry);
+        const quantity = Math.max(1, Math.trunc(Number(entry?.quantity) || 1));
+        return Number.isFinite(item?.valueCp) && item.valueCp > 0 ? Math.floor(item.valueCp * share) * quantity : 0;
+    };
+    for (const purchase of events.purchases || []) lossCp += n(purchase?.priceCp) || catalogCp(purchase, 1);
+    for (const sale of events.sells || []) gainCp += n(sale?.priceCp) || catalogCp(sale, 0.5);
     return { gainCp, lossCp };
+}
+
+/**
+ * The audit's view of the transaction log for one narration: the context the
+ * engine's window rules read (2026-11-01), with the narrated counterparty.
+ */
+function auditLedgerContext(state, party) {
+    const messages = state?.messages || [];
+    const cleaned = cleanParty(party);
+    return {
+        messages,
+        atMessage: messages.length,
+        party: cleaned,
+        partyId: resolvePartyId(state, cleaned),
+        restAt: lastLongRestAt(state),
+    };
+}
+
+/** Identity strings of every item the log saw ENTER the pack inside the window (a bought item counts). */
+function recentlyArrivedIdentities(state, party) {
+    const ctx = auditLedgerContext(state, party);
+    return normalizeLedger(state?.ledger)
+        .filter(entry => withinWindow(entry, ctx))
+        .flatMap(entry => movedItems(entry, 'in'))
+        .flatMap(item => [item.name, item.itemKey])
+        .filter(value => value && String(value).trim())
+        .map(String);
+}
+
+/**
+ * "Narrated, not recorded" (2026-11-01): a movement the Scribe saw in a reply
+ * the DM DID event. One accountant per narration keeps the audit from booking
+ * it on its own (the DM owns an evented reply), and before this card it was
+ * simply dropped — the stated cost of making doubles impossible. Now the
+ * player decides: a card with one button to book it and one to dismiss it,
+ * never shown to the DM; the answer is booked on the player lane
+ * (RESOLVE_RECOVERY).
+ */
+function postRecoveryCard(dispatch, { sourceId, direction, items = [], coinCp = 0, party = '' }) {
+    const parts = [
+        ...items.map(item => (item.quantity > 1 ? `${item.quantity}x ${item.name}` : item.name)),
+        ...(coinCp > 0 ? [formatCurrency(coinCp)] : []),
+    ];
+    if (parts.length === 0) return;
+    const who = party ? ` ${direction === 'out' ? 'to' : 'from'} ${party}` : '';
+    const what = direction === 'out'
+        ? (items.length > 0 ? 'leave your hands' : 'paid')
+        : 'reach your hands';
+    dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+            id: `${sourceId}:recovery`,
+            role: 'system',
+            kind: 'recovery',
+            content: `**Narrated, not recorded:** the story shows ${parts.join(', ')} ${what}${who}, but this turn's events did not record it.`,
+            recovery: {
+                status: 'open',
+                direction: direction === 'out' ? 'out' : 'in',
+                items: items.slice(0, 4).map(item => ({ name: String(item.name).slice(0, 80), quantity: Math.max(1, Math.min(MAX_ITEM_QUANTITY, Math.trunc(Number(item.quantity) || 1))) })),
+                coinCp: Math.max(0, Math.min(MAX_COIN_EVENT * 100, Math.trunc(coinCp))),
+                party: cleanParty(party),
+            },
+        },
+    });
 }
 
 // Item identity for the whole audit family lives in the shared textMatch core
@@ -397,26 +471,15 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
         console.log(`[Scribe] Loot audit: event path applied a ${lossCp} cp loss for this narration — payment-shaped turn, treating the reported coin gain as direction confusion and standing down on coins.`);
     }
 
-    // Cross-message ledger check (live playtest #8): the same-message stand-down
-    // above cannot see a RE-narration — "you tuck the pages away" one turn after
-    // the pages were evented re-granted them. The dedupe happens HERE, with a
-    // fuzzy identity match strictly broader than the reducer's exact-signature
-    // check (which audit dispatches therefore skip — they carry `audit: true`
-    // meta so the reducer ledgers them without double-checking or
-    // double-announcing). Window IS the reducer's
-    // RECENT_ITEM_GRANT_EXTENDED_WINDOW (2026-08-31 P1: the old 4 let a
-    // victory-loot reward re-emit at quest completion, >4 conversational
-    // messages later; one constant since 2026-10-10).
-    const recentGrantIdentities = [];
-    const currentIndex = (state?.messages || []).length;
-    for (const entry of state?.recentItemGrants || []) {
-        if (entry?.status !== 'applied') continue;
-        const distance = conversationalDistance(state.messages, entry.messageIndex, currentIndex);
-        if (!(distance >= 0 && distance <= RECENT_ITEM_GRANT_EXTENDED_WINDOW)) continue;
-        for (const value of [entry.name, entry.itemKey]) {
-            if (value && String(value).trim()) recentGrantIdentities.push(String(value));
-        }
-    }
+    // Cross-message check (live playtest #8): the same-message stand-down
+    // above cannot see a RE-narration — "you tuck the pages away" one turn
+    // after the pages were evented re-granted them. The dedupe happens HERE,
+    // with the fuzzy identity rule, against every item the transaction log saw
+    // arrive inside its window — a BOUGHT item too since 2026-11-01. Audit
+    // grants carry `audit: true` so the reducer logs them without judging
+    // them twice.
+    const party = typeof narrated.from === 'string' ? cleanParty(narrated.from) : '';
+    const recentGrantIdentities = recentlyArrivedIdentities(state, party);
     // ONE ACCOUNTANT PER NARRATION (2026-10-31, Vesa: "the worst problem for
     // the game, always"): when the event path granted ANY item for this
     // narration, the DM owns this narration's items and the audit grants none.
@@ -431,11 +494,18 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
     if (items.length > 0 && itemsEvented) {
         console.log(`[Scribe] Loot audit: the event path granted items for this narration — standing down on items (${items.map(item => `"${item.name}"`).join(', ')}).`);
     }
-    const missingItems = itemsEvented ? [] : items.filter(item => {
+    const unrecorded = items.filter(item => {
         const recentlyGranted = matchesAnyItemIdentity(item, recentGrantIdentities);
         if (recentlyGranted) console.warn(`[Scribe] Narrated item "${item.name}" was already granted moments ago (ledger); skipping.`);
         return !recentlyGranted;
     });
+    const missingItems = itemsEvented ? [] : unrecorded;
+    // The evented reply's leftovers go to the player, never into the pack.
+    if (itemsEvented) {
+        const applied = appliedItemIdentities(appliedEvents);
+        const leftovers = unrecorded.filter(item => !matchesAnyItemIdentity(item, applied));
+        postRecoveryCard(dispatch, { sourceId, direction: 'in', items: leftovers, party });
+    }
 
     // Coins route through the replay-guarded grant so a reward the DM re-narrates on a
     // later turn (already suppressed on the event path) cannot re-enter via the audit.
@@ -446,14 +516,14 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
             type: 'ADD_COIN_GRANT',
             payload: {
                 gold, silver, copper,
-                _meta: { sourceId, announce: 'audit', audit: true },
+                _meta: { sourceId, announce: 'audit', audit: true, ...(party && { party }) },
             },
         });
     }
     // Audit meta ledgers each grant in recentItemGrants so a later DM
     // re-emission of the same reward hits the reducer's replay guard.
     for (const item of missingItems) {
-        dispatch({ type: 'ADD_ITEM', payload: { ...item, _meta: { sourceId, audit: true } } });
+        dispatch({ type: 'ADD_ITEM', payload: { ...item, _meta: { sourceId, audit: true, ...(party && { party }) } } });
     }
 
     if (missingItems.length > 0) {
@@ -552,8 +622,15 @@ function reconcileNarratedPayment(narrated, lootAudit, dispatch) {
     const { appliedEvents } = lootAudit;
 
     const narratedCp = gold * 100 + silver * 10 + copper;
+    const party = typeof narrated.to === 'string' ? cleanParty(narrated.to) : '';
     const { gainCp, lossCp } = appliedCoinCp(appliedEvents);
     if (lossCp > 0) {
+        // One accountant: the DM charged this narration and owns its amount.
+        // A narrated total ABOVE what it charged (the second purchase in one
+        // reply, 2026-10-31 F7) is the player's call, on a card.
+        if (narratedCp > lossCp) {
+            postRecoveryCard(dispatch, { sourceId: paymentSourceId, direction: 'out', coinCp: narratedCp - lossCp, party });
+        }
         console.log(`[Scribe] Payment audit: event path already applied a ${lossCp} cp loss for this narration — standing down.`);
         return;
     }
@@ -576,7 +653,7 @@ function reconcileNarratedPayment(narrated, lootAudit, dispatch) {
         type: 'AUDIT_COIN_PAYMENT',
         payload: {
             gold, silver, copper,
-            _meta: { sourceId: paymentSourceId, audit: true, ...(lootAudit.playerMessage && { playerMessage: lootAudit.playerMessage }) },
+            _meta: { sourceId: paymentSourceId, audit: true, ...(party && { party }), ...(lootAudit.playerMessage && { playerMessage: lootAudit.playerMessage }) },
         },
     });
     console.log(`[Scribe] Payment audit settled: ${narratedCp} cp (no coin loss was evented for this narration).`);
@@ -618,21 +695,33 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
 
     const claimed = claimAuditSource(lootAudit, dispatch, 'losses', 'Loss audit');
     if (!claimed) return;
-    const { state } = claimed;
+    const { state, sourceId: lossSourceId } = claimed;
     const { appliedEvents } = lootAudit;
+    // An item SOLD in this reply left through the sale (2026-11-01): the loss
+    // audit never removes it a second time.
+    const soldNames = (appliedEvents?.sells || []).flatMap(sale => [sale?.name, sale?.itemKey, sale?.key]).filter(Boolean).map(String);
+    const lostNames = (appliedEvents?.itemsLost || []).map(entry => (typeof entry === 'string' ? entry : entry?.name)).filter(name => name && String(name).trim()).map(String);
+    const unsold = items.filter(item => !matchesAnyItemIdentity(item, soldNames));
 
     // One accountant per narration (2026-10-31): when the event path removed
     // ANY item for this narration, the DM owns its losses and the audit removes
     // none — a second removal of a renamed item was the loss twin of the double
-    // grant.
-    if ((appliedEvents?.itemsLost || []).some(entry => entry && (typeof entry === 'string' ? entry.trim() : entry.name))) {
-        console.log('[Scribe] Loss audit: the event path removed items for this narration — standing down.');
+    // grant. A sale is the DM's accounting too. What the DM left out goes
+    // to the player on a card.
+    if (lostNames.length > 0 || soldNames.length > 0) {
+        const leftovers = unsold
+            .filter(item => !matchesAnyItemIdentity(item, lostNames))
+            .map(item => ({ ...item, owned: resolveOwnedItem(state?.inventory, item.name, 'Narrated loss') }))
+            .filter(item => item.owned && item.owned !== AMBIGUOUS)
+            .map(item => ({ name: item.owned.name, quantity: typeof item.quantity === 'number' ? item.quantity : 1 }));
+        postRecoveryCard(dispatch, { sourceId: lossSourceId, direction: 'out', items: leftovers });
+        console.log('[Scribe] Loss audit: the event path removed or sold items for this narration — standing down.');
         return;
     }
 
     const removed = [];
     const removedItemIds = new Set();
-    for (const { name, quantity } of items) {
+    for (const { name, quantity } of unsold) {
         // Exact name first; otherwise a fuzzy match is honored only when it is
         // UNAMBIGUOUS — REMOVE_ITEM_BY_NAME takes whole stacks, so "wax candles"
         // matching both a lowercase shadow row and "Wax Candles (x5)" must skip
@@ -651,7 +740,7 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
         removedItemIds.add(identity);
         dispatch({
             type: 'REMOVE_ITEM_BY_NAME',
-            payload: quantity === null ? owned.name : { name: owned.name, quantity },
+            payload: { name: owned.name, ...(quantity !== null && { quantity }), _meta: { sourceId: lossSourceId, audit: true } },
         });
         removed.push(owned.name);
     }

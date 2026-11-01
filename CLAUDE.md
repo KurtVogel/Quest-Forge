@@ -103,7 +103,8 @@ docs/         STATUS, IDEAS, DECISIONS, the three queues, ARCHITECTURE.md, flows
   player harm, not on a severity label.
 - **Ship a replay ledger with every DM-writable mechanical channel** (same-message sourceId +
   cross-message ledger in conversational distance). The DM re-emitting an applied event is a
-  proven, recurring failure.
+  proven, recurring failure. Coins and items go through the ONE transaction log and judge
+  (`engine/transactionLedger.js`, `state/handlers/ledger.js`) — never a sixth ledger.
 - **Treat every LLM lane as a trust boundary:** a reducer fed by any lane projects the payload to
   known keys and clamps every text it stores; walk each lane into every reducer it dispatches.
 - **Keep the prompt prefix byte-stable:** never interpolate live state into a prefix block; the

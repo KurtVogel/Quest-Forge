@@ -6,7 +6,15 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-10-31 (late: doubles by construction, the Flash length limit, playtest run 4; night: the third Opus playtest + five fixes; evening: named presence, far friends, story cards retire, the Scribe sees facts, places, dooms abroad; earlier: the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
+_Last updated: 2026-11-01 (one transaction log, one judge, the counterparty, "Narrated, not recorded" cards, playtest run 5); 2026-10-31 (late: doubles by construction, the Flash length limit, playtest run 4; night: the third Opus playtest + five fixes; evening: named presence, far friends, story cards retire, the Scribe sees facts, places, dooms abroad; earlier: the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
+
+## 2026-11-01 — one transaction log, one judge, the counterparty, and "Narrated, not recorded" cards — pushed AND deployed
+
+Vesa: see the whole LLM + engine + Scribe picture and build the optimal fix for doubles, blowing stale things up if needed. Built (DECISIONS.md 2026-11-01): `state.ledger` (engine/transactionLedger.js) replaces the five trade ledgers; `state/handlers/ledger.js` is the one judge every coin / item reducer calls; the DM and the Scribe name the counterparty (two known people are never one payment; the same person's reward recapped up to 40 messages later is caught, until a long rest); a RECENT TRANSACTIONS block in the DM prompt; the five holes closed (bought item recapped as found, re-emitted items_lost, sale beside a loss audit, catalog purchase counted coin-silent, gear handoff); evented-reply leftovers become a player card instead of vanishing; the Scribe now reports purchases and sales. Old saves migrate at load. Playtest run 5 (30 turns on Flash): counterparties named everywhere, zero doubles.
+
+**For Vesa's own save:** nothing to do — the old ledgers fold into the log on load.
+
+**Next:** watch for the first live "Narrated, not recorded" card (and how often a change-making payment raises a spurious one); the premise-purse idea in IDEAS.
 
 ## 2026-10-31 (late) — doubles prevented by construction, a hard length limit for Flash, and playtest run 4 — pushed AND deployed
 

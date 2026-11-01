@@ -30,13 +30,18 @@ function buildTransactionMeta(events, opts) {
     return {
         ...(opts?.lootSourceId && { sourceId: opts.lootSourceId }),
         ...(opts?.playerMessage && { playerMessage: opts.playerMessage }),
-        // A response that completes a quest is the canonical replay moment for
-        // its already-banked reward (2026-08-31 P1: handover pays, completion
-        // recap re-emits >4 messages later) — coin/item grants riding it dedupe
-        // across the wide window. The player-phrasing bypass still applies.
-        ...((events.questUpdates || []).some(q => q.status === 'completed') && { questCompletionAdjacent: true }),
     };
 }
+
+/**
+ * The counterparty of one movement (2026-11-01): who the coin or item came
+ * from or went to, as the DM named them — the transaction log's window key.
+ * A string of at most a name's length; anything else is no one.
+ */
+function partyOf(value) {
+    return typeof value === 'string' ? value.trim().slice(0, 60) : '';
+}
+const withParty = (meta, party) => (party ? { ...meta, party } : meta);
 
 /**
  * Premise reconciliation has distinct semantics from ordinary loot: starting
@@ -373,20 +378,40 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
                 ...(item.healing && { healing: item.healing }),
                 ...(item.quantity && { quantity: item.quantity }),
             };
-        // The cross-message replay ledger (recentItemGrants) needs the source
-        // message id + player phrasing — the same meta purchases already carry.
-        dispatch({ type: 'ADD_ITEM', payload: withTransactionMeta(itemData) });
+        // The transaction log judges the grant by its source message, the
+        // player's phrasing and who the item came from.
+        dispatch({ type: 'ADD_ITEM', payload: withMeta(itemData, withParty(transactionMeta, partyOf(item.from))) });
     }
 
     for (const purchase of events.purchases) {
-        dispatch({ type: 'PURCHASE_ITEM', payload: withTransactionMeta(purchase) });
+        dispatch({ type: 'PURCHASE_ITEM', payload: withMeta(purchase, withParty(transactionMeta, partyOf(purchase?.seller))) });
     }
 
     for (const sale of events.sells) {
-        dispatch({ type: 'SELL_ITEM', payload: withTransactionMeta(sale) });
+        dispatch({ type: 'SELL_ITEM', payload: withMeta(sale, withParty(transactionMeta, partyOf(sale?.buyer))) });
     }
 
-    for (const itemName of itemsLost) {
+    // Same-identity items_lost entries travel as ONE removal (the items_found
+    // aggregation's twin): the log's exact-source replay rule would otherwise
+    // take the second "Torch" of a reply listing two burned torches as a replay.
+    const lostByToken = new Map();
+    const lostEntries = [];
+    for (const entry of itemsLost) {
+        const name = typeof entry === 'string' ? entry : entry?.name || '';
+        if (!name) continue;
+        const token = tradeIdentity(itemKeyOf(entry) || name);
+        const quantity = typeof entry === 'string' ? undefined : entry.quantity;
+        const prior = token ? lostByToken.get(token) : null;
+        if (prior && prior.quantity !== 'all' && !(typeof quantity === 'string' && /^all$/i.test(quantity.trim()))) {
+            const count = (value) => (Number.isFinite(Number(value)) && Number(value) > 0 ? Math.trunc(Number(value)) : 1);
+            prior.quantity = count(prior.quantity) + count(quantity);
+            continue;
+        }
+        const normalized = typeof entry === 'string' ? { name } : { ...entry, name };
+        lostEntries.push(normalized);
+        if (token) lostByToken.set(token, normalized);
+    }
+    for (const itemName of lostEntries) {
         const lostName = typeof itemName === 'string' ? itemName : itemName.name || '';
         if (!lostName) continue;
         // A DM quantity (a count, or "all") rides along (2026-09-03 P1); a bare
@@ -395,9 +420,16 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
         const lostQuantity = typeof rawQuantity === 'string' && /^all$/i.test(rawQuantity.trim())
             ? 'all'
             : (Number.isFinite(Number(rawQuantity)) && Number(rawQuantity) > 0 ? Math.trunc(Number(rawQuantity)) : null);
+        // Source meta since 2026-11-01: the removal is judged against the
+        // transaction log like every other movement (a re-emitted loss used to
+        // take a second unit of a stack).
         dispatch({
             type: 'REMOVE_ITEM_BY_NAME',
-            payload: lostQuantity === null ? lostName : { name: lostName, quantity: lostQuantity },
+            payload: {
+                name: lostName,
+                ...(lostQuantity !== null && { quantity: lostQuantity }),
+                ...(Object.keys(transactionMeta).length > 0 && { _meta: withParty(transactionMeta, partyOf(itemName.to)) }),
+            },
         });
     }
 
@@ -434,7 +466,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
                 gold: goldFound,
                 silver: silverFound,
                 copper: copperFound,
-                _meta: transactionMeta,
+                _meta: withParty(transactionMeta, partyOf(events.coinFrom)),
             },
         });
     }
@@ -448,7 +480,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
                 gold: goldLost,
                 silver: silverLost,
                 copper: copperLost,
-                _meta: transactionMeta,
+                _meta: withParty(transactionMeta, partyOf(events.coinTo)),
             },
         });
     }

@@ -41,6 +41,14 @@ import {
     systemMessage,
 } from './shared.js';
 import { strictFlag } from '../../engine/text.js';
+import { loadLedger, RETIRED_LEDGER_KEYS } from '../../engine/transactionLedger.js';
+
+/** A loaded payload without the five trade ledgers the transaction log replaced. */
+function withoutRetiredLedgers(payload) {
+    const rest = { ...payload };
+    for (const key of RETIRED_LEDGER_KEYS) delete rest[key];
+    return rest;
+}
 
 /** Campaign name as typed at adventure start (the save-slot list renders it). */
 const SESSION_NAME_MAX = 120;
@@ -353,7 +361,7 @@ function validateSaveState(payload) {
         : initialGameState.session;
     const session = sanitizeLivingWorldSession(rawSession, { maxMessageCount: messageCount });
     return {
-        ...payload,
+        ...withoutRetiredLedgers(payload),
         // Entries are object-filtered like every sibling list (2026-09-11
         // persistence P2): a null/number row became a permanent "Unknown item"
         // gear row through normalizeItem's default.
@@ -504,11 +512,9 @@ function validateSaveState(payload) {
         worldTempo: sanitizeWorldTempo(payload.worldTempo),
         pendingRoleplayCheck: sanitizePendingRoleplayCheck(payload.pendingRoleplayCheck),
         appliedLootSourceIds: Array.isArray(payload.appliedLootSourceIds) ? payload.appliedLootSourceIds : [],
-        recentPurchases: normalizeRecentTransactions(payload.recentPurchases),
-        recentSales: normalizeRecentTransactions(payload.recentSales),
-        recentCoinGrants: normalizeRecentTransactions(payload.recentCoinGrants),
-        recentCoinLosses: normalizeRecentTransactions(payload.recentCoinLosses),
-        recentItemGrants: normalizeRecentTransactions(payload.recentItemGrants),
+        // The one transaction log (2026-11-01); a save from before carries the
+        // five retired trade ledgers, folded in here and dropped.
+        ledger: loadLedger(payload),
         recentExpAwards: normalizeRecentTransactions(payload.recentExpAwards),
         recentRulings: (Array.isArray(payload.recentRulings) ? payload.recentRulings : [])
             .map(ruling => normalizeRollRuling(ruling, { maxMessageCount: messageCount })).filter(Boolean).slice(-RECENT_RULING_LIMIT),

@@ -194,6 +194,36 @@
   margin-bottom: 0.25rem;
 }
 
+/* "Narrated, not recorded" (2026-11-01): the player books a movement the
+   events missed, or dismisses it. */
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+}
+
+.recovery-actions button {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-primary);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.recovery-actions .recovery-accept {
+  border-color: var(--gold-dim, var(--border-primary));
+  font-weight: 600;
+}
+
+.recovery-status {
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
 .message-setup-note {
   font-size: 0.72rem;
   font-style: italic;
