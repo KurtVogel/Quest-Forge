@@ -11,6 +11,12 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
+### Count the WORK, not only the coin — status: `idea` (2026-11-01, playtest run 6)
+The fifth crate's narration said "you shoulder another brine-heavy crate … slaps a single, cold silver piece" — the counting attached to the crate, not the coin, so the wage went to a "Recorded once" card instead of paying. An additive quantifier on the object of the work the payment is FOR (crate, round, shift, cast) is the same evidence. Not built: "another" near any noun is broad ("another round of ale"), and the card already makes the miss one tap. Worth it if live play shows the card firing mostly on wages.
+
+### The DM narrates the engine's count over its own story — status: `idea` (2026-11-01, playtest run 6)
+After a genuine pelt sale was dropped, the DM read the pack (three pelts) and wrote "three wolf pelts still weigh down your pack", then let the hero sell five of four. Fixing the drop is the real fix (the "Recorded once" card), but an OPEN card could also reach the DM's prompt as "unconfirmed: one more Wolf pelt may have been sold" so its story does not harden around a count the player has not settled. Cheap; only worth it if open cards are often left unanswered.
+
 ### A card for a narrated coin GAIN beyond what the reply evented — status: `idea` (2026-11-01)
 The recovery card covers items the evented reply left out, payments above what it charged and losses beside an evented one — not coins RECEIVED beyond an evented grant (two rewards in one reply, one evented). Left out on purpose: gross-vs-net change-making makes the gain side the noisier one. Worth it if a playtest shows a second reward going missing.
 

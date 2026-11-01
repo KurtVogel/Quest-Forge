@@ -751,6 +751,8 @@ export function createTurnRunner({
                 // The DM's own facts remember this message (2026-10-11).
                 sourceMessageId: msgId,
                 playerMessage: originalPlayerMessage || playerActionContext,
+                // The reply's own words for the transaction judge (2026-11-01 run 6).
+                narrative,
                 // The scene's text for the NPC lane (M0, 2026-10-13): a short
                 // name the roster holds twice resolves to the person named
                 // in full here, or to nobody.

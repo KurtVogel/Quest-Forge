@@ -242,6 +242,14 @@ async function debugSnap(page) {
             journal: (s.journal || []).map(j => ({ range: j.messageRange, summary: String(j.summary || '').slice(0, 300), location: j.location || null })),
             recentEncounters: s.recentEncounters || [],
             chronicle: (s.chronicle || []).length,
+            // The economy judge (2026-11-01): purse, pack, the transaction log and every recovery card.
+            economy: {
+                purse: { gold: s.character?.gold || 0, silver: s.character?.silver || 0, copper: s.character?.copper || 0 },
+                inventory: (s.inventory || []).map(i => ({ name: i.name, quantity: i.quantity || 1 })),
+                ledger: s.ledger || [],
+                recovery: (s.messages || []).map((m, i) => (m.kind === 'recovery' ? { i, content: m.content, ...m.recovery } : null)).filter(Boolean),
+                notes: (s.messages || []).map((m, i) => (m.role === 'system' && /ignored|Duplicate/i.test(String(m.content || '')) ? { i, content: m.content } : null)).filter(Boolean),
+            },
         };
     }).catch(e => ({ error: String(e) }));
 }

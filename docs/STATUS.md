@@ -6,7 +6,15 @@ replace stale entries, don't let it grow. For deeper history run `git log --onel
 (this file was trimmed back to its one-screen contract on 2026-07-31; every prior entry
 lives in git history and the settled outcomes in DECISIONS.md).
 
-_Last updated: 2026-11-01 (one transaction log, one judge, the counterparty, "Narrated, not recorded" cards, playtest run 5); 2026-10-31 (late: doubles by construction, the Flash length limit, playtest run 4; night: the third Opus playtest + five fixes; evening: named presence, far friends, story cards retire, the Scribe sees facts, places, dooms abroad; earlier: the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
+_Last updated: 2026-11-01 (night: playtest run 6 — genuine repeats were dropped; the DM's counting, "Recorded once" cards, late-roster counterparties; earlier: one transaction log, one judge, the counterparty, "Narrated, not recorded" cards, playtest run 5); 2026-10-31 (late: doubles by construction, the Flash length limit, playtest run 4; night: the third Opus playtest + five fixes; evening: named presence, far friends, story cards retire, the Scribe sees facts, places, dooms abroad; earlier: the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
+
+## 2026-11-01 (night) — playtest run 6: the judge was dropping genuine repeats; "Recorded once" cards — pushed AND deployed
+
+Vesa asked for one more playtest angle; this one hunted the opposite of doubles (`docs/OPUS_PLAYTEST_2026-10-31.md` run 6, Flash, 23 player lines). Found: a second crate's wage, four pelt sales to the same buyer, and 1 sp of a gambler's pot all dropped as "duplicates", and the DM then narrated the phantom pelts. Built (DECISIONS.md 2026-11-01 night): the DM's own counting ("another silver", "five more coins") is a new movement; a sale line that puts the goods down by name is a sale; anything still uncertain books nothing but becomes a **"Recorded once"** card ("Record it again" / "Same one"); a counterparty is resolved when judged. Live after the fix: crates paid, the card fired and booked on one tap, no doubles. The driver's `/debug` now carries the purse, pack, log and cards (`economy`).
+
+**For Vesa's own save:** nothing to do. An old "Duplicate … ignored" line stays a plain line; new ones that could be a real repeat come with the buttons.
+
+**Next:** watch how often "Recorded once" appears in ordinary play (the card should be rare; frequent cards mean the narration signal needs another look); the premise-purse idea in IDEAS (run 6 opened with 27 gp and 20 gp in two boots of one premise).
 
 ## 2026-11-01 — one transaction log, one judge, the counterparty, and "Narrated, not recorded" cards — pushed AND deployed
 
@@ -14,7 +22,7 @@ Vesa: see the whole LLM + engine + Scribe picture and build the optimal fix for 
 
 **For Vesa's own save:** nothing to do — the old ledgers fold into the log on load.
 
-**Next:** watch for the first live "Narrated, not recorded" card (and how often a change-making payment raises a spurious one); the premise-purse idea in IDEAS.
+**Next:** superseded by run 6 above (change-making at the tavern booked cleanly — 1 sp paid, 2 cp back — with no card).
 
 ## 2026-10-31 (late) — doubles prevented by construction, a hard length limit for Flash, and playtest run 4 — pushed AND deployed
 

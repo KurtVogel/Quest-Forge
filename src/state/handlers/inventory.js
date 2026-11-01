@@ -21,7 +21,7 @@ import {
     systemMessage,
     withInventoryAndAC,
 } from './shared.js';
-import { judgeItemIn, judgeItemOut, ledgerContext, logMovement } from './ledger.js';
+import { judgeItemIn, judgeItemOut, ledgerContext, logMovement, repeatCard } from './ledger.js';
 
 // Item grants and losses are judged against the one transaction log
 // (state/handlers/ledger.js, 2026-11-01): the DM re-granting a potion on the
@@ -65,14 +65,17 @@ export const handlers = {
             const ctx = ledgerContext(state, meta);
             const verdict = judgeItemIn(state, ctx, ref);
             if (verdict.suppress) {
+                const line = `Duplicate item grant ignored — ${item.name} was already added moments ago.`;
                 return {
                     ...state,
                     ledger: logMovement(state, ctx, { kind: 'item', itemsIn: [ref], status: 'ignored' }),
                     messages: [
                         ...state.messages,
                         // dmVisible: the DM must learn its re-emission was suppressed
-                        // (the item is already owned) or it keeps trying.
-                        systemMessage(`Duplicate item grant ignored — ${item.name} was already added moments ago.`, { dmVisible: true }),
+                        // (the item is already owned) or it keeps trying. A
+                        // cross-message twin asks the player instead (repeatCard).
+                        repeatCard(state, ctx, verdict, line, { type: 'ADD_ITEM', payload: { ...ref, type: item.type } })
+                            || systemMessage(line, { dmVisible: true }),
                     ],
                 };
             }
@@ -261,10 +264,15 @@ export const handlers = {
                 : { name: ref, itemKey: '', quantity: 1 };
             const verdict = judgeItemOut(state, ctx, probe);
             if (verdict.suppress) {
+                const line = `Duplicate item loss ignored — ${probe.name} already left your pack moments ago.`;
                 return {
                     ...state,
                     ledger: logMovement(state, ctx, { kind: 'item', itemsOut: [probe], status: 'ignored' }),
-                    messages: [...state.messages, systemMessage(`Duplicate item loss ignored — ${probe.name} already left your pack moments ago.`, { dmVisible: true })],
+                    messages: [
+                        ...state.messages,
+                        repeatCard(state, ctx, verdict, line, { type: 'REMOVE_ITEM_BY_NAME', payload: { name: probe.name } })
+                            || systemMessage(line, { dmVisible: true }),
+                    ],
                 };
             }
         }

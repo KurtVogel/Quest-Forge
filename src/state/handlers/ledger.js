@@ -23,8 +23,10 @@
  * player confirmed, a gear handoff from the Inventory panel) is the player's
  * own decision: it is logged, never second-guessed, except as an exact replay.
  *
- * The player-phrasing bypasses live here too: the repeat a player asks for in
- * their own words always pays.
+ * The repeat bypasses live here too: the repeat a player asks for in their
+ * own words always pays, and so does one the DM's own narration COUNTS
+ * ("slaps another silver into your palm", "five more coins", "the next
+ * pelt") — a replay retells, it does not count (2026-11-01 run 6).
  */
 import {
     baseOf,
@@ -42,9 +44,12 @@ import {
 } from '../../engine/transactionLedger.js';
 import {
     currentMessageIndex,
+    itemNounSrc,
     playerMessageSupportsRepeatTransaction,
     repeatIntentNearNoun,
 } from './shared.js';
+
+export { itemNounSrc };
 
 const LANES = new Set(['dm', 'audit', 'player', 'engine']);
 
@@ -65,6 +70,24 @@ export function ledgerContext(state, meta = {}, party = '') {
         partyId: resolvePartyId(state, cleaned),
         restAt: lastLongRestAt(state),
         playerMessage: lane === 'dm' || lane === 'audit' ? meta?.playerMessage : '',
+        // The DM's own words for this reply — the audits recount narration
+        // themselves and never get the narration bypass.
+        narrative: lane === 'dm' && typeof meta?.narrative === 'string' ? meta.narrative.slice(0, 8000) : '',
+        // A counterparty logged before the roster knew them (an NPC registered
+        // later the same turn) is resolved at judging time (2026-11-01 run 6:
+        // the dockmaster's 1 sp, logged without an id, was stripped out of the
+        // gambler's 4 sp pot as "the same reward").
+        resolveParty: memoResolver(state),
+    };
+}
+
+function memoResolver(state) {
+    const cache = new Map();
+    return (name) => {
+        const key = cleanParty(name);
+        if (!key) return '';
+        if (!cache.has(key)) cache.set(key, resolvePartyId(state, key));
+        return cache.get(key);
     };
 }
 
@@ -81,6 +104,60 @@ export function logMovement(state, ctx, fields) {
 }
 
 const isExact = (twin, ctx) => !!ctx.sourceId && twin?.sourceId === ctx.sourceId;
+
+// ── "Recorded once" — the judgment text cannot settle ───────────────────
+
+/** The movements a "Recorded once" card may re-run, and the payload keys each keeps. */
+const REPEAT_REPLAYS = {
+    ADD_COIN_GRANT: ['copper'],
+    APPLY_COIN_LOSS: ['copper'],
+    PURCHASE_ITEM: ['name', 'itemKey', 'quantity', 'priceCp'],
+    SELL_ITEM: ['itemId', 'name', 'itemKey', 'quantity', 'priceCp'],
+    ADD_ITEM: ['name', 'itemKey', 'quantity', 'type'],
+    REMOVE_ITEM_BY_NAME: ['name', 'quantity'],
+};
+
+/** A replay payload projected to its movement's known keys, every value clamped (a save is input too). */
+export function projectRepeatReplay(replay) {
+    const keys = REPEAT_REPLAYS[replay?.type];
+    if (!keys) return null;
+    const source = replay.payload && typeof replay.payload === 'object' ? replay.payload : {};
+    const payload = {};
+    for (const key of keys) {
+        const value = source[key];
+        if (typeof value === 'string' && value.trim()) payload[key] = value.trim().slice(0, 160);
+        else if (Number.isFinite(value)) payload[key] = Math.max(0, Math.min(10_000_000, Math.trunc(value)));
+    }
+    return { type: replay.type, payload };
+}
+
+/**
+ * A same-value twin from an EARLIER message, on the DM lane, is the one
+ * judgment the text cannot settle: "five more silver for the next pelt" and
+ * "Maud's five silver" retold read alike (2026-11-01 run 6 — five genuine
+ * repeats dropped in one session, and each phrase rule a patch for the
+ * last). The engine still books nothing — a double stays impossible — but
+ * the note becomes a card the player answers in one tap: "Record it again"
+ * re-runs exactly this movement on the player lane. An exact-source replay
+ * and a same-reply twin stay plain notes: those are certain.
+ */
+export function repeatCard(state, ctx, verdict, line, replay) {
+    const twin = verdict?.twin;
+    if (verdict?.suppress !== 'duplicate' || ctx.lane !== 'dm' || !twin || isExact(twin, ctx)) return null;
+    if (ctx.base && baseOf(twin.sourceId) === ctx.base) return null;
+    const projected = projectRepeatReplay(replay);
+    if (!projected) return null;
+    return {
+        id: `${ctx.sourceId || 'msg'}:repeat:${(state.messages || []).length}`,
+        timestamp: Date.now(),
+        role: 'system',
+        kind: 'recovery',
+        // The DM reads it like the note it replaces: its re-emission was not booked.
+        dmVisible: true,
+        content: `**Recorded once:** ${line} If this was a new one, record it.`,
+        recovery: { status: 'open', mode: 'repeat', replay: projected, party: ctx.party || '' },
+    };
+}
 
 // ── The player's own words ──────────────────────────────────────────────
 
@@ -167,8 +244,43 @@ export function playerMessageNamesAmount(playerMessage, costCp) {
     return false;
 }
 
+// ── The DM's own counting ───────────────────────────────────────────────
+
+// An additive quantifier: the narration counting THIS hand-over against an
+// earlier one. "the same" and a trailing "again" are deliberately absent —
+// "the same silver", "counts the coins again" are what a recap says.
+const ADDITIVE_SRC = String.raw`(?:another|a (?:second|third|fourth|fifth)|(?:one|two|three|four|five|six|seven|eight|nine|ten|twenty|\d+) more|the next)`;
+const NEGATED_TAIL_RE = /(?:\bno|\bnot|\bnever|\bwithout|n['’]t|\brefuses?)\s+(?:[\w'’-]+\s+){0,3}$/i;
+// Quoted speech is offer and haggle ("Another two silver to see if the
+// sheep still like you?"), not a hand-over: only the narration counts.
+const QUOTED_RE = /["“][^"”]*["”]/g;
+
+/**
+ * The DM's narration of this reply counts a movement as an ADDITIONAL one —
+ * "slaps another river-dull silver piece into your palm", "pitching five more
+ * dull silver coins onto the timber", "another stack of five clipped silver
+ * pieces", "the next pelt" (live 2026-11-01 run 6:
+ * a second crate's wage and a second pelt's sale, both judged replays of the
+ * first). Narration outside quotes only, never negated ("won't give you
+ * another copper").
+ */
+export function narrativeCountsAnother(narrative, nounSrc) {
+    const text = String(narrative || '').replace(QUOTED_RE, ' ');
+    if (!text.trim() || !nounSrc) return false;
+    const re = new RegExp(String.raw`\b${ADDITIVE_SRC}\s+(?:[\w'’-]+\s+){0,5}?(?:${nounSrc})\b`, 'gi');
+    for (const match of text.matchAll(re)) {
+        if (!NEGATED_TAIL_RE.test(text.slice(Math.max(0, match.index - 48), match.index))) return true;
+    }
+    return false;
+}
+
+const narrationCountsCoin = (ctx) => narrativeCountsAnother(ctx.narrative, COIN_NOUN_SRC.source);
+const narrationCountsItem = (ctx, item) => narrativeCountsAnother(ctx.narrative, itemNounSrc(item));
+
 export const PURCHASE_VERB_RE = /\b(buy|buys|buying|bought|purchase|purchases|purchasing|purchased|pay|pays|paying|paid|order|orders|ordering|ordered|take|takes|taking|grab|grabs|grabbing|get|gets|getting)\b/i;
-export const SALE_VERB_RE = /\b(sell|sells|selling|sold|pawn|pawns|pawning|pawned|trade|trades|trading|traded|offer|offers|offering|offered|unload|unloads|unloading|fence|fences|fencing|fenced)\b/i;
+// Selling is often just PUTTING the goods down at a buyer's counter ("I pull
+// out the last pelt and put it down for her" — run 6, 2026-11-01).
+export const SALE_VERB_RE = /\b(sell|sells|selling|sold|pawn|pawns|pawning|pawned|trade|trades|trading|traded|offer|offers|offering|offered|unload|unloads|unloading|fence|fences|fencing|fenced|put|puts|putting|lay|lays|laying|laid|set|sets|setting|slap|slaps|slapping|slapped|drop|drops|dropping|dropped|place|places|placing|placed|hand|hands|handing|handed)\b/i;
 // Verbs that show the player's own message re-acquiring an item this turn —
 // broader than the coin-loss commerce set on purpose: "I take/grab/pick up
 // another torch" is a genuine second acquisition.
@@ -247,7 +359,7 @@ export function judgeCoinIn(state, ctx, amounts) {
     const total = amounts.totalCp;
     if (ctx.lane === 'player') return { bundled: null };
     const isAudit = ctx.lane === 'audit';
-    const bypass = !isAudit && playerMessageSupportsRepeatCoinGrant(ctx.playerMessage);
+    const bypass = !isAudit && (playerMessageSupportsRepeatCoinGrant(ctx.playerMessage) || narrationCountsCoin(ctx));
     const ledger = state.ledger;
     const duplicate = findTwin(ledger, ctx, entry => entry.kind === 'coin' && entry.cp === total, { crossBase: isAudit });
     if (duplicate && (isExact(duplicate, ctx) || isAudit || !bypass)) return { suppress: 'duplicate', twin: duplicate };
@@ -281,7 +393,7 @@ export function judgeCoinOut(state, ctx, amounts) {
         const replay = findTwin(state.ledger, ctx, entry => entry.kind === 'coin' && entry.cp === -total);
         return isExact(replay, ctx) ? { suppress: 'duplicate', twin: replay } : {};
     }
-    const bypass = playerMessageSupportsRepeatCoinLoss(ctx.playerMessage);
+    const bypass = playerMessageSupportsRepeatCoinLoss(ctx.playerMessage) || narrationCountsCoin(ctx);
     const duplicate = findTwin(state.ledger, ctx, entry => entry.kind === 'coin' && entry.cp === -total);
     if (duplicate && (isExact(duplicate, ctx) || !bypass)) return { suppress: 'duplicate', twin: duplicate };
     // The price already left through an atomic purchase, retold as loose coin.
@@ -337,7 +449,7 @@ export function judgeItemIn(state, ctx, item) {
         // A recap rarely repeats the name exactly ("the brass token" for
         // "Brass toll-token"): the audits' own identity rule counts too.
         || findTwin(state.ledger, ctx, entry => movedItems(entry, 'in').some(held => sameItem(held, item, { fuzzy: true })), { exactSource: false });
-    if (twin && (isExact(twin, ctx) || !playerMessageSupportsRepeatTransaction(item, ctx.playerMessage, ITEM_ACQUIRE_VERB_RE))) {
+    if (twin && (isExact(twin, ctx) || !(playerMessageSupportsRepeatTransaction(item, ctx.playerMessage, ITEM_ACQUIRE_VERB_RE) || narrationCountsItem(ctx, item)))) {
         return { suppress: 'duplicate', twin };
     }
     return {};
@@ -353,7 +465,7 @@ export function judgeItemOut(state, ctx, item) {
     const isAudit = ctx.lane === 'audit';
     const twin = findTwin(state.ledger, ctx, claim, { crossBase: isAudit })
         || findTwin(state.ledger, ctx, entry => movedItems(entry, 'out').some(held => sameItem(held, item, { fuzzy: true })), { crossBase: isAudit, exactSource: false });
-    if (twin && (isExact(twin, ctx) || isAudit || !playerMessageSupportsRepeatTransaction(item, ctx.playerMessage, ITEM_SPEND_VERB_RE))) {
+    if (twin && (isExact(twin, ctx) || isAudit || !(playerMessageSupportsRepeatTransaction(item, ctx.playerMessage, ITEM_SPEND_VERB_RE) || narrationCountsItem(ctx, item)))) {
         return { suppress: 'duplicate', twin };
     }
     return {};
@@ -368,11 +480,12 @@ export function judgeItemOut(state, ctx, item) {
  */
 export function judgePurchase(state, ctx, transaction) {
     const { item, quantity, priceCp } = transaction;
-    const bypass = playerMessageSupportsRepeatTransaction(item, ctx.playerMessage, PURCHASE_VERB_RE);
+    const bypass = playerMessageSupportsRepeatTransaction(item, ctx.playerMessage, PURCHASE_VERB_RE) || narrationCountsItem(ctx, item);
     const duplicate = findTwin(state.ledger, ctx, entry => entry.kind === 'purchase'
         && entry.cp === -priceCp
         && entry.itemsIn.some(held => sameItem(held, item) && held.quantity === quantity));
-    if (duplicate && (isExact(duplicate, ctx) || !bypass)) return { suppress: 'duplicate', twin: duplicate };
+    // The player lane (a confirmed card) is never second-guessed but as an exact replay.
+    if (duplicate && (isExact(duplicate, ctx) || (!bypass && ctx.lane !== 'player'))) return { suppress: 'duplicate', twin: duplicate };
     if (bypass || ctx.lane === 'player') return { coinTwin: null, itemTwin: null };
     const coinTwin = priceCp > 0
         ? findTwin(state.ledger, ctx, entry => entry.kind === 'coin' && movedOut(entry) && -entry.movedCp === priceCp, { crossBase: true, exactSource: false })
@@ -381,14 +494,29 @@ export function judgePurchase(state, ctx, transaction) {
     return { coinTwin, itemTwin };
 }
 
+/**
+ * The player's line this turn hands over the goods by their noun, singular or
+ * plural — "I pull out the last pelt and put it down for her" for "Wolf
+ * pelts", a run-6 sale (2026-11-01) the exact-name matcher missed. Sales
+ * only: on the purchase side "I take the lantern" must not unlock a second
+ * charge for a price already paid as loose coin.
+ */
+function playerPutsDownGoods(item, playerMessage) {
+    const text = String(playerMessage || '');
+    const noun = itemNounSrc(item);
+    return !!noun && SALE_VERB_RE.test(text) && !PAYMENT_RECAP_RE.test(text) && new RegExp(String.raw`\b${noun}\b`, 'i').test(text);
+}
+
 /** An atomic sale. `{ suppress, twin }` for a replay; otherwise `coinTwin` (proceeds already paid as found coin). */
 export function judgeSale(state, ctx, item, quantity, proceedsCp) {
-    const bypass = playerMessageSupportsRepeatTransaction(item, ctx.playerMessage, SALE_VERB_RE);
+    const bypass = playerMessageSupportsRepeatTransaction(item, ctx.playerMessage, SALE_VERB_RE)
+        || playerPutsDownGoods(item, ctx.playerMessage)
+        || narrationCountsItem(ctx, item) || narrationCountsCoin(ctx);
     const duplicate = findTwin(state.ledger, ctx, entry => entry.kind === 'sale'
         && entry.cp === proceedsCp
         && entry.itemsOut.some(held => sameItem(held, item) && held.quantity === quantity));
-    if (duplicate && (isExact(duplicate, ctx) || !bypass)) return { suppress: 'duplicate', twin: duplicate };
-    if (bypass || !(proceedsCp > 0)) return { coinTwin: null };
+    if (duplicate && (isExact(duplicate, ctx) || (!bypass && ctx.lane !== 'player'))) return { suppress: 'duplicate', twin: duplicate };
+    if (bypass || ctx.lane === 'player' || !(proceedsCp > 0)) return { coinTwin: null };
     const coinTwin = findTwin(state.ledger, ctx, entry => entry.kind === 'coin' && movedIn(entry) && entry.movedCp === proceedsCp, { crossBase: true, exactSource: false });
     return { coinTwin };
 }

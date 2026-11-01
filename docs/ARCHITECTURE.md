@@ -257,7 +257,9 @@ dated eval and playtest reports, and `agent-dialogues/`.
   `eventChannels.js` → a reducer action → a prompt line saying the field exists.
 - **Every DM-writable mechanical channel ships with a replay ledger.** Coins and items share ONE
   transaction log (`state.ledger`, `engine/transactionLedger.js`) judged by ONE judge
-  (`state/handlers/ledger.js`) with the counterparty as the window key (2026-11-01); spells,
+  (`state/handlers/ledger.js`) with the counterparty as the window key (2026-11-01); the DM's own
+  counting ("another silver") is a new movement, and an uncertain cross-message twin books nothing
+  but asks the player on a "Recorded once" card (2026-11-01 night); spells,
   rests and XP keep their own; combat uses `exchangeId`. The DM re-emitting an applied event on a
   later turn is a proven failure mode. Windows are measured in conversational distance.
 - **Every LLM lane is a trust boundary.** A reducer fed by any lane projects the payload to known

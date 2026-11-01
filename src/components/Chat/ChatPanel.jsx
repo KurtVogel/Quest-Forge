@@ -1246,6 +1246,8 @@ function RoleplayCheckPanel({
 // transcript message — that was O(campaign × chunks) per DM turn.
 /** The one button that books a "Narrated, not recorded" card, worded by what it moves. */
 function recoveryActionLabel(recovery) {
+    // A "Recorded once" card re-runs the declined movement (ledger.js repeatCard).
+    if (recovery.mode === 'repeat') return 'Record it again';
     const coin = recovery.coinCp > 0 ? formatCurrency(recovery.coinCp) : '';
     if (recovery.direction === 'out') return coin ? `Deduct ${coin}` : 'Remove from my pack';
     return coin && !(recovery.items || []).length ? `Add ${coin}` : 'Add to my pack';
@@ -1324,11 +1326,15 @@ const ChatMessage = memo(function ChatMessage({ message, onDelete, onResolveReco
                                     {recoveryActionLabel(message.recovery)}
                                 </button>
                                 <button type="button" className="recovery-dismiss" onClick={() => onResolveRecovery?.(message.id, false)}>
-                                    Dismiss
+                                    {message.recovery.mode === 'repeat' ? 'Same one' : 'Dismiss'}
                                 </button>
                             </>
                         ) : (
-                            <span className="recovery-status">{message.recovery.status === 'accepted' ? 'Recorded.' : 'Dismissed — nothing changed.'}</span>
+                            <span className="recovery-status">
+                                {message.recovery.status === 'accepted'
+                                    ? 'Recorded.'
+                                    : (message.recovery.mode === 'repeat' ? 'Kept as one.' : 'Dismissed — nothing changed.')}
+                            </span>
                         )}
                     </div>
                 )}

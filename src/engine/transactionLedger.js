@@ -157,9 +157,13 @@ const foldParty = (value) => cleanParty(value).toLowerCase().replace(/^(?:the|a|
  * deliberately narrow — "the guard" and "Sergeant Holt" may be one man, so a
  * pair the engine cannot tell apart keeps the ordinary window.
  */
-export function partyRelation(a, b) {
+export function partyRelation(a, b, resolve = null) {
     if (!a?.party || !b?.party) return 'unknown';
-    if (a.partyId && b.partyId) return a.partyId === b.partyId ? 'same' : 'different';
+    // An id missing at logging time (the NPC joined the roster later) is
+    // resolved now when the caller can (2026-11-01 run 6).
+    const idA = a.partyId || (resolve ? resolve(a.party) : '');
+    const idB = b.partyId || (resolve ? resolve(b.party) : '');
+    if (idA && idB) return idA === idB ? 'same' : 'different';
     const fa = foldParty(a.party);
     const fb = foldParty(b.party);
     if (fa && fa === fb) return 'same';
@@ -184,7 +188,7 @@ export function lastLongRestAt(state) {
  * twin of the movement described by `ctx` (two people the roster knows apart).
  */
 export function windowFor(entry, ctx) {
-    const relation = partyRelation(entry, ctx);
+    const relation = partyRelation(entry, ctx, typeof ctx.resolveParty === 'function' ? ctx.resolveParty : null);
     if (relation === 'different') return null;
     const sameDay = !(Number.isFinite(ctx.restAt) && ctx.restAt > entry.atMessage);
     return relation === 'same' && sameDay ? LONG_WINDOW : SHORT_WINDOW;

@@ -110,3 +110,17 @@ max 54 s. Zero page errors, zero failed DM calls. Raw artifacts in `test-results
 | Two purchases in one line | **PARTIAL → fixed** | run before the fix: the dagger was charged, the cloak granted but its price never charged, and the Scribe reported NOTHING — it was told never to report purchases. After the fix (the Scribe reports them): rope + tinderbox evented and audited, nothing doubled. The card itself verified by hand in the production build (Add to my pack, Deduct 5 sp → player-lane log entries with the party) |
 | Reload | **PASS** | state identical, the log intact |
 | Found | **minor** | a rope lashed to a bell clapper and left behind stayed in the pack — the DM's call, not the ledger's |
+
+## Run 6 — 2026-11-01 (night), the opposite failure: genuine repeats
+
+`opus-flash-6`: Brannoc Ironvein, dwarf Fighter laid off in Millhaven with four wolf pelts and his apprentice Tuva; the dockmaster Hesk Varro pays 1 sp a crate, Old Maud buys pelts at 5 sp, Tamsin Reed dices at two-silver stakes, Sergeant Holt wants a 3 sp fine. 23 player lines (28 driver calls) on Flash, built to repeat the SAME amount with the SAME person the way a player types it ("Next one." / "the next pelt" / "throw again"), plus change-making, a three-item shop line, a long rest, and a reload after each fix. Zero page errors. The driver's `/debug` gained an `economy` view (purse, pack, log, cards) for this run.
+
+| Column | Verdict | Evidence |
+|---|---|---|
+| Genuine repeats | **FAIL → fixed** | before: crate 2's 1 sp dropped ("slaps another river-dull silver piece into your palm"), pelt sales 2, 4, 5 and 6 dropped ("five more dull silver coins", "another stack of five clipped silver pieces", then just "five clipped silver bits"), the gambler's 4 sp pot cut to 3 sp by the dockmaster's earlier 1 sp. After: the second crate of day two paid on the narration; the fifth crate raised a "Recorded once" card, one tap booked it on the player lane |
+| Story drift | **found** | the DM read the uncorrected pack and narrated phantom pelts ("three wolf pelts still weigh down your pack"), letting the hero sell six of four — the cost of a silent drop |
+| Doubles | **PASS** | nothing booked twice all run; the hero counting his purse on the skiff moved nothing |
+| Change-making | **PASS** | one silver on the counter for stew, ale and a candle: 1 sp paid, 2 cp back, candle added — no card |
+| Three items in one line | **PASS** | rope, whetstone and socks evented with one 1 gp 1 sp payment — the DM recorded it all, no card needed |
+| Dice | **PASS** | stake, win, win after a rest, loss on a natural 1 — each moved once |
+| Found | **minor** | socks handed to Tuva stayed in the pack (Tuva never joined the party roster); the opening purse differed between two boots of one premise (27 gp vs 20 gp — the premise-purse idea) |

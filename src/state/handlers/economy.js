@@ -18,7 +18,7 @@ import {
     systemMessage,
     withInventoryAndAC,
 } from './shared.js';
-import { judgeAuditPayment, judgeCoinIn, judgeCoinOut, judgePurchase, judgeSale, ledgerContext, logMovement } from './ledger.js';
+import { judgeAuditPayment, judgeCoinIn, judgeCoinOut, judgePurchase, judgeSale, ledgerContext, logMovement, projectRepeatReplay, repeatCard } from './ledger.js';
 import { handlers as inventoryHandlers } from './inventory.js';
 
 export { playerMessageNamesAmount } from './ledger.js';
@@ -150,11 +150,14 @@ const itemsOf = (entry) => (entry?.itemsOut?.length ? entry.itemsOut : entry?.it
  * re-emission of the re-emission is still a replay) and the reason is posted
  * as a purse receipt the DM reads.
  */
-function ignore(state, ctx, fields, line) {
+// `ask` ({ verdict, replay }) turns a cross-message duplicate into a
+// "Recorded once" card (ledger.js repeatCard); anything certain stays a note.
+function ignore(state, ctx, fields, line, ask = null) {
+    const card = ask ? repeatCard(state, ctx, ask.verdict, line, ask.replay) : null;
     return {
         ...state,
         ledger: logMovement(state, ctx, { ...fields, status: 'ignored' }),
-        messages: [...state.messages, coinLine(line)],
+        messages: [...state.messages, card || coinLine(line)],
     };
 }
 
@@ -185,7 +188,8 @@ export const handlers = {
         const name = formatCurrency(amounts.totalCp);
         const verdict = judgeCoinIn(state, ctx, amounts);
         if (verdict.suppress) {
-            return ignore(state, ctx, { kind: 'coin', cp: amounts.totalCp }, GRANT_LINES[verdict.suppress](name, verdict.twin));
+            return ignore(state, ctx, { kind: 'coin', cp: amounts.totalCp }, GRANT_LINES[verdict.suppress](name, verdict.twin),
+                { verdict, replay: { type: 'ADD_COIN_GRANT', payload: { copper: amounts.totalCp } } });
         }
         const bundled = verdict.bundled;
         const grant = bundled ? bundled.remainder : amounts;
@@ -227,7 +231,8 @@ export const handlers = {
         }
         if (verdict.suppress) {
             return ignore(state, ctx, { kind: 'coin', cp: -amounts.totalCp },
-                `Duplicate coin charge ignored — ${name} was already paid${withParty(verdict.twin, 'to')} moments ago.`);
+                `Duplicate coin charge ignored — ${name} was already paid${withParty(verdict.twin, 'to')} moments ago.`,
+                { verdict, replay: { type: 'APPLY_COIN_LOSS', payload: { copper: amounts.totalCp } } });
         }
         const result = spendCurrency(state.character, amounts);
         if (!result.paid) {
@@ -321,7 +326,8 @@ export const handlers = {
         const claim = { kind: 'purchase', cp: -priceCp, itemsIn: [itemRef(item, quantity)] };
         const verdict = judgePurchase(state, ctx, transaction);
         if (verdict.suppress) {
-            return ignore(state, ctx, claim, `Duplicate purchase ignored — ${item.name} was already bought recently.`);
+            return ignore(state, ctx, claim, `Duplicate purchase ignored — ${item.name} was already bought recently.`,
+                { verdict, replay: { type: 'PURCHASE_ITEM', payload: { name: item.name, itemKey: item.itemKey, quantity, priceCp } } });
         }
         const label = `${quantity > 1 ? `${quantity}x ` : ''}${item.name}`;
         // Both halves already happened as loose events (the price as a coin
@@ -416,7 +422,8 @@ export const handlers = {
         const claim = { kind: 'sale', cp: proceedsCp, itemsOut: [itemRef(item, quantity)] };
         const verdict = judgeSale(state, ctx, item, quantity, proceedsCp);
         if (verdict.suppress) {
-            return ignore(state, ctx, claim, `Duplicate sale ignored — ${item.name} was already sold recently.`);
+            return ignore(state, ctx, claim, `Duplicate sale ignored — ${item.name} was already sold recently.`,
+                { verdict, replay: { type: 'SELL_ITEM', payload: { itemId: item.id, name: item.name, itemKey: item.itemKey, quantity, priceCp: proceedsCp } } });
         }
         const label = `${quantity > 1 ? `${quantity}x ` : ''}${item.name}`;
         // The proceeds already arrived as loose found coin: the goods leave,
@@ -460,6 +467,14 @@ export const handlers = {
         if (accept !== true) return marked(state, 'dismissed');
         let next = marked(state, 'accepted');
         const meta = { lane: 'player', sourceId: `${messageId}:recovery`, party: recovery.party || '' };
+        // "Recorded once" (ledger.js repeatCard): re-run exactly the movement
+        // the judge declined, on the player lane — projected again, since a
+        // save is input too.
+        if (recovery.mode === 'repeat') {
+            const replay = projectRepeatReplay(recovery.replay);
+            const run = replay && (handlers[replay.type] || inventoryHandlers[replay.type]);
+            return run ? run(next, { type: replay.type, payload: { ...replay.payload, _meta: meta } }) : next;
+        }
         const coinCp = Math.max(0, Math.trunc(Number(recovery.coinCp) || 0));
         const items = Array.isArray(recovery.items) ? recovery.items.slice(0, 4) : [];
         if (recovery.direction === 'out') {

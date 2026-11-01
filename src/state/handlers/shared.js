@@ -417,6 +417,21 @@ export function rememberTransaction(entries, transaction, sourceId, messageIndex
     return [...previous, record].slice(-RECENT_TRANSACTION_LIMIT);
 }
 
+const NAME_STOPWORDS = new Set(['the', 'and', 'with', 'for', 'from', 'set', 'pair', 'bundle']);
+
+/** The noun alternation an item answers to in prose ("Wolf pelts" → wolf|pelt, each with an optional plural). */
+export function itemNounSrc(item) {
+    const words = [item?.name, String(item?.itemKey || '').replace(/[_-]+/g, ' ')]
+        .join(' ')
+        .toLowerCase()
+        .split(/[^a-z]+/)
+        .filter(word => word.length > 2 && !NAME_STOPWORDS.has(word))
+        .map(word => word.replace(/(?:es|s)$/, ''))
+        .filter(word => word.length > 2);
+    const unique = [...new Set(words)];
+    return unique.length ? `(?:${unique.join('|')})(?:s|es)?` : '';
+}
+
 export function playerMessageSupportsRepeatTransaction(item, playerMessage, verbRe) {
     const text = String(playerMessage || '');
     if (!text.trim()) return false;
