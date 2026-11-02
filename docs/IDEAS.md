@@ -4187,3 +4187,29 @@ bystanders lock the hero's own companion out of a tell for its life; every cappe
 yields, and the names the engine needs later (party, roster) go first. Payoff: a merchant's beating
 that is the merchant's, a check the arbiter approved that rolls, a reputation that says only what
 was seen, one record per habit, and a companion who can say what she watched.
+
+### [strengthening] A ceiling clamps the total once; a stamp enters through the one load clamp the day it is born; a roster's duplicates are the ledger's blind spot; a key is bounded where it is written, not where it is read; an unused shelf is a missing twin — status: `idea` (2026-11-02)
+Five rules from the character-vault + inventory-economy pass of 2026-11-02 (Lap 2, hostile input),
+each reproduced with a throwaway probe over the real reducer, `applyEvents`, the vault and the roster
+store on `fake-indexeddb`. **(1)** `coinAmounts` clamps each coin column at 10,000 and THEN the event
+at 10,000 gp; the 10-20 fix added the second ceiling and left the first, and since 11-01 every
+internal replay (the two cards, the covers, the judge's booking, the undo) is denominated in copper
+alone — so a 150 gp card pays 100 gp, a 120 gp wage the judge calls new books 100, and the receipt
+never says why. One clamp per quantity, on the quantity the rule is stated for; a per-part clamp
+beside a total clamp is two ceilings and the lower wins silently. **(2)** The transaction log is the
+one `at*` ledger `validateSaveState` does not hand the transcript length, and the distance helper
+answers 0 for a stamp past the end — so a future-stamped entry is "just now" forever: shown to the DM
+every turn and a twin for every same-value movement from that person. A new conversational stamp joins
+the load clamp in the commit that births it, and the clamp drops what the transcript cannot place.
+**(3)** `partyRelation` says `different` on two resolved ids, and `different` is the only verdict that
+removes a replay window entirely — so a roster twin ("Tuomas" / "Tuomas the furrier") pays a second
+same-value grant and buys a second rope with no card. A verdict that disables a safety net needs
+positive evidence (names that do not match), never the absence of a shared record. **(4)** The hero
+id is typed string-or-mint and never bounded at the load heal or the template, the roster writes it as
+its IndexedDB key, and the list projection clamps it to 200 — so a 5,000-char id is a row the picker
+cannot open and `deleteRosterCharacter` cannot remove. A store's key and its projection read one
+constant, and the writer mints when over. **(5)** `saneEpochMs` was built for "a finite-but-absurd
+`createdAt` (1e300)" and the vault's `createdAt` / `portraitUpdatedAt` still pass `Number.isFinite`
+alone. When a shelf is built for a class, grep every boundary that types the same field. Payoff: a
+reward paid in full, a ledger that forgets what the transcript forgot, a safety net that survives a
+duplicated NPC, a roster every row of which can be opened and deleted, and two stamps that mean a date.
