@@ -131,7 +131,7 @@ function build(state, flags = {}) {
 }
 
 const sizes = (parts) => Object.fromEntries(parts.map(p => [p.name, p.text.length]));
-const INTENT_CEILING = 12200; // 11,074 measured 2026-10-26 (16,263 on 10-15 with the living-world family aboard)
+const INTENT_CEILING = 15800; // 14,332 measured 2026-11-03 (every carried row named; 11,074 on 10-26, 16,263 on 10-15 with the living-world family aboard)
 // The intent lane's dynamic parts, measured 2026-10-26 (no `mode` on this fixture; DM REMINDERS renders only with content).
 const INTENT_PARTS = ['character', 'party', 'inventory', 'combat', 'formatReminder'];
 const PREFIX_END = 'heroSheet'; // the last per-campaign constant block (2026-09-26: HERO IDENTITY → SPELLBOOK → HERO SHEET)
@@ -144,7 +144,7 @@ const PREFIX_END = 'heroSheet'; // the last per-campaign constant block (2026-09
 const DYNAMIC_CEILINGS = {
     character: 1500,       // 1,108
     party: 14000,          // 12,728 — four companions, every bond field at its cap (one bond composer + Wants / Their business now since 2026-10-13)
-    inventory: 3000,       // 2,551 — 60 rows, names + values only
+    inventory: 6000,       // 5,436 — 60 rows at the 80-char name cap, all mechanical: 25 valued rows + a 33-name tail (2026-11-03: no carried row is hidden; 2,551 when the tail was a count)
     ledger: 1500,          // RECENT TRANSACTIONS (2026-11-01): 8 rows clamped at 160 chars + the header
     quests: 7500,          // 6,554 — the block's own row cap + the 8-name overflow tail
     recentRolls: 1000,     // 744
@@ -261,7 +261,7 @@ describe('prompt blocks — per-block ceilings, prefix stability, per-call-type 
         const names = parts.map(p => p.name);
         expect(names.slice(names.indexOf(PREFIX_END) + 1)).toEqual(['character', 'inventory', 'quests', 'formatReminder']);
         const dynamic = parts.slice(names.indexOf(PREFIX_END) + 1).reduce((n, p) => n + p.text.length, 0);
-        expect(dynamic).toBeLessThan(12000);
+        expect(dynamic).toBeLessThan(15200); // 13,826 measured 2026-11-03 (every carried row named)
         // The prefix is the same bytes as the ordinary turn's — the cache holds.
         const prefixOf = (list) => list.slice(0, list.findIndex(p => p.name === PREFIX_END) + 1).map(p => p.text).join('\n\n');
         expect(prefixOf(parts)).toBe(prefixOf(partsA));
