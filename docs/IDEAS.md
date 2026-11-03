@@ -4213,3 +4213,24 @@ constant, and the writer mints when over. **(5)** `saneEpochMs` was built for "a
 alone. When a shelf is built for a class, grep every boundary that types the same field. Payoff: a
 reward paid in full, a ledger that forgets what the transcript forgot, a safety net that survives a
 duplicated NPC, a roster every row of which can be opened and deleted, and two stamps that mean a date.
+
+### [strengthening] A fallback lane runs the primary lane's final clamp; a stamp inside a string is a stamp; a loss rule written for the last element must know it is last; a resume point is the furthest claim, not the latest row — status: `idea` (2026-11-03)
+Four rules from the spellcasting + chronicler pass of 2026-11-03 (Lap 2, hostile input), each
+reproduced with a throwaway probe over the real reducer, `restoreChapters` and the chronicler with the
+adapter mocked. **(1)** `resolveSpellRecipients` dedupes by identity and caps at the spell's limit;
+the 10-31 roster-NPC heal fallback then maps EVERY matching invalid ref to a recipient and re-applies
+neither — Cure Wounds with five roster names spends one slot and tells the DM five people were cured
+(one of them twice). A lane that mints the same record as the primary runs the same final clamp, on
+the merged result, once. **(2)** The 09-10 / 09-13 / 11-02 sweeps clamped every `at*` field to the
+transcript; `recentSpellCasts` / `recentRests` carry their index as the third segment of a
+pipe-string and were typed "string" and kept — a future stamp makes a spell "cast a few turns ago"
+forever and a DM rest a silent no-op. The load clamp walks every READER of `conversationalDistance`,
+not every field named `at*`. **(3)** "A chapter without its prose is no chapter — its span re-opens"
+is true for the newest chapter and false for a middle one: the next close resumes after the LAST
+chapter, so a lost middle blob is a span nobody will ever retell and nobody is told about. A
+drop-on-loss handler that leans on "the next write re-covers it" must know it is last, or leave a stub.
+**(4)** Two readers take the resume point from the last saved chapter and trust the order the writer
+keeps; a save that does not keep it retells a span twice. A resume point is the furthest claim, not the
+latest row — or the load enforces the writer's order. Payoff: one cure per slot on the engine's own
+word, a ledger that forgets what the transcript forgot (and a rest that says when it refuses), a
+chronicle whose holes are visible, and a close that never retells what the record already holds.
