@@ -95,6 +95,9 @@ docs/         STATUS, IDEAS, DECISIONS, the three queues, ARCHITECTURE.md, flows
 
 - **Master only.** No feature branches, no PRs. Pull first, commit on master, push to origin.
   Every session that ships code also builds and deploys — never "pushed but not deployed".
+  A hosted session bound to a `claude/*` / `ccr-*` branch still lands on master (checkout master,
+  ff-pull, commit, push); if it truly cannot, its final message AND `docs/STATUS.md` name the branch
+  so the next machine lands it first thing. Work left on a side branch was lost once (2026-11-03).
 - **Run `npm test` and `npm run lint`** before committing engine / parser / state changes; add a
   parser fixture whenever a new LLM failure mode is found.
 - **Push back.** Vesa wants ideas argued: a weaker premise, a cheaper path, an existing shelf —
