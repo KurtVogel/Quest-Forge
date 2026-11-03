@@ -18,6 +18,7 @@ import {
     mintOwnedItem,
     normalizeCompanion,
     resolveInventoryItemRef,
+    stackIdentity,
     systemMessage,
     withInventoryAndAC,
 } from './shared.js';
@@ -32,6 +33,27 @@ import { judgeItemIn, judgeItemOut, ledgerContext, logMovement, repeatCard } fro
 
 function isBonusActionConsumable(item) {
     return item?.actionType === 'bonus' || item?.consumableType === 'healing';
+}
+
+// Every item that enters or leaves the pack posts ONE receipt line in the chat
+// (2026-11-03, Vesa: "always show in the chat what was just added or removed
+// — to avoid confusion and to catch weird transactions early"). Purchases,
+// sales and a consumable's use already had theirs (economy.js, USE_ITEM); a
+// plain grant (items_found, an audit's recovery, the panel's own Add) and a
+// named loss (items_lost, a gear handoff) landed silently, so the player
+// learned of a wrong grant only from the panel, turns later. Stamped
+// dmVisible like the coin receipts: the DM reads the same accounting the
+// player does, and consecutive receipts fold into one window row.
+const countOf = (n) => (n > 1 ? ` ×${n}` : '');
+function itemReceipt(sign, name, quantity, { party = '', to = false, tail = '' } = {}) {
+    const who = party ? ` (${to ? 'to' : 'from'} ${party})` : '';
+    const verb = sign === '+' ? 'added to your pack' : 'left your pack';
+    return systemMessage(`**${sign}${name}${countOf(quantity)}** ${verb}${who}${tail}.`, { dmVisible: true });
+}
+function stackLeft(inventory, item) {
+    const row = inventory.find(i => i.id === item.id);
+    const left = row ? Math.max(0, Math.trunc(row.quantity || 1)) : 0;
+    return left > 0 ? ` — ${left} left` : '';
 }
 
 // resolveInventoryItemRef / findInventoryItemByRef live in shared.js
@@ -59,10 +81,13 @@ export const handlers = {
         // grants stay unguarded (a user click is always deliberate).
         const sourceId = String(meta.sourceId || '').slice(0, 160);
         let ledger = state.ledger;
+        // The receipt names the counterparty as the ledger cleaned and clamped it.
+        let party = '';
         if (sourceId) {
             const quantity = Math.max(1, Math.trunc(item.quantity || 1));
             const ref = { name: item.name, itemKey: item.itemKey, quantity };
             const ctx = ledgerContext(state, meta);
+            party = ctx.party;
             const verdict = judgeItemIn(state, ctx, ref);
             if (verdict.suppress) {
                 const line = `Duplicate item grant ignored — ${item.name} was already added recently.`;
@@ -106,7 +131,14 @@ export const handlers = {
         // Same-identity non-equipment joins its existing stack (2026-09-03 P2:
         // buy 2 → buy 3 → find 1 minted three "Torch" rows, and a later loss
         // decremented whichever row resolved first).
-        return withInventoryAndAC(guarded, normalizeEquippedSlots(addOrStackItem(state.inventory, newItem), newItem.equipped ? newItem.id : null));
+        const nextInventory = normalizeEquippedSlots(addOrStackItem(state.inventory, newItem), newItem.equipped ? newItem.id : null);
+        const landed = Math.max(0, Math.max(1, Math.trunc(newItem.quantity || 1)) - overflow);
+        const stackRow = nextInventory.find(row => row.id !== newItem.id && stackIdentity(row) && stackIdentity(row) === stackIdentity(newItem));
+        const tail = (stackRow ? ` — now ${Math.trunc(stackRow.quantity || 1)}` : '') + (nextInventory.some(row => row.id === newItem.id && row.equipped) ? ', equipped' : '');
+        const receipted = landed > 0
+            ? { ...guarded, messages: [...guarded.messages, itemReceipt('+', newItem.name, landed, { party, tail })] }
+            : guarded;
+        return withInventoryAndAC(receipted, nextInventory);
     },
 
     USE_ITEM(state, action) {
@@ -225,7 +257,10 @@ export const handlers = {
     },
 
     REMOVE_ITEM(state, action) {
-        return withInventoryAndAC(state, state.inventory.filter(item => item.id !== action.payload));
+        const item = state.inventory.find(row => row.id === action.payload);
+        if (!item) return state;
+        const receipted = { ...state, messages: [...state.messages, itemReceipt('−', item.name, Math.max(1, Math.trunc(item.quantity || 1)), { tail: ' — removed by you' })] };
+        return withInventoryAndAC(receipted, state.inventory.filter(row => row.id !== action.payload));
     },
 
     REMOVE_ITEM_BY_NAME(state, action) {
@@ -295,7 +330,12 @@ export const handlers = {
         const removed = ctx
             ? { ...state, ledger: logMovement(state, ctx, { kind: 'item', itemsOut: [{ name: matchToRemove.name, itemKey: matchToRemove.itemKey, quantity: units }] }) }
             : state;
-        return withInventoryAndAC(removed, consumeItem(state.inventory, matchToRemove.id, units));
+        const nextInventory = consumeItem(state.inventory, matchToRemove.id, units);
+        const receipted = {
+            ...removed,
+            messages: [...removed.messages, itemReceipt('−', matchToRemove.name, units, { party: ctx?.party || '', to: true, tail: stackLeft(nextInventory, matchToRemove) })],
+        };
+        return withInventoryAndAC(receipted, nextInventory);
     },
 
     EQUIP_ITEM(state, action) {
