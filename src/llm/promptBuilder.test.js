@@ -4,7 +4,7 @@
  * promptBuilder.*.test.js files (fronts, story memory, action surge, combat pacing).
  */
 import { describe, expect, it } from 'vitest';
-import { buildSystemPrompt, buildSystemPromptParts, PROMPT_CHAR_BUDGET } from './promptBuilder.js';
+import { CARRIED_NAMES_CHAR_CEILING, splitCarriedForPrompt, buildSystemPrompt, buildSystemPromptParts, PROMPT_CHAR_BUDGET } from './promptBuilder.js';
 
 function makeCharacter(overrides = {}) {
     return {
@@ -603,6 +603,8 @@ describe('party block', () => {
     });
 });
 
+const CARRIED_NAMES_CHAR_ceiling_plus_header = () => CARRIED_NAMES_CHAR_CEILING + 200;
+
 describe('inventory block', () => {
     it('separates equipped and carried items with mechanical annotations', () => {
         const text = prompt({
@@ -624,25 +626,62 @@ describe('inventory block', () => {
         expect(text).toContain('NOT proficient');
     });
 
-    it('caps the Carried list, prioritizing mechanical items and keeping equipped complete', () => {
-        // 2026-08-05 audit: a hoarder campaign paid ~1k tokens/turn in carried
-        // annotations. 30 misc trinkets + 2 unequipped mechanical items → the
-        // mechanical items always render, the oldest trinkets overflow.
+    it('names EVERY carried item: values on the mechanical and newest rows, the rest as a names-only tail', () => {
+        // 2026-11-03: the 2026-08-05 cap hid the overflow behind "…and N more
+        // minor items" and a megacampaign DM granted and denied gear from a
+        // stale list. 30 trinkets + 2 unequipped mechanical items → the
+        // mechanical rows and the newest trinkets carry a value, the oldest
+        // trinkets are still NAMED, and nothing is counted away.
         const inventory = [
             { id: 'sword', name: 'Spare Longsword', type: 'weapon', damage: '1d8', equipped: false },
             { id: 'potion', name: 'Healing Potion', type: 'consumable', equipped: false },
-            ...Array.from({ length: 30 }, (_, i) => ({ id: `t${i}`, name: `Trinket ${i}`, type: 'gear', equipped: false })),
+            ...Array.from({ length: 30 }, (_, i) => ({ id: `t${i}`, name: `Trinket ${i}`, type: 'gear', quantity: i === 0 ? 4 : 1, valueCp: 50, equipped: false })),
             { id: 'armor', name: 'Chain Mail', type: 'armor', armorType: 'heavy', baseAC: 16, equipped: true },
         ];
         const text = prompt({ inventory });
         expect(text).toContain('Chain Mail'); // equipped always complete
-        expect(text).toContain('Spare Longsword');
-        expect(text).toContain('Healing Potion');
-        expect(text).toContain('Trinket 29'); // newest minor kept
-        expect(text).not.toContain('Trinket 0'); // oldest minor overflowed
-        expect(text).toContain('…and 7 more minor items (still owned; full list in the Inventory panel)');
+        const carried = text.slice(text.indexOf('**Carried:**'), text.indexOf('**Also carried**'));
+        const tail = text.split(/\r?\n/).find(line => line.startsWith('**Also carried**'));
+        expect(carried).toContain('Spare Longsword');
+        expect(carried).toContain('Healing Potion');
+        expect(carried).toContain('Trinket 29 [value 5 sp]'); // newest minor rows carry a value
+        expect(carried).toContain('Trinket 7 [value 5 sp]'); // 25 − 2 mechanical = 23 valued trinkets (7..29)
+        expect(carried).not.toContain('Trinket 6 ');
+        expect(tail).toContain('Trinket 0 (x4), Trinket 1, Trinket 2, Trinket 3, Trinket 4, Trinket 5, Trinket 6'); // oldest: named, quantity kept, no value
+        expect(tail).not.toContain('[value');
+        expect(text).not.toContain('more minor items');
+        expect(text).not.toContain('…and');
     });
 
+    it('keeps the NEWEST mechanical rows valued when the mechanical rows alone overflow the cap (the megacampaign bug)', () => {
+        // 40 unequipped potions / wands: the old slice(0, cap) kept the
+        // OLDEST 25 and the 15 newest rows vanished into the overflow count.
+        // Three trinkets ride along: with the cap spent on mechanical rows
+        // they get NO valued slot (slice(-0) once meant "all of them").
+        const trinkets = Array.from({ length: 3 }, (_, i) => ({ id: `t${i}`, name: `Trinket ${i}`, type: 'gear', valueCp: 5, equipped: false }));
+        const elixirs = Array.from({ length: 40 }, (_, i) => ({ id: `p${i}`, name: `Elixir ${i}`, type: 'consumable', valueCp: 100, equipped: false }));
+        const inventory = [trinkets[0], ...elixirs.slice(0, 20), trinkets[1], ...elixirs.slice(20), trinkets[2]];
+        const { full, namesOnly } = splitCarriedForPrompt(inventory);
+        expect(full.map(i => i.id)).toEqual(elixirs.slice(15).map(i => i.id));
+        expect(namesOnly.map(i => i.id)).toEqual(['t0', ...elixirs.slice(0, 15).map(i => i.id), 't1', 't2']);
+        expect(full.length + namesOnly.length).toBe(inventory.length);
+        const text = prompt({ inventory });
+        expect(text).toContain('Elixir 39 [value 1 gp]');
+        expect(text).toContain('Elixir 15 [value 1 gp]');
+        expect(text.slice(text.indexOf('**Also carried**'))).toContain('Elixir 0, Elixir 1');
+        expect(text).not.toContain('…and');
+    });
+
+    it('a pathological pack drops only the OLDEST names past the names-only char ceiling, and says how many', () => {
+        const inventory = Array.from({ length: 400 }, (_, i) => ({ id: `g${i}`, name: `Curio number ${i} of the hoard`, type: 'gear', equipped: false }));
+        const text = prompt({ inventory });
+        const tail = text.split(/\r?\n/).find(line => line.startsWith('**Also carried**'));
+        expect(tail.length).toBeLessThan(CARRIED_NAMES_CHAR_ceiling_plus_header());
+        expect(tail).toContain('Curio number 374 of the hoard'); // the newest names-only row
+        expect(tail).not.toContain('Curio number 0 of the hoard,'); // the oldest fell to the count
+        expect(tail).toMatch(/…and \d+ more \(still owned; full list in the Inventory panel\)/);
+        expect(text).toContain('Curio number 399 of the hoard'); // the newest 25 carry full rows
+    });
     it('is omitted when inventory is empty', () => {
         const text = prompt({ inventory: [] });
         expect(text).not.toContain('## INVENTORY');

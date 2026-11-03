@@ -1393,25 +1393,67 @@ function buildInventoryBlock(inventory, character) {
         block += `\n**Equipped:** ${equipped.map(formatEquipped).join(', ')}`;
     }
     if (carried.length) {
-        // Equipped stays complete; the Carried list is capped — a hoarder
-        // campaign at 60+ items paid ~1k tokens/turn in full stat annotations
-        // (2026-08-05 audit). Mechanically relevant items keep priority, the
-        // most recent minor items fill the rest, and the overflow count keeps
-        // the DM from treating omitted gear as lost.
-        let shown = carried;
-        let overflow = '';
-        if (carried.length > CARRIED_PROMPT_CAP) {
-            const mechanical = carried.filter(isMechanicalItem);
-            const minor = carried.filter(i => !isMechanicalItem(i));
-            shown = [...mechanical, ...minor.slice(-Math.max(0, CARRIED_PROMPT_CAP - mechanical.length))].slice(0, CARRIED_PROMPT_CAP);
-            overflow = `, …and ${carried.length - shown.length} more minor items (still owned; full list in the Inventory panel)`;
+        // Every carried item reaches the DM by NAME (2026-11-03). The 25-row
+        // cap of the 2026-08-05 audit hid the rest behind "…and N more minor
+        // items", and on a megacampaign pack the hidden rows were the NEWEST
+        // ones: when more than 25 rows were mechanical (consumables, magic,
+        // spare weapons) the cap kept the OLDEST 25 and the DM granted, denied
+        // and priced gear from a stale list. The cap bought bytes the carried
+        // rows no longer carry (stats left them 2026-09-25) — a name costs
+        // ~5 tokens. Now the cap only decides which rows carry a VALUE: the
+        // mechanical rows and the newest minor ones (newest-first when the
+        // mechanical rows alone overflow it); the rest follow as a compact
+        // names-only list. A char ceiling on that tail is the one belt left,
+        // for a pathological pack, and it drops the OLDEST names.
+        const { full, namesOnly } = splitCarriedForPrompt(carried);
+        block += `\n**Carried:** ${full.map(formatCarried).join(', ')}`;
+        if (namesOnly.length) {
+            const names = namesOnly.map(formatCarriedName);
+            let kept = names;
+            let tail = '';
+            if (names.join(', ').length > CARRIED_NAMES_CHAR_CEILING) {
+                let used = 0;
+                const fit = [];
+                for (let k = names.length - 1; k >= 0; k -= 1) {
+                    used += names[k].length + 2;
+                    if (used > CARRIED_NAMES_CHAR_CEILING) break;
+                    fit.unshift(names[k]);
+                }
+                kept = fit;
+                tail = `${kept.length ? ', ' : ''}…and ${names.length - kept.length} more (still owned; full list in the Inventory panel)`;
+            }
+            block += `\n**Also carried** (names only, every one still owned — never grant these again as found): ${kept.join(', ')}${tail}`;
         }
-        block += `\n**Carried:** ${shown.map(formatCarried).join(', ')}${overflow}`;
     }
     return block;
 }
 
+// Rows that carry a value in the INVENTORY block: the mechanical ones (newest
+// first when they alone overflow the cap) and the newest minor ones filling
+// the rest. Both lists keep inventory order (oldest → newest). Exported for the
+// tests that pin the "no row is ever hidden" invariant.
+export function splitCarriedForPrompt(carried, cap = CARRIED_PROMPT_CAP) {
+    if (carried.length <= cap) return { full: carried, namesOnly: [] };
+    const mechanical = carried.filter(isMechanicalItem);
+    const minor = carried.filter(i => !isMechanicalItem(i));
+    // slice(-0) is slice(0) — the whole list — so the minor share is guarded.
+    const minorShare = Math.max(0, cap - mechanical.length);
+    const chosen = new Set([
+        ...mechanical.slice(-cap),
+        ...(minorShare > 0 ? minor.slice(-minorShare) : []),
+    ]);
+    return {
+        full: carried.filter(i => chosen.has(i)),
+        namesOnly: carried.filter(i => !chosen.has(i)),
+    };
+}
+
 const CARRIED_PROMPT_CAP = 25;
+// The names-only tail's belt (2026-11-03): ~1k tokens of names covers a pack
+// of well over a hundred rows; past it the OLDEST names fall to a count.
+export const CARRIED_NAMES_CHAR_CEILING = 4000;
+
+const formatCarriedName = (i) => (i.quantity > 1 ? `${i.name} (x${i.quantity})` : i.name);
 
 function isMechanicalItem(i) {
     return !!(i.damage || isWornArmor(i) || isShieldItem(i) || i.type === 'consumable' || i.magicBonus);
