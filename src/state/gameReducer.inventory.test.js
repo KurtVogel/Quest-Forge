@@ -825,3 +825,55 @@ describe('ADD_ITEM stacks same-identity non-equipment (2026-09-03 P2)', () => {
         expect(next.inventory.filter(i => i.name === 'Amulet')).toHaveLength(2);
     });
 });
+
+describe('item receipts — every grant and loss posts one chat line (2026-11-03)', () => {
+    const lastLine = (state) => state.messages[state.messages.length - 1];
+    const receipts = (state) => state.messages.filter(m => m.role === 'system' && /^\*\*[+−]/.test(m.content));
+
+    it('a DM grant posts "+name ×n added to your pack (from <party>)", DM-visible, with the stack total', () => {
+        const withTorches = gameReducer(makeState(), { type: 'ADD_ITEM', payload: { name: 'Torch', quantity: 2 } });
+        expect(lastLine(withTorches).content).toBe('**+Torch ×2** added to your pack.');
+        const granted = gameReducer(withTorches, { type: 'ADD_ITEM', payload: { name: 'Torch', quantity: 3, _meta: { sourceId: 'msg-1', party: 'Mira the chandler' } } });
+        const line = lastLine(granted);
+        expect(line.role).toBe('system');
+        expect(line.dmVisible).toBe(true);
+        expect(line.content).toBe('**+Torch ×3** added to your pack (from Mira the chandler) — now 5.');
+        expect(granted.inventory.find(i => i.name === 'Torch').quantity).toBe(5);
+    });
+
+    it('an auto-equipped grant says so; a suppressed duplicate posts NO + receipt', () => {
+        const bare = { ...makeState(), inventory: [] };
+        const armored = gameReducer(bare, { type: 'ADD_ITEM', payload: { itemKey: 'leatherArmor' } });
+        expect(lastLine(armored).content).toMatch(/^\*\*\+Leather Armor\*\* added to your pack, equipped\.$/);
+        const first = gameReducer(makeState(), { type: 'ADD_ITEM', payload: { name: 'Silver Locket', _meta: { sourceId: 'msg-7' } } });
+        const again = gameReducer(first, { type: 'ADD_ITEM', payload: { name: 'Silver Locket', _meta: { sourceId: 'msg-7' } } });
+        expect(receipts(again).filter(m => m.content.startsWith('**+Silver Locket'))).toHaveLength(1);
+        expect(lastLine(again).content).toContain('Duplicate item grant ignored');
+    });
+
+    it('a named loss posts "−name left your pack (to <party>) — n left"; the whole stack going has no remainder', () => {
+        const withTorches = gameReducer(makeState(), { type: 'ADD_ITEM', payload: { name: 'Torch', quantity: 4 } });
+        const one = gameReducer(withTorches, { type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'torch', _meta: { sourceId: 'msg-2', party: 'Dim' } } });
+        expect(lastLine(one).content).toBe('**−Torch** left your pack (to Dim) — 3 left.');
+        expect(lastLine(one).dmVisible).toBe(true);
+        const rest = gameReducer(one, { type: 'REMOVE_ITEM_BY_NAME', payload: { name: 'Torch', quantity: 'all' } });
+        expect(lastLine(rest).content).toBe('**−Torch ×3** left your pack.');
+        expect(rest.inventory.some(i => i.name === 'Torch')).toBe(false);
+    });
+
+    it('the panel\'s own remove button posts "−name … removed by you"; an unknown id posts nothing', () => {
+        const state = makeState();
+        const removed = gameReducer(state, { type: 'REMOVE_ITEM', payload: 'shield-1' });
+        expect(lastLine(removed).content).toBe('**−Shield** left your pack — removed by you.');
+        expect(gameReducer(state, { type: 'REMOVE_ITEM', payload: 'no-such-id' })).toBe(state);
+    });
+
+    it('a hostile counterparty reaches the receipt clamped, never raw', () => {
+        const party = `<script>${'x'.repeat(500)}`;
+        const granted = gameReducer(makeState(), { type: 'ADD_ITEM', payload: { name: 'Pebble', _meta: { sourceId: 'msg-9', party } } });
+        // The ledger's cleanParty clamps the counterparty (PARTY_MAX); the chat
+        // markdown escapes HTML — the same path every coin receipt takes.
+        expect(lastLine(granted).content.length).toBeLessThan(200);
+        expect(lastLine(granted).content).toMatch(/\(from <script>x+\)\.$/);
+    });
+});
