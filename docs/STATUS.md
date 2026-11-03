@@ -8,13 +8,13 @@ lives in git history and the settled outcomes in DECISIONS.md).
 
 _Last updated: 2026-11-03 (every carried item reaches the DM by name — the "…and 33 more items" cap hid the newest rows); 2026-11-02 (small hours: the repeat judge replaces the phrase rules; playtest runs 7–8; `eval:repeats` 32/32); 2026-11-01 (night: playtest run 6 — genuine repeats were dropped; the DM's counting, "Recorded once" cards, late-roster counterparties; earlier: one transaction log, one judge, the counterparty, "Narrated, not recorded" cards, playtest run 5); 2026-10-31 (late: doubles by construction, the Flash length limit, playtest run 4; night: the third Opus playtest + five fixes; evening: named presence, far friends, story cards retire, the Scribe sees facts, places, dooms abroad; earlier: the derived relationship arc + species / wants fixes, the personality-repetition fixes, the architecture map; below them the 2026-10-30 (night) Opus playtest + ten fixes, the morning's open-queue sweep, the 10-28 Opus playtest and the megacampaign read)_
 
-## 2026-11-03 — the DM sees every carried item; the "…and 33 more items" cap is gone — pushed AND deployed
+## 2026-11-03 — the DM sees every carried item; the "…and 33 more items" cap is gone — pushed, NOT deployed (the environment's Firebase token was rejected, HTTP 401; deploy from a machine with a valid login)
 
 Vesa: the DM says "…and 33 more items" on the megacampaign and "doesn't know my latest items and it causes problems". Cause (DECISIONS.md 2026-11-03): the Carried line's 25-row cap put mechanical rows first and sliced from the FRONT, so once more than 25 carried rows were potions / wands / spare weapons / magic items the NEWEST rows were the hidden ones — and the cap's reason (stat annotations on carried rows) left in September. Built: every carried row is named; the cap decides only which 25 carry a value (mechanical, newest first, then the newest minor); the rest ride an **Also carried** names-and-quantities line ("every one still owned — never grant these again as found"); a 4,000-char belt on that tail for a pathological pack. A 60-row megapack renders in ~1,750 chars. Measured: 4,412 tests / 288 files, lint clean, ceilings re-pinned on the worst-case fixture.
 
 **For Vesa's own save:** nothing to do — it is prompt-side; the next turn carries the whole pack.
 
-**Not done:** not played on a real provider from here (no keys in the environment).
+**Not done:** NOT deployed — `firebase deploy` from the hosted session got HTTP 401 on the environment's `FIREBASE_TOKEN` (it deployed on 11-02; the token has since expired or been revoked). Not played on a real provider from here (no keys in the environment). Landed on branch `ccr-96edbdec-pmxnlw`, not master — the hosted session was bound to that branch; fast-forward master from it, then build + deploy.
 
 **Next:** on the megacampaign, ask the DM about one of the items it used to lose (a late pickup) — it should name it without a grant; watch that it does not re-grant anything on the Also-carried line.
 
