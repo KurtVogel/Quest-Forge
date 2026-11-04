@@ -13,7 +13,7 @@
  * first row (the default model belongs to the default provider). This is the
  * ONE model heal (2026-10-12: GameContext re-ran it on the merged settings).
  */
-import { PROVIDERS } from '../llm/modelCatalog.js';
+import { PROVIDERS, RETIRED_MODEL_ALIASES } from '../llm/modelCatalog.js';
 import { PRESETS } from '../data/presets.js';
 import { normalizePaceDial } from '../engine/worldTempo.js';
 import { cleanTextField } from '../config/contentLimits.js';
@@ -47,10 +47,16 @@ export function sanitizeSettings(raw) {
     // row: the picker is a <select>, so a stored id outside the list rendered
     // blank and the DM call went to a model the app had dropped on purpose. A
     // stored provider WITHOUT a model takes its first row too — the merge would
-    // otherwise pair it with the default (Gemini) model.
+    // otherwise pair it with the default (Gemini) model. A RETIRED id with an
+    // alias (2026-11-04: what the provider itself routes it to) lands on that
+    // row when it is one of the provider's own, so a 2.5 Flash player keeps
+    // the Flash-Lite tier Google gives them instead of stepping up to 3.8 Flash.
     if (typeof out.model === 'string' || out.llmProvider) {
         const provider = PROVIDERS[out.llmProvider || 'gemini'];
-        if (provider && !provider.models.some(m => m.id === out.model)) out.model = provider.models[0].id;
+        if (provider && !provider.models.some(m => m.id === out.model)) {
+            const alias = typeof out.model === 'string' ? RETIRED_MODEL_ALIASES[out.model] : undefined;
+            out.model = alias && provider.models.some(m => m.id === alias) ? alias : provider.models[0].id;
+        }
     }
     if ('preset' in raw && typeof raw.preset === 'string' && Object.prototype.hasOwnProperty.call(PRESETS, raw.preset)) {
         out.preset = raw.preset;

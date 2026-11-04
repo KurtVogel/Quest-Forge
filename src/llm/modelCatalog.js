@@ -23,8 +23,11 @@ export const PROVIDERS = {
         models: [
             { id: DEFAULT_DM_MODEL, name: 'Gemini 3.8 Flash (Recommended)', description: 'The DM model — newest Flash, stable, fast and cheap (1M context, 64k output)' },
             { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', description: 'Fast frontier-class, great value' },
-            { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', description: 'Cheapest current-gen' },
-            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Previous gen, fast and affordable' },
+            { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite', description: 'Budget tier — what Gemini 2.5 Flash becomes on 2026-12-01; stronger multi-turn persona consistency than 3.1 Flash-Lite ($0.30 / $2.50 per M tokens)' },
+            { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', description: 'Cheapest ($0.25 / $1.50 per M tokens)' },
+            // gemini-2.5-flash left the picker 2026-11-04: Google retired it
+            // 2026-11-02 and routes it to gemini-3.5-flash-lite from 2026-12-01
+            // (RETIRED_MODEL_ALIASES below keeps a stored id on that tier).
         ],
     },
     openai: {
@@ -47,10 +50,32 @@ export const PROVIDERS = {
     xai: {
         name: 'xAI (Grok)',
         models: [
-            { id: 'grok-4.3', name: 'Grok 4.3 (Recommended)', description: 'xAI flagship — fast, strong prose, but weaker game-event compliance: quests, loot, and coin may need the built-in audits to keep up' },
-            { id: 'grok-4.1-fast', name: 'Grok 4.1 Fast', description: 'Budget tier; xAI aliases retired IDs forward to the current model. Same event-compliance caveat as Grok 4.3' },
+            // 4.3 stays the recommended row (2026-11-04): 1M context at $1.25 /
+            // $2.50 per M, the only Grok shape played here. xAI's own pick is
+            // 4.7 ("the most capable model we've built", 500k context, $2 / $6,
+            // every rate ×2 at ≥ 200k prompt tokens) — offered, not default,
+            // until a run shows its event compliance. grok-4.1-fast left the
+            // picker: xAI's models page no longer lists it (alias below).
+            { id: 'grok-4.3', name: 'Grok 4.3 (Recommended)', description: 'xAI — fast, strong prose, 1M context, but weaker game-event compliance: quests, loot, and coin may need the built-in audits to keep up' },
+            { id: 'grok-4.7', name: 'Grok 4.7', description: 'xAI\'s newest and most capable; 500k context, $2 / $6 per M tokens (×2 at ≥ 200k prompt tokens). Not playtested here — same event-compliance caveat' },
         ],
     },
 };
+
+/**
+ * Model ids the picker no longer offers, mapped to the row a stored setting
+ * should land on (2026-11-04). Each alias is what the PROVIDER itself does
+ * with the retired id, so the player keeps the tier they chose: Google routes
+ * gemini-2.5-flash to gemini-3.5-flash-lite and gemini-2.5-pro to
+ * gemini-3.8-flash from 2026-12-01 (changelog 2026-11-02); xAI aliases a
+ * retired id to the latest stable version. The settings heal reads this
+ * before falling to the provider's first row; an alias never crosses
+ * providers (the heal checks the target is one of the provider's own rows).
+ */
+export const RETIRED_MODEL_ALIASES = Object.freeze({
+    'gemini-2.5-flash': 'gemini-3.5-flash-lite',
+    'gemini-2.5-pro': DEFAULT_DM_MODEL,
+    'grok-4.1-fast': 'grok-4.3',
+});
 
 export const PROVIDER_LIST = Object.keys(PROVIDERS);

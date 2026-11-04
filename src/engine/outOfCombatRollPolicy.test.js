@@ -6,7 +6,7 @@ vi.mock('../llm/adapter.js', () => ({ sendMessage }));
 import { playerAuthorityRollCorrectionPrompt, reviewOutsideCombatRolls, reviewOutsideCombatRollsSync } from './outOfCombatRollPolicy.js';
 import { MACHINERY_MODEL } from '../llm/machinery.js';
 
-const SETTINGS = { apiKey: 'test-key', llmProvider: 'gemini', model: 'gemini-2.5-flash' };
+const SETTINGS = { apiKey: 'test-key', llmProvider: 'gemini', model: 'gemini-3.5-flash-lite' };
 
 describe('outside-combat social roll policy', () => {
     it('rejects a belief check for an explicitly truthful answer', async () => {

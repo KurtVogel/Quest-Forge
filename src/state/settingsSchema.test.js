@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { sanitizeSettings } from './settingsSchema.js';
 import { initialGameState } from './initialState.js';
-import { DEFAULT_DM_MODEL, PROVIDERS } from '../llm/modelCatalog.js';
+import { DEFAULT_DM_MODEL, PROVIDERS, RETIRED_MODEL_ALIASES } from '../llm/modelCatalog.js';
 import { PROVIDERS as ADAPTER_PROVIDERS, DEFAULT_DM_MODEL as ADAPTER_DEFAULT } from '../llm/adapter.js';
 
 /** What GameContext's initializer does with a loaded blob: defaults, then the blob. */
@@ -18,6 +18,19 @@ describe('the stored-model heal (2026-10-12 — one copy)', () => {
     it('a retired Gemini Pro id falls to the provider\'s first row, the DM model', () => {
         expect(sanitizeSettings({ llmProvider: 'gemini', model: 'gemini-3.1-pro-preview' }).model).toBe(DEFAULT_DM_MODEL);
         expect(sanitizeSettings({ model: 'gemini-2.5-pro' }).model).toBe(DEFAULT_DM_MODEL);
+    });
+
+    it('a retired id with an alias lands on the row its provider routes it to (2026-11-04), never across providers', () => {
+        expect(sanitizeSettings({ llmProvider: 'gemini', model: 'gemini-2.5-flash' }).model).toBe('gemini-3.5-flash-lite');
+        expect(sanitizeSettings({ llmProvider: 'xai', model: 'grok-4.1-fast' }).model).toBe('grok-4.3');
+        // The alias target is another provider's row: the first row wins, not the alias.
+        expect(sanitizeSettings({ llmProvider: 'openai', model: 'gemini-2.5-flash' }).model).toBe(PROVIDERS.openai.models[0].id);
+        // Every alias points at a row the picker still offers, and no retired id is still a row.
+        for (const [retired, target] of Object.entries(RETIRED_MODEL_ALIASES)) {
+            const rows = Object.values(PROVIDERS).flatMap(p => p.models.map(m => m.id));
+            expect(rows).toContain(target);
+            expect(rows).not.toContain(retired);
+        }
     });
 
     it('a blank or junk model falls to the provider\'s first row', () => {
