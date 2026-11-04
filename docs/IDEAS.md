@@ -4234,3 +4234,24 @@ keeps; a save that does not keep it retells a span twice. A resume point is the 
 latest row — or the load enforces the writer's order. Payoff: one cure per slot on the engine's own
 word, a ledger that forgets what the transcript forgot (and a rest that says when it refuses), a
 chronicle whose holes are visible, and a close that never retells what the record already holds.
+
+### [strengthening] A turn type the engine knows is a gate the engine enforces; a name compared by `includes` is not an identity; a number with three composers has three bands; a cap with three writers protects nothing; a half-guard guards the cheap half — status: `idea` (2026-11-04)
+Five rules from the rules-math + scribe pass of 2026-11-04 (Lap 2, hostile input), each reproduced
+with a throwaway probe over the real reducer, the rules engine and `runScribe` with the adapter mocked.
+**(1)** The orchestrator computes `recallTurn`, switches the audit off on it and tells the Scribe — and
+the Scribe gates `hero_tells` on it and lets the RECALL TURN prose guard eleven other lanes; a recounted
+ferry crossing relocated the hero to the ferry, minted a fact and a card. When the caller already knows
+a lane must not fire, the gate is an `if` at the dispatch and the prose is the explanation. **(2)** The
+combat contradiction filter tests `claim.includes(enemyName)`; an active "Rat" dropped a fact and a
+dossier update about Ratcatcher Finn. Every name that decides a drop goes through the `textMatch` shelf.
+**(3)** The vault clamps a score 1..30, the ASI stops at 20, the load floors at 1 — a save with
+`strength: 10,000,000` loads an AC of five million into the file and a damage die that falls to `1d4+0`
+because the kernel's fallback drops the modifier the builder promised to keep. The load heal is never
+looser than the file importer. **(4)** `ADD_CONDITION` refuses the eleventh condition silently,
+`withCondition` appends past the cap, the load trims the tail — the table condition (paralyzed,
+unconscious) is the one each loses. One writer owns a capped list; a refusal is a line or an eviction
+rule. **(5)** The region seed asks "is this the current place?" and the profile write above it, where
+the canon changes, does not — a drover's hearsay became a distant place's recorded state and a motif
+the world "has shown". A precondition for a side effect belongs on the write. Payoff: a recall turn
+that remembers without moving anyone, a fight that cannot silence news about a namesake, a save that
+cannot load a demigod, a paralysis that always lands, and place cards made of what the hero saw.
