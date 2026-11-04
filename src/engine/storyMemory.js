@@ -849,8 +849,19 @@ export function detectCallbackPayoff(curated = [], narrative = '', { query = '',
 
 const describeAge = (ageTurns) => (Number.isFinite(ageTurns) ? (ageTurns <= 0 ? 'just now' : `${ageTurns} turn${ageTurns === 1 ? '' : 's'} ago`) : 'long ago');
 
-export function buildStoryMemoryPromptBlock(memories = []) {
+/**
+ * @param {object[]} memories - the curated cards
+ * @param {{ staleTwinFor?: ((text: string) => string)|null }} [options] - the
+ *   stale-twin judge (memory-research 2026-11-04 M0): given a card's text,
+ *   the live twin of a since-flipped fact the card restates, or ''. The
+ *   builder owns the judge (`describeStaleTwin` over `listStaleFacts`,
+ *   engine/worldFacts.js) because worldFacts imports this module; the line
+ *   ends ` — since changed: "<twin>"` before its age, and nothing about the
+ *   card changes — the DM is SHOWN the premise moved and the fiction decides.
+ */
+export function buildStoryMemoryPromptBlock(memories = [], { staleTwinFor = null } = {}) {
     if (!memories.length) return '';
+    const judge = typeof staleTwinFor === 'function' ? staleTwinFor : null;
     const lines = memories.slice(0, DEFAULT_CARD_LIMIT).map(m => {
         const subject = m.subject ? ` | subject: ${m.subject}` : '';
         // Array.isArray, not just ?.length — a string value has .length but no .join.
@@ -863,7 +874,10 @@ export function buildStoryMemoryPromptBlock(memories = []) {
         // The age and the voice (WOW 2026-10-14): how long ago, and who in
         // the scene could say it — else the hero's own passing thought.
         const speakers = Array.isArray(m.speakers) && m.speakers.length ? m.speakers.join(', ') : 'the hero (a passing thought)';
-        return `- ${formatSecrecyTag(m.knownBy)}(${m.type}; salience ${m.salience}/5${id}${subject}${npcs}${loc}) ${m.text} — ${describeAge(m.ageTurns)} · could say it: ${speakers}`;
+        // A card premised on a since-flipped fact says so (2026-11-04 M0).
+        const twin = judge && typeof m.text === 'string' ? judge(m.text) : '';
+        const stale = typeof twin === 'string' && twin ? ` — since changed: "${twin}"` : '';
+        return `- ${formatSecrecyTag(m.knownBy)}(${m.type}; salience ${m.salience}/5${id}${subject}${npcs}${loc}) ${m.text}${stale} — ${describeAge(m.ageTurns)} · could say it: ${speakers}`;
     }).join('\n');
 
     return `## DRAMATIC CALLBACK OPPORTUNITIES

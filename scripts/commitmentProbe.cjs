@@ -3,7 +3,7 @@
  * (docs/MEMORY_RESEARCH.md, entry 2026-09-17, amended 09-17 / 09-23 / 09-30).
  *
  *   npm run eval:commitments -- [--turns 30] [--checkpoints 10,20,30]
- *                               [--dm gemini|terra] [--machinery gemini-3.8-flash|gemini-3-flash-preview]
+ *                               [--dm gemini|terra|sol] [--partnerRows] [--machinery gemini-3.8-flash|gemini-3-flash-preview]
  *                               [--embed-dims 768|1536] [--label <name>] [--url <app url>]
  *
  * What it measures (NCP-Bench-shaped, MemDelta / MemTrace / MemStrata / LAPSE protocol):
@@ -39,7 +39,7 @@
  *   npx vite build --outDir <dir> && npx vite preview --outDir <dir> --port 4181
  *   QUEST_FORGE_TEST_URL=http://localhost:4181/?debugState=1
  * Keys come from .env / the environment (GEMINI_API_KEY always; OPENAI_API_KEY for
- * the Terra DM). Never the Grok DM (Vesa, 2026-09-14). Keys are never printed.
+ * the Terra / Sol DMs). Never the Grok DM (Vesa, 2026-09-14). Keys are never printed.
  *
  * Output: test-results/commitments/<timestamp>-<label>/report.md + report.json
  * (+ turns.json, transcript.json, log.json, screenshots).
@@ -83,6 +83,8 @@ const OPENAI_API_KEY = envKey('OPENAI_API_KEY');
 const DM_ARMS = {
     gemini: { provider: 'gemini', model: 'gemini-3.8-flash', label: 'Gemini Flash' },
     terra: { provider: 'openai', model: 'gpt-5.6-terra', label: 'GPT Terra' },
+    // The shipped OpenAI DM (2026-11-04): the cache-boundary smoke C4 has owed since 10-16 runs here.
+    sol: { provider: 'openai', model: 'gpt-6.1-sol', label: 'GPT-6.1 Sol' },
 };
 const dmArmName = String(ARGS.dm || 'gemini');
 if (!DM_ARMS[dmArmName]) {
@@ -131,14 +133,19 @@ if (!STARTER_TITLES[STARTER_ID]) {
     process.exit(1);
 }
 const HERO_NAME = String(ARGS.hero || 'Kerttu Vaara');
-const APP_URL = String(ARGS.url || process.env.QUEST_FORGE_TEST_URL || 'http://localhost:4181/?debugState=1');
+const BASE_URL = String(ARGS.url || process.env.QUEST_FORGE_TEST_URL || 'http://localhost:4181/?debugState=1');
+// --partnerRows (memory-research 2026-11-04 M1 trial): the playtest gate's flag turns the
+// retrieved-exchange partner line on for this run (llm/debugFlags.js); compare the
+// RETRIEVAL-vs-USE column against a run without it.
+const PARTNER_ROWS = ARGS.partnerRows === true || ARGS.partnerRows === 'true' || ARGS.partnerRows === '1';
+const APP_URL = PARTNER_ROWS && !/[?&]partnerRows=/.test(BASE_URL) ? `${BASE_URL}${BASE_URL.includes('?') ? '&' : '?'}partnerRows=1` : BASE_URL;
 const CHROME_PATH = process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const PROXY_ARGS = process.env.HTTPS_PROXY
     ? [`--proxy-server=${process.env.HTTPS_PROXY}`, '--ssl-version-max=tls1.2']
     : [];
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-const RUN_LABEL = String(ARGS.label || `${dmArmName}-${MACHINERY_MODEL.replace(/^gemini-/, '')}-${EMBED_DIMS}d-t${TURNS}`);
+const RUN_LABEL = String(ARGS.label || `${dmArmName}-${MACHINERY_MODEL.replace(/^gemini-/, '')}-${EMBED_DIMS}d-t${TURNS}${PARTNER_ROWS ? '-partner' : ''}`);
 const OUT_DIR = path.resolve(`test-results/commitments/${stamp}-${RUN_LABEL}`);
 const PROFILE_DIR = path.join(OUT_DIR, 'profile');
 fs.mkdirSync(OUT_DIR, { recursive: true });

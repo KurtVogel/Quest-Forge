@@ -9,7 +9,6 @@ import { describeArmorAc, describeShieldAc, formatModifier, getModifier, getProf
 import { SUPPORTED_ENEMY_CONDITIONS_SENTENCE } from '../engine/enemyStats.js';
 import { getDmBonusXpCap, getExperienceThreshold, isMaxLevel } from '../engine/progression.js';
 import { buildJournalBlocks, describeBondForPrompt } from './journalBlocks.js';
-import { coverage } from '../engine/textMatch.js';
 import { buildWonderBlock } from '../engine/wonder.js';
 import { buildInterludeBlock } from '../engine/interlude.js';
 import { buildPresenceText } from './narrativeMessages.js';
@@ -30,7 +29,7 @@ import { describeHeroIncapacity, isLowLevelSolo } from '../engine/combatPredicat
 import { briefNpcFieldForPrompt, findCompanionRecord, findNamedPeople, resolveCompanionLook } from '../engine/npcRoster.js';
 import { buildRelationshipBeatBlock } from '../engine/relationshipArc.js';
 import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
-import { describeStateTag, factTokenSet, hasNegation, isLiveFact, liveWorldFacts } from '../engine/worldFacts.js';
+import { describeStaleTwin, describeStateTag, listStaleFacts, liveWorldFacts } from '../engine/worldFacts.js';
 import { conversationalAgeSince, describeTurnsAgo } from '../engine/replayLedger.js';
 
 // ——— RETRIEVED MEMORIES (the RAG block — moved here from engine/vectorMemory.js
@@ -52,72 +51,81 @@ const MEMORY_LABEL_MAX = 80;
 
 /**
  * A retrieved row that RESTATES a since-flipped fact carries its correction
- * (memory-research 2026-10-28 M0, D1 / D4 — "Obsolete Facts": the newest
- * value present with one obsolete competitor beside it cost 100 → 44.6 %;
- * reproduced on ours as a journal row restating a flipped fact printed bare
- * beside the live flip in WORLD FACTS). A journal / narrative / npc / general
- * row whose text holds at least this share of a superseded fact's meaning
- * tokens — the dedupe's own tokenizer, `factTokenSet` — and whose restating
- * clause does not already carry the live twin's polarity ends
+ * (memory-research 2026-10-28 M0, built 2026-10-30 — "Obsolete Facts": the
+ * newest value present with one obsolete competitor beside it cost 100 →
+ * 44.6 %; reproduced on ours as a journal row restating a flipped fact
+ * printed bare beside the live flip in WORLD FACTS). The judge —
+ * `listStaleFacts` + `describeStaleTwin`, engine/worldFacts.js — is shared
+ * with the DRAMATIC CALLBACKS block since 2026-11-04 (M0: a card premised on a
+ * since-flipped fact says so too). A journal / narrative / npc / general row,
+ * or a story card's own `story_*` row, whose text holds at least
+ * STALE_ROW_CONTAINMENT of a superseded fact's meaning tokens and whose
+ * restating clause is not already on the live twin's side ends
  * ` — since changed: "<live twin>"`. Never a `world_fact` row (the seed
  * prunes those) and never a `player` row (a claim, not canon). Zero calls.
  */
-export const STALE_ROW_CONTAINMENT = 0.8;
-const STALE_TAG_TWIN_MAX = 160;
+export { STALE_ROW_CONTAINMENT } from '../engine/worldFacts.js';
 const STALE_TAGGABLE_CATEGORIES = new Set(['journal', 'narrative', 'npc', 'general']);
-
-/** The superseded facts whose LIVE twin is on record, newest change first, with their token sets. */
-function listStaleFacts(worldFacts) {
-    if (!Array.isArray(worldFacts) || worldFacts.length === 0) return [];
-    const byId = new Map(worldFacts.filter(f => f && typeof f.id === 'string').map(f => [f.id, f]));
-    const stamp = f => (Number.isFinite(f.supersededAtMessage) ? f.supersededAtMessage : -1);
-    return worldFacts
-        .filter(f => f && typeof f.fact === 'string' && f.supersededBy && !Number.isFinite(f.retractedAtMessage))
-        .map(f => {
-            // A twin itself superseded (a re-flip) is not the live truth: the
-            // fact it replaced may be true again, and its own successor tags.
-            const twin = byId.get(f.supersededBy);
-            if (!isLiveFact(twin)) return null;
-            const tokens = factTokenSet(f.fact);
-            if (tokens.size === 0) return null;
-            return { stale: f, twin, tokens, flip: hasNegation(f.fact) !== hasNegation(twin.fact) };
-        })
-        .filter(Boolean)
-        .sort((a, b) => stamp(b.stale) - stamp(a.stale));
-}
-
-/** The sentence of `text` holding the most of `tokens` — where the row's polarity on THIS claim is judged. */
-function restatingClause(text, tokens) {
-    const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean);
-    if (sentences.length <= 1) return text;
-    let best = sentences[0];
-    let bestShare = -1;
-    for (const sentence of sentences) {
-        const share = coverage(tokens, factTokenSet(sentence));
-        if (share > bestShare) {
-            best = sentence;
-            bestShare = share;
-        }
-    }
-    return best;
-}
+const isStaleTaggable = (category) => STALE_TAGGABLE_CATEGORIES.has(category) || category.startsWith('story_');
 
 /** The ` — since changed: "…"` tag for a row, or '' — one tag per row, the newest change winning. */
 function staleRowTag(memory, staleFacts) {
     if (staleFacts.length === 0 || typeof memory?.text !== 'string') return '';
     const category = typeof memory.category === 'string' ? memory.category : 'general';
-    if (!STALE_TAGGABLE_CATEGORIES.has(category)) return '';
-    const rowTokens = factTokenSet(memory.text);
-    if (rowTokens.size === 0) return '';
-    for (const { twin, tokens, flip } of staleFacts) {
-        if (coverage(tokens, rowTokens) < STALE_ROW_CONTAINMENT) continue;
-        // A genuine flip pair: a clause already on the twin's side of the
-        // negation states the new truth and needs no tag. A same-polarity
-        // close (a plan closed by its deed) is judged on the tokens alone.
-        if (flip && hasNegation(restatingClause(memory.text, tokens)) === hasNegation(twin.fact)) continue;
-        return ` — since changed: "${clipMemoryText(twin.fact, STALE_TAG_TWIN_MAX)}"`;
+    if (!isStaleTaggable(category)) return '';
+    const twin = describeStaleTwin(memory.text, staleFacts);
+    return twin ? ` — since changed: "${twin}"` : '';
+}
+
+/**
+ * TRIAL (memory-research 2026-11-04 M1, D4): a retrieved exchange arrives
+ * whole. A `narrative` row is the DM's reply clamped at 500 chars and a
+ * `player` row the line alone; each clears the retrieval gate on its own
+ * vector, so the half that asked and the half that answered rarely arrive
+ * together (Chain on Demand's same-session restoration: +4.6 over
+ * token-matched random expansion, +16 over dense at a similar volume). With
+ * `partnerRows` on, a row whose `sourceMessage` is in the transcript gets a
+ * second indented line — the nearest undeleted player line BEFORE a narrative
+ * row, the nearest undeleted DM reply AFTER a player row, within
+ * RETRIEVED_PARTNER_SPAN rows (a dice turn is ~5 rows) — clipped to
+ * RETRIEVED_PARTNER_MAX. Both lines count as ONE row inside the UNMOVED
+ * ceiling (a bigger budget hurts — "Obsolete Facts"): a full block admits
+ * fewer rows, never more text. A partner that is itself among the retrieved
+ * rows prints once. Off by default until the commitment probe's
+ * RETRIEVAL-vs-USE column says it helps; the playtest gate's
+ * `?debugState=1&partnerRows=1` turns it on for a run (llm/debugFlags.js).
+ */
+export const RETRIEVED_PARTNER_ROWS = false;
+export const RETRIEVED_PARTNER_MAX = 200;
+export const RETRIEVED_PARTNER_SPAN = 6;
+
+const isTranscriptRow = (m) => m && !m.deleted && !m.hidden && typeof m.content === 'string' && m.content.trim();
+
+/** The exchange partner of a narrative / player row, or null. */
+export function findPartnerRow(memory, messages) {
+    if (!Array.isArray(messages) || !memory || typeof memory.sourceMessage !== 'string') return null;
+    const category = memory.category;
+    if (category !== 'narrative' && category !== 'player') return null;
+    const index = messages.findIndex(m => m?.id === memory.sourceMessage);
+    if (index < 0) return null;
+    const step = category === 'narrative' ? -1 : 1;
+    const wantRole = category === 'narrative' ? 'user' : 'assistant';
+    // The nearest row of the partner's role IS the exchange partner: a dice
+    // turn's system / DM rows between are skipped, but a deleted or hidden
+    // partner yields nothing — never a line borrowed from another exchange.
+    for (let i = index + step, seen = 0; i >= 0 && i < messages.length && seen < RETRIEVED_PARTNER_SPAN; i += step, seen += 1) {
+        const m = messages[i];
+        if (!m || m.role !== wantRole) continue;
+        return isTranscriptRow(m) ? m : null;
     }
-    return '';
+    return null;
+}
+
+function partnerLine(memory, messages, retrievedSources) {
+    const partner = findPartnerRow(memory, messages);
+    if (!partner || (typeof partner.id === 'string' && retrievedSources.has(partner.id))) return '';
+    const label = memory.category === 'narrative' ? 'the player had said' : 'the DM answered';
+    return `\n  ↳ ${label}: "${clipMemoryText(partner.content.replace(/\s+/g, ' ').trim(), RETRIEVED_PARTNER_MAX)}"`;
 }
 
 /** A memory's label (category / location) read string-or-fallback, clamped — the row came from a cache. */
@@ -151,9 +159,10 @@ function clipMemoryText(text, max) {
  * @param {{ messages?: Array|null, worldFacts?: Array|null }} [options]
  * @returns {string}
  */
-export function buildRetrievedMemoriesBlock(memories, { messages = null, worldFacts = null } = {}) {
+export function buildRetrievedMemoriesBlock(memories, { messages = null, worldFacts = null, partnerRows = RETRIEVED_PARTNER_ROWS } = {}) {
     if (!memories || memories.length === 0) return '';
     const staleFacts = listStaleFacts(worldFacts);
+    const retrievedSources = new Set(memories.map(m => (typeof m?.sourceMessage === 'string' ? m.sourceMessage : null)).filter(Boolean));
     const lines = [];
     let used = 0;
     let omitted = 0;
@@ -166,7 +175,8 @@ export function buildRetrievedMemoriesBlock(memories, { messages = null, worldFa
         const locationTag = location ? ` — recorded at: ${location}` : '';
         const age = Array.isArray(messages) && Number.isFinite(m.atMessage) ? describeTurnsAgo(messages, m.atMessage) : '';
         const stale = staleRowTag(m, staleFacts);
-        const line = `- [${label}${locationTag}] ${clipMemoryText(m.text, RETRIEVED_MEMORY_ROW_MAX - stale.length)}${stale}${age ? ` — ${age}` : ''}`;
+        const partner = partnerRows === true ? partnerLine(m, messages, retrievedSources) : '';
+        const line = `- [${label}${locationTag}] ${clipMemoryText(m.text, RETRIEVED_MEMORY_ROW_MAX - stale.length)}${stale}${age ? ` — ${age}` : ''}${partner}`;
         if (used + line.length + 1 > RETRIEVED_MEMORIES_CHAR_CEILING) {
             omitted += 1;
             continue;
@@ -239,7 +249,7 @@ export function buildSystemPromptSplit(options) {
  * every dynamic block has a ceiling from its inputs' caps, and a test that can
  * read the blocks by name can pin each one instead of only the total.
  */
-export function buildSystemPromptParts({ ledger = null, character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, regions = null, worldMotifs = null, interlude = null, memoryUnavailable = false, narrationOnly = false, intentOnly = false, nudgeOnly = false, mode = null, storyMemoryPool = null }) {
+export function buildSystemPromptParts({ ledger = null, character, inventory, quests, rollHistory, preset, ruleset, customSystemPrompt, journal, npcs, party, currentLocation, combat, worldFacts, fronts, storyMemory, retrievedMemories, premise, recentRulings, worldTempo, recentEncounters, recentChecks, paceDial, messageCount, messages, regionalHearsay, absenceDrift, relationshipBeat, locations, recallRecord, wonder, heroTells, heroTellBeat, regions = null, worldMotifs = null, interlude = null, partnerRows = RETRIEVED_PARTNER_ROWS, memoryUnavailable = false, narrationOnly = false, intentOnly = false, nudgeOnly = false, mode = null, storyMemoryPool = null }) {
     // `intentOnly` (2026-09-30 prompt-building Lap-3 P2): the combat INTENT
     // call translates one committed action into a bounded combat_exchange
     // whose targets are enemy ids and whose actions are the slot whitelist —
@@ -621,7 +631,11 @@ export function buildSystemPromptParts({ ledger = null, character, inventory, qu
             parts.push(constraints, 'dmReminders');
         }
 
-        const storyMemoryBlock = buildStoryMemoryPromptBlock(storyMemory || []);
+        // A callback premised on a since-flipped fact says so (2026-11-04 M0):
+        // the same judge the RETRIEVED MEMORIES rows use, over the WHOLE fact
+        // list (the superseded rows say which facts changed).
+        const staleFacts = listStaleFacts(worldFacts);
+        const storyMemoryBlock = buildStoryMemoryPromptBlock(storyMemory || [], { staleTwinFor: text => describeStaleTwin(text, staleFacts) });
         if (storyMemoryBlock) {
             parts.push(storyMemoryBlock, 'storyMemory');
         }
@@ -630,7 +644,7 @@ export function buildSystemPromptParts({ ledger = null, character, inventory, qu
         // The WHOLE fact list rides (2026-10-30 M0): a row restating a since-
         // flipped fact is tagged with its live twin, and only the superseded
         // rows — the ones liveWorldFacts filters out — say which those are.
-        const ragBlock = buildRetrievedMemoriesBlock(retrievedMemories, { messages: ctx.messages, worldFacts });
+        const ragBlock = buildRetrievedMemoriesBlock(retrievedMemories, { messages: ctx.messages, worldFacts, partnerRows });
         if (ragBlock) {
             parts.push(ragBlock, 'retrievedMemories');
         }

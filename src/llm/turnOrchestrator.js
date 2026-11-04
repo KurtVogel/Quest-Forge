@@ -26,6 +26,7 @@
 
 import { isRecordEntry } from '../engine/journalEntry.js';
 import { buildSystemPrompt, buildSystemPromptSplit } from './promptBuilder.js';
+import { readDebugFlag } from './debugFlags.js';
 import { parseResponse, detectPreNarratedOutcome, displayCutIndex, normalizeEvents, detectSemanticTextRolls } from './responseParser.js';
 import { applyEvents } from '../state/applyEvents.js';
 import { gameReducer } from '../state/gameReducer.js';
@@ -306,6 +307,10 @@ export function createTurnRunner({
             messages: s.messages || [],
             storyMemory,
             retrievedMemories,
+            // Trial (memory-research 2026-11-04 M1): a retrieved row brings its
+            // exchange partner — on only under the playtest gate until the probe
+            // shows it helps (then RETRIEVED_PARTNER_ROWS flips in promptBuilder).
+            partnerRows: readDebugFlag('partnerRows'),
             premise: s.session?.premise,
             regionalHearsay: s.session?.regionalHearsay || null,
             absenceDrift: s.session?.absenceDrift || null,

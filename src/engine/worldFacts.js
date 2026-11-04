@@ -44,7 +44,7 @@
  *   `supersededBy` exactly as a FLIP does. Only an INTENT closes by ref — a
  *   standing truth closes by a flip alone, so no lane can bury canon by id.
  */
-import { containment, tokenSet } from './textMatch.js';
+import { containment, coverage, tokenSet } from './textMatch.js';
 import { conversationalDistance } from './replayLedger.js';
 import { normalizeKnownBy } from './storyMemory.js';
 import { appendWitness } from './retraction.js';
@@ -337,4 +337,86 @@ export function planWorldFactAdditions(worldFacts, payload, { messageCount = 0, 
         changed = true;
     }
     return { worldFacts: facts, added, changed };
+}
+
+/**
+ * A text that RESTATES a since-flipped fact carries its correction
+ * (memory-research 2026-10-28 M0, built 2026-10-30 for the RETRIEVED
+ * MEMORIES rows; moved here 2026-11-04 so the DRAMATIC CALLBACKS block
+ * judges with the SAME rule — "Obsolete Facts": the newest value present
+ * with one obsolete competitor beside it cost a reader 100 → 44.6 %;
+ * StateGraph: a belief or plan DERIVED from a changed premise stays accepted
+ * unless something says so). A text holding at least STALE_ROW_CONTAINMENT of
+ * a superseded fact's meaning tokens — the dedupe's own tokenizer — whose
+ * restating clause is not already on the live twin's side of the negation is
+ * answered with the live twin's text. Nothing is invalidated: the reader is
+ * SHOWN the change and the fiction decides. Zero calls.
+ */
+export const STALE_ROW_CONTAINMENT = 0.8;
+export const STALE_TAG_TWIN_MAX = 160;
+
+/** The superseded facts whose LIVE twin is on record, newest change first, with their token sets. */
+export function listStaleFacts(worldFacts) {
+    if (!Array.isArray(worldFacts) || worldFacts.length === 0) return [];
+    const byId = new Map(worldFacts.filter(f => f && typeof f.id === 'string').map(f => [f.id, f]));
+    const stamp = f => (Number.isFinite(f.supersededAtMessage) ? f.supersededAtMessage : -1);
+    return worldFacts
+        .filter(f => f && typeof f.fact === 'string' && f.supersededBy && !Number.isFinite(f.retractedAtMessage))
+        .map(f => {
+            // A twin itself superseded (a re-flip) is not the live truth: the
+            // fact it replaced may be true again, and its own successor tags.
+            const twin = byId.get(f.supersededBy);
+            if (!isLiveFact(twin)) return null;
+            const tokens = factTokenSet(f.fact);
+            if (tokens.size === 0) return null;
+            return { stale: f, twin, tokens, flip: hasNegation(f.fact) !== hasNegation(twin.fact) };
+        })
+        .filter(Boolean)
+        .sort((a, b) => stamp(b.stale) - stamp(a.stale));
+}
+
+/** The sentence of `text` holding the most of `tokens` — where the text's polarity on THIS claim is judged. */
+function restatingClause(text, tokens) {
+    const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean);
+    if (sentences.length <= 1) return text;
+    let best = sentences[0];
+    let bestShare = -1;
+    for (const sentence of sentences) {
+        const share = coverage(tokens, factTokenSet(sentence));
+        if (share > bestShare) {
+            best = sentence;
+            bestShare = share;
+        }
+    }
+    return best;
+}
+
+/** Clip at the last sentence end inside `max` (past its midpoint), else hard. */
+function clipTwinText(text, max) {
+    const clean = typeof text === 'string' ? text : '';
+    if (clean.length <= max) return clean;
+    const head = clean.slice(0, max);
+    const cut = Math.max(head.lastIndexOf('. '), head.lastIndexOf('! '), head.lastIndexOf('? '), head.lastIndexOf('.\n'));
+    if (cut >= max / 2) return `${head.slice(0, cut + 1)} …`;
+    return `${head.trimEnd()}…`;
+}
+
+/**
+ * The live twin a text should be shown beside, or '' — one answer per text,
+ * the newest change winning. `staleFacts` is `listStaleFacts(worldFacts)`,
+ * computed once per prompt.
+ */
+export function describeStaleTwin(text, staleFacts) {
+    if (!Array.isArray(staleFacts) || staleFacts.length === 0 || typeof text !== 'string') return '';
+    const rowTokens = factTokenSet(text);
+    if (rowTokens.size === 0) return '';
+    for (const { twin, tokens, flip } of staleFacts) {
+        if (coverage(tokens, rowTokens) < STALE_ROW_CONTAINMENT) continue;
+        // A genuine flip pair: a clause already on the twin's side of the
+        // negation states the new truth and needs no tag. A same-polarity
+        // close (a plan closed by its deed) is judged on the tokens alone.
+        if (flip && hasNegation(restatingClause(text, tokens)) === hasNegation(twin.fact)) continue;
+        return clipTwinText(twin.fact, STALE_TAG_TWIN_MAX);
+    }
+    return '';
 }
