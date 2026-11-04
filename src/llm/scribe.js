@@ -23,7 +23,7 @@ import { captureReflection, captureScribePass, captureUsage } from '../debug/mem
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
 import { getKnownSpells, isSpellcaster } from '../engine/spellcasting.js';
 import { containment, tokenSet } from '../engine/textMatch.js';
-import { findSubjectsInText } from '../engine/textMatch.js';
+import { findSubjectsInText, nameTokensPresent, textWordSet } from '../engine/textMatch.js';
 import { factMemoryItem, queueMemoryItem } from '../engine/vectorMemory.js';
 import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX, NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
@@ -573,15 +573,33 @@ export function capNovelCards(candidates, pool) {
  * @param {function} options.dispatch - Game state dispatch
  * @param {object|null} [options.authoritativeContext] - Engine truth that narration cannot override
  */
+/**
+ * Does a claim NAME this enemy? Whole words on the textMatch shelf
+ * (2026-11-04 scribe P2): the old `claim.includes(name)` read the living
+ * "Rat" inside "Ratcatcher Finn was killed" and dropped a true fact and a
+ * dossier update. A name with no identifying token ("Ox", "The Ox") falls
+ * back to the whole name as a whole-word phrase.
+ */
+function claimNamesEnemy(words, claim, name) {
+    const present = nameTokensPresent(words, name);
+    if (present !== null) return present;
+    const phrase = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(' ');
+    if (!phrase) return false;
+    const claimWords = claim.split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(' ');
+    return ` ${claimWords} `.includes(` ${phrase} `);
+}
+
 function contradictsAuthoritativeCombat(value, authoritativeContext) {
     const claim = String(value || '').toLowerCase();
     const enemies = authoritativeContext?.postState?.enemies || [];
+    if (enemies.length === 0 || !claim) return false;
+    const words = textWordSet(claim);
     const deathClaim = /\b(dead|dies|died|killed|slain|lifeless|destroyed|finished off)\b/i;
     const activeCombatEndedClaim = /\b(defeated|vanquished)\b/i;
     const aliveClaim = /\b(alive|survives|survived|fighting|active)\b/i;
     return enemies.some(enemy => {
         const name = String(enemy.name || '').toLowerCase();
-        if (!name || !claim.includes(name)) return false;
+        if (!name || !claimNamesEnemy(words, claim, name)) return false;
         if (enemy.status === 'defeated' || (enemy.hp ?? 0) <= 0) return aliveClaim.test(claim);
         if (enemy.status === 'active') return deathClaim.test(claim) || activeCombatEndedClaim.test(claim);
         return deathClaim.test(claim);
@@ -608,6 +626,27 @@ function npcUpdateContradictsAuthoritativeCombat(npc, authoritativeContext) {
         .filter(Boolean);
     if (fields.length === 0) return false;
     return contradictsAuthoritativeCombat(`${npc.name}: ${fields.join(' ')}`, authoritativeContext);
+}
+
+/**
+ * A recall turn keeps ONE lane: a person the remembering visibly moved —
+ * `npc_updates` projected to the name, the bond moment and the stance
+ * (RECALL_TURN_RULE's exception). Everything else the answer recounts is
+ * already on record, so the projection carries nothing else.
+ */
+const RECALL_NPC_FIELDS = ['bondMoment', 'stanceToPlayer'];
+export function projectRecallExtraction(extracted) {
+    const npcUpdates = (Array.isArray(extracted?.npc_updates) ? extracted.npc_updates : [])
+        .filter(npc => npc && typeof npc === 'object' && !Array.isArray(npc) && typeof npc.name === 'string' && npc.name.trim())
+        .map(npc => {
+            const kept = { name: npc.name };
+            for (const key of RECALL_NPC_FIELDS) {
+                if (npc[key] !== undefined && npc[key] !== null && npc[key] !== '') kept[key] = npc[key];
+            }
+            return kept;
+        })
+        .filter(npc => Object.keys(npc).length > 1);
+    return { world_facts: [], npc_updates: npcUpdates };
 }
 
 /**
@@ -724,8 +763,15 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             ].filter(Boolean).join('\n\n'),
         });
 
-        const extracted = tryParseDirectorJson(response, SCRIBE_ANCHORS, 'Scribe');
-        if (!extracted) return;
+        const parsed = tryParseDirectorJson(response, SCRIBE_ANCHORS, 'Scribe');
+        if (!parsed) return;
+        // The recall turn's contract in CODE (2026-11-04 scribe P1): the
+        // answer is the engine's own record read back, so every lane but the
+        // rule's one exception is dropped here — the prose rule explains, the
+        // projection guards. Measured before: "You first met Tammo on the
+        // Weirs ferry" minted a fact, a card, an appearance merge, and a full
+        // SET_LOCATION to the remembered place (the arrival tail with it).
+        const extracted = recallTurn ? projectRecallExtraction(parsed) : parsed;
 
         // Engine-owned budget backstop: the prompt caps extraction at 2-3 per turn,
         // but a chatty model must not be able to flood the fact/card stores anyway.

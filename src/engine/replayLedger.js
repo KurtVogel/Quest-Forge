@@ -126,6 +126,24 @@ function parseLedgerEntry(entry) {
     return { sourceId, key, messageIndex: Number.isFinite(messageIndex) ? messageIndex : null };
 }
 
+/**
+ * The load typer for the two pipe-string ledgers (recentSpellCasts /
+ * recentRests, 2026-11-04 spellcasting P2): strings only, and a messageIndex
+ * past the transcript is re-stamped to its end — a future stamp measured 0
+ * conversational rows away forever ("NOT cast again", a rest that heals
+ * nothing and says nothing, twenty turns later).
+ */
+export function loadPipeLedger(entries, { maxMessageCount = Infinity, limit = Infinity } = {}) {
+    const ceiling = Number.isFinite(maxMessageCount) ? Math.max(0, Math.floor(maxMessageCount) - 1) : Infinity;
+    const list = (Array.isArray(entries) ? entries : []).filter(entry => typeof entry === 'string');
+    const typed = list.map(entry => {
+        const parsed = parseLedgerEntry(entry);
+        if (!parsed || parsed.messageIndex === null || parsed.messageIndex <= ceiling) return entry;
+        return `${parsed.sourceId}|${parsed.key}|${ceiling}`;
+    });
+    return Number.isFinite(limit) ? typed.slice(-limit) : typed;
+}
+
 /** Exact-source short-circuit: the same emission re-parsed (same sourceId
  * prefix) is always a replay, regardless of distance. `prefix` is everything
  * before the messageIndex — "sourceId" for rests, "sourceId|spellKey" for

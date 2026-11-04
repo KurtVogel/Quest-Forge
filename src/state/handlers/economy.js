@@ -96,12 +96,18 @@ function coinLine(content) {
     return systemMessage(content, { dmVisible: true });
 }
 
-function clampCoinAmount(value) {
-    return Number.isFinite(value) ? Math.max(0, Math.min(MAX_COIN_EVENT, Math.trunc(value))) : 0;
-}
-
 /** The one ceiling of a coin EVENT, in copper: MAX_COIN_EVENT gold. */
 const MAX_COIN_EVENT_CP = MAX_COIN_EVENT * 100;
+
+// Each column is bounded by the EVENT ceiling in its own coin (2026-11-04
+// inventory-economy P1): every internal lane — the "Narrated, not recorded"
+// card, the "Recorded once" replays, the purchase / sale covers, the judge's
+// booking, the undo — denominates in COPPER, and a column clamp at
+// MAX_COIN_EVENT capped all of them at 10,000 cp = 100 gp (a 150 gp card paid
+// 100). The event ceiling below is the one real cap.
+function clampCoinAmount(value, cap) {
+    return Number.isFinite(value) ? Math.max(0, Math.min(cap, Math.trunc(value))) : 0;
+}
 
 /**
  * The three clamped denominations of a coin payload, and whether they move
@@ -112,13 +118,16 @@ const MAX_COIN_EVENT_CP = MAX_COIN_EVENT * 100;
  * smaller coins are dropped with it (the signature is by value anyway).
  */
 function coinAmounts(payload) {
-    const gold = clampCoinAmount(payload?.gold);
-    const silver = clampCoinAmount(payload?.silver);
-    const copper = clampCoinAmount(payload?.copper);
+    const gold = clampCoinAmount(payload?.gold, MAX_COIN_EVENT);
+    const silver = clampCoinAmount(payload?.silver, MAX_COIN_EVENT_CP / 10);
+    const copper = clampCoinAmount(payload?.copper, MAX_COIN_EVENT_CP);
     const totalCp = gold * 100 + silver * 10 + copper;
     if (totalCp > MAX_COIN_EVENT_CP) {
         return { gold: MAX_COIN_EVENT, silver: 0, copper: 0, totalCp: MAX_COIN_EVENT_CP };
     }
+    // A copper-denominated replay stays copper (the purse normalizes through
+    // fromCopper, and the bundle judge decomposes within the columns exactly
+    // as it did below 100 gp).
     return { gold, silver, copper, totalCp };
 }
 

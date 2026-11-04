@@ -26,6 +26,7 @@ import { companionAttackBonus } from './companionGear.js';
 import { deathSaveLine, judgeDeathSave } from './deathSaves.js';
 import { describePendingLoot } from './roleplayCheck.js';
 import { DEFAULT_ROLL_DC } from '../config/contentLimits.js';
+import { isHeroRef } from './spellcasting.js';
 
 /**
  * Resolve a batch of requested rolls.
@@ -58,10 +59,19 @@ export function resolveRolls(requestedRolls, { character, inventory, party, disp
         }
         return null;
     };
-    // An NPC attack's named target, when it is a companion (else the hero).
-    const targetCompanion = (roll) => (roll.type === 'npc_attack' && roll.target && roll.target !== 'player' && roll.target !== 'self'
-        ? findCompanion(roll.target)
-        : null);
+    // An NPC attack's target: the hero (no target, or any hero alias / the
+    // hero's name — isHeroRef, the exchange's predicate), a companion, or an
+    // UNTRACKED third party (2026-11-04 roll-resolution P1: "the merchant"
+    // used to resolve as null = the hero, priced against the hero's AC with
+    // the damage landing on the hero's HP).
+    const npcAttackTarget = (roll) => {
+        if (roll.type !== 'npc_attack') return { kind: 'hero' };
+        const ref = typeof roll.target === 'string' ? roll.target.trim() : '';
+        if (!ref || isHeroRef(ref, character)) return { kind: 'hero' };
+        const companion = findCompanion(ref);
+        if (companion) return { kind: 'companion', companion };
+        return { kind: 'untracked', name: ref.slice(0, 60) };
+    };
 
     const results = [];
     let appliedHp = false;
@@ -103,7 +113,16 @@ export function resolveRolls(requestedRolls, { character, inventory, party, disp
             // Resolve the to-hit vs the correct target's AC (companion AC if targeting
             // one) — and the companion's conditions, same target-side treatment every
             // other attack path already gets (2026-08-27 audit).
-            const comp = targetCompanion(roll);
+            const target = npcAttackTarget(roll);
+            const comp = target.kind === 'companion' ? target.companion : null;
+            if (target.kind === 'untracked') {
+                // A to-hit against the DM's stated DC (never the hero's AC),
+                // no damage: the engine tracks no HP for this person, so the
+                // DM narrates the outcome and the hero's HP is untouched.
+                const result = resolveNpcRoll(roll, character, dispatch, inventory, roll.dc ?? DEFAULT_ROLL_DC, null);
+                if (result) results.push({ ...result, targetName: target.name, untrackedTarget: true });
+                continue;
+            }
             const result = resolveNpcRoll(roll, character, dispatch, inventory, comp?.ac, comp?.conditions);
             if (!result) continue;
             results.push(result);
@@ -192,6 +211,9 @@ export function formatRollSummary(rollResults) {
         if (r.type === 'companion_attack' || r.type === 'npc_attack') {
             const fallbackName = r.type === 'companion_attack' ? 'Companion' : 'Enemy';
             const head = `${r.description || (r.attacker || fallbackName) + ' attack'} vs AC ${r.dc}, rolled ${r.rolled}`;
+            if (r.untrackedTarget) {
+                return `[ROLL RESULT: ${head} — ${r.success ? 'HIT' : 'MISS'} against ${r.targetName}, who is not a tracked combatant: no HP changed — narrate the outcome; the hero was not the target.]`;
+            }
             if (!r.success) return `[ROLL RESULT: ${head} — MISS]`;
             if (r.damage != null) {
                 const downed = r.targetHp <= 0 ? (r.targetIsPlayer ? ' — the player is DOWNED (0 HP)' : ` — ${r.targetName} is DOWNED`) : '';

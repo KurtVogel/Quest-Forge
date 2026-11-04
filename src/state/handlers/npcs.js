@@ -808,6 +808,15 @@ export const handlers = {
         const targetIdx = findLocationRecord(locationsBefore, name);
         if (targetIdx === -1) return state;
         const targetRecord = locationsBefore[targetIdx];
+        // The place the hero STANDS in (2026-11-04 scribe P2, the half-guard):
+        // the region seed below always checked "is this the current place?",
+        // but the write above it did not, so a drover's hearsay about a
+        // distant known place rewrote that place's type / danger / last state
+        // and booked its motifs as SHOWN. Hearsay about elsewhere is a world
+        // fact; the profile classifies here. An unknown current place (a
+        // fresh campaign, a legacy save) keeps the old update-only rule.
+        const currentIdx = findLocationRecord(locationsBefore, state.currentLocation);
+        if (currentIdx !== -1 && currentIdx !== targetIdx) return state;
         const priorRegions = collectKnownRegions(locationsBefore);
 
         // Region acceptance runs four gates before the registry write:

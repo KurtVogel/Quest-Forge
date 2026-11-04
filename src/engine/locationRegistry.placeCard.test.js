@@ -191,16 +191,24 @@ describe('SET_LOCATION counts genuine arrivals; UPDATE_LOCATION_PROFILE carries 
         expect(state.locations.find(l => l.name === 'Ghyll').visitCount).toBe(1);
     });
 
-    it('the Scribe profile lane fills signature / lastState without relocating the hero', () => {
+    it('the Scribe profile lane fills signature / lastState for the place the hero stands in, and never for a place elsewhere (2026-11-04)', () => {
         let state = gameReducer(base, { type: 'SET_LOCATION', payload: 'Rimehollow' });
-        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Ghyll' });
         state = gameReducer(state, {
             type: 'UPDATE_LOCATION_PROFILE',
             payload: { name: 'Rimehollow', profile: { type: 'settlement', signature: SIGNATURE, lastState: 'half-burned' } },
         });
-        expect(state.currentLocation).toBe('Ghyll');
+        expect(state.currentLocation).toBe('Rimehollow');
         const record = state.locations.find(l => l.name === 'Rimehollow');
         expect(record).toMatchObject({ signature: SIGNATURE, lastState: 'half-burned', type: 'settlement' });
+        // Away in Ghyll, a drover's hearsay about Rimehollow writes nothing.
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Ghyll' });
+        const away = gameReducer(state, {
+            type: 'UPDATE_LOCATION_PROFILE',
+            payload: { name: 'Rimehollow', profile: { type: 'hostile_site', danger: 'deadly', lastState: 'burned to the waterline', archetype: 'marsh leeches' } },
+        });
+        expect(away).toBe(state);
+        expect(away.currentLocation).toBe('Ghyll');
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Rimehollow' });
         state = gameReducer(state, {
             type: 'UPDATE_LOCATION_PROFILE',
             payload: { name: 'Rimehollow', profile: { signature: 'a totally new identity for the village that a later scribe pass made up', lastState: 'rebuilt' } },

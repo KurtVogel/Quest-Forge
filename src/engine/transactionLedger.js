@@ -273,9 +273,16 @@ export function migrateLegacyLedgers(payload) {
 }
 
 /** The log a loaded save carries: its own, or the retired ledgers folded in. */
-export function loadLedger(payload) {
-    if (Array.isArray(payload?.ledger)) return normalizeLedger(payload.ledger);
-    return migrateLegacyLedgers(payload);
+export function loadLedger(payload, { maxMessageCount = Infinity } = {}) {
+    const entries = Array.isArray(payload?.ledger) ? normalizeLedger(payload.ledger) : migrateLegacyLedgers(payload);
+    // A stamp past the transcript is clamped to its end (2026-11-04
+    // inventory-economy P2, recentRulings' rule): conversationalDistance
+    // answers 0 for a future stamp, so a hand-edited / foreign save's entry
+    // read as "just now" forever — shown in RECENT TRANSACTIONS and judging
+    // every same-value grant a repeat. Clamped, it ages from the load.
+    if (!Number.isFinite(maxMessageCount)) return entries;
+    const ceiling = Math.max(0, Math.floor(maxMessageCount) - 1);
+    return entries.map(entry => (entry.atMessage > ceiling ? { ...entry, atMessage: ceiling } : entry));
 }
 
 // ── The DM's view ────────────────────────────────────────────────────────

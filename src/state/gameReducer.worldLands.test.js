@@ -386,11 +386,15 @@ describe('the region family after the 2026-10-27 audit', () => {
 
     it('the tally counts a motif once per settlement, not once per record of it', () => {
         let state = traveled();
+        // The profile classifies the place the hero stands in (2026-11-04), so
+        // the walk visits each record before its pass.
         for (const name of ['Aldermill', 'Aldermill Market Square', 'Aldermill Tannery']) {
+            state = gameReducer(state, { type: 'SET_LOCATION', payload: name });
             state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name, profile: { type: 'settlement', motifs: ['timber palisade'] } } });
         }
         expect(state.worldMotifs['timber palisade']).toEqual({ count: 1, lastMessage: 20 });
         // Another town of the same land still counts: a land's monotony is the point.
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Fort Halla' });
         state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Fort Halla', profile: { motifs: ['timber palisade'] } } });
         expect(state.worldMotifs['timber palisade'].count).toBe(2);
     });

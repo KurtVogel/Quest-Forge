@@ -177,7 +177,7 @@ describe('Undo — same one', () => {
                 : message)),
         };
         // Two steps at most, each projected and clamped.
-        expect(purse(undo(forged)) - purse(state)).toBe(10_000); // the grant's own MAX_COIN_EVENT
+        expect(purse(undo(forged)) - purse(state)).toBe(1_000_000); // the grant's own event ceiling: MAX_COIN_EVENT gold (2026-11-04)
     });
 });
 

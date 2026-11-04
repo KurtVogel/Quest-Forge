@@ -143,6 +143,22 @@ export function parseDirectorJson(response, anchorKey, label, { missingMessage, 
  * The walk itself is jsonExtractor's ONE (2026-10-11).
  */
 export function tryParseDirectorJson(response, anchorKey, label) {
-    return parseLlmJson(response, { anchors: anchorKey, wholeObject: true, label })?.value ?? null;
+    const value = parseLlmJson(response, { anchors: anchorKey, wholeObject: true, label })?.value ?? null;
+    // The whole-object fallback reads "the object", never a JSON array or a
+    // provider's `{ "error": … }` body (2026-11-04 scribe P2): both were inert
+    // downstream but the inspector booked a pass that extracted nothing with
+    // no reason. A refusal here is a logged null.
+    if (Array.isArray(value)) {
+        console.warn(`[${label || 'Director'}] Reply was a JSON array, not the schema object — ignored.`);
+        return null;
+    }
+    if (value && typeof value === 'object' && 'error' in value) {
+        const anchors = Array.isArray(anchorKey) ? anchorKey : [anchorKey];
+        if (!anchors.some(key => key && key in value)) {
+            console.warn(`[${label || 'Director'}] Reply was an error body, not the schema object — ignored.`);
+            return null;
+        }
+    }
+    return value;
 }
 

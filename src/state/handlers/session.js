@@ -42,6 +42,7 @@ import {
 } from './shared.js';
 import { strictFlag } from '../../engine/text.js';
 import { loadLedger, RETIRED_LEDGER_KEYS } from '../../engine/transactionLedger.js';
+import { loadPipeLedger } from '../../engine/replayLedger.js';
 
 /** A loaded payload without the five trade ledgers the transaction log replaced. */
 function withoutRetiredLedgers(payload) {
@@ -514,17 +515,13 @@ function validateSaveState(payload) {
         appliedLootSourceIds: Array.isArray(payload.appliedLootSourceIds) ? payload.appliedLootSourceIds : [],
         // The one transaction log (2026-11-01); a save from before carries the
         // five retired trade ledgers, folded in here and dropped.
-        ledger: loadLedger(payload),
+        ledger: loadLedger(payload, { maxMessageCount: messageCount }),
         recentExpAwards: normalizeRecentTransactions(payload.recentExpAwards),
         recentRulings: (Array.isArray(payload.recentRulings) ? payload.recentRulings : [])
             .map(ruling => normalizeRollRuling(ruling, { maxMessageCount: messageCount })).filter(Boolean).slice(-RECENT_RULING_LIMIT),
         recentChecks: sanitizeRecentChecks(payload.recentChecks, { maxMessageCount: messageCount }),
-        recentSpellCasts: Array.isArray(payload.recentSpellCasts)
-            ? payload.recentSpellCasts.filter(entry => typeof entry === 'string').slice(-RECENT_SPELL_CAST_LIMIT)
-            : [],
-        recentRests: Array.isArray(payload.recentRests)
-            ? payload.recentRests.filter(entry => typeof entry === 'string').slice(-RECENT_REST_LIMIT)
-            : [],
+        recentSpellCasts: loadPipeLedger(payload.recentSpellCasts, { maxMessageCount: messageCount, limit: RECENT_SPELL_CAST_LIMIT }),
+        recentRests: loadPipeLedger(payload.recentRests, { maxMessageCount: messageCount, limit: RECENT_REST_LIMIT }),
         recentHearsay: sanitizeRecentHearsay(payload.recentHearsay),
         combat: (() => {
             const savedCombat = payload.combat && typeof payload.combat === 'object' && !Array.isArray(payload.combat)

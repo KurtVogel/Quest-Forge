@@ -699,7 +699,7 @@ export function resolvePlayerRollModifier(character, inventory, roll) {
     if (isAbility && !isAttackRoll) {
         return {
             key, kind, ability: key,
-            modifier: getModifier(character.abilityScores?.[key]),
+            modifier: getModifier(character.abilityScores?.[key] ?? 10),
             source: 'ability',
             label: `${name} check`,
         };

@@ -14,6 +14,7 @@ import {
     resolveSpellRecipients,
     spellHealingNotation,
     spendSpellSlot,
+    spellTargetLimit,
     summarizeSpellSlots,
 } from '../../engine/spellcasting.js';
 import { findExactSourceReplay, findNearbyReplay, rememberLedgerEntry } from '../../engine/replayLedger.js';
@@ -139,7 +140,8 @@ export const handlers = {
             : [payload.target];
         const resolved = resolveSpellRecipients(spell, character, state.party, targetRefs);
         let { recipients, invalid: invalidRefs } = resolved;
-        const { overflow, redirected } = resolved;
+        let { overflow } = resolved;
+        const { redirected } = resolved;
         // A heal on a living PERSON of the roster outside the party (2026-10-31,
         // the Opus playtest: Cure Wounds on the fevered Sister Ottilie was
         // refused, no slot spent, and the DM narrated the cure — free magic).
@@ -147,11 +149,19 @@ export const handlers = {
         // them, and the DM narrates the effect. Never the dead, never a name
         // the roster does not know.
         if (recipients.length === 0 && spell.healing) {
-            const people = invalidRefs
-                .map(ref => (state.npcs || []).find(npc => npc?.name && isPromptRosterNpc(npc) && !isRecordedDead(npc) && namesMatch(npc.name, ref)))
-                .filter(Boolean);
+            // One record, one recipient, then the spell's own cap (2026-11-04
+            // spellcasting P2): "Ottilie" and "Sister Ottilie" are one person,
+            // and Cure Wounds heals ONE — the party lane's ladder already did
+            // both; this lane healed every name it was handed.
+            const people = [];
+            for (const ref of invalidRefs) {
+                const npc = (state.npcs || []).find(entry => entry?.name && isPromptRosterNpc(entry) && !isRecordedDead(entry) && namesMatch(entry.name, ref));
+                if (npc && !people.includes(npc)) people.push(npc);
+            }
             if (people.length > 0) {
-                recipients = people.map(npc => ({ type: 'other', name: npc.name }));
+                const limit = spellTargetLimit(spell);
+                overflow += Math.max(0, people.length - limit);
+                recipients = people.slice(0, limit).map(npc => ({ type: 'other', name: npc.name }));
                 invalidRefs = invalidRefs.filter(ref => !people.some(npc => namesMatch(npc.name, ref)));
             }
         }

@@ -271,7 +271,7 @@ describe('LOAD_GAME progression migrations', () => {
             payload: {
                 character: { ...baseCharacter, exp: 0 },
                 inventory: [],
-                messages: [],
+                messages: Array.from({ length: 8 }, (_, i) => ({ id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: `beat ${i}` })), // stamps sit inside the transcript (a later one is clamped, 2026-11-04)
                 recentRests: ['msg-1|long|4', { hostile: true }, 42, 'msg-2|short|6'],
             },
         });
@@ -510,7 +510,7 @@ describe('LOAD_GAME progression migrations', () => {
             payload: {
                 character: { ...baseCharacter, exp: 0 },
                 inventory: [],
-                messages: [],
+                messages: Array.from({ length: 8 }, (_, i) => ({ id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: `beat ${i}` })),
                 appliedLootSourceIds: ['msg-1', 'msg-2'],
                 recentPurchases: [{
                     signature: 'dagger|1|200',

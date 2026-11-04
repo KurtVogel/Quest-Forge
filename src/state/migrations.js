@@ -319,7 +319,10 @@ function healLoadedCharacter(character) {
     const rawScores = character.abilityScores && typeof character.abilityScores === 'object' && !Array.isArray(character.abilityScores)
         ? character.abilityScores
         : {};
-    const abilityScores = Object.fromEntries(ABILITY_NAMES.map(name => [name, Math.max(1, toInt(rawScores[name], 10))]));
+    // The vault's 1..30 band (2026-11-04 rules-math P2): the load floored at 1
+    // and had no ceiling, so a hand-edited "strength: 10,000,000" stamped AC
+    // 5,000,005 into the save; the load is never looser than the file importer.
+    const abilityScores = Object.fromEntries(ABILITY_NAMES.map(name => [name, Math.min(30, Math.max(1, toInt(rawScores[name], 10)))]));
     // Hit dice are catalog-rebuilt like sustainedSpell (2026-09-01 dice-engine
     // P2): backfillCharacterShape defaults only a MISSING hitDice object, so a
     // partial/hand-edited `{ total, remaining }` (no die, or die "8"/0) reached

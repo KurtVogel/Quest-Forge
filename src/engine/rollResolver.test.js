@@ -720,13 +720,31 @@ describe('enemy attacks a companion (inline damage, queue 2026-07-08)', () => {
         expect(dispatch.mock.calls.some(([action]) => action.type === 'UPDATE_COMPANION')).toBe(false);
     });
 
-    it('falls back to the player when the named target is not a tracked companion', () => {
-        rollQueue.push(15, 4);
+    it('a third-party target is a damage-less to-hit against the stated DC — never the hero (2026-11-04 P1)', () => {
+        rollQueue.push(15); // 15 + 3 = 18 vs DC 12 — a hit, no damage die drawn
         const { results, dispatch } = runWithContext(
-            [{ type: 'npc_attack', attackerId: 'wolf', attacker: 'Fen Wolf', target: 'some stranger', modifier: 3, damage: '1d6+1' }],
-            { party: [] }
+            [{ type: 'npc_attack', attackerId: 'wolf', attacker: 'Fen Wolf', target: 'the merchant', modifier: 3, dc: 12, damage: '1d6+1' }],
+            { party: [], inventory: [{ name: 'Plate Armor', type: 'armor', equipped: true }] }
         );
 
+        const attack = results.find(r => r.type === 'npc_attack');
+        expect(attack).toMatchObject({ success: true, dc: 12, targetName: 'the merchant', untrackedTarget: true });
+        expect(attack.damage).toBeUndefined();
+        expect(attack.targetIsPlayer).toBeUndefined();
+        expect(dispatch.mock.calls.some(([action]) => action.type === 'TAKE_DAMAGE')).toBe(false);
+        expect(rollQueue).toHaveLength(0);
+        const summary = formatRollSummary(results);
+        expect(summary).toContain('HIT against the merchant');
+        expect(summary).toContain('no HP changed');
+        expect(summary).not.toMatch(/Testo now/);
+    });
+
+    it.each(['player', 'self', 'Testo', 'the hero', '  '])('target %j is the hero', (target) => {
+        rollQueue.push(15, 4);
+        const { results, dispatch } = runWithContext(
+            [{ type: 'npc_attack', attackerId: 'wolf', attacker: 'Fen Wolf', target, modifier: 3, damage: '1d6+1' }],
+            { party: [] }
+        );
         expect(results.find(r => r.type === 'npc_attack')).toMatchObject({ targetIsPlayer: true, damage: 5 });
         expect(dispatch).toHaveBeenCalledWith({ type: 'TAKE_DAMAGE', payload: 5 });
     });
