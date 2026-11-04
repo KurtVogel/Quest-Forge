@@ -16,6 +16,9 @@
 import { foldExperience, getQuestCompletionXp, isHeroDown, QUEST_INSTANT_XP } from '../../engine/progression.js';
 import { containment, tokenSet } from '../../engine/textMatch.js';
 import { cleanText } from '../../engine/text.js';
+import { conversationalGap } from '../../engine/replayLedger.js';
+import { resolveNpcRef } from '../../engine/npcRoster.js';
+import { gameReducer } from '../gameReducer.js';
 import { normalizeRefToken, systemMessage } from './shared.js';
 
 // Quest-name stopwords: articles/fillers that survive normalizeRefToken but
@@ -53,6 +56,17 @@ function questNameMatcher(refName) {
 // into the save and rode the system prompt every turn (2026-09-04 audit).
 export const QUEST_NAME_MAX_LENGTH = 160;
 export const QUEST_DESCRIPTION_MAX_LENGTH = 800;
+// The sworn record (WOW 2026-11-04, quests-and-rewards): who asked, what was
+// promised, how it went — three wire fields the DM may fill, typed here and
+// at the parser boundary alike. The AGREEMENT is the first description,
+// frozen; every later `updated` APPENDS a stage instead of overwriting it.
+export const QUEST_PATRON_MAX_LENGTH = 80;
+export const QUEST_PROMISED_MAX_LENGTH = 120;
+export const QUEST_OUTCOME_MAX_LENGTH = 200;
+export const QUEST_STAGE_MAX_LENGTH = 200;
+export const QUEST_STAGES_CAP = 6;
+/** An arc that lived this many conversational rows is a chapter: its close offers the Chronicle nudge and its card carries salience 4. */
+export const QUEST_LONG_ARC_ROWS = 40;
 
 const QUEST_STATUSES = new Set(['active', 'completed', 'failed']);
 const mintQuestId = () => `quest-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -94,6 +108,15 @@ export function sanitizeQuestRecord(raw, { maxMessageCount = Infinity } = {}) {
     // post-journal verifier reads it to tell a completion that landed AFTER
     // its snapshot from a lost quest. Only a terminal row carries it.
     const closedAtMessage = status === 'active' ? undefined : stamp(raw.closedAtMessage);
+    // The sworn record's fields (WOW 2026-11-04), typed string-or-drop: the
+    // patron (and the roster id it resolved to), what was promised, the
+    // frozen agreement, the staged log, and — terminal rows only — how it ended.
+    const patron = cleanText(raw.patron, QUEST_PATRON_MAX_LENGTH);
+    const patronId = typeof raw.patronId === 'string' && raw.patronId.trim() ? raw.patronId.trim().slice(0, 80) : '';
+    const promised = cleanText(raw.promised, QUEST_PROMISED_MAX_LENGTH);
+    const agreement = cleanText(raw.agreement, QUEST_DESCRIPTION_MAX_LENGTH);
+    const stages = sanitizeQuestStages(raw.stages, stamp);
+    const outcome = status === 'active' ? '' : cleanText(raw.outcome, QUEST_OUTCOME_MAX_LENGTH);
     return {
         id,
         name,
@@ -103,6 +126,81 @@ export function sanitizeQuestRecord(raw, { maxMessageCount = Infinity } = {}) {
         addedAt: Number.isFinite(addedAt) ? addedAt : Date.now(),
         ...(openedAtMessage !== undefined && { openedAtMessage }),
         ...(closedAtMessage !== undefined && { closedAtMessage }),
+        ...(patron && { patron }),
+        ...(patron && patronId && { patronId }),
+        ...(promised && { promised }),
+        ...(agreement && { agreement }),
+        ...(stages.length > 0 && { stages }),
+        ...(outcome && { outcome }),
+    };
+}
+
+/** The staged log, typed: `{ text, atMessage }` rows, blank rows dropped, the newest QUEST_STAGES_CAP kept. */
+function sanitizeQuestStages(list, stamp) {
+    if (!Array.isArray(list)) return [];
+    const rows = [];
+    for (const raw of list) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+        const text = cleanText(raw.text, QUEST_STAGE_MAX_LENGTH);
+        if (!text) continue;
+        const atMessage = stamp(raw.atMessage);
+        rows.push({ text, ...(atMessage !== undefined && { atMessage }) });
+    }
+    return rows.slice(-QUEST_STAGES_CAP);
+}
+
+/**
+ * The patron is a PERSON on the roster when the name resolves (exact, the
+ * roster's own short / long fold, or the one namesMatch candidate — the
+ * 10-13 `resolveNpcRef` shape; an ambiguous name is kept as text, never a
+ * guess). The record keeps the roster's full name and the id, so the Journal
+ * and the prompt can tie the job to the person who gave it.
+ */
+function resolvePatron(npcs, name) {
+    const patron = cleanText(name, QUEST_PATRON_MAX_LENGTH);
+    if (!patron) return {};
+    const resolved = resolveNpcRef(npcs, { name: patron });
+    if (resolved.npc && typeof resolved.npc.name === 'string' && resolved.npc.name.trim()) {
+        return { patron: resolved.npc.name.trim().slice(0, QUEST_PATRON_MAX_LENGTH), patronId: String(resolved.npc.id || '') };
+    }
+    return { patron };
+}
+
+/** The player-facing row a quest's open or close posts — one line, DM-visible like every receipt. */
+const questReceipt = (content) => systemMessage(content, { dmVisible: true });
+
+function describeQuestTaken(row) {
+    const parts = [row.patron && `for ${row.patron}`, row.promised && `promised: ${row.promised}`].filter(Boolean);
+    return `◆ **Quest taken** — ${row.name}${parts.length > 0 ? ` (${parts.join(' · ')})` : ''}`;
+}
+
+function describeQuestClosed(row, terminalStatus) {
+    const mark = terminalStatus === 'completed' ? '✦ **Quest done**' : '✕ **Quest failed**';
+    return `${mark} — ${row.name}${row.outcome ? `: ${row.outcome}` : ''}`;
+}
+
+/**
+ * The close as a MEMORY (WOW 2026-11-04 slice B, the END_COMBAT wound card's
+ * pattern): one engine `quest` card — the name, how it ended, the patron
+ * linked — so the callback lane, recall and the Chronicle can bring the
+ * ending back as a thing someone was there for. Salience 3; 4 for an arc that
+ * lived QUEST_LONG_ARC_ROWS conversational rows.
+ */
+function buildQuestCard(row, terminalStatus, { longArc, location }) {
+    const ending = row.outcome || (terminalStatus === 'completed' ? 'done.' : 'the goal was lost.');
+    const forWhom = row.patron ? ` for ${row.patron}` : '';
+    const promised = row.promised ? ` (promised: ${row.promised})` : '';
+    return {
+        type: 'quest',
+        subject: row.name.slice(0, 80),
+        text: `"${row.name}"${forWhom}${promised} — ${terminalStatus}: ${ending}`,
+        salience: longArc ? 4 : 3,
+        emotionalCharge: terminalStatus === 'failed' ? 3 : 2,
+        status: 'active',
+        source: 'engine',
+        tags: ['quest', terminalStatus],
+        linkedNpcNames: row.patron ? [row.patron] : [],
+        ...(typeof location === 'string' && location.trim() && { location: location.trim().slice(0, 120) }),
     };
 }
 
@@ -146,6 +244,10 @@ export const handlers = {
             name: cleanText(raw.name, QUEST_NAME_MAX_LENGTH),
             description: cleanText(raw.description, QUEST_DESCRIPTION_MAX_LENGTH),
             source: raw.source,
+            // The sworn record's wire fields (WOW 2026-11-04): the patron
+            // resolves against the roster; the promise is a few words.
+            ...resolvePatron(state.npcs, raw.patron),
+            promised: cleanText(raw.promised, QUEST_PROMISED_MAX_LENGTH),
         };
         const nameToken = normalizeRefToken(payload.name);
         const sameName = quest => !!nameToken && normalizeRefToken(quest.name) === nameToken;
@@ -174,6 +276,19 @@ export const handlers = {
             if (fuzzy.length === 1) existing = fuzzy[0];
         }
         if (existing) {
+            // An update APPENDS a stage and never overwrites the agreement
+            // (WOW 2026-11-04): the first description is frozen as
+            // `agreement` (back-filled on a pre-11-04 row the first time it
+            // moves), a changed description joins the staged log with its
+            // stamp, and the newest stays `description` for every reader.
+            // Patron and promise fill once; a later wire never rewrites them.
+            const changed = !!payload.description && payload.description !== existing.description;
+            const stages = changed
+                ? sanitizeQuestStages([
+                    ...(Array.isArray(existing.stages) ? existing.stages : []),
+                    { text: payload.description, atMessage: (state.messages || []).length },
+                ], (value) => (Number.isFinite(Number(value)) ? Math.max(0, Math.trunc(Number(value))) : undefined))
+                : existing.stages;
             return {
                 ...state,
                 quests: state.quests.map(quest => quest.id === existing.id
@@ -186,6 +301,10 @@ export const handlers = {
                         // Only an exact (normalized-equal) name replaces.
                         name: (payload.name && sameName(quest)) ? payload.name : quest.name,
                         description: payload.description || quest.description,
+                        ...(changed && !quest.agreement && quest.description && { agreement: quest.description }),
+                        ...(Array.isArray(stages) && stages.length > 0 && { stages }),
+                        ...(!quest.patron && payload.patron && { patron: payload.patron, ...(payload.patronId && { patronId: payload.patronId }) }),
+                        ...(!quest.promised && payload.promised && { promised: payload.promised }),
                     }
                     : quest),
             };
@@ -195,12 +314,17 @@ export const handlers = {
         // re-minted — the DM's invented id must not collide with a live arc.
         const row = sanitizeQuestRecord({
             ...payload,
+            agreement: payload.description,
             status: 'active',
             openedAtMessage: (state.messages || []).length,
         });
         if (!row) return state;
         if (state.quests.some(quest => quest.id === row.id)) row.id = mintQuestId();
-        return { ...state, quests: [...state.quests, row] };
+        // The job taken is a moment (WOW 2026-11-04 slice B): one row under
+        // the DM's reply says what was agreed. The panel's own + (source
+        // 'player') is a note, not a job — it stays silent.
+        const taken = payload.source === 'player' ? [] : [questReceipt(describeQuestTaken(row))];
+        return { ...state, quests: [...state.quests, row], messages: [...state.messages, ...taken] };
     },
 
     COMPLETE_QUEST(state, action) {
@@ -275,12 +399,48 @@ export const handlers = {
         const matched = targets.length > 0;
         if (matched) {
             const closedAtMessage = (state.messages || []).length;
+            // How it ended (WOW 2026-11-04): the wire's `outcome`, else the
+            // close's own description when it says something the row did not.
+            const outcome = isObjectRef
+                ? (cleanText(ref.outcome, QUEST_OUTCOME_MAX_LENGTH)
+                    || (cleanText(ref.description, QUEST_OUTCOME_MAX_LENGTH) !== cleanText(targets[0]?.description, QUEST_OUTCOME_MAX_LENGTH)
+                        ? cleanText(ref.description, QUEST_OUTCOME_MAX_LENGTH)
+                        : ''))
+                : '';
             let next = {
                 ...state,
                 quests: state.quests.map(q => isMatch(q)
-                    ? { ...q, status: terminalStatus, closedAtMessage }
+                    ? { ...q, status: terminalStatus, closedAtMessage, ...(outcome && { outcome }) }
                     : q),
             };
+            // The job done is a moment, not a receipt (WOW 2026-11-04 slice
+            // B) — for the DM lane only: the panel's ✓ is bookkeeping (the
+            // 09-04 rule) and posts nothing. Each tracked arc that ENDS here
+            // posts its ✦ / ✕ row above the XP receipt, mints one engine
+            // `quest` card (the fight-mark pattern), and — when the arc
+            // lived QUEST_LONG_ARC_ROWS conversational rows — offers the
+            // Chronicle a chapter close (the 07-26 offer, on the front's field).
+            if (isObjectRef) {
+                for (const target of targets.filter(q => q.status === 'active')) {
+                    const closed = next.quests.find(q => q.id === target.id) || { ...target, outcome };
+                    next = { ...next, messages: [...next.messages, questReceipt(describeQuestClosed(closed, terminalStatus))] };
+                    const lived = conversationalGap(target.openedAtMessage, closedAtMessage, { messages: state.messages });
+                    const longArc = Number.isFinite(lived) && lived >= QUEST_LONG_ARC_ROWS;
+                    next = gameReducer(next, {
+                        type: 'ADD_STORY_MEMORY_CARD',
+                        payload: buildQuestCard(closed, terminalStatus, { longArc, location: state.currentLocation }),
+                    });
+                    if (longArc) {
+                        next = {
+                            ...next,
+                            session: {
+                                ...next.session,
+                                chapterCloseSuggested: { reason: 'quest', title: closed.name.slice(0, 160), at: Date.now() },
+                            },
+                        };
+                    }
+                }
+            }
             // Engine-owned completion XP. Only genuine completions pay (FAIL_QUEST
             // aliases this handler — failure pays 0, always, killing the
             // "fail cheap quests fast" exploit), only on the transition from a
@@ -363,6 +523,9 @@ export const handlers = {
             id: ref.id,
             name: ref.name,
             description: ref.description,
+            ...resolvePatron(state.npcs, ref.patron),
+            promised: ref.promised,
+            outcome: ref.outcome,
             status: terminalStatus,
             openedAtMessage: (state.messages || []).length,
             closedAtMessage: (state.messages || []).length,

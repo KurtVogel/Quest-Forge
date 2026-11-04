@@ -289,10 +289,18 @@ function normalizeQuestUpdate(raw) {
     // (sanitizeQuestRecord) silently dropped at the next LOAD_GAME. A terminal
     // update may still close a tracked arc by its id alone.
     if (!name && (status === 'new' || status === 'updated')) return null;
+    // The sworn record (WOW 2026-11-04): who asked, what was promised, how it
+    // ended — typed string-or-drop at the wire like every other text field.
+    const patron = typeof raw.patron === 'string' ? raw.patron.trim().slice(0, 80) : '';
+    const promised = typeof raw.promised === 'string' ? raw.promised.trim().slice(0, 120) : '';
+    const outcome = typeof raw.outcome === 'string' ? raw.outcome.trim().slice(0, 200) : '';
     return {
         ...(id && { id }),
         ...(name && { name }),
         ...(description && { description }),
+        ...(patron && { patron }),
+        ...(promised && { promised }),
+        ...(outcome && (status === 'completed' || status === 'failed') && { outcome }),
         status,
     };
 }

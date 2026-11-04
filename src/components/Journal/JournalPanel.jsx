@@ -378,6 +378,8 @@ function ChronicleTab({ chapters, messages, heroName, chapterTitle, onChapterTit
     // — the hero's death. `suggested` is typed at load (complete-or-null).
     const suggestedTitle = typeof suggested?.title === 'string' ? suggested.title : '';
     const suggestedDeath = suggested?.reason === 'death';
+    // A long quest arc closed (WOW 2026-11-04): the player's own storyline ended.
+    const suggestedQuest = suggested?.reason === 'quest';
     const [removeArmed, setRemoveArmed] = useState(false);
     const lastChronicled = chapters.length > 0 ? (chapters[chapters.length - 1].toIndex ?? -1) : -1;
     // The pending walk and the passage plan are memoized on the transcript
@@ -400,8 +402,11 @@ function ChronicleTab({ chapters, messages, heroName, chapterTitle, onChapterTit
                     <p className="journal-hint chronicle-suggested">
                         {suggestedDeath
                             ? <>🪦 {suggestedTitle}’s story has ended — close the last chapter of the saga.</>
-                            : <>🕰️ The fall of “{suggestedTitle}” just closed a major arc — a fitting
-                                moment to close this chapter of the saga.</>}
+                            : suggestedQuest
+                                ? <>✦ “{suggestedTitle}” has run its course — a long arc of your own just
+                                    ended, a fitting moment to close this chapter of the saga.</>
+                                : <>🕰️ The fall of “{suggestedTitle}” just closed a major arc — a fitting
+                                    moment to close this chapter of the saga.</>}
                     </p>
                 )}
                 <p className="journal-hint">
@@ -828,6 +833,19 @@ function NPCTab({
                                 <span className="journal-npc-stance-label">Toward you</span>
                                 {npc.stanceToPlayer}
                             </p>
+                        )}
+                        {Array.isArray(npc.ties) && npc.ties.length > 0 && (
+                            <div className="journal-npc-bonds journal-npc-ties">
+                                <span className="journal-npc-bonds-label">With others</span>
+                                <ul className="journal-npc-bonds-list">
+                                    {npc.ties.map((tie, i) => (
+                                        <li key={i} title="How this person regards someone else on record, as the story showed it">
+                                            <span className="journal-npc-bond-kind">{tie.name}</span>
+                                            {tie.regard}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
                         )}
                         {bonds.key.length > 0 && (
                             <div className="journal-npc-bonds">

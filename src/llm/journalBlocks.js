@@ -10,7 +10,7 @@
  * the whole context.
  */
 import { LOCATION_NAME_MAX } from '../config/contentLimits.js';
-import { briefNpcFieldForPrompt, curateNpcsForPrompt, findCompanionRecord, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
+import { briefNpcFieldForPrompt, curateNpcsForPrompt, describeTiesForPrompt, findCompanionRecord, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
 import { describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
 import { describeCurrentPlace, describeTravelLink, isSameLocation, listKnownWays } from '../engine/locationRegistry.js';
 import { describeRegionLine, findRegionProfile, regionForPrompt } from '../engine/regionProfile.js';
@@ -184,6 +184,10 @@ export function buildKnownNpcsBlock(npcs, currentLocation, { presentNames = null
     if (rosterNpcs.length === 0) return '';
     const shown = curateNpcsForPrompt(rosterNpcs, { location: currentLocation, limit: MAX_PROMPT_NPCS, presentNames, messages, locations });
     const hiddenCount = Math.max(0, rosterNpcs.length - shown.length);
+    // The people IN the scene — present roster people and the party — are the
+    // only ones a tie renders for (2026-11-04): a tie to someone elsewhere is
+    // the record's, not this turn's.
+    const sceneNames = [...(Array.isArray(presentNames) ? presentNames : []), ...(Array.isArray(partyNames) ? partyNames : [])];
 
     const npcList = shown.map(n => {
         // Species and gender ride next to the name (not buried in extras):
@@ -212,6 +216,8 @@ export function buildKnownNpcsBlock(npcs, currentLocation, { presentNames = null
             // is the beat players remember most; the DM must play it consistently.
             n.stanceToPlayer && `toward the hero: ${briefNpcFieldForPrompt(n.stanceToPlayer)}`,
             ...describeBondForPrompt(n, storyMemory, { messages, messageCount: Array.isArray(messages) ? messages.length : undefined }),
+            // How this person regards someone ELSE in the room (2026-11-04).
+            describeTiesForPrompt(n, sceneNames),
             Number.isFinite(n.trust) && `trust: ${n.trust}/100`,
             n.basedIn && `based in: ${n.basedIn}`,
             n.lastLocation && `last seen: ${n.lastLocation}`,
@@ -224,7 +230,7 @@ export function buildKnownNpcsBlock(npcs, currentLocation, { presentNames = null
         ? `\n*(${hiddenCount} other NPCs available via RETRIEVED MEMORIES when relevant)*`
         : '';
 
-    return `\n## KNOWN NPCs (keep names, registered gender, and established looks EXACTLY consistent — a character's gender and pronouns NEVER change from the registered value or the fiction that introduced them, and never re-invent or launder hair, eyes, build, body proportions, scars, intimate details, or clothing that "looks:" already records. Each NPC's "secret:" and "agenda:" entries are that character's PRIVATE interior — other characters do not know them unless the fiction has shown the reveal, per rule 9. "bond:" is where that person and the hero stand; "between you now:" is the LIVE thread between them — the thing they would raise first, so let them act on it, ask about it, or visibly avoid it when they share a scene; "apart:" is how time alone has changed the register they meet in — cooled, sharpened, scarred, or stinging — play the reunion in that register before the old warmth or heat returns)\n${npcList}${overflow}`;
+    return `\n## KNOWN NPCs (keep names, registered gender, and established looks EXACTLY consistent — a character's gender and pronouns NEVER change from the registered value or the fiction that introduced them, and never re-invent or launder hair, eyes, build, body proportions, scars, intimate details, or clothing that "looks:" already records. Each NPC's "secret:" and "agenda:" entries are that character's PRIVATE interior — other characters do not know them unless the fiction has shown the reveal, per rule 9. "bond:" is where that person and the hero stand; "between you now:" is the LIVE thread between them — the thing they would raise first, so let them act on it, ask about it, or visibly avoid it when they share a scene; "apart:" is how time alone has changed the register they meet in — cooled, sharpened, scarred, or stinging — play the reunion in that register before the old warmth or heat returns; "ties:" is how this person regards someone ELSE who is in the scene right now — the tie is in the room: let it color what they say to and about each other, and let a companion's view of the hero's new friend show)\n${npcList}${overflow}`;
 }
 
 /**

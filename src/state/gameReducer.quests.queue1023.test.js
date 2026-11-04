@@ -43,7 +43,9 @@ const dyingHero = {
     deathSaves: { successes: 1, failures: 2 },
     conditions: ['Unconscious'],
 };
-const systemLines = (state) => state.messages.filter(m => m.role === 'system');
+// The ⚖ / XP lines these pins count — never the ◆ / ✦ / ✕ quest moments the
+// open and close post since 2026-11-04 (WOW quests-and-rewards slice B).
+const systemLines = (state) => state.messages.filter(m => m.role === 'system' && !/^[◆✦✕] \*\*Quest/.test(m.content));
 
 describe('a DOWN hero stays down through the engine-amount XP folds a DM channel triggers (2026-10-23 P1)', () => {
     it('a quest completion crossing a level leaves a dying hero at 0 HP with the death-save clock intact', () => {
@@ -156,9 +158,10 @@ describe('a finished quest never changes its ending (2026-10-23 P2)', () => {
     it('a `failed` carrying a completed row\'s id is refused with a dmVisible ⚖ line — status, close stamp and XP untouched', () => {
         const state = completedArc();
         const row = state.quests[0];
-        expect(row).toMatchObject({ status: 'completed', closedAtMessage: 2 });
+        // Stamp 3 since 2026-11-04: the ◆ "Quest taken" row the open posted sits at index 2.
+        expect(row).toMatchObject({ status: 'completed', closedAtMessage: 3 });
         const flipped = gameReducer(state, { type: 'FAIL_QUEST', payload: { id: 'q-debt', name: 'Collect the Ferry Debt' } });
-        expect(flipped.quests[0]).toMatchObject({ status: 'completed', closedAtMessage: 2 });
+        expect(flipped.quests[0]).toMatchObject({ status: 'completed', closedAtMessage: 3 });
         expect(flipped.character.exp).toBe(state.character.exp);
         const line = flipped.messages.at(-1);
         expect(line).toMatchObject({ role: 'system', dmVisible: true });

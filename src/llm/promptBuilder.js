@@ -26,7 +26,7 @@ import { buildRegionalHearsayBlock } from '../engine/regionalHearsay.js';
 import { buildWhileYouWereAwayBlock } from './absenceDrift.js';
 import { describeSpellbookForPrompt, describeSpellSlotsForPrompt, isSpellcaster } from '../engine/spellcasting.js';
 import { describeHeroIncapacity, isLowLevelSolo } from '../engine/combatPredicates.js';
-import { briefNpcFieldForPrompt, findCompanionRecord, findNamedPeople, resolveCompanionLook } from '../engine/npcRoster.js';
+import { briefNpcFieldForPrompt, describeTiesForPrompt, findCompanionRecord, findNamedPeople, resolveCompanionLook } from '../engine/npcRoster.js';
 import { buildRelationshipBeatBlock } from '../engine/relationshipArc.js';
 import { HERO_TELLS_STANDING_RULE, buildHeroTellBeatBlock, buildHeroTellsBlock } from '../engine/heroTells.js';
 import { describeStaleTwin, describeStateTag, listStaleFacts, liveWorldFacts } from '../engine/worldFacts.js';
@@ -521,12 +521,21 @@ export function buildSystemPromptParts({ ledger = null, character, inventory, qu
         }
     }
 
+    // The people IN the scene — the presence judgement RAG retrieval and
+    // callback curation make, from the last narrative messages. KNOWN NPCs
+    // reserves slots for them (2026-09-06 P1); the party line renders a
+    // companion's ties to them (2026-11-04).
+    const rosterNames = ctx.npcs.map(n => n?.name).filter(Boolean);
+    const presentNames = rosterNames.length > 0 && ctx.messages && ctx.messages.length > 0
+        ? findNamedPeople(ctx.npcs, { sceneText: buildPresenceText(ctx.messages), locations: ctx.locations, cap: 8 }).map(npc => npc.name)
+        : null;
+
     // Party / Companions. The intent call reads companion ids, HP, status and
     // actions and nothing of the bond (2026-10-13 prompt-building P2: 8.5k of
     // the intent call's 19.1k dynamic chars were bond prose the translation
     // cannot use); the nudge reads none of it.
     if (ctx.party.length > 0 && !nudgeOnly) {
-        parts.push(buildPartyBlock(ctx.party, ctx.npcs, threadPool, { messages: ctx.messages, messageCount: ctx.messageCount, mechanicsOnly: intentOnly }), 'party');
+        parts.push(buildPartyBlock(ctx.party, ctx.npcs, threadPool, { messages: ctx.messages, messageCount: ctx.messageCount, mechanicsOnly: intentOnly, presentNames }), 'party');
     }
 
     // Inventory
@@ -574,10 +583,8 @@ export function buildSystemPromptParts({ ledger = null, character, inventory, qu
     // the same presence judgement RAG retrieval and callback curation make,
     // from the last narrative messages, so the person the hero is talking to
     // can never be ranked out of the block by richer dossiers elsewhere.
-    const rosterNames = ctx.npcs.map(n => n?.name).filter(Boolean);
-    const presentNames = rosterNames.length > 0 && ctx.messages && ctx.messages.length > 0
-        ? findNamedPeople(ctx.npcs, { sceneText: buildPresenceText(ctx.messages), locations: ctx.locations, cap: 8 }).map(npc => npc.name)
-        : null;
+    // (`presentNames` is computed above the party block since 2026-11-04 —
+    // a companion's ties render only for the people in the room.)
     const partyNames = ctx.party.map(c => c?.name).filter(Boolean);
     // An empty journal skips SESSION HISTORY and LOCATION TRANSITION HISTORY
     // (both derive from it) while the place card and KNOWN NPCs still render.
@@ -854,7 +861,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "conditions_gained": [],
   "conditions_removed": [],
   "healing": 0,
-  "quest_updates": [{ "status": "new|updated|completed|failed", "name": "Quest Name", "description": "Quest description" }],
+  "quest_updates": [{ "status": "new|updated|completed|failed", "name": "Quest Name", "description": "Quest description", "patron": "who asked, by their full known name (omit when the hero took it up alone)", "promised": "the fee or stake agreed, a few words", "outcome": "how it ended — on completed/failed only" }],
   "location": "<the exact name of the place the hero PHYSICALLY stands at the END of this response, ONLY when it changed — never a place merely mentioned, discussed, or being left behind; omit when unchanged>",
   "world_facts": [
     { "fact": "The bandit captain Rarg is dead, killed by the player at the crossroads.", "category": "event" },
@@ -915,8 +922,8 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - Supply a descriptive name, optional known catalog itemKey, brief premise-grounded description, and equipped true only when explicitly worn/wielded at the opening. Never provide prices, bonuses, damage, armor, healing, magic, or other mechanics; the engine owns recognized catalog stats and rejects duplicates.
 
 ## QUEST TRACKING INSTRUCTIONS
-- The Quests panel only shows what you emit — whenever the hero ACCEPTS a job, deal, debt, errand, hunt, or investigation (even an informal handshake like "clear the rats and the room is yours"), emit \`quest_updates\` with \`status: "new"\`, a short name, and what was agreed (task, payment/stakes, who asked).
-- When an objective meaningfully changes, emit \`status: "updated"\` with the new situation; when it is fulfilled or becomes impossible, emit \`status: "completed"\` or \`status: "failed"\` in the same response that narrates it. \`failed\` means the GOAL itself can no longer be reached — never a quest whose route changed (a lost ship, a new plan, a different road to the same promise): that is \`updated\` with the new route, never a failed quest beside a new one.
+- The Quests panel only shows what you emit — whenever the hero ACCEPTS a job, deal, debt, errand, hunt, or investigation (even an informal handshake like "clear the rats and the room is yours"), emit \`quest_updates\` with \`status: "new"\`, a short name, what was agreed as the description, \`patron\` (who asked, by their full known name — omit when nobody did) and \`promised\` (the fee or stake agreed, a few words). The record keeps the agreement and every later stage; the panel shows them.
+- When an objective meaningfully changes, emit \`status: "updated"\` with the new situation; when it is fulfilled or becomes impossible, emit \`status: "completed"\` or \`status: "failed"\` in the same response that narrates it, with \`outcome\`: one line of how it ended (what was delivered, who paid what, what was lost). \`failed\` means the GOAL itself can no longer be reached — never a quest whose route changed (a lost ship, a new plan, a different road to the same promise): that is \`updated\` with the new route, never a failed quest beside a new one.
 - Completing a quest pays engine-computed XP automatically (a visible system line confirms it). NEVER emit \`exp_awarded\` for a quest completion — that double-pays. Failed quests pay nothing.
 - One quest per actual agreement — don't open quests for vague rumors, mere invitations, or things the hero declined.
 - A patron is NOT required: when the hero TAKES UP a pursuit on their own initiative and acts on it — investigating a disappearance, hunting a beast, tracking a debt — open the quest the moment they act on it (a full missing-family investigation with no quest entry is the failure mode; a passing question is not a quest).
@@ -1056,7 +1063,7 @@ PROGRESSION & STATUS EFFECTS:
 - The engine awards XP automatically for combat (defeated, surrendered, or fled threats — with a larger reward for a decisively beaten "boss": true foe) AND for every quest completed via quest_updates. NEVER emit "exp_awarded" for winning a fight or completing a quest — the engine already paid; an award on top double-pays.
 - Use "exp_awarded" ONLY for small freeform bonuses the engine cannot see: clever roleplay, a brilliant solution, a discovery, a personal milestone outside any quest. Keep it modest: the EXP line in PLAYER CHARACTER shows the current "freeform bonus cap" — the engine pays at most that, and says so on the XP line if you exceed it.
 - "exp_awarded" is one-shot: award XP for an accomplishment exactly once, in the response that resolves it — never re-emit XP in a later response that references, recaps, or confirms the same accomplishment, even if the player asks whether XP was granted (the engine shows every award as a system line; if none appeared, it was not granted — award the missing amount ONCE, then never again).
-- **LEVELING:** The client owns XP thresholds, HP gain, hit dice, feature unlocks, and level-up messages. Do NOT narrate HP or stat changes yourself. Use "level_up": true only for a deliberate, rare story milestone (a great deed decisively completed, an arc closed). The engine pays a fixed milestone reward for it — half a level of XP, two milestones = one level — never a whole level on request; otherwise award XP normally and let the system decide. A front you resolve through front_updates already pays its own milestone — never add "level_up" or "exp_awarded" in the response that resolves it (the engine drops them).
+- **LEVELING:** The client owns XP thresholds, HP gain, hit dice, feature unlocks, and level-up messages. Do NOT narrate HP or stat changes yourself. A **Level Up!** system line in the conversation is a beat: in the hero's next scene, give the new feature one sentence of fiction by its name — what they can now do — never the numbers. Use "level_up": true only for a deliberate, rare story milestone (a great deed decisively completed, an arc closed). The engine pays a fixed milestone reward for it — half a level of XP, two milestones = one level — never a whole level on request; otherwise award XP normally and let the system decide. A front you resolve through front_updates already pays its own milestone — never add "level_up" or "exp_awarded" in the response that resolves it (the engine drops them).
 - **FIGHTER EXTRA ATTACK:** Fighters of level 5+ may declare two targetable strikes inside each Attack slot. The engine rolls and applies both.
 - **ROGUE CLASS FEATURES (Level 1–5):**
   - **Expertise:** A Rogue's selected expertise skills double their proficiency bonus. The engine applies this bonus automatically to any check/save.
@@ -1317,7 +1324,7 @@ const PARTY_LOOK_MAX = 300;
 /** Sentence-case a bond composer line ("between you now: …" → "Between you now: …"). */
 const sentenceCase = (line) => (line ? `${line[0].toUpperCase()}${line.slice(1)}` : line);
 
-function buildPartyBlock(party, npcs = [], storyMemory = [], { messages = null, messageCount, mechanicsOnly = false } = {}) {
+function buildPartyBlock(party, npcs = [], storyMemory = [], { messages = null, messageCount, mechanicsOnly = false, presentNames = null } = {}) {
     return `## COMPANIONS (PARTY)
 These characters are currently traveling with the player. They act in combat and can be conversed with.
 ${party.map(c => {
@@ -1358,6 +1365,13 @@ ${party.map(c => {
             for (const bondLine of describeBondForPrompt(dossier, storyMemory, { messages, messageCount })) {
                 bond.push(`  ${sentenceCase(bondLine)}`);
             }
+            // How this companion regards someone else in the room (2026-11-04)
+            // — a present roster person or another companion.
+            const ties = describeTiesForPrompt(dossier, [
+                ...(Array.isArray(presentNames) ? presentNames : []),
+                ...party.map(member => member?.name).filter(name => typeof name === 'string' && name !== c.name),
+            ]);
+            if (ties) bond.push(`  ${sentenceCase(ties)}`);
         }
         return bond.length > 0 ? `${line}\n${bond.join('\n')}` : line;
     }).join('\n')}
@@ -1493,6 +1507,8 @@ const QUEST_NAME_PROMPT_MAX = 160;
  * names are kept (the likeliest to be closed or re-opened as a duplicate).
  */
 const QUEST_OVERFLOW_NAMES = 8;
+const QUEST_PATRON_PROMPT_MAX = 80;
+const QUEST_PROMISED_PROMPT_MAX = 120;
 
 function buildQuestBlock(quests) {
     const shown = quests.slice(-QUEST_PROMPT_CAP);
@@ -1506,7 +1522,16 @@ function buildQuestBlock(quests) {
     // Names are clamped here too (2026-09-14 audit P2 belt): the load
     // sanitizer types them, but a 200k-char name rode the prompt in full.
     const clampName = (name) => textOr(name, 'Untitled quest').slice(0, QUEST_NAME_PROMPT_MAX);
-    const lines = shown.map(q => `- **${clampName(q.name)}** [id: ${q.id}]: ${clampDesc(q.description)}`).join('\n');
+    // The sworn record on the line (WOW 2026-11-04): for whom and for what,
+    // then the newest stage — the DM pays what was promised at the close.
+    const terms = (q) => [
+        q.patron && `for ${textOr(q.patron, '').slice(0, QUEST_PATRON_PROMPT_MAX)}`,
+        q.promised && `promised: ${textOr(q.promised, '').slice(0, QUEST_PROMISED_PROMPT_MAX)}`,
+    ].filter(Boolean).join(' · ');
+    const lines = shown.map(q => {
+        const meta = terms(q);
+        return `- **${clampName(q.name)}** [id: ${q.id}]${meta ? ` — ${meta}. Now` : ''}: ${clampDesc(q.description)}`;
+    }).join('\n');
     // Omitted quests keep their names in view so the DM can still close them
     // (and never re-opens a duplicate) without paying for their descriptions.
     const named = omitted.slice(-QUEST_OVERFLOW_NAMES).map(q => clampName(q.name));

@@ -14,6 +14,10 @@ const ALLOWED_TYPES = new Set([
     'playerCanon',
     'foreshadow',
     'npcAgenda',
+    // The engine's record of a quest's END (WOW 2026-11-04): the name, how it
+    // ended, the patron linked — minted by COMPLETE_QUEST / FAIL_QUEST, never
+    // by a lane (the Scribe is told a job is the DM's quest, not a card).
+    'quest',
 ]);
 
 const ALLOWED_STATUS = new Set(['active', 'resolved', 'dormant']);

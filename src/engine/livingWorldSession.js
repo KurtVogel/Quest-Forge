@@ -28,7 +28,8 @@ import { clampMessageStamp } from './replayLedger.js';
 const HEARSAY_GRADES = ['firsthand', 'secondhand', 'legend'];
 
 /** Why the Chronicle tab suggests a close: a front's fall, or the hero's death (2026-09-30). */
-export const CHAPTER_CLOSE_REASONS = Object.freeze(['front', 'death']);
+// 'quest' (WOW 2026-11-04): a quest arc that lived QUEST_LONG_ARC_ROWS closed.
+export const CHAPTER_CLOSE_REASONS = Object.freeze(['front', 'death', 'quest']);
 
 /*
  * Every message stamp here goes through `clampMessageStamp` (replayLedger.js —

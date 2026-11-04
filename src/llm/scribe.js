@@ -71,6 +71,7 @@ Output ONLY valid JSON:
       "openThreadResolved": "true ONLY when this exchange settles the recorded open thread WITH THAT PERSON PRESENT (the promise kept TO them, the question answered TO them, the debt paid TO them) and nothing new is pending — progress made elsewhere (the gift bought, the proof found, the road taken) settles nothing; omit otherwise",
       "trust": "a number 0-100 ONLY when this exchange visibly changes how far they trust the hero — omit otherwise (never echo a placeholder)",
       "privateNotes": "hidden NPC intent or unrevealed motive useful for future consistency",
+      "ties": [{ "name": "another KNOWN person (their full recorded name) this NPC showed a regard for in THIS exchange — never the hero, never a stranger", "regard": "how they regard that person, from this NPC's side, with the reason the scene showed — one clause" }],
       "callbackHooks": ["an unresolved THING this NPC could bring back later — an object, a debt, a favor, a line once said, a name — a complete phrase in the neutral REGISTER; never scenery, a sound, a gesture, or the room. Usually omit"]
     }
   ],
@@ -115,6 +116,7 @@ Rules:
 - Keep story_memory compact; do not duplicate ordinary world_facts unless the memory has callback value.
 - When KNOWN STORY CARDS lists a beat and this turn continues, deepens, or restates it, emit it with that card's exact "id" and the COMPLETE updated text so the record is updated in place — never mint a second card for a beat already on record. A card listed as resolved is PAID OFF: never re-report it under any wording (the engine keeps it resolved regardless).
 - Only include npc_updates for NPCs that appeared in this specific exchange
+- ties record one person's regard of ANOTHER recorded person, only when THIS exchange SHOWED it — a warning given about someone, a grudge named, a fondness or deference shown, two people sizing each other up in the room. Never the hero (that is stanceToPlayer), never someone not yet on record, never inferred from roles alone; at most 2 per NPC per turn, and never restate a tie already listed under KNOWN PLAYER-RELATIONSHIP STANCES unless it changed
 - The hero's PARTY COMPANIONS are NPCs for record-keeping: emit npc_updates for them (stanceToPlayer, bondMoment, appearance, personality, goals) exactly like any other character — never skip someone because they travel with the hero. The party is the game's most sustained relationship, so companion stance shifts and bond moments matter MORE than a stranger's, not less.
 - basedIn is the NPC's current anchor in the world (not permanent): update it when they are reassigned, relocate, or fiction establishes a new base. lastLocation is ephemeral — where they were this turn
 - stanceToPlayer is about the personal relationship between this NPC and the HERO specifically — their feelings toward the hero, not their role or plot function. Update it whenever an exchange genuinely shifts how they regard the hero: a flirtation received warmly or coldly, gratitude after a rescue, trust broken, growing attraction or contempt. Write it unvarnished — desire, resentment, and awkwardness named plainly. When KNOWN PLAYER-RELATIONSHIP STANCES lists this NPC, emit the COMPLETE updated stance as a full rewrite: restate every still-true part IN ITS EXISTING WORDING, integrate what this turn changed, and drop only what this turn superseded. The engine replaces the stored stance only when your text covers it — a differently-worded fragment gets APPENDED instead, leaving contradicted old feelings standing next to the new ones ("resentful and suspicious" beside "warmly appreciative"). If nothing shifted for them personally, omit the field. When KNOWN PLAYER-RELATIONSHIP STANCES lists RECENT IMPRESSIONS (unconfirmed) for this NPC, carry one into the stance ONLY if this exchange bears it out again — the engine makes an impression permanent only when the fiction shows it in a second scene.
@@ -337,7 +339,9 @@ export function buildKnownStances({ npcs = [], messages = null } = {}, ...texts)
         const wants = typeof npc?.goals === 'string' ? npc.goals.trim() : '';
         const secret = typeof npc?.secrets === 'string' ? npc.secrets.trim() : '';
         const joined = justJoined(npc);
-        if (!name || (!stance && !personality && !wants && !secret && onRecord.length === 0 && !thread && !joined)) continue;
+        // Ties on record (2026-11-04): the Scribe re-reports a tie only when it changed.
+        const ties = Array.isArray(npc?.ties) ? npc.ties.filter(tie => tie && typeof tie.name === 'string' && typeof tie.regard === 'string') : [];
+        if (!name || (!stance && !personality && !wants && !secret && onRecord.length === 0 && !thread && !joined && ties.length === 0)) continue;
         if (!isPresent(name)) continue;
         const lines = [];
         // The WHOLE stance (2026-10-31): a 240-char cut asked for a complete
@@ -369,6 +373,9 @@ export function buildKnownStances({ npcs = [], messages = null } = {}, ...texts)
                 const kind = bondKindLabel(moment.kind);
                 return `"${moment.text.slice(0, 140)}"${kind ? ` (${kind})` : ''}`;
             }).join('; ')}`);
+        }
+        if (ties.length > 0) {
+            fields.push(`ties: ${ties.map(tie => `${tie.name} — "${tie.regard.slice(0, 120)}"`).join('; ')}`);
         }
         if (fields.length > 0) lines.push(`${name} — ${fields.join(' | ')}`);
         entries.push(lines.join('\n'));

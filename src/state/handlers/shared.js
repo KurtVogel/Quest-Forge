@@ -23,6 +23,7 @@ import {
     mergeNpcAppearance,
     mergeNpcCoreText,
     mergeNpcDossierText,
+    mergeNpcTies,
     namesMatch,
     normalizeImpressions,
     normalizeNpcRecord,
@@ -877,6 +878,10 @@ export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, pre
         if (Array.isArray(update.bondMoments)) bondAdditions.push(...update.bondMoments);
         delete update.bondMoments;
     }
+    // Ties merge against the ROSTER (2026-11-04): a lane names another
+    // person; the record keeps that person's full name and id, or nothing.
+    const tieAdditions = Array.isArray(update.ties) ? update.ties : [];
+    delete update.ties;
 
     // A shared name is not a person (M0, 2026-10-13): the record is resolved
     // by context — exact id, exact name, else the one `namesMatch` candidate,
@@ -932,6 +937,10 @@ export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, pre
         if (update.callbackHooks) {
             update.callbackHooks = appendCallbackHooks(existing.callbackHooks, update.callbackHooks);
         }
+        if (tieAdditions.length > 0) {
+            const ties = mergeNpcTies(existing.ties, tieAdditions, { npcs, self: existing, messageCount });
+            if (ties.length > 0) update.ties = ties;
+        }
         // Appearance stays a rewrite-replaces field, but a FRAGMENT arriving
         // without merge context (the DM lane, or a Scribe turn that only saw a
         // short name) joins the record instead of wiping it (2026-09-06 P1).
@@ -958,6 +967,10 @@ export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, pre
     }
     if (update.callbackHooks) {
         update.callbackHooks = appendCallbackHooks([], update.callbackHooks);
+    }
+    if (tieAdditions.length > 0) {
+        const ties = mergeNpcTies([], tieAdditions, { npcs, self: { name: payload.name }, messageCount });
+        if (ties.length > 0) update.ties = ties;
     }
     return [...npcs, normalizeNpcRecord({
         id: `npc-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,

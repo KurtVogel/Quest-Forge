@@ -250,8 +250,11 @@ export function buildRecallDossier(state, intent, { maxChars = RECALL_DOSSIER_CH
         const status = typeof item.status === 'string' ? item.status : 'active';
         const ago = Number.isFinite(item.openedAtMessage) ? when(item.openedAtMessage) : '';
         const opened = ago ? `, taken up ${ago}` : '';
-        const description = typeof item.description === 'string' && item.description.trim() ? `: ${clip(item.description, 160)}` : '';
-        ledgers.push(row('quests', `- QUEST "${clip(item.name, 80)}" (${status}${opened})${description}`, item.openedAtMessage));
+        // A finished quest recalls how it ENDED (WOW 2026-11-04); the patron rides the status.
+        const forWhom = typeof item.patron === 'string' && item.patron.trim() ? ` for ${clip(item.patron, 60)}` : '';
+        const ending = typeof item.outcome === 'string' && item.outcome.trim() ? `: ${clip(item.outcome, 160)}` : '';
+        const description = ending || (typeof item.description === 'string' && item.description.trim() ? `: ${clip(item.description, 160)}` : '');
+        ledgers.push(row('quests', `- QUEST "${clip(item.name, 80)}"${forWhom} (${status}${opened})${description}`, item.openedAtMessage));
     });
 
     // Only RESOLVED fronts: a live front is hidden campaign state and never

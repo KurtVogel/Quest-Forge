@@ -27,6 +27,16 @@ export const NPC_KINDS = new Set(['character', 'creature', 'ephemeral']);
  */
 export const NPC_DISPOSITIONS = new Set(['friendly', 'neutral', 'hostile', 'wary', 'unknown']);
 export const NPC_NAME_MAX = 80;
+/**
+ * People have ties to each other (WOW 2026-10-07 slice B, built 2026-11-04):
+ * one person's regard of ANOTHER recorded person — `{ name, regard, npcId }`,
+ * the name a roster record's (a tie never mints a person), the regard one
+ * clause from the fiction. Cap 4 per record, the oldest falls off; a second
+ * regard of the same person replaces the first. Rendered on the KNOWN NPCs /
+ * party line only when the tied person shares the scene.
+ */
+export const NPC_TIE_REGARD_MAX = 120;
+export const NPC_TIES_CAP = 4;
 /** Current-state prose a lane replaces outright — clamped like the dossier fields. */
 export const NPC_LANE_TEXT_LIMITS = Object.freeze({
     name: NPC_NAME_MAX,
@@ -50,13 +60,14 @@ export const NPC_LANE_KEYS = new Set([
     ...Object.keys(NPC_LANE_TEXT_LIMITS),
     'id', 'kind', 'rosterEligible', 'roster_eligible', 'rosterTier', 'disposition', 'trust',
     'bondMoment', 'bondMoments', 'openThread', 'openThreadResolved', 'callbackHooks',
-    'gradedMoments', '_seen',
+    'gradedMoments', '_seen', 'ties',
 ]);
 /** Every key a persisted roster record may hold — the LOAD_GAME projection. */
 export const NPC_RECORD_KEYS = new Set([
     ...Object.keys(NPC_LANE_TEXT_LIMITS),
     'id', 'kind', 'rosterTier', 'pinned', 'importance', 'disposition', 'trust',
     'bondMoments', 'recentImpressions', 'openThread', 'openThreadMessage', 'openThreadResolvedMessage', 'callbackHooks',
+    'ties',
     'knownFacts', 'firstMet', 'lastSeen', 'lastSeenMessage',
     // Joining and leaving are moments (WOW 2026-10-13): the reducer stamps
     // when a companion joined / left the party; never lane-writable.
@@ -877,6 +888,77 @@ function sameHook(a, b) {
     return shared >= HOOK_FOLD_MIN_SHARED && shared / small.size >= HOOK_FOLD_OVERLAP;
 }
 
+/** The ties list, typed: `{ name, regard, npcId?, atMessage? }`, blanks dropped, one row per person, the newest NPC_TIES_CAP kept. */
+export function normalizeNpcTies(list) {
+    if (!Array.isArray(list)) return [];
+    const rows = [];
+    for (const raw of list) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+        const name = cleanText(raw.name, NPC_NAME_MAX);
+        const regard = cleanText(raw.regard, NPC_TIE_REGARD_MAX);
+        if (!name || !regard) continue;
+        const npcId = typeof raw.npcId === 'string' && raw.npcId.trim() ? raw.npcId.trim().slice(0, 80) : '';
+        const atMessage = Number(raw.atMessage);
+        const row = {
+            name,
+            regard,
+            ...(npcId && { npcId }),
+            ...(Number.isFinite(atMessage) && atMessage >= 0 && { atMessage: Math.trunc(atMessage) }),
+        };
+        const same = rows.findIndex(held => (npcId && held.npcId === npcId) || namesMatch(held.name, name));
+        if (same !== -1) rows[same] = row;
+        else rows.push(row);
+    }
+    return rows.slice(-NPC_TIES_CAP);
+}
+
+/**
+ * Merge a lane's `ties` onto a record. Each addition's name must resolve to a
+ * ROSTER record (`resolveNpcRef`: exact, the short / long fold, the one
+ * namesMatch candidate — an ambiguous name lands on nobody) that is not this
+ * person; the record's full name and id are kept, never the lane's spelling.
+ * A tie to someone the roster does not hold is dropped: a tie never mints a
+ * person, and the hero is never on the roster, so "the hero" never qualifies
+ * (that is stanceToPlayer).
+ */
+export function mergeNpcTies(existing = [], additions = [], { npcs = [], self = null, messageCount } = {}) {
+    const incoming = [];
+    for (const raw of Array.isArray(additions) ? additions.slice(0, 4) : []) {
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+        const name = cleanText(raw.name, NPC_NAME_MAX);
+        const regard = cleanText(raw.regard, NPC_TIE_REGARD_MAX);
+        if (!name || !regard) continue;
+        const resolved = resolveNpcRef(npcs, { name });
+        const person = resolved.npc;
+        if (!person || typeof person.name !== 'string' || !person.name.trim()) continue;
+        if (self && ((self.id && person.id === self.id) || namesMatch(self.name, person.name))) continue;
+        if (!isPromptRosterNpc(person)) continue;
+        incoming.push({
+            name: person.name.trim().slice(0, NPC_NAME_MAX),
+            regard,
+            ...(person.id && { npcId: String(person.id) }),
+            ...(Number.isFinite(messageCount) && { atMessage: Math.max(0, Math.trunc(messageCount)) }),
+        });
+    }
+    if (incoming.length === 0) return normalizeNpcTies(existing);
+    return normalizeNpcTies([...(Array.isArray(existing) ? existing : []), ...incoming]);
+}
+
+/**
+ * The ties IN THE ROOM for a prompt line: only the ties whose person shares
+ * the scene (present or on the party), at most two, as
+ * `ties: Hesper — distrusts her since the ferry money; …`. '' when none.
+ */
+export function describeTiesForPrompt(npc = {}, sceneNames = []) {
+    const ties = normalizeNpcTies(npc?.ties);
+    if (ties.length === 0) return '';
+    const names = (Array.isArray(sceneNames) ? sceneNames : []).filter(name => typeof name === 'string' && name.trim());
+    if (names.length === 0) return '';
+    const here = ties.filter(tie => names.some(name => namesMatch(name, tie.name))).slice(-2);
+    if (here.length === 0) return '';
+    return `ties: ${here.map(tie => `${tie.name} — ${tie.regard}`).join('; ')}`;
+}
+
 export function appendCallbackHooks(existing = [], additions = []) {
     // normalizeCallbackHook runs on the EXISTING list too, so a stored
     // truncation fragment self-cleans the next time this NPC's hooks merge.
@@ -1308,6 +1390,13 @@ export function migrateLegacyNpc(npc = {}) {
         const impressions = normalizeImpressions(merged.recentImpressions);
         if (impressions.length > 0) merged.recentImpressions = impressions;
         else delete merged.recentImpressions;
+    }
+    // Ties load typed and only when present (2026-11-04) — a record without
+    // ties stays byte-identical to its pre-ties shape.
+    if (merged.ties !== undefined) {
+        const ties = normalizeNpcTies(merged.ties);
+        if (ties.length > 0) merged.ties = ties;
+        else delete merged.ties;
     }
     // The disposition-flip log is retired (2026-10-31): the arc is derived
     // from the bond moments (deriveRelationshipArc); the NPC_RECORD_KEYS

@@ -32,6 +32,28 @@ export default function QuestPanel() {
         dispatch({ type: 'REMOVE_QUEST', payload: questId });
     };
 
+    // The staged log behind a ▸ (WOW 2026-11-04): the agreement, then every
+    // stage the DM wrote since — the card shows the newest by default.
+    const [openStages, setOpenStages] = useState(() => new Set());
+    const toggleStages = (questId) => setOpenStages(prev => {
+        const next = new Set(prev);
+        if (next.has(questId)) next.delete(questId);
+        else next.add(questId);
+        return next;
+    });
+    const describeTerms = (quest) => [
+        quest.patron && `for ${quest.patron}`,
+        quest.promised && `promised: ${quest.promised}`,
+    ].filter(Boolean).join(' · ');
+    const stageHistory = (quest) => {
+        const stages = Array.isArray(quest.stages) ? quest.stages : [];
+        if (stages.length === 0) return [];
+        return [
+            ...(quest.agreement ? [{ text: quest.agreement, label: 'Agreed' }] : []),
+            ...stages.slice(0, -1).map(stage => ({ text: stage.text, label: 'Then' })),
+        ];
+    };
+
     return (
         <div className="quest-panel">
             <div className="quest-header">
@@ -71,8 +93,28 @@ export default function QuestPanel() {
                         <div className="quest-item-status">◆</div>
                         <div className="quest-item-info">
                             <span className="quest-item-name">{quest.name}</span>
+                            {describeTerms(quest) && (
+                                <span className="quest-item-terms" title="Who asked, and what was agreed — the record keeps this however the job changes">{describeTerms(quest)}</span>
+                            )}
                             {quest.description && (
                                 <span className="quest-item-desc">{quest.description}</span>
+                            )}
+                            {stageHistory(quest).length > 0 && (
+                                <button
+                                    type="button"
+                                    className="quest-stages-toggle"
+                                    onClick={() => toggleStages(quest.id)}
+                                    title="How this job got here — the agreement and every stage since"
+                                >
+                                    {openStages.has(quest.id) ? '▾' : '▸'} {stageHistory(quest).length} earlier stage{stageHistory(quest).length === 1 ? '' : 's'}
+                                </button>
+                            )}
+                            {openStages.has(quest.id) && (
+                                <ul className="quest-stages">
+                                    {stageHistory(quest).map((stage, i) => (
+                                        <li key={i}><span className="quest-stage-label">{stage.label}</span>{stage.text}</li>
+                                    ))}
+                                </ul>
                             )}
                         </div>
                         <div className="quest-item-actions">
@@ -113,6 +155,11 @@ export default function QuestPanel() {
                                     </div>
                                     <div className="quest-item-info">
                                         <span className="quest-item-name">{quest.name}</span>
+                                        {(quest.outcome || describeTerms(quest)) && (
+                                            <span className="quest-item-outcome" title={quest.status === 'failed' ? 'How it was lost' : 'How it ended'}>
+                                                {quest.outcome || describeTerms(quest)}
+                                            </span>
+                                        )}
                                     </div>
                                     <button
                                         className="quest-action-btn remove"

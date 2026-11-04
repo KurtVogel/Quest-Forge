@@ -94,13 +94,13 @@ function applyQuestUpdates(events, dispatch, { openOnly = false } = {}) {
             // ADD_QUEST upserts by name (an id only when the name agrees), so
             // "updated" refreshes the existing entry or self-heals into a new one
             // if the DM never opened it; the reducer refuses a nameless row.
-            dispatch({ type: 'ADD_QUEST', payload: { ...(quest.id && { id: quest.id }), name: quest.name, description: quest.description } });
+            dispatch({ type: 'ADD_QUEST', payload: { ...(quest.id && { id: quest.id }), name: quest.name, description: quest.description, patron: quest.patron, promised: quest.promised } });
         } else if (openOnly) {
             continue;
         } else if (quest.status === 'completed') {
-            dispatch({ type: 'COMPLETE_QUEST', payload: { id: quest.id, name: quest.name, description: quest.description } });
+            dispatch({ type: 'COMPLETE_QUEST', payload: { id: quest.id, name: quest.name, description: quest.description, patron: quest.patron, promised: quest.promised, outcome: quest.outcome } });
         } else if (quest.status === 'failed') {
-            dispatch({ type: 'FAIL_QUEST', payload: { id: quest.id, name: quest.name, description: quest.description } });
+            dispatch({ type: 'FAIL_QUEST', payload: { id: quest.id, name: quest.name, description: quest.description, patron: quest.patron, promised: quest.promised, outcome: quest.outcome } });
         }
     }
 }
