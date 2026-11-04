@@ -11,6 +11,41 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
+### [wow] Quests: a sworn record, and the close as a ceremony — status: `idea` (wow audit 2026-11-04, W1 ×2; `docs/SCHEDULED_WOW.md` 2026-11-04)
+The quest ENGINE is genre-best at identity and payment (the name over the DM's id, the fuzzy
+near-equality, a finished quest never changes its ending, engine XP chosen on live evidence —
+DECISIONS 2026-10-10 / 10-25 / 08-26). The quest RECORD is three fields: `name`, `description`,
+`status`. Patron, payment and stakes exist only as prose inside the description, which the first
+`updated` REPLACES (`handlers/quests.js:188`) — the agreement vanishes under its own progress
+(pillar 1); no field ties the job to the roster person who gave it; the open posts no row, the
+close posts `+38 XP`, a failure posts nothing, no outcome is written, and no card, journal line
+or Chronicle nudge follows — where a hidden front's end gets the 🕰️ line, a pinned fact, the
+chapter nudge and an aftermath director. The level-up is HP arithmetic with no beat asked of the
+DM. References: Ironsworn (the vow's rank and stake at the swearing; Fulfill and Forsake as
+moves), The Witcher 3 (the fee at the taking, a paragraph per stage, the last says how it ended),
+BG3 / Dragon Age: Origins (the staged log), Disco Elysium (a failed task says why; a level-up is
+a choice and a line), Roadwarden, Wildermyth.
+- **Slice A — a sworn record (W1).** Three optional wire fields on `quest_updates` — `patron`
+  (roster-resolved through the 10-13 `resolveNpcRef` shape, text otherwise), `promised` (≤ 120),
+  `outcome` (≤ 200, on a close) — projected and clamped like every wire and typed by the load
+  twin; the record keeps `agreement` (the first description, frozen) and a `stages` log (cap
+  6 × 200; `updated` APPENDS, the newest stays `description` for every existing reader); the
+  ACTIVE QUESTS line reads `for <patron> · promised: <x> · now: <newest stage>`; QUEST TRACKING
+  asks for the three fields; the panel shows patron / promise with the stages behind a ▸ and the
+  Finished row shows the outcome. Zero calls; ≤ 720 chars more in the dynamic half.
+- **Slice B — the open and the close are moments (W1).** ◆ **Quest taken** / ✦ **Quest done** /
+  ✕ **Quest failed** rows minted by the reducer above the XP receipt (the 11-03 item-receipt
+  pattern); a close mints ONE engine `quest` story card (the END_COMBAT wound pattern) with the
+  patron linked, salience 3 (4 past 40 conversational rows); an arc that lived ≥ 40 rows writes
+  `chapterCloseSuggested: { reason: 'quest' }` — the 07-26 Chronicle entry's open "offer a close
+  on major quest completion", absorbed here; one LEVELING line asks for a sentence of fiction
+  naming the new feature after a Level Up row, never the numbers. Zero calls.
+- **Left standing:** the 11-01 "quest-reward escrow" rejection — nothing here judges whether the
+  promised fee was paid; the counterparty's long window covers the report-back recap.
+- **Merged here:** "[strengthening] Quests panel 'clear finished' / summarized quest history"
+  (2026-09-27) — a Finished row with an outcome IS the summarized history; folding the terminal
+  rows stays a later slice of this entry, never a silent prune (DECISIONS 2026-09-27 (4) holds).
+
 ### The repeat judge for XP and spells too — status: `idea` (2026-11-02)
 `character.js` (playerMessageSupportsRepeatExpAward) and `spellcasting.js` still decide a repeat award / cast by phrase rules — the same weakness Vesa named for coins. The repeat judge's card + JUDGE_REPEAT pattern fits them (a replay type each). Not built: no live misfire seen; do it the first time one shows.
 
@@ -1126,7 +1161,9 @@ continuity, DM model), markdown export, strictly player-facing (never DM prompt/
 unvarnished + clinical-register prompt. **2026-08-05: the chapter-close offer on front
 resolution AND the milestone-XP pairing shipped** as the payoff ceremony (DECISIONS.md
 2026-08-05 ×2). Still open from the original notes: a chapter illustration via scene art,
-and offering a close on major quest completion.
+and offering a close on major quest completion (**absorbed 2026-11-04 into slice B of "[wow]
+Quests: a sworn record, and the close as a ceremony"** — `chapterCloseSuggested: { reason: 'quest' }`
+for an arc that lived ≥ 40 conversational rows).
 When the player closes a major chapter (player-initiated "close chapter", or offered when a
 front resolves / a major quest completes), a chronicler pass writes that span of play as a
 single naturally flowing narrative — a readable saga chapter, accumulated into a "Chronicle"
@@ -1676,7 +1713,7 @@ profiles — each rejected visibly until its profile exists, never a free hostil
 material, not here:** a round is two DM calls at ~33–36 s each on Flash 3.8 (2026-09-20 full
 run) — the strengthening queue's `narrationOnly` prompt slimming is the first slice.
 
-### [strengthening] Quests panel "clear finished" / summarized quest history — status: `open` (strengthening audit 2026-09-27, quests Lap 3 metric)
+### [strengthening] Quests panel "clear finished" / summarized quest history — status: `merged` (2026-11-04 wow audit [wow] — into "[wow] Quests: a sworn record, and the close as a ceremony": a Finished row with an outcome is the summarized history; folding stays that entry's later slice) (strengthening audit 2026-09-27, quests Lap 3 metric)
 Terminal quest rows are forever by decision (DECISIONS.md 2026-09-27 (4)): they are the quest
 ledger's one-shot guard and the finished section is the player's. Measured share: 500 terminal
 rows ≈ 159 KB in every autosave / cloud save, typed at every load (3 ms) — cheap at a realistic
