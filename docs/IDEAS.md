@@ -4293,3 +4293,25 @@ the canon changes, does not — a drover's hearsay became a distant place's reco
 the world "has shown". A precondition for a side effect belongs on the write. Payoff: a recall turn
 that remembers without moving anyone, a fight that cannot silence news about a namesake, a save that
 cannot load a demigod, a paralysis that always lands, and place cards made of what the hero saw.
+
+### [strengthening] A validated element is not a validated collection; a shelf's namesake does less; a projection by spread keeps what it does not name; a cache that fails quietly is paid for every mount — status: `idea` (2026-11-05)
+Four rules from the enemy-stats-conditions + vector-memory-rag pass of 2026-11-05 (Lap 2, hostile
+input), each reproduced with a throwaway probe over the real parser → reducer → prompt → load chain
+and the real seed / retrieval over `fake-indexeddb`. **(1)** `combat_start` types every field of every
+foe and counts none of them; the exchange caps the DM's intents at 30 and lets every uncounted foe
+attack by default; the load caps the turn order at 40 and the enemies not at all — sixty 3-HP rats
+dropped a level-3 fighter to dying in the first exchange with the DM asking no foe to swing. A list a
+lane accepts names its cap beside the element validator, the load twin applies the same cap, and a
+flood is pinned through the one consumer that pays for it. **(2)** `cleanText` collapses whitespace,
+`cleanTextField` only trims, and the enemy name uses neither — one `combat_start` name with line breaks
+forged three `## ` headings inside the combat block on both calls per round and survived the reload.
+Two helpers whose names differ by a suffix are one helper, or the stricter one owns every record text
+at a trust boundary. **(3)** `typeCachedRow` re-types the four fields it names and spreads the rest, so
+a 50 KB unknown key on a cached embed row rides into memory and back to disk on every retag; two other
+load boundaries moved from spread to whitelist for exactly this. A load-boundary row is built from a key
+list. **(4)** The embed cache failing to open is caught into `[]` with no line and no report, and a
+300-row campaign re-embeds all 300 on every mount — the class the campaign key was built to end, back
+on a rollback deploy or a blocked store. Every `catch { return [] }` on a cache names its failure once
+to the lane that reports, and the pin counts the second mount. Payoff: a crowd the DM narrates instead
+of sixty engine-rolled attacks, a combat block that stays one block, a cache row that is only its row,
+and a quota bill the Inspector can explain.
