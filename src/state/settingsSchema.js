@@ -22,7 +22,9 @@ export const SETTINGS_KEY_MAX = 512;
 export const SETTINGS_MODEL_MAX = 120;
 export const SETTINGS_RULESET_MAX = 60;
 export const SETTINGS_CUSTOM_PROMPT_MAX = 20_000;
-const FIREBASE_CONFIG_MAX_KEYS = 20;
+const FIREBASE_CONFIG_KEYS = Object.freeze([
+    'apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId', 'measurementId', 'databaseURL',
+]);
 
 const STRING_FIELDS = Object.freeze({
     apiKey: SETTINGS_KEY_MAX,
@@ -66,11 +68,15 @@ export function sanitizeSettings(raw) {
     if ('firebaseConfig' in raw) {
         const config = raw.firebaseConfig;
         if (config && typeof config === 'object' && !Array.isArray(config)) {
+            // Key NAMES whitelisted (2026-11-05 strengthening P2): values and the
+            // key count were bounded, names never — a 100,000-char key survived,
+            // was re-written by saveSettings and parsed on every boot. The
+            // config is handed whole to `initializeApp`, so the list is the
+            // Firebase web config's own keys (Settings types the first three).
             out.firebaseConfig = Object.fromEntries(
-                Object.entries(config)
-                    .filter(([, value]) => typeof value === 'string')
-                    .slice(0, FIREBASE_CONFIG_MAX_KEYS)
-                    .map(([k, value]) => [k, value.trim().slice(0, SETTINGS_KEY_MAX)]),
+                FIREBASE_CONFIG_KEYS
+                    .filter(k => Object.prototype.hasOwnProperty.call(config, k) && typeof config[k] === 'string')
+                    .map(k => [k, config[k].trim().slice(0, SETTINGS_KEY_MAX)]),
             );
         }
     }

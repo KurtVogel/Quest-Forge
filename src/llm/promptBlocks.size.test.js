@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { buildSystemPromptParts, PROMPT_CHAR_BUDGET } from './promptBuilder.js';
 import { createCharacter } from '../engine/characterUtils.js';
 import { awardExperience, getExperienceThreshold } from '../engine/progression.js';
+import { sanitizeRollHistoryEntry } from '../state/handlers/shared.js';
 
 const fill = (label, length) => `${label} `.repeat(Math.ceil(length / (label.length + 1))).slice(0, length);
 const ABILITY_SCORES = { strength: 14, dexterity: 10, constitution: 16, intelligence: 10, wisdom: 18, charisma: 12 };
@@ -61,7 +62,12 @@ function maxedState({ messageCount = 400, live = 0, inCombat = false } = {}) {
         },
         inventory: Array.from({ length: 60 }, (_, i) => ({ id: `item-${i}`, name: fill(`Trade good ${i}`, 80), type: i < 3 ? 'weapon' : 'gear', quantity: 3, priceCp: 1250, damage: '1d8', equipped: i < 2, magicBonus: 1 })),
         quests: Array.from({ length: 30 }, (_, i) => ({ id: `q-${i}`, name: fill(`Errand ${i}`, 160), status: 'active', description: fill('quest description', 800), openedAtMessage: 10 + i })),
-        rollHistory: Array.from({ length: 50 }, (_, i) => ({ id: `r${i}`, notation: '1d20+5', total: 17, rolls: [12], modifier: 5, description: fill(`roll ${i}`, 120), timestamp: i })),
+        // …the newest row LOADED from a hostile save (2026-11-05 dice-engine P2):
+        // 100,000 faces, a 1e300 modifier and total, both natural flags on a 2d6.
+        rollHistory: [
+            ...Array.from({ length: 49 }, (_, i) => ({ id: `r${i}`, notation: '1d20+5', total: 17, rolls: [12], modifier: 5, description: fill(`roll ${i}`, 120), timestamp: i })),
+            sanitizeRollHistoryEntry({ id: 'hostile', notation: '2d6', rolls: Array(100000).fill(1e9), modifier: 1e300, total: 1e300, isCritical: true, isCritFail: true, description: fill('hostile', 5000) }),
+        ],
         journal: Array.from({ length: 40 }, (_, i) => ({
             id: `j-${i}`, timestamp: i, location: i % 3 ? 'Brackwater' : 'Jewelglade', messageRange: [i * 10, i * 10 + 10],
             summary: fill(`Entry ${i} summary`, 2000),
@@ -147,7 +153,7 @@ const DYNAMIC_CEILINGS = {
     inventory: 6000,       // 5,436 — 60 rows at the 80-char name cap, all mechanical: 25 valued rows + a 33-name tail (2026-11-03: no carried row is hidden; 2,551 when the tail was a count)
     ledger: 1500,          // RECENT TRANSACTIONS (2026-11-01): 8 rows clamped at 160 chars + the header
     quests: 7500,          // 6,554 — the block's own row cap + the 8-name overflow tail
-    recentRolls: 1000,     // 744
+    recentRolls: 2200,     // 1,947 since 2026-11-05: the newest row is a LOADED hostile one at the faces cap (200 × "1000") — 400,189 before the load bound (744 with five plain rows)
     recentRulings: 1000,   // 876
     worldFacts: 6500,      // 5,631 — 15 lines
     place: 2400,           // 2,156 — the place card + 6 known ways + the Region line (2026-10-26: five 120-char faces + the rule)

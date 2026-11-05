@@ -195,6 +195,8 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
                     enemies: events.combatStart.enemies || [],
                     surprise: events.combatStart.surprise,
                     queuedExchange: events.combatExchange,
+                    // The foes past MAX_COMBAT_ENEMIES, for START_COMBAT's note (2026-11-05 P1).
+                    droppedEnemies: events.combatStart.droppedEnemies,
                 },
             });
         }
@@ -543,6 +545,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
             payload: {
                 enemies: events.combatStart.enemies || [],
                 surprise: events.combatStart.surprise,
+                droppedEnemies: events.combatStart.droppedEnemies,
             },
         });
     }

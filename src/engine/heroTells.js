@@ -265,7 +265,8 @@ export function recordHeroTells(existing = [], reports = [], { messageCount, mes
             // Voiced-by-the-fiction (slice 3): a character NAMED the pattern
             // aloud this turn. That is not a sighting of the hero doing it —
             // only `sighted: true` beside it adds one. `voicedBy` is the
-            // speaker; a bare `voiced: true` still stamps the time.
+            // speaker; a speaker-less remark with no sighting never gets here
+            // (`prepareHeroTellReports` drops it, 2026-11-05).
             const voiced = toFlag(report?.voiced);
             const voicedBy = normalizeWitnesses(report?.voicedBy);
             return { tell, voiced, voicedBy, sighted: !voiced || toFlag(report?.sighted) };
@@ -389,16 +390,24 @@ export function prepareHeroTellReports(reports = [], { partyNames = [], heroName
         // remark used to mint a SIGHTING with the party as witnesses.
         const voicedOnly = toFlag(report.voiced) && !toFlag(report.sighted);
         if (voicedOnly) {
-            // The speaker named was the hero and nobody else: no remark.
-            if (namedVoices.length > 0 && voicedBy.length === 0) continue;
+            // A remark needs a speaker (2026-11-05 strengthening P2, decided):
+            // the speaker named was the hero and nobody else, OR nobody was
+            // named at all — a bare `voiced: true` with no sighting minted a
+            // tell "said aloud" by nobody (and bumped a held tell's count).
+            // It is dropped here: it mints nothing and a held tell gains nothing.
+            if (voicedBy.length === 0) continue;
             out.push({ ...report, witnesses: [], voicedBy });
             continue;
         }
         const intimate = normalizeHeroTellKind(report.kind) === 'intimate';
+        // Party FIRST (2026-11-05 strengthening P2): the witness list caps at
+        // MAX_HERO_TELL_WITNESSES first-come, and with the party appended
+        // last a sighting filed with eight named bystanders left the present
+        // companion off the record for the tell's life.
         const witnesses = notHero([
+            ...(intimate ? [] : party),
             ...(Array.isArray(report.witnesses) ? report.witnesses : (typeof report.witnesses === 'string' ? [report.witnesses] : [])),
             ...(toFlag(report.voiced) ? voicedBy : []),
-            ...(intimate ? [] : party),
         ]);
         if (witnesses.length === 0) continue;
         out.push({ ...report, witnesses, voicedBy });
@@ -446,16 +455,18 @@ export function setHeroTellDormant(tells = [], id, dormant = true) {
  */
 export function listVoicedTells(tells = []) {
     return (Array.isArray(tells) ? tells : [])
-        .filter(t => t && typeof t === 'object' && text(t.text) && ((t.voicedCount || 0) > 0 || (Array.isArray(t.voicedBy) && t.voicedBy.length > 0)))
+        // A named speaker is required (2026-11-05 strengthening P2): a count
+        // with no `voicedBy` (a pre-fix bare `voiced: true`, or a voiced
+        // sighting that named nobody) is a tell said aloud by nobody.
+        .filter(t => t && typeof t === 'object' && text(t.text) && Array.isArray(t.voicedBy) && t.voicedBy.some(name => text(name)))
         .map(t => ({
             id: t.id,
             text: t.text,
             kind: normalizeHeroTellKind(t.kind),
             intimate: isIntimateTell(t),
             dormant: !!t.dormant,
-            // The fiction's stamp only: a Scribe `voiced` report without a
-            // speaker reads "said aloud", never a guessed witness.
-            saidBy: Array.isArray(t.voicedBy) ? t.voicedBy : [],
+            // The fiction's stamp only, never a guessed witness.
+            saidBy: t.voicedBy,
             lastVoicedMessage: Number.isFinite(t.lastVoicedMessage) ? t.lastVoicedMessage : null,
         }))
         .sort((a, b) => (b.lastVoicedMessage || 0) - (a.lastVoicedMessage || 0));

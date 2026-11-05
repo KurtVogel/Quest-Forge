@@ -26,8 +26,10 @@ import {
     getWeaponAttackBonus,
     getWeaponDamageNotation,
     normalizeConditionList,
+    normalizeConditionName,
     normalizeDeathSaves,
     resolvePlayerRollModifier,
+    addConditionCapped,
 } from './rules.js';
 import { DEATH_SAVE_OUTCOMES, deathSaveLine, judgeDeathSave } from './deathSaves.js';
 import {
@@ -1355,13 +1357,18 @@ export function mergeCharacterUpdates(character, updates) {
     const { addConditions = [], removeConditions = [], ...direct } = updates;
     const next = { ...character, ...direct };
     let conditions = next.conditions || [];
+    // Canonical names on both sides and THE capped writer for adds (2026-11-05
+    // strengthening P2, enemy-stats 11-05): this fourth writer appended raw
+    // ("Frightened " verbatim) and past the cap. Its adds are catalog spells'
+    // table conditions, which evict a flavour one and are never refused.
     if (removeConditions.length > 0) {
-        const removable = new Set(removeConditions.map(c => String(c).toLowerCase()));
-        conditions = conditions.filter(c => !removable.has(String(c).toLowerCase()));
+        const removable = new Set(removeConditions.map(normalizeConditionName).filter(Boolean));
+        conditions = conditions.filter(c => !removable.has(normalizeConditionName(c)));
     }
-    if (addConditions.length > 0) {
-        const existing = new Set(conditions.map(c => String(c).toLowerCase()));
-        conditions = [...conditions, ...addConditions.filter(c => !existing.has(String(c).toLowerCase()))];
+    for (const condition of addConditions) {
+        const result = addConditionCapped(conditions, condition);
+        if (result.refused) console.warn(`[combatExchange] "${result.refused}" not recorded — the hero's condition list is full.`);
+        conditions = result.conditions;
     }
     return { ...next, conditions };
 }

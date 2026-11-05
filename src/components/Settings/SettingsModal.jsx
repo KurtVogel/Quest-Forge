@@ -676,7 +676,7 @@ export default function SettingsModal() {
                                                     </div>
                                                     {save.location && <div className="save-meta">{save.location}</div>}
                                                     <div className="save-date">
-                                                        {new Date(save.savedAt).toLocaleString()}
+                                                        {save.savedAt ? new Date(save.savedAt).toLocaleString() : '—'}
                                                     </div>
                                                 </div>
                                                 <div className="save-actions">
@@ -713,7 +713,7 @@ export default function SettingsModal() {
                                                     </div>
                                                     {save.location && <div className="save-meta">{save.location}</div>}
                                                     <div className="save-date">
-                                                        {new Date(save.savedAt).toLocaleString()}
+                                                        {save.savedAt ? new Date(save.savedAt).toLocaleString() : '—'}
                                                     </div>
                                                 </div>
                                                 <div className="save-actions">

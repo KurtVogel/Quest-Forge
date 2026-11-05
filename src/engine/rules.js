@@ -5,6 +5,7 @@
 import { CLASSES, FIGHTING_STYLE_EFFECTS } from '../data/classes.js';
 import { MAGIC_BONUS_MAX, MAX_ARMOR_BASE_AC, MAX_SHIELD_AC } from '../data/items.js';
 import { DEFAULT_ROLL_DC, MAX_ROLL_DC } from '../config/contentLimits.js';
+import { cleanText } from './text.js';
 import { isShieldItem, isWeaponItem, isWornArmor } from './equipment.js';
 
 /**
@@ -524,23 +525,70 @@ export const CONDITION_LIST_CAP = 10;
  */
 export function normalizeConditionName(value) {
     if (typeof value !== 'string') return null;
-    const name = value.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, CONDITION_NAME_MAX).trim();
+    // Through the cleanText shelf (2026-11-05 strengthening P2, rules-math
+    // nit): a zero-width-only string ("\u200B") was a stored condition and
+    // `slice(0, 40)` could split a surrogate pair. Zero-width marks are not
+    // `\s`, so they are stripped first.
+    const name = cleanText(value.replace(/[\u200B-\u200D\u2060\u180E]/g, '').toLowerCase(), CONDITION_NAME_MAX).trim();
     return (CONDITION_ALIASES[name] || name) || null;
 }
 
-/** A hero condition list in canonical form: strings only, deduped, capped. */
+/** A TABLE condition: one the rules engine resolves (a CONDITION_EFFECTS key); everything else is fiction-only flavour. */
+export function isTableCondition(name) {
+    return Object.prototype.hasOwnProperty.call(CONDITION_EFFECTS, normalizeConditionName(name) || '');
+}
+
+/**
+ * A hero condition list in canonical form: strings only, deduped, capped. Over
+ * the cap (2026-11-05 strengthening P2, rules-math 11-04), TABLE conditions
+ * are kept first, then the NEWEST flavour ones, in their stored order — the
+ * old first-ten trim dropped a defeated hero's `unconscious` on reload.
+ */
 export function normalizeConditionList(list) {
     if (!Array.isArray(list)) return [];
     const seen = new Set();
-    const out = [];
+    const names = [];
     for (const raw of list) {
         const name = normalizeConditionName(raw);
         if (!name || seen.has(name)) continue;
         seen.add(name);
-        out.push(name);
-        if (out.length >= CONDITION_LIST_CAP) break;
+        names.push(name);
     }
-    return out;
+    if (names.length <= CONDITION_LIST_CAP) return names;
+    let flavourRoom = Math.max(0, CONDITION_LIST_CAP - names.filter(isTableCondition).length);
+    const keepFlavour = new Set();
+    for (let i = names.length - 1; i >= 0 && flavourRoom > 0; i--) {
+        if (isTableCondition(names[i])) continue;
+        keepFlavour.add(i);
+        flavourRoom -= 1;
+    }
+    return names.filter((name, i) => isTableCondition(name) || keepFlavour.has(i)).slice(0, CONDITION_LIST_CAP);
+}
+
+/**
+ * THE capped hero-condition writer (2026-11-05 strengthening P2, rules-math
+ * 11-04 + enemy-stats 11-05): ADD_CONDITION, `withCondition` and the
+ * exchange's `mergeCharacterUpdates` all add through it — they disagreed (a
+ * silent refusal that dropped `paralyzed`, an append past the cap, a raw
+ * append). At the cap a TABLE condition evicts the OLDEST flavour one; a
+ * flavour condition, or a table one when every slot is a table condition, is
+ * refused. Returns `{ conditions, added, evicted, refused }` (names or null);
+ * a junk name or one already carried returns the list unchanged.
+ */
+export function addConditionCapped(list, value) {
+    const conditions = Array.isArray(list) ? list : [];
+    const name = normalizeConditionName(value);
+    const unchanged = { conditions, added: null, evicted: null, refused: null };
+    if (!name || conditions.some(c => normalizeConditionName(c) === name)) return unchanged;
+    if (conditions.length < CONDITION_LIST_CAP) return { ...unchanged, conditions: [...conditions, name], added: name };
+    const oldestFlavour = conditions.findIndex(c => !isTableCondition(c));
+    if (!isTableCondition(name) || oldestFlavour < 0) return { ...unchanged, refused: name };
+    return {
+        conditions: [...conditions.filter((_, i) => i !== oldestFlavour), name],
+        added: name,
+        evicted: normalizeConditionName(conditions[oldestFlavour]) || 'an unreadable entry',
+        refused: null,
+    };
 }
 
 /** First incapacitating condition on the list, or null when the creature can act. */

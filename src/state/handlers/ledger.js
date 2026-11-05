@@ -87,6 +87,7 @@ function memoResolver(state) {
 
 /** Log one judged movement with the context's source, lane, time and counterparty. */
 export function logMovement(state, ctx, fields) {
+    // The transcript measures the log's long-window bound (2026-11-05 strengthening P2).
     return recordEntry(state.ledger, {
         sourceId: ctx.sourceId,
         lane: ctx.lane,
@@ -94,7 +95,7 @@ export function logMovement(state, ctx, fields) {
         party: ctx.party,
         partyId: ctx.partyId,
         ...fields,
-    });
+    }, { messages: state.messages });
 }
 
 const isExact = (twin, ctx) => !!ctx.sourceId && twin?.sourceId === ctx.sourceId;

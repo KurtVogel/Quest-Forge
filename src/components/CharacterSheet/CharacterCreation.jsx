@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { createCharacter, createStartingInventory, STANDARD_ARRAY, ABILITY_NAMES, ABILITY_SHORT, SKILL_LABELS } from '../../engine/characterUtils.js';
-import { sanitizeCharacter, sanitizeInventory, parseCharacterExport } from '../../engine/characterVault.js';
+import { MAX_CHARACTER_FILE_BYTES, sanitizeCharacter, sanitizeInventory, parseCharacterExport } from '../../engine/characterVault.js';
 import { downloadCharacterExport } from './exportFile.js';
 import { countRosterCharacters, listRosterCharacters, loadRosterCharacter, saveRosterCharacter, deleteRosterCharacter } from '../../state/rosterStore.js';
 import { RACES, RACE_LIST } from '../../data/races.js';
@@ -327,6 +327,9 @@ export default function CharacterCreation() {
         if (!file) return;
         setRosterError(null);
         try {
+            // Size gate BEFORE the read (2026-11-05 strengthening P2): `file.text()`
+            // read any file whole before the format check could refuse it.
+            if (file.size > MAX_CHARACTER_FILE_BYTES) throw new Error('This file is too large to be a Quest Forge character file.');
             const { character, inventory } = parseCharacterExport(await file.text());
             await saveRosterCharacter(character, inventory);
             await refreshRoster();
@@ -406,7 +409,7 @@ export default function CharacterCreation() {
                                     <span className="roster-entry-name">{entry.name}</span>
                                     <span className="roster-entry-meta">
                                         Lv.{entry.level} {RACES[entry.race]?.name || entry.race} {CLASSES[entry.class]?.name || entry.class}
-                                        {' · saved '}{new Date(entry.savedAt).toLocaleDateString()}
+                                        {entry.savedAt ? ` · saved ${new Date(entry.savedAt).toLocaleDateString()}` : ''}
                                     </span>
                                 </button>
                                 <div className="roster-entry-actions">

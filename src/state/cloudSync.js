@@ -428,9 +428,10 @@ export async function saveGameToCloud(uid, slotId, gameState, options = {}) {
  * Rehydrate every lane's refs from its blob collection — one `getDoc` per
  * ref, all lanes in parallel — before the state leaves this module, so
  * LOAD_GAME never sees a ref. A blob that is missing or unreadable is a
- * missing picture (`restorePortraits` strips the stamps) or a dropped chapter
- * (`restoreChapters` — its span re-opens for the next close), never a failed
- * load.
+ * missing picture (`restorePortraits` strips the stamps) or a lost chapter
+ * (`restoreChapters` — a stub that keeps its span in order, or, for the
+ * trailing run, dropped so its span re-opens for the next close), never a
+ * failed load.
  */
 async function rehydrateBlobs(uid, state) {
     const wanted = collectLaneRefs(state);

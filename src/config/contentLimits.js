@@ -121,9 +121,41 @@ export const HERO_TEXT_LIMITS = Object.freeze({
     portraitProvider: 40,
 });
 
-export function cleanTextField(value, max = Infinity) {
+/**
+ * THE most foes one fight tracks (2026-11-05 enemy-stats-conditions P1): the
+ * `combat_start` wire, START_COMBAT and the LOAD_GAME twin (its enemies AND
+ * its turn order) all read this one number. The count was the wire's one
+ * unbounded dimension, and every foe with no intent attacks by default — 60
+ * rats downed a level-3 fighter in one exchange the DM never asked for. A
+ * crowd beyond it is narrated, not tracked.
+ */
+export const MAX_COMBAT_ENEMIES = 16;
+
+/**
+ * `text.slice(0, max)` that never cuts a surrogate pair in half (2026-11-05
+ * strengthening P2, the character-vault 11-02 nit): a 29-char name + an emoji
+ * sliced at 30 kept a lone high surrogate (`isWellFormed()` false). The pair
+ * is dropped whole instead.
+ */
+export function sliceWhole(text, max) {
+    if (!(max < text.length)) return text;
+    const end = Math.max(0, Math.floor(max));
+    const last = text.charCodeAt(end - 1);
+    return text.slice(0, last >= 0xD800 && last <= 0xDBFF ? end - 1 : end);
+}
+
+/**
+ * The persisted-text field (see the type-strict note above). Line breaks are
+ * KEPT by default — the premise, a background, notes, a journal summary and
+ * the custom DM prompt are multi-line by nature. `singleLine` folds every
+ * whitespace run to one space like `cleanText` (2026-11-05 enemy-stats P2: a
+ * name with a newline inside it forged `## ` headings in the combat block on
+ * both calls per round, through the turn order and every autosave).
+ */
+export function cleanTextField(value, max = Infinity, { singleLine = false } = {}) {
     if (typeof value !== 'string') return '';
-    return value.trim().slice(0, max);
+    const text = singleLine ? value.replace(/\s+/g, ' ') : value;
+    return sliceWhole(text.trim(), max);
 }
 
 export function normalizeCampaignPremise(value) {

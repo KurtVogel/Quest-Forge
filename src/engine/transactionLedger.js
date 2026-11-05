@@ -34,7 +34,17 @@ import { namesMatch, resolveNpcRef } from './npcRoster.js';
 import { formatCurrency } from './currency.js';
 import { normalizeItemKey } from '../data/items.js';
 
+/**
+ * The log is bounded by the LONG window first, then the count (2026-11-05
+ * strengthening P2): `LEDGER_LIMIT` alone kept 60 claims, applied and ignored
+ * alike, so a trade stretch (70 purchases over ten turns) evicted entries the
+ * 40-row window still reached. `recordEntry` keeps every entry inside
+ * `LONG_WINDOW` of the newest one, at least the newest `LEDGER_LIMIT`, and
+ * never more than `LEDGER_HARD_LIMIT` (the hostile-input bound — no real
+ * stretch makes 200 movements inside one window).
+ */
 export const LEDGER_LIMIT = 60;
+export const LEDGER_HARD_LIMIT = 200;
 /** The window for a movement with an unknown counterparty — the old one. */
 export const SHORT_WINDOW = 12;
 /** The window for a movement with the SAME counterparty, inside one day. */
@@ -96,7 +106,7 @@ export function normalizeLedger(entries) {
     return (Array.isArray(entries) ? entries : [])
         .map(normalizeLedgerEntry)
         .filter(Boolean)
-        .slice(-LEDGER_LIMIT);
+        .slice(-LEDGER_HARD_LIMIT);
 }
 
 /** One item's identity: the catalog key when one resolves, else the compact name. */
@@ -121,8 +131,13 @@ function claimSignature(entry) {
     return `${entry.kind}|${entry.cp}|${items(entry.itemsIn)}|${items(entry.itemsOut)}`;
 }
 
-/** Append one judged movement (applied or ignored). The newest claim of a source wins. */
-export function recordEntry(ledger, raw) {
+/**
+ * Append one judged movement (applied or ignored). The newest claim of a
+ * source wins. `messages` (the live transcript) measures the long window in
+ * conversational distance; without it the raw index gap is used, which is
+ * never shorter, so the bound only errs toward eviction at the count.
+ */
+export function recordEntry(ledger, raw, { messages } = {}) {
     const current = normalizeLedger(ledger);
     const seq = (current.length > 0 ? Math.max(...current.map(entry => entry.seq)) : 0) + 1;
     const entry = normalizeLedgerEntry({ timestamp: Date.now(), ...raw, seq });
@@ -131,7 +146,10 @@ export function recordEntry(ledger, raw) {
     const kept = entry.sourceId
         ? current.filter(prior => !(prior.sourceId === entry.sourceId && claimSignature(prior) === signature))
         : current;
-    return [...kept, entry].slice(-LEDGER_LIMIT);
+    const log = [...kept, entry];
+    const firstInWindow = log.findIndex(prior => conversationalDistance(messages, prior.atMessage, entry.atMessage) <= LONG_WINDOW);
+    const inWindow = firstInWindow < 0 ? 1 : log.length - firstInWindow;
+    return log.slice(-Math.min(LEDGER_HARD_LIMIT, Math.max(LEDGER_LIMIT, inWindow)));
 }
 
 /**

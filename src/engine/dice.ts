@@ -1,3 +1,5 @@
+import { normalizeDiceNotation } from './diceNotation.js';
+
 /**
  * Cryptographically random dice engine.
  * Uses crypto.getRandomValues() so the LLM can never influence results.
@@ -110,7 +112,11 @@ export function rollWithModifier(
 ): DiceRollResult {
   // The modifier axis gets the same loud failure as count/sides: NaN was a
   // sticky-NaN total and a string modifier concatenated ("5" → "125").
-  if (typeof modifier !== 'number' || !Number.isFinite(modifier)) {
+  // …and the magnitude band parseNotation already holds (2026-11-05
+  // strengthening P2, rules-math nit): a 1e300 modifier passed here while the
+  // same number as notation was refused. No engine caller comes near it (the
+  // largest is a Short Rest's CON × hit dice, ≤ 200).
+  if (typeof modifier !== 'number' || !Number.isFinite(modifier) || Math.abs(modifier) > MAX_ROLL_MODIFIER) {
     throw new Error(`Invalid roll modifier: ${String(modifier)}`);
   }
   const rolls = rollDice(count, sides);
@@ -140,23 +146,28 @@ export function rollWithModifier(
 // nothing in the app used. Real skill/save math lives in rules.js; attack and
 // damage mechanics in combatMath.js.
 
+// THE tolerant notation reader lives in diceNotation.js (2026-11-05
+// strengthening P2) so the notation boundaries never import the RNG module —
+// nineteen test files mock this one with a fixed export list. Re-exported here.
+export { normalizeDiceNotation };
+
 /**
- * Parse dice notation string like "2d6+3", "1d20", "3d8-1".
+ * Parse dice notation string like "2d6+3", "1d20", "3d8-1" — read through
+ * `normalizeDiceNotation` (so "d8" and "2d6 + 3 fire" parse), then banded.
  */
 export function parseNotation(notation: string): { count: number; sides: number; modifier: number } {
-  const match = String(notation).replace(/\s+/g, '').toLowerCase().match(/^(\d+)d(\d+)([+-]\d+)?$/);
-  if (!match) {
+  const parts = normalizeDiceNotation(String(notation));
+  if (!parts) {
     throw new Error(`Invalid dice notation: "${notation}"`);
   }
-  const count = parseInt(match[1], 10);
-  const sides = parseInt(match[2], 10);
+  const { count, sides } = parts;
   // The regex accepts "0d6", "1d0", and "9999999d6"; the first two would silently
   // produce empty or NaN rolls downstream, the last would freeze the tab rolling
   // millions of dice. Reject all of them like any other malformed notation.
   if (count < 1 || sides < 1 || count > MAX_DICE_COUNT || sides > MAX_DIE_SIDES) {
     throw new Error(`Invalid dice notation: "${notation}"`);
   }
-  const modifier = match[3] ? parseInt(match[3], 10) : 0;
+  const { modifier } = parts;
   if (!Number.isFinite(modifier) || Math.abs(modifier) > MAX_ROLL_MODIFIER) {
     throw new Error(`Invalid dice notation: "${notation}"`);
   }

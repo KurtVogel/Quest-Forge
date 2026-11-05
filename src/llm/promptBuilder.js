@@ -17,7 +17,7 @@ import { describeCatalogForPrompt } from '../data/items.js';
 import { isShieldItem, isWeaponItem, isWornArmor } from '../engine/equipment.js';
 import { formatCurrency } from '../engine/currency.js';
 import { CLASSES } from '../data/classes.js';
-import { cleanTextField, normalizeCampaignPremise } from '../config/contentLimits.js';
+import { cleanTextField, MAX_COMBAT_ENEMIES, normalizeCampaignPremise } from '../config/contentLimits.js';
 import { cleanText, textOr } from '../engine/text.js';
 import { NPC_NAME_DIVERSITY_RULES } from './nameGuidance.js';
 import { EPILOGUE_RESPONSE_MODE, TABLE_TALK_RESPONSE_MODE, TABLE_TALK_STANDING_RULE } from './tableTalk.js';
@@ -134,12 +134,18 @@ function cleanMemoryLabel(value, fallback = '') {
     return text || fallback;
 }
 
-/** Clip at the last sentence end inside `max` (past its midpoint), else hard. */
+/**
+ * Clip at the last sentence end inside `max` (past its midpoint), else hard.
+ * Whitespace-collapsed first (2026-11-05 strengthening P2): a memory text's
+ * line breaks were prompt lines — a stored "\n\n## HERO SHEET" printed as a
+ * heading of the builder's own. Collapsed HERE, at the block, never in the
+ * composer: the text is the row's key, and a re-key would double every row.
+ */
 function clipMemoryText(text, max) {
-    const clean = typeof text === 'string' ? text : '';
+    const clean = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '';
     if (clean.length <= max) return clean;
     const head = clean.slice(0, max);
-    const cut = Math.max(head.lastIndexOf('. '), head.lastIndexOf('! '), head.lastIndexOf('? '), head.lastIndexOf('.\n'));
+    const cut = Math.max(head.lastIndexOf('. '), head.lastIndexOf('! '), head.lastIndexOf('? '));
     if (cut >= max / 2) return `${head.slice(0, cut + 1)} …`;
     return `${head.trimEnd()}…`;
 }
@@ -971,6 +977,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 - **FATAL ERROR AVOIDANCE**: NEVER ask the player to roll in narrative text. Outside combat, use \`requested_rolls\` for uncertain checks and saves.
 - During ACTIVE COMBAT, use \`combat_exchange\` instead. Never emit \`attack_roll\`, \`companion_attack\`, or \`npc_attack\`; the engine generates all standard combat dice from live state.
 - Outside combat, player checks use "skill_check" or "saving_throw" with a DC. Saving throws name the ability; the engine applies proficiency.
+- Outside combat, another actor's dice: \`npc_attack\` {attacker, target, modifier, damage}, \`npc_save\` {attacker, modifier, dc}, \`companion_attack\` {attacker: the companion's name, dc}. An npc_attack \`target\` omitted, "player", or the hero's name = the hero (real AC, engine-applied damage); a companion's name = that companion; anyone else = an untracked person: a to-hit vs your \`dc\`, no HP tracked.
 - A response containing outside-combat \`requested_rolls\` carries no outcome mutations. The post-roll response narrates the result once.`;
 
 // Class-gated static block (2026-09-25): rendered between RESPONSE_FORMAT_HEAD
@@ -988,7 +995,7 @@ const SPELLCASTING_INSTRUCTIONS = `## SPELLCASTING INSTRUCTIONS (Wizard / Cleric
 - Out-of-combat healing has no roll gate: casting Cure Wounds on a wounded ally simply works. Genuine uncertainty about ANOTHER objective still uses requested_rolls as usual.`;
 
 const RESPONSE_FORMAT_TAIL = `COMBAT NOTES — INTENT ONLY, ENGINE OWNS MECHANICS:
-- Use "combat_start" when combat begins and list every foe 1:1 with a unique stable "id", plus "name", "hp", "ac", "attack_bonus", and "damage" — and "max_hp" above "hp" when the foe is ALREADY wounded (the returning ogre the hero bloodied yesterday), so it fields bloodied instead of fresh. Mark skeletons, zombies, ghouls, and other undead with "is_undead": true, and optionally give tough foes a flat "save_bonus" (-5..15, default +2) used for spell saving throws. Never silently add or drop combatants. If the same response also contains "combat_exchange", every player/companion/enemy reference must use one of those exact combat_start ids.
+- Use "combat_start" when combat begins and list every foe 1:1 with a unique stable "id", plus "name", "hp", "ac", "attack_bonus", and "damage" — and "max_hp" above "hp" when the foe is ALREADY wounded (the returning ogre the hero bloodied yesterday), so it fields bloodied instead of fresh. Mark skeletons, zombies, ghouls, and other undead with "is_undead": true, and optionally give tough foes a flat "save_bonus" (-5..15, default +2) used for spell saving throws. Never silently add or drop combatants. Declare at most ${MAX_COMBAT_ENEMIES} tracked foes; a bigger crowd is narrated (scenery, a rout, a later wave), never listed. If the same response also contains "combat_exchange", every player/companion/enemy reference must use one of those exact combat_start ids.
 - Set combat_start "surprise" to "player" only when the player is genuinely caught unaware, "enemies" only when the foes are caught unaware, otherwise "none". The engine converts this into Opening Initiative; never grant surprise attacks in narration yourself.
 - **The ACTIVE COMBAT block is the live truth.** LIVE COMBAT STATE OVERRIDES any contradictory earlier narration, journal entry, retrieved memory, or world fact about these combatants: a foe shown there with HP above 0 and active status is alive; never treat it as dead merely because earlier prose said so. The engine owns every combat die and state transition. A foe marked FLANKED is under a standing, engine-applied advantage — emit \`flank_broken\` only when the fiction ends it.
 - **Read the block's Phase.** \`awaiting_player\`: translate the committed player action into one combat_exchange intent envelope (the block's Action Surge line says whether one or two player_slots are required). \`opening\` or \`awaiting_narration\`: declare no actions — the engine is resolving, or you are narrating a result it already committed.

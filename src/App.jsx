@@ -210,7 +210,7 @@ function StartScreen() {
                     {save.characterName} · Lv.{save.characterLevel} {save.characterClass} · {save.messageCount} msgs
                   </span>
                 </div>
-                <span className="start-save-date">{new Date(save.savedAt).toLocaleDateString()}</span>
+                <span className="start-save-date">{save.savedAt ? new Date(save.savedAt).toLocaleDateString() : '—'}</span>
               </button>
             ))}
 
@@ -223,7 +223,7 @@ function StartScreen() {
                     {save.characterName} · Lv.{save.characterLevel} {save.characterClass} · {save.messageCount} msgs
                   </span>
                 </div>
-                <span className="start-save-date">{new Date(save.savedAt).toLocaleDateString()}</span>
+                <span className="start-save-date">{save.savedAt ? new Date(save.savedAt).toLocaleDateString() : '—'}</span>
               </button>
             ))}
           </div>

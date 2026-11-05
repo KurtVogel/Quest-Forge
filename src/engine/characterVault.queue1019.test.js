@@ -96,7 +96,7 @@ describe('a stripped portrait carries no stamps (2026-10-19 nit — the vault tw
         expect(stripped).toMatchObject({ portraitUrl: '', portraitProvider: '', portraitUpdatedAt: null });
         const absent = sanitizeCharacter({ ...character, portraitUrl: '', portraitProvider: 'gemini', portraitUpdatedAt: 123 });
         expect(absent).toMatchObject({ portraitUrl: '', portraitProvider: '', portraitUpdatedAt: null });
-        const kept = sanitizeCharacter({ ...character, portraitUrl: PORTRAIT, portraitProvider: 'gemini', portraitUpdatedAt: 123 });
-        expect(kept).toMatchObject({ portraitUrl: PORTRAIT, portraitProvider: 'gemini', portraitUpdatedAt: 123 });
+        const kept = sanitizeCharacter({ ...character, portraitUrl: PORTRAIT, portraitProvider: 'gemini', portraitUpdatedAt: 1767312000000 });
+        expect(kept).toMatchObject({ portraitUrl: PORTRAIT, portraitProvider: 'gemini', portraitUpdatedAt: 1767312000000 });
     });
 });

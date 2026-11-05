@@ -17,10 +17,10 @@
  * Application (events → dispatches) lives in src/state/applyEvents.js.
  */
 
-import { canonicalEnemyId, validateEnemyAttackBonus, clampEnemyAC, clampEnemyHP, isDeclaredDowned, typeEnemyFields } from '../engine/enemyStats.js';
+import { boundDeclaredMaxHp, canonicalEnemyId, validateEnemyAttackBonus, clampEnemyAC, clampEnemyHP, isDeclaredDowned, typeEnemyFields } from '../engine/enemyStats.js';
 import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../engine/combatWire.js';
 import { dedupeCastTargets } from '../engine/spellcasting.js';
-import { DEFAULT_ROLL_DC, LOCATION_NAME_MAX, MAX_COIN_EVENT, MAX_ROLL_DC } from '../config/contentLimits.js';
+import { DEFAULT_ROLL_DC, LOCATION_NAME_MAX, MAX_COIN_EVENT, MAX_COMBAT_ENEMIES, MAX_ROLL_DC } from '../config/contentLimits.js';
 import { toFiniteNumber } from '../data/items.js';
 import { toFlag } from '../engine/text.js';
 import { normalizeConditionName, findSkillInText, CONDITION_LIST_CAP } from '../engine/rules.js';
@@ -83,7 +83,7 @@ export function validateCombatStart(combatStart) {
     if (!Array.isArray(combatStart.enemies) || combatStart.enemies.length === 0) return null;
 
     const usedIds = new Set();
-    const sanitizedEnemies = combatStart.enemies
+    const fielded = combatStart.enemies
         .filter(e => isPlainObject(e) && typeof e.name === 'string' && e.name.trim())
         // A foe the DM declares at 0 HP is not a combatant: clampEnemyHP's
         // fallback used to field it as a FRESH 20-HP enemy (2026-09-15 audit P2).
@@ -91,7 +91,16 @@ export function validateCombatStart(combatStart) {
             if (!isDeclaredDowned(e.hp)) return true;
             console.warn(`[eventChannels] Dropped combat_start enemy "${e.name.trim()}" declared at 0 HP.`);
             return false;
-        })
+        });
+    // The COUNT is bounded (2026-11-05 enemy-stats-conditions P1): every foe
+    // with no intent attacks by default, so 60 declared rats were 60 swings in
+    // the first exchange. The first MAX_COMBAT_ENEMIES are tracked; the rest
+    // ride to START_COMBAT by name for the visible note the DM reads.
+    const droppedCount = Math.max(0, fielded.length - MAX_COMBAT_ENEMIES);
+    if (droppedCount > 0) {
+        console.warn(`[eventChannels] combat_start declared ${fielded.length} foes; tracking the first ${MAX_COMBAT_ENEMIES}.`);
+    }
+    const sanitizedEnemies = fielded.slice(0, MAX_COMBAT_ENEMIES)
         .map((e, index) => ({
             // Enemy turns are engine-owned, so capture the foe's stats once here,
             // validated at this boundary through the ONE typed composer
@@ -106,7 +115,9 @@ export function validateCombatStart(combatStart) {
             // nit): `max_hp` above `hp` fields it bloodied, so the telegraph
             // and the "bloodied foes break" bullet read the returning ogre
             // right. Absent or below hp, the maximum is the hp (unchanged).
-            ...(maxHpOf(e) !== null && { maxHp: Math.max(clampEnemyHP(e.hp), maxHpOf(e)) }),
+            // …within DECLARED_WOUND_MAX_RATIO of it (2026-11-05 nit): a
+            // `max_hp: "1e9"` typo fields the foe fresh, not 7/999 critical.
+            ...(maxHpOf(e) !== null && { maxHp: boundDeclaredMaxHp(clampEnemyHP(e.hp), maxHpOf(e)) }),
         }));
 
     if (sanitizedEnemies.length === 0) return null;
@@ -121,6 +132,12 @@ export function validateCombatStart(combatStart) {
         surprise: ['player', 'enemies'].includes(String(combatStart.surprise || '').toLowerCase())
             ? String(combatStart.surprise).toLowerCase()
             : 'none',
+        ...(droppedCount > 0 && {
+            droppedEnemies: {
+                count: droppedCount,
+                names: fielded.slice(MAX_COMBAT_ENEMIES, MAX_COMBAT_ENEMIES * 2).map(e => typeEnemyFields(e).name),
+            },
+        }),
     };
 }
 

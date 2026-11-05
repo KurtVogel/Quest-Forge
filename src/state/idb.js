@@ -6,7 +6,8 @@
  * fields, and the blob-lane helpers both stores run inside their transactions
  * (ensure the blobs a record names, read them back, sweep the orphans).
  */
-import { BLOB_LANES } from './portraitStore.js';
+import { BLOB_LANES, typedLaneRefs } from './portraitStore.js';
+import { saneEpochMs } from './handlers/shared.js';
 
 export const DB_NAME = 'rpg-client-saves';
 // v3 (2026-08-04): save payloads split out of the metadata records so listing
@@ -207,10 +208,38 @@ export const metaNumber = (value, fallback) => {
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
 };
+/**
+ * A list row's `savedAt` as epoch ms (2026-11-05 strengthening P2): a finite
+ * number or a parseable ISO string (the cloud's stamp shape) inside the sane
+ * epoch band (`saneEpochMs`), anything else 0 — the renderers show no date
+ * for 0. Any string used to ride the save row raw ("Invalid Date"), and a
+ * roster row's `1e300` passed `metaNumber`.
+ */
+export const metaEpochMs = (value) => {
+    const ms = typeof value === 'number' ? value : typeof value === 'string' ? Date.parse(value) : NaN;
+    if (!Number.isFinite(ms)) return 0;
+    return saneEpochMs(ms) === ms ? ms : 0;
+};
 
-/** The string refs a metadata record lists under one lane's refs field (`portraitRefs` / `chapterRefs`). */
-export const metadataRefs = (record, refsField) =>
-    (Array.isArray(record?.[refsField]) ? record[refsField].filter(ref => typeof ref === 'string') : []);
+/**
+ * The refs a metadata record lists under one lane's refs field (`portraitRefs`
+ * / `chapterRefs`), TYPED through the lane's own `typedLaneRefs` (2026-11-05
+ * strengthening P2 — the cloud claim list's rule: well-formed keys, deduped,
+ * bounded; this read was untyped and uncapped).
+ */
+export const metadataRefs = (record, refsField) => {
+    const lane = BLOB_LANES.find(candidate => candidate.refsField === refsField);
+    return lane ? typedLaneRefs(record?.[refsField], lane) : [];
+};
+
+/**
+ * A stored record's primary key as a list row may carry it (2026-11-05
+ * strengthening P2): the EXACT key — a string as stored (never trimmed or
+ * clamped, or the row's load / delete misses), or a finite number — else
+ * null. A row listed by any other id is unreachable and undeletable.
+ */
+export const addressableKey = (key) =>
+    ((typeof key === 'string' && key) || (typeof key === 'number' && Number.isFinite(key)) ? key : null);
 
 // === Blob lanes inside a transaction ===
 
@@ -289,6 +318,9 @@ export function sweepOrphanBlobs(tx) {
     if (lanes.length === 0) return;
     const sweepStores = () => {
         for (const lane of lanes) {
+            // A live set the sweep could not finish reading deletes nothing
+            // this time (the orphans wait for the next sweep).
+            if (lane.unread) continue;
             const store = tx.objectStore(lane.id);
             const keysRequest = store.getAllKeys();
             keysRequest.onerror = quiet;
@@ -299,14 +331,7 @@ export function sweepOrphanBlobs(tx) {
             };
         }
     };
-    const allRequest = tx.objectStore(STORE_NAME).getAll();
-    allRequest.onerror = quiet;
-    allRequest.onsuccess = () => {
-        for (const record of allRequest.result || []) {
-            for (const lane of lanes) {
-                liveRefsOf(lane, record, record?.state).forEach(ref => lane.live.add(ref));
-            }
-        }
+    const readRoster = () => {
         const portraitLane = lanes.find(lane => lane.id === PORTRAIT_STORE);
         if (!portraitLane) { sweepStores(); return; }
         const rosterRequest = tx.objectStore(ROSTER_STORE).getAll();
@@ -318,4 +343,59 @@ export function sweepOrphanBlobs(tx) {
             sweepStores();
         };
     };
+    const saves = tx.objectStore(STORE_NAME);
+    // Keys beside the records (same key order, requests settle in order):
+    // the payload belt below reads a record's payload by its KEY.
+    const keysRequest = saves.getAllKeys();
+    keysRequest.onerror = quiet;
+    const allRequest = saves.getAll();
+    allRequest.onerror = quiet;
+    allRequest.onsuccess = () => {
+        const keys = keysRequest.result || [];
+        const belt = [];
+        (allRequest.result || []).forEach((record, index) => {
+            for (const lane of lanes) {
+                liveRefsOf(lane, record, record?.state).forEach(ref => lane.live.add(ref));
+            }
+            // The live set used to be a SHAPE assumption (2026-11-05
+            // strengthening P2): a record whose ref list is missing or not a
+            // list contributed nothing, so the next release by ANY slot swept
+            // that slot's pictures and chapters for good. Its payload is read
+            // as the belt — every record this build writes carries both lists,
+            // so a steady-state sweep reads no payload.
+            if (!record?.state && lanes.some(lane => !Array.isArray(record?.[lane.refsField]))) belt.push(keys[index]);
+        });
+        readPayloadBelt(tx, lanes, belt, readRoster);
+    };
+}
+
+/**
+ * Add the refs each belt slot's PAYLOAD names to every lane's live set, then
+ * `done()`. A transaction without the payload store in scope (a roster save)
+ * or a payload read that fails cannot prove those refs dead, so the lanes are
+ * marked `unread` and that sweep deletes nothing.
+ */
+function readPayloadBelt(tx, lanes, keys, done) {
+    if (keys.length === 0) { done(); return; }
+    const markUnread = () => lanes.forEach(lane => { lane.unread = true; });
+    if (!tx.objectStoreNames.contains(PAYLOAD_STORE)) { markUnread(); done(); return; }
+    const store = tx.objectStore(PAYLOAD_STORE);
+    let pending = keys.length;
+    const settle = () => { if (--pending === 0) done(); };
+    for (const key of keys) {
+        let request = null;
+        try {
+            request = store.get(key);
+        } catch {
+            markUnread();
+            settle();
+            continue;
+        }
+        request.onsuccess = () => {
+            const state = request.result?.state;
+            for (const lane of lanes) lane.collect(state).forEach(ref => lane.live.add(ref));
+            settle();
+        };
+        request.onerror = (event) => { quiet(event); markUnread(); settle(); };
+    }
 }

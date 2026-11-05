@@ -21,6 +21,20 @@ export function mintHeroId() {
 }
 
 /**
+ * The hero id is the roster's IndexedDB KEY (2026-11-05 strengthening P2): a
+ * BOUNDED key in a plain charset, read by the load heal, the vault template
+ * and the roster write. A 5,000-char id used to load, template and be stored,
+ * then list through the 200-char text clamp — `loadRosterCharacter(listId)`
+ * null, `deleteRosterCharacter(listId)` a no-op: a permanent undeletable row.
+ * Every id `mintHeroId` makes (and a UUID) passes.
+ */
+export const HERO_ID_MAX = 80;
+const HERO_ID_RE = /^[A-Za-z0-9_.:-]+$/;
+export function isSaneHeroId(id) {
+    return typeof id === 'string' && id.length <= HERO_ID_MAX && HERO_ID_RE.test(id);
+}
+
+/**
  * Player-facing species/class names for PROMPT boundaries (2026-09-01
  * scene-art P2): `character.race` stores the data KEY ('halfOrc'), which the
  * sheet renders through RACES[...].name ("Half-Orc") but every image prompt

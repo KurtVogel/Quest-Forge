@@ -2,7 +2,7 @@
  * Character domain: creation/update, ability score improvements, damage &
  * healing, the death-save state machine, XP/levels, and conditions.
  */
-import { computeACFromInventory, getModifier, normalizeConditionName, CONDITION_LIST_CAP } from '../../engine/rules.js';
+import { addConditionCapped, computeACFromInventory, getModifier, normalizeConditionName, CONDITION_LIST_CAP } from '../../engine/rules.js';
 import { judgeDeathSave } from '../../engine/deathSaves.js';
 import { ABILITY_NAMES, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from '../../engine/characterUtils.js';
 import { foldExperience, getDmBonusXpCap, getStoryMilestoneXp, isHeroDown, isMaxLevel } from '../../engine/progression.js';
@@ -437,15 +437,25 @@ export const handlers = {
     // case-insensitively against whatever a legacy save still carries, so
     // "Poisoned" gained then "poisoned" removed cannot strand the condition
     // (2026-09-05 audit P1). Junk payloads are no-ops.
+    // The cap goes through THE capped writer (2026-11-05 strengthening P2):
+    // the 11th condition used to be refused SILENTLY even when it was the
+    // table's `paralyzed`. Now a table condition evicts the oldest flavour
+    // one, and every eviction or refusal is a visible line the DM reads.
     ADD_CONDITION(state, action) {
-        const condition = normalizeConditionName(action.payload);
-        if (!condition) return state;
-        const existing = state.character.conditions || [];
-        if (existing.some(c => normalizeConditionName(c) === condition)) return state;
-        if (existing.length >= CONDITION_LIST_CAP) return state;
+        const result = addConditionCapped(state.character.conditions || [], action.payload);
+        if (result.refused) {
+            return {
+                ...state,
+                messages: [...state.messages, systemMessage(`**${result.refused}** is not recorded — ${state.character.name || 'the hero'} already carries ${CONDITION_LIST_CAP} conditions. Narrate it, or clear one with conditions_removed first.`, { dmVisible: true })],
+            };
+        }
+        if (!result.added) return state;
         return {
             ...state,
-            character: { ...state.character, conditions: [...existing, condition] },
+            character: { ...state.character, conditions: result.conditions },
+            ...(result.evicted && {
+                messages: [...state.messages, systemMessage(`*${result.evicted}* gives way to **${result.added}** — the hero carries at most ${CONDITION_LIST_CAP} conditions.`, { dmVisible: true })],
+            }),
         };
     },
 

@@ -100,7 +100,7 @@ describe('sanitizeEnemyDamage (offensive: reject, never clamp)', () => {
         expect(sanitizeEnemyDamage('1d100')).toBeUndefined();
         expect(sanitizeEnemyDamage('1d2')).toBeUndefined();
         expect(sanitizeEnemyDamage('a lot')).toBeUndefined();
-        expect(sanitizeEnemyDamage('d6')).toBeUndefined();
+        expect(sanitizeEnemyDamage('d6')).toBe('1d6'); // count-less shorthand reads as one die since 2026-11-05
         expect(sanitizeEnemyDamage(8)).toBeUndefined();
         expect(sanitizeEnemyDamage(null)).toBeUndefined();
     });
@@ -308,9 +308,9 @@ describe('sanitizeEnemyDamage trailing damage type (2026-09-15 audit P1)', () =>
         expect(sanitizeEnemyDamage('2d6 fire/acid')).toBe('2d6');
     });
 
-    it('still rejects multi-part and count-less notations, and out-of-band values under a type', () => {
+    it('still rejects multi-part notations and out-of-band values under a type (count-less reads as one die since 2026-11-05)', () => {
         expect(sanitizeEnemyDamage('1d8+2, plus 1d6 poison')).toBeUndefined();
-        expect(sanitizeEnemyDamage('d8 slashing')).toBeUndefined();
+        expect(sanitizeEnemyDamage('d8 slashing')).toBe('1d8');
         expect(sanitizeEnemyDamage('9d8+2 slashing')).toBeUndefined();
         expect(sanitizeEnemyDamage('1d20 psychic')).toBeUndefined();
         expect(sanitizeEnemyDamage('1d8+99 necrotic')).toBeUndefined();

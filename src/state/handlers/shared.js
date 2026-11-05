@@ -2,13 +2,14 @@
  * Helpers shared by multiple reducer domains and the save-migration pipeline
  * (migrations.js). Single-domain helpers live in their domain module instead.
  */
-import { computeACFromInventory, normalizeConditionList, normalizeConditionName } from '../../engine/rules.js';
+import { addConditionCapped, computeACFromInventory, normalizeConditionList } from '../../engine/rules.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
 import { itemIdentityMatches, nameTokensPresent, textWordSet } from '../../engine/textMatch.js';
 import { isArmorItem, isShieldItem, isWeaponItem } from '../../engine/equipment.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName, MAX_ITEM_QUANTITY } from '../../data/items.js';
 import { MAX_CHARACTER_LEVEL, reviveHero } from '../../engine/progression.js';
-import { MAX_DIE_SIDES } from '../../engine/dice.ts';
+import { MAX_DICE_COUNT, MAX_DIE_SIDES, MAX_ROLL_MODIFIER } from '../../engine/dice.ts';
+import { normalizeDiceNotation } from '../../engine/diceNotation.js';
 import { appendKeepsakes } from '../../engine/companionGear.js';
 import { CHRONICLE_CHAPTER_TEXT_MAX, CHRONICLE_TITLE_MAX, NPC_DOSSIER_FIELD_MAX, ROLL_HISTORY_CAP } from '../../config/contentLimits.js';
 import { COMBAT_PHASES, isLowLevelSolo } from '../../engine/combatPredicates.js';
@@ -104,16 +105,39 @@ function loadedNumber(value) {
 export function sanitizeRollHistoryEntry(entry, { maxMessageCount = null } = {}) {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
     if (!Array.isArray(entry.rolls)) return null;
+    // The faces LIST, the modifier and the total are bounded too (2026-11-05
+    // strengthening P2, dice-engine 10-31): one 100,000-face row printed
+    // 400,189 chars into RECENT DICE ROLLS. A crit doubles a pool of at most
+    // MAX_DICE_COUNT, so twice that is every face a real roll carries; the
+    // modifier takes parseNotation's band; a total outside what those faces
+    // and that modifier can make (or minted from a clamped modifier) is
+    // recomputed from them.
     const rolls = entry.rolls.map(loadedNumber)
         .filter(value => value !== null)
+        .slice(0, MAX_DICE_COUNT * 2)
         .map(value => Math.max(0, Math.min(MAX_DIE_SIDES, Math.trunc(value))));
     if (rolls.length === 0) return null;
     const storedModifier = loadedNumber(entry.modifier);
-    const modifier = storedModifier === null ? 0 : Math.trunc(storedModifier);
+    const rawModifier = storedModifier === null ? 0 : Math.trunc(storedModifier);
+    const modifier = Math.max(-MAX_ROLL_MODIFIER, Math.min(MAX_ROLL_MODIFIER, rawModifier));
     const subtotal = rolls.reduce((sum, value) => sum + value, 0);
     const storedTotal = loadedNumber(entry.total);
-    const total = storedTotal === null ? subtotal + modifier : storedTotal;
+    const totalInBand = storedTotal !== null && modifier === rawModifier
+        && Math.abs(storedTotal) <= rolls.length * MAX_DIE_SIDES + MAX_ROLL_MODIFIER;
+    const total = totalInBand ? Math.trunc(storedTotal) : subtotal + modifier;
     const text = value => (typeof value === 'string' ? value.trim().slice(0, ROLL_HISTORY_TEXT_MAX) : '');
+    // The natural flags are RE-DERIVED from one d20 face, never trusted: a
+    // hostile save printed "(natural 20) (natural 1)" on a 2d6 row. A single
+    // face on a 1d20 notation (or none) is the only natural; a crit below 20
+    // stands only as one of combatMath.stampCriticalRoll's / resolveAttackRoll's
+    // attack stamps — the Champion's natural 19, or any hit on a helpless target.
+    const notationParts = normalizeDiceNotation(text(entry.notation));
+    const face = rolls.length === 1 && (!notationParts || (notationParts.count === 1 && notationParts.sides === 20))
+        && rolls[0] >= 1 && rolls[0] <= 20 ? rolls[0] : null;
+    const threshold = entry.kind === 'attack' && entry.isCritical === true ? text(entry.criticalThreshold) : '';
+    const stampedCrit = face !== null && threshold
+        && ((/champion/i.test(threshold) && face === 19) || (/helpless/i.test(threshold) && face > 1));
+    const isCritical = face === 20 || !!stampedCrit;
     const id = typeof entry.id === 'string' && entry.id
         ? entry.id.slice(0, 80)
         : typeof entry.id === 'number' && Number.isFinite(entry.id)
@@ -130,12 +154,12 @@ export function sanitizeRollHistoryEntry(entry, { maxMessageCount = null } = {})
         total,
         description: text(entry.description),
         notation: text(entry.notation),
-        isCritical: entry.isCritical === true,
-        isCritFail: entry.isCritFail === true,
+        isCritical,
+        isCritFail: face === 1,
         ...(atMessage !== null ? { atMessage } : {}),
         // combatMath.stampCriticalRoll's two stamps — the prompt's crit label reads `kind`.
         ...(entry.kind === 'attack' ? { kind: 'attack' } : {}),
-        ...(text(entry.criticalThreshold) ? { criticalThreshold: text(entry.criticalThreshold) } : {}),
+        ...(stampedCrit ? { criticalThreshold: threshold } : {}),
     };
 }
 
@@ -182,12 +206,18 @@ export function applyDeath(character) {
 // engine, the reducer, applyEvents, and the prompt all ask the SAME function live.
 export { isLowLevelSolo };
 
+/**
+ * Add one condition through THE capped writer (2026-11-05 strengthening P2:
+ * this appended PAST the cap — a defeated hero carried eleven). Its callers
+ * add table conditions (`unconscious`, a catalog spell's), which evict the
+ * oldest flavour condition and can never be refused: the table has exactly
+ * CONDITION_LIST_CAP entries. A refusal would be a flavour name — warned.
+ */
 export function withCondition(character, condition) {
-    const name = normalizeConditionName(condition);
-    if (!name) return character;
-    const conditions = character.conditions || [];
-    if (conditions.some(c => normalizeConditionName(c) === name)) return character;
-    return { ...character, conditions: [...conditions, name] };
+    const result = addConditionCapped(character.conditions || [], condition);
+    if (result.refused) console.warn(`[conditions] "${result.refused}" not recorded — the hero's condition list is full.`);
+    if (!result.added) return character;
+    return { ...character, conditions: result.conditions };
 }
 
 /** Convert an early low-level knockout into a setback instead of campaign-ending death. */
@@ -246,7 +276,10 @@ export function normalizeChronicleChapter(entry, { maxMessageCount = Infinity } 
     };
     return {
         id: typeof entry.id === 'string' && entry.id ? entry.id.slice(0, 80) : `chapter-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        title: typeof entry.title === 'string' ? entry.title.trim().slice(0, CHRONICLE_TITLE_MAX) : '',
+        // Whitespace collapsed (2026-11-05 strengthening P2): the input cannot
+        // type a newline but a save can — "Ch\n\n# Evil" exported a top-level
+        // heading inside the chapter's `##` line.
+        title: typeof entry.title === 'string' ? entry.title.replace(/\s+/g, ' ').trim().slice(0, CHRONICLE_TITLE_MAX) : '',
         text,
         fromIndex: index(entry.fromIndex),
         toIndex: index(entry.toIndex),

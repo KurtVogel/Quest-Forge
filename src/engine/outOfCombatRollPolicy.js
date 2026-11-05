@@ -1,6 +1,7 @@
 import { sendMessage } from '../llm/adapter.js';
 import { getPreCommitConfig } from '../llm/machinery.js';
 import { parseLlmJson } from '../llm/utils/jsonExtractor.js';
+import { triFlag } from './text.js';
 
 const SOCIAL_SKILLS = new Set(['persuasion', 'deception', 'intimidation', 'charisma']);
 
@@ -137,10 +138,13 @@ Output ONLY the JSON, no prose outside the JSON.`;
         for (let i = 0; i < rolls.length; i++) {
             // Coerced index: a string "0" or a missing entry must not read as approval.
             const evaluation = result.rolls_evaluation.find(e => e && typeof e === 'object' && Number(e.index) === i);
-            const llmApproved = evaluation
-                ? (evaluation.approved === true || String(evaluation.approved).trim().toLowerCase() === 'true')
-                : true; // no verdict → the sync floor decides alone
-            if (evaluation && !llmApproved) {
+            // Tri-state (2026-11-05 strengthening P2): `approved` omitted /
+            // junk is NO verdict — the sync floor decides alone, exactly as
+            // for a missing entry. It used to REJECT (fail-closed for junk,
+            // fail-open for absence) and route a false authority correction.
+            const verdict = evaluation ? triFlag(evaluation.approved) : undefined;
+            const llmApproved = verdict !== false;
+            if (verdict === false) {
                 console.log(`[RollPolicy] Scribe REJECTED proposed check: "${rolls[i].description || rolls[i].skill || 'Check'}". Reason: ${evaluation.reason}`);
                 if (String(evaluation.violation || '').toLowerCase() === 'attack') attackAsCheck = true;
             }
@@ -151,7 +155,10 @@ Output ONLY the JSON, no prose outside the JSON.`;
             }
         }
 
-        const preNarrated = result.pre_narrated_outcome_detected === true;
+        // Tri-state (2026-11-05 strengthening P2): the string 'true' is true;
+        // omitted / junk is `undefined`, so the orchestrator's regex belt
+        // (`detectPreNarratedOutcome`) still runs instead of reading "false".
+        const preNarrated = triFlag(result.pre_narrated_outcome_detected);
 
         return { acceptedRolls, rejectedRolls, preNarrated, attackAsCheck };
     } catch (e) {

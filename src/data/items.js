@@ -1,4 +1,5 @@
 import { toFlag } from '../engine/text.js';
+import { normalizeDiceNotation } from '../engine/diceNotation.js';
 /**
  * Core item catalog for common D&D-style equipment.
  *
@@ -348,13 +349,14 @@ export function toFiniteNumber(value) {
 }
 
 /** Bound a healing notation like boundWeaponDamage bounds a weapon's dice. */
+// Read through the ONE tolerant reader (2026-11-05 strengthening P2): `d8` /
+// `d8+2` and a trailing word ("2d4+2 healing") used to fall to the 2d4+2
+// fallback — more than written. A negative bonus still falls back (unchanged).
 export function boundHealingNotation(value) {
-    const match = String(value ?? '').trim().match(/^(\d{1,3})\s*d\s*(\d{1,4})\s*(?:\+\s*(\d{1,4}))?$/i);
-    if (!match) return FALLBACK_HEALING;
-    const count = Number(match[1]);
-    const sides = Number(match[2]);
-    const bonus = Number(match[3] || 0);
-    if (count < 1 || sides < 1 || count > MAX_HEALING_DICE_COUNT || sides > MAX_HEALING_DIE_SIDES || bonus > MAX_HEALING_FLAT_BONUS) {
+    const parts = normalizeDiceNotation(String(value ?? ''));
+    if (!parts) return FALLBACK_HEALING;
+    const { count, sides, modifier: bonus } = parts;
+    if (count < 1 || sides < 1 || count > MAX_HEALING_DICE_COUNT || sides > MAX_HEALING_DIE_SIDES || bonus < 0 || bonus > MAX_HEALING_FLAT_BONUS) {
         return FALLBACK_HEALING;
     }
     return `${count}d${sides}${bonus ? `+${bonus}` : ''}`;

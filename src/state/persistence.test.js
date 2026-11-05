@@ -465,11 +465,11 @@ describe('metadata/payload split (DB v3, 2026-08-04)', () => {
                 const db = req.result;
                 const tx = db.transaction('saves', 'readwrite');
                 tx.objectStore('saves').put({
-                    slotId: 'bad-slot', name: 'Doomed Save', characterName: 'Cursed Hero', savedAt: 1,
+                    slotId: 'bad-slot', name: 'Doomed Save', characterName: 'Cursed Hero', savedAt: 1767225600001,
                     state: { character: { name: 'Cursed Hero' }, currentLocation: 'Quota Cliffs' },
                 });
                 tx.objectStore('saves').put({
-                    slotId: 'good-slot', name: 'Fine Save', characterName: 'Lucky Hero', savedAt: 2,
+                    slotId: 'good-slot', name: 'Fine Save', characterName: 'Lucky Hero', savedAt: 1767225600002,
                     state: { character: { name: 'Lucky Hero' }, currentLocation: 'Green Vale' },
                 });
                 tx.oncomplete = () => { db.close(); resolve(); };
@@ -541,7 +541,7 @@ describe('character roster', () => {
                 const db = open.result;
                 const tx = db.transaction('characters', 'readwrite');
                 tx.objectStore('characters').put({ id: 'junk-1', name: { first: 'X' }, race: 7, class: null, level: 'abc', savedAt: 'later', character: 'nope', inventory: 'none' });
-                tx.objectStore('characters').put({ id: 'junk-2', name: '', level: 2, savedAt: 5, character: { name: 'From Character' } });
+                tx.objectStore('characters').put({ id: 'junk-2', name: '', level: 2, savedAt: 1767225600005, character: { name: 'From Character' } });
                 tx.oncomplete = () => { db.close(); resolve(); };
                 tx.onabort = () => { db.close(); reject(tx.error); };
             };
@@ -771,7 +771,7 @@ describe('failure surfacing', () => {
             transaction: () => {
                 const request = {};
                 const tx = {
-                    objectStore: () => ({ get: () => request, getAll: () => request }),
+                    objectStore: () => ({ get: () => request, getAll: () => request, getAllKeys: () => ({}) }),
                 };
                 queueMicrotask(() => {
                     const err = new Error('disk failure');
@@ -805,7 +805,7 @@ describe('failure surfacing', () => {
             transaction: () => {
                 const request = {};
                 const tx = {
-                    objectStore: () => ({ get: () => request, getAll: () => request }),
+                    objectStore: () => ({ get: () => request, getAll: () => request, getAllKeys: () => ({}) }),
                 };
                 queueMicrotask(() => {
                     const err = new Error('read failed');
@@ -939,8 +939,8 @@ describe('projectSaveMetadata — the ONE typed list row (2026-09-10 audit P1)',
     });
 
     it('keeps honest values and the stored slotId over the fallback', () => {
-        const row = projectSaveMetadata({ slotId: 'slot-1', name: 'Coast', characterLevel: 3, location: 'Oakhaven', savedAt: 1700000000000 }, 'doc-key');
-        expect(row).toMatchObject({ slotId: 'slot-1', name: 'Coast', characterLevel: 3, location: 'Oakhaven', savedAt: 1700000000000 });
+        const row = projectSaveMetadata({ slotId: 'slot-1', name: 'Coast', characterLevel: 3, location: 'Oakhaven', savedAt: 1767225600000 }, 'doc-key');
+        expect(row).toMatchObject({ slotId: 'slot-1', name: 'Coast', characterLevel: 3, location: 'Oakhaven', savedAt: 1767225600000 });
         expect(projectSaveMetadata(null).slotId).toBeNull();
     });
 

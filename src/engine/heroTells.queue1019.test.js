@@ -66,8 +66,8 @@ describe('the hero is never their own witness (2026-10-19 P2)', () => {
         // A remark the hero alone made about themself is nothing; a remark by someone else beside the hero keeps the other.
         expect(prepareHeroTellReports([{ text: 'the pipe', kind: 'habit', voiced: true, voicedBy: 'Astra' }], hero)).toEqual([]);
         expect(prepareHeroTellReports([{ text: 'the pipe', kind: 'habit', voiced: true, voicedBy: ['Astra', 'Tammo'] }], hero)[0]).toMatchObject({ witnesses: [], voicedBy: ['Tammo'] });
-        // A bare `voiced: true` (no speaker named) still passes through on its voice.
-        expect(prepareHeroTellReports([{ text: 'the pipe', kind: 'habit', voiced: true }], hero)).toHaveLength(1);
+        // A bare `voiced: true` (no speaker named, no sighting) is dropped (2026-11-05 strengthening P2, decided).
+        expect(prepareHeroTellReports([{ text: 'the pipe', kind: 'habit', voiced: true }], hero)).toEqual([]);
         // No hero name known: the lane behaves as before.
         expect(prepareHeroTellReports([{ text: 'never draws first', kind: 'principle', witnesses: ['Astra'] }], {})[0].witnesses).toEqual(['Astra']);
     });

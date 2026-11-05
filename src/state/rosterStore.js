@@ -17,7 +17,9 @@ import {
     PORTRAIT_STORE,
     PORTRAIT_SWEEP_STORES,
     ROSTER_STORE,
+    addressableKey,
     ensureLaneBlobs,
+    metaEpochMs,
     metaNumber,
     metaText,
     metadataRefs,
@@ -107,10 +109,16 @@ export async function saveRosterCharacter(character, inventory) {
  * row is ~6k once its portrait rides the blob store, so no reason has
  * appeared to split the roster the same way.)
  */
-export function projectRosterEntry(record) {
+export function projectRosterEntry(record, key = record?.id) {
     if (!record || typeof record !== 'object' || Array.isArray(record)) return null;
-    const id = metaText(record.id, null);
-    if (!id) return null;
+    // The EXACT store key (2026-11-05 strengthening P2): the id went through
+    // the 200-char text clamp, so a 5,000-char (or space-padded) id listed an
+    // id that `loadRosterCharacter` / `deleteRosterCharacter` could not find —
+    // a permanent undeletable row. The list passes the cursor-order key; a
+    // number key is addressable too. New ids are bounded at the write
+    // (`isSaneHeroId`, via toHeroTemplate).
+    const id = addressableKey(key);
+    if (id === null) return null;
     const character = record.character && typeof record.character === 'object' && !Array.isArray(record.character)
         ? record.character
         : null;
@@ -120,7 +128,7 @@ export function projectRosterEntry(record) {
         race: metaText(record.race, ''),
         class: metaText(record.class, ''),
         level: metaNumber(record.level, 1),
-        savedAt: metaNumber(record.savedAt, 0),
+        savedAt: metaEpochMs(record.savedAt),
     };
 }
 
@@ -149,10 +157,14 @@ export function listRosterCharacters() {
     return withDb((db, resolve, reject) => {
         const tx = db.transaction(ROSTER_STORE, 'readonly');
         const store = tx.objectStore(ROSTER_STORE);
+        // Keys beside the rows (same order; requests settle in order) — a
+        // row is listed by its exact key (2026-11-05 strengthening P2).
+        const keysRequest = store.getAllKeys();
         const request = store.getAll();
         request.onsuccess = () => {
+            const keys = keysRequest.result || [];
             resolve((Array.isArray(request.result) ? request.result : [])
-                .map(projectRosterEntry)
+                .map((record, index) => projectRosterEntry(record, keys[index]))
                 .filter(Boolean)
                 .sort((a, b) => b.savedAt - a.savedAt));
         };

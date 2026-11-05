@@ -1,3 +1,5 @@
+import { sliceWhole } from '../config/contentLimits.js';
+
 /**
  * THE text-typing shelf for engine and director boundaries (2026-10-02
  * hidden-fronts Lap-4: six private engine copies plus the llm/ one, three of
@@ -7,10 +9,12 @@
  * text. `String(object)` minted "[object Object]" as a front's epitaph, a
  * hearsay line AND a permanent world fact — every other shape is junk → ''.
  * Whitespace runs collapse to one space (a stored line is a prompt line).
+ * The clamp never splits a surrogate pair (2026-11-05 strengthening P2 — the
+ * one `sliceWhole` beside `cleanTextField`, which shares this shelf's rule).
  */
 export function cleanText(value, max = Infinity) {
     if (typeof value !== 'string' && !(typeof value === 'number' && Number.isFinite(value))) return '';
-    return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
+    return sliceWhole(String(value || '').replace(/\s+/g, ' ').trim(), max);
 }
 
 /**
@@ -40,6 +44,26 @@ export function toFlag(value) {
         return word !== '' && !FALSE_FLAG_WORDS.has(word);
     }
     return !!value;
+}
+
+const TRUE_FLAG_WORDS = new Set(['true', 'yes', 'on', '1']);
+const DEFINITE_FALSE_FLAG_WORDS = new Set(['false', 'no', 'off', '0']);
+
+/**
+ * A lane VERDICT (2026-11-05 strengthening P2): `true` / `false` when the
+ * value says so (`toFlag`'s words, either spelling), `undefined` when it does
+ * not — omitted, blank, `null`, "none", or junk is NO verdict, so the caller's
+ * own fallback decides (the arbiter's sync floor, the pre-narration regex).
+ * `toFlag` would read junk as `true` and an omission as `false`.
+ */
+export function triFlag(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value === 1 ? true : (value === 0 ? false : undefined);
+    if (typeof value !== 'string') return undefined;
+    const word = value.trim().toLowerCase();
+    if (TRUE_FLAG_WORDS.has(word)) return true;
+    if (DEFINITE_FALSE_FLAG_WORDS.has(word)) return false;
+    return undefined;
 }
 
 /**

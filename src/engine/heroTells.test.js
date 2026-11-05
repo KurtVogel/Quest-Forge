@@ -249,8 +249,8 @@ describe('hero tells — follow-up slices (2026-09-23): the sheet, hearsay, voic
         expect(unvoiced[0]).toMatchObject({ lastBeatMessage: 124, lastVoicedMessage: null, voicedCount: 0 });
         // "How others see you" reads the fiction's keys only: a closed-unvoiced window is not a line anyone said.
         expect(listVoicedTells(unvoiced)).toEqual([]);
-        // A bare `voiced: true` (no speaker) lists as said aloud by nobody named — never a guessed witness.
-        expect(listVoicedTells([{ ...unvoiced[0], voicedCount: 1 }])[0].saidBy).toEqual([]);
+        // A count with no named speaker is not on the sheet (2026-11-05 strengthening P2): never "said aloud" by nobody.
+        expect(listVoicedTells([{ ...unvoiced[0], voicedCount: 1 }])).toEqual([]);
     });
 
     it('the absence beat: a faded, once-voiced habit with its witness on the roster gets an absence window, cooled by its own stamp', async () => {
@@ -320,12 +320,12 @@ describe('hero tells — queue sweep 2026-09-24 (scene window, id claim, witness
     it('prepareHeroTellReports: companions witness every non-intimate sighting, the speaker of a SIGHTED voiced report is a witness, a witness-less sighting is dropped, and a remark alone carries no witness', () => {
         expect(prepareHeroTellReports([{ text: 'never draws first', kind: 'principle' }], { partyNames: [] })).toEqual([]);
         expect(prepareHeroTellReports([{ text: 'never draws first', kind: 'principle', witnesses: [] }], { partyNames: ['Osma', 'Osma', 42] })[0].witnesses).toEqual(['Osma']);
-        expect(prepareHeroTellReports([{ text: 'never draws first', kind: 'principle', witnesses: 'Bran' }], { partyNames: ['Osma'] })[0].witnesses).toEqual(['Bran', 'Osma']);
+        expect(prepareHeroTellReports([{ text: 'never draws first', kind: 'principle', witnesses: 'Bran' }], { partyNames: ['Osma'] })[0].witnesses).toEqual(['Osma', 'Bran']);
         // An intimate tell's witnesses stay exactly the partner(s): a companion is not in the bed.
         expect(prepareHeroTellReports([{ text: 'likes to be held afterwards', kind: 'intimate' }], { partyNames: ['Osma'] })).toEqual([]);
         expect(prepareHeroTellReports([{ text: 'likes to be held afterwards', kind: 'intimate', witnesses: ['Maren'] }], { partyNames: ['Osma'] })[0].witnesses).toEqual(['Maren']);
         // Whoever named the pattern aloud WHILE the hero did it has seen it.
-        expect(prepareHeroTellReports([{ text: 'the pipe', kind: 'habit', voiced: true, voicedBy: 'Maren', sighted: true }], { partyNames: ['Osma'] })[0].witnesses).toEqual(['Maren', 'Osma']);
+        expect(prepareHeroTellReports([{ text: 'the pipe', kind: 'habit', voiced: true, voicedBy: 'Maren', sighted: true }], { partyNames: ['Osma'] })[0].witnesses).toEqual(['Osma', 'Maren']);
         // A remark alone is not a sighting (2026-10-07 P2): the Scribe's list, the
         // speaker and the party all saw nothing — it passes through on its voice.
         const remark = prepareHeroTellReports([{ text: 'the pipe', kind: 'habit', witnesses: ['Tammo'], voiced: true, voicedBy: 'Maren' }], { partyNames: ['Osma'] });

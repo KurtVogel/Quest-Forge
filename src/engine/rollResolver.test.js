@@ -322,7 +322,8 @@ describe('companion attacks', () => {
 
         expect(results[0]).toMatchObject({ type: 'companion_attack', attacker: 'Garrick', dc: 13, rolled: 18, success: true });
         expect(results[0].damage).toBeUndefined();
-        expect(dispatch.mock.calls.map(([a]) => a.type)).toEqual(['ADD_ROLL', 'ADD_MESSAGE']);
+        // A companion's die is not the hero's: chat line, no ledger row (2026-11-05 strengthening P2).
+        expect(dispatch.mock.calls.map(([a]) => a.type)).toEqual(['ADD_MESSAGE']);
         expect(messagesFrom(dispatch)).toBe('**Garrick cuts at the rope** (vs AC 13): Rolled **18** — **Hit!**');
         expect(formatRollSummary(results)).toBe('[ROLL RESULT: Garrick cuts at the rope vs AC 13, rolled 18 — HIT]');
     });

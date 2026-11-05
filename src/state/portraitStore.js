@@ -105,15 +105,24 @@ const PORTRAIT_FIELD = {
     },
 };
 
+/** The stub prose of a chapter whose blob is gone (player-facing: the Journal card and the export). */
+export const LOST_CHAPTER_TEXT = 'The prose of this chapter was lost from storage. The span of play it covered stays closed in the record.';
+// Marks a stub minted by THIS restore (never stored: `restoreChapters` strips it).
+const LOST_CHAPTER_MARK = Symbol('lostChapter');
+
 const CHAPTER_FIELD = {
     field: 'text',
     refField: 'chapterRef',
     isStorable: isStorableChapterText,
     keyOf: chapterKey,
-    // A chapter without its prose is no chapter (the load heal drops one
-    // anyway): the newest one's span re-opens for a fresh "Close chapter",
-    // exactly the REMOVE_CHRONICLE_CHAPTER recovery path.
-    onMissing: () => null,
+    // A chapter whose prose is gone keeps its place as a STUB (2026-11-05
+    // strengthening P2): the record still names its span and title, and the
+    // text says the prose was lost. Dropping it was a silent hole — a missing
+    // MIDDLE blob left the span unretold forever, since the next close resumes
+    // after the furthest chapter. `restoreChapters` still drops the TRAILING
+    // run of lost chapters: the newest spans re-open for a fresh "Close
+    // chapter", exactly the REMOVE_CHRONICLE_CHAPTER recovery path.
+    onMissing: (rest) => ({ ...rest, text: LOST_CHAPTER_TEXT, [LOST_CHAPTER_MARK]: true }),
 };
 
 function extractRecord(record, blobs, spec) {
@@ -204,14 +213,22 @@ export function collectChapterRefs(payload) {
 
 /**
  * Inverse of `extractChapters`; `lookup(key)` returns the stored text or
- * nothing. A chapter whose blob is gone is dropped (no prose, no chapter);
- * a chapter that still carries inline text (pre-split payload) is untouched.
+ * nothing. A chapter whose blob is gone keeps its place as a stub
+ * (`LOST_CHAPTER_TEXT`, its span and title intact) unless it is in the
+ * trailing run of lost chapters, which is dropped so those spans re-open
+ * (2026-11-05 strengthening P2); a chapter that still carries inline text
+ * (pre-split payload) is untouched.
  */
 export function restoreChapters(payload, lookup) {
     if (!isPlainObject(payload) || !Array.isArray(payload.chronicle)) return payload;
-    const chronicle = payload.chronicle
-        .map(chapter => restoreRecord(chapter, lookup, CHAPTER_FIELD))
-        .filter(chapter => chapter !== null);
+    const restored = payload.chronicle.map(chapter => restoreRecord(chapter, lookup, CHAPTER_FIELD));
+    let end = restored.length;
+    while (end > 0 && isPlainObject(restored[end - 1]) && restored[end - 1][LOST_CHAPTER_MARK]) end--;
+    const chronicle = restored.slice(0, end).filter(chapter => chapter !== null).map(chapter => {
+        if (!isPlainObject(chapter) || !chapter[LOST_CHAPTER_MARK]) return chapter;
+        const { [LOST_CHAPTER_MARK]: _lost, ...stub } = chapter;
+        return stub;
+    });
     return { ...payload, chronicle };
 }
 

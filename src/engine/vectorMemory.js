@@ -181,8 +181,13 @@ async function loadPersistedEmbeddings(sessionId) {
                 )).map(typeCachedRow));
             };
         });
-    } catch {
-        return [];
+    } catch (e) {
+        // A cache that cannot be OPENED (2026-11-05 strengthening P2 — a
+        // VersionError after a rollback deploy, a blocked or corrupt store)
+        // used to be silent and re-embed the whole corpus every mount: one
+        // line here, and null tells the seed the cache is unavailable, not empty.
+        console.warn(`[VectorMemory] Embedding cache unavailable — this campaign's memories are embedded without it: ${e?.name || 'Error'}${e?.message ? `: ${e.message}` : ''}`);
+        return null;
     }
 }
 
@@ -326,14 +331,20 @@ function cleanLabel(value, fallback = '') {
  * `location` string-or-absent, `subjects` through normalizeSubjects — an
  * app-written row, so junk is unlikely, but the prompt block and the presence
  * gate read these fields raw.
+ * Built from storeMemoryEntry's ten keys only (2026-11-05 strengthening P2):
+ * a projection by spread kept every unknown key of a cached row — a 50 KB
+ * blob rode memory and was rewritten to disk by the next retag. The loader
+ * has already checked `sessionId`, `text` and `schema`.
  */
 function typeCachedRow(entry) {
     const location = cleanLabel(entry.location);
     const subjects = normalizeSubjects(entry.subjects);
-    const { location: _location, subjects: _subjects, sourceMessage: _source, atMessage: _at, ...rest } = entry;
     const atMessage = memoryStamp(entry.atMessage);
     return {
-        ...rest,
+        sessionId: entry.sessionId,
+        text: entry.text,
+        schema: entry.schema,
+        timestamp: Number.isFinite(entry.timestamp) ? entry.timestamp : 0,
         vector: toStoredVector(entry.vector),
         category: cleanLabel(entry.category, 'general'),
         ...(location && { location }),
@@ -619,12 +630,14 @@ let seedInFlight = null;
  * @param {string} apiKey
  * @param {Array<{text: string, category: string}>} items
  * @param {string|null} sessionId - the campaign these memories belong to
- * @param {{ onIncomplete?: (report: { missing: number, reason: object|null }) => void }} [options] -
+ * @param {{ onIncomplete?: (report: { missing: number, reason: object|null, cacheUnavailable?: true }) => void }} [options] -
  *   `onIncomplete` (2026-09-29): called once when rows the seed meant to embed
  *   are still missing at the end (a rate limit, an outage, a rejected key)
  *   with the count and the provider's first failure reason — the session
  *   then runs against a partial store until the next mount, which the
- *   player should hear about (it used to be console-only).
+ *   player should hear about (it used to be console-only). Also called,
+ *   with `cacheUnavailable: true`, when the embedding cache could not be
+ *   opened (2026-11-05) — `missing` may then be 0.
  */
 export function seedMemories(apiKey, items, sessionId = null, { onIncomplete = null, retiredTexts = null, transcriptIds = null, onBranchPruned = null } = {}) {
     const options = { onIncomplete, retiredTexts, transcriptIds, onBranchPruned };
@@ -657,6 +670,12 @@ async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null
     // stamped with the OTHER campaign's session and pushed into its store.
     const generation = ++seedGeneration;
     const superseded = () => seedGeneration !== generation;
+    // The same campaign's rows still in memory (a remount in one page
+    // session) stand in for a cache that cannot be opened (2026-11-05
+    // strengthening P2) — the second mount re-embedded the whole corpus.
+    const carried = sessionId != null && activeSessionId === sessionId
+        ? memoryStore.filter(m => m.sessionId === sessionId)
+        : [];
     activeSessionId = sessionId;
     memoryStore = [];
     discardMemoryQueue(); // a batch queued under the previous campaign
@@ -671,9 +690,13 @@ async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null
     // kept unless its source stamp names a message the loaded transcript does
     // not hold. Every disk write of the seed — the stale deletes, the retags,
     // the new rows — rides ONE transaction at the end (2026-09-29 P2).
-    const persistedRaw = sessionId != null ? await loadPersistedEmbeddings(sessionId) : [];
+    const loaded = sessionId != null ? await loadPersistedEmbeddings(sessionId) : [];
     if (superseded()) return;
-    const currentSeedTexts = new Set((items || []).map(item => item.text));
+    const cacheUnavailable = loaded === null;
+    const persistedRaw = cacheUnavailable ? carried : loaded;
+    // `item?.text` with its siblings' type check (2026-11-05 strengthening
+    // nit): one null element used to reject the whole seed.
+    const currentSeedTexts = new Set((items || []).filter(item => typeof item?.text === 'string').map(item => item.text));
     // Retired texts (2026-09-29): the caller names the texts the record has
     // retired (a superseded or retracted fact); those rows prune whatever
     // their category. Since 2026-10-21 a special case of the record rule — a
@@ -792,9 +815,11 @@ async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null
     enforceCampaignCap();
     // Rows still missing run this whole session against a partial store
     // (2026-09-29 P2) — said once, with the provider's reason, so the player
-    // hears it instead of the console.
-    if (missing > 0 && typeof onIncomplete === 'function') {
-        try { onIncomplete({ missing, reason: failure }); } catch { /* a notice must never break the seed */ }
+    // hears it instead of the console. A cache that could not be opened rides
+    // the same report as `cacheUnavailable: true` (2026-11-05 strengthening
+    // P2), even with nothing missing — the next reload embeds it all again.
+    if ((missing > 0 || cacheUnavailable) && typeof onIncomplete === 'function') {
+        try { onIncomplete({ missing, reason: failure, ...(cacheUnavailable && { cacheUnavailable: true }) }); } catch { /* a notice must never break the seed */ }
     }
 }
 

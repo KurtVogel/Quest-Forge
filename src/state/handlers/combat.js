@@ -6,6 +6,7 @@ import { computeACFromInventory, formatModifier, getModifier } from '../../engin
 import { rollDie, rollWithModifier } from '../../engine/dice.ts';
 import { awardExperience, estimateCombatExperience } from '../../engine/progression.js';
 import {
+    boundDeclaredMaxHp,
     canonicalEnemyId,
     clampEnemyAC,
     clampEnemyHP,
@@ -26,6 +27,8 @@ import { isStillAtPlace } from '../../engine/locationRegistry.js';
 import { initialGameState } from '../initialState.js';
 import { gameReducer } from '../gameReducer.js';
 import { appendRollHistory, clearSustainedSpellState, reviveCharacter, systemMessage } from './shared.js';
+import { MAX_COMBAT_ENEMIES } from '../../config/contentLimits.js';
+import { cleanText } from '../../engine/text.js';
 
 function normalizeCombatEnemy(enemy, index, usedIds) {
     const hp = clampEnemyHP(enemy?.hp);
@@ -37,8 +40,9 @@ function normalizeCombatEnemy(enemy, index, usedIds) {
     // fall to the exchange engine's flat ENEMY_DEFAULT_* at roll time, so older
     // saves whose enemies lack these fields still work.
     // A declared maximum above the current HP fields the foe wounded
-    // (2026-10-22 enemy-stats nit — the parser carries `max_hp` as `maxHp`).
-    const maxHp = Number.isFinite(enemy?.maxHp) && enemy.maxHp > hp ? clampEnemyHP(enemy.maxHp) : hp;
+    // (2026-10-22 enemy-stats nit — the parser carries `max_hp` as `maxHp`),
+    // within the wire's ratio bound (2026-11-05 nit — one rule, both lanes).
+    const maxHp = Number.isFinite(enemy?.maxHp) ? boundDeclaredMaxHp(hp, clampEnemyHP(enemy.maxHp, hp)) : hp;
     return {
         id: canonicalEnemyId(enemy, index, usedIds),
         ...typeEnemyFields(enemy, { fallbackName: `Enemy ${index + 1}` }),
@@ -50,6 +54,24 @@ function normalizeCombatEnemy(enemy, index, usedIds) {
         combatStatus: 'active',
         defending: false,
     };
+}
+
+/**
+ * The visible note for foes past MAX_COMBAT_ENEMIES (2026-11-05 P1): the
+ * wire's overflow (`{ count, names }`, already typed) plus any this lane
+ * trimmed itself. Null when nothing was dropped.
+ */
+function describeDroppedEnemies(trimmed, wireDropped) {
+    const wireCount = Number.isInteger(wireDropped?.count) && wireDropped.count > 0 ? wireDropped.count : 0;
+    const count = wireCount + trimmed.length;
+    if (count === 0) return null;
+    const names = [
+        ...(Array.isArray(wireDropped?.names) ? wireDropped.names : []),
+        ...trimmed.map(enemy => typeEnemyFields(enemy).name),
+    ].map(name => cleanText(name, 100)).filter(Boolean);
+    const unique = [...new Set(names)].slice(0, 8);
+    const listed = unique.length > 0 ? ` (${unique.join(', ')}${count > unique.length ? ', …' : ''})` : '';
+    return `**${count} more foe${count === 1 ? '' : 's'} not tracked**${listed} — a fight tracks at most ${MAX_COMBAT_ENEMIES}. They are the crowd: narrate them as scenery, fleeing, or a later wave, never as extra attackers.`;
 }
 
 const withMessages = (state, ...lines) => ({ ...state, messages: [...state.messages, ...lines] });
@@ -188,13 +210,19 @@ function awardFightXp(before, next, { slainXpOnly }) {
 
 export const handlers = {
     START_COMBAT(state, action) {
-        // Track exactly the enemies the DM declared — no count or HP trimming. Encounter
-        // difficulty for low-level solo play is steered by the system prompt instead, so
-        // the narrative and the tracked combatants always stay 1:1.
+        // Track the enemies the DM declared 1:1 — no HP trimming; encounter
+        // difficulty for low-level solo play is steered by the system prompt.
+        // The COUNT is bounded (2026-11-05 enemy-stats-conditions P1, replacing
+        // "no count trimming"): every tracked foe without an intent attacks by
+        // default, so a declared crowd past MAX_COMBAT_ENEMIES is named in a
+        // visible note (the wire's overflow and this lane's own) and narrated,
+        // not tracked.
         const usedEnemyIds = new Set();
-        const enemies = (Array.isArray(action.payload?.enemies) ? action.payload.enemies : [])
+        const declared = Array.isArray(action.payload?.enemies) ? action.payload.enemies : [];
+        const enemies = declared.slice(0, MAX_COMBAT_ENEMIES)
             .map((enemy, index) => normalizeCombatEnemy(enemy, index, usedEnemyIds));
         if (enemies.length === 0) return state;
+        const droppedNote = describeDroppedEnemies(declared.slice(MAX_COMBAT_ENEMIES), action.payload?.droppedEnemies);
         // Nobody on the hero's side can act (2026-10-17 audit P1): a STABLE
         // hero (unconscious at 0 HP, not dying) with no battle-ready companion
         // has no fight to open — the exchange would be a lone `pass` against
@@ -265,6 +293,7 @@ export const handlers = {
             rollHistory: appendRollHistory(state, playerInitiativeRoll),
             messages: [
                 ...state.messages,
+                ...(droppedNote ? [systemMessage(droppedNote, { dmVisible: true })] : []),
                 systemMessage(`**Initiative** — ${state.character?.name || 'You'} rolled **${playerInitiativeRoll.total}** (d20: ${playerInitiativeRoll.rolls.join(', ')}${dexMod ? `, DEX ${formatModifier(dexMod)}` : ''}).`),
             ],
         };

@@ -13,8 +13,9 @@
  * outcome word (`enemyOutcome`) and the engine defaults (`ENEMY_DEFAULT_*`).
  */
 
-import { toFlag } from './text.js';
+import { cleanText, toFlag } from './text.js';
 import { CONDITION_EFFECTS } from './rules.js';
+import { normalizeDiceNotation } from './diceNotation.js';
 
 const ATTACK_BONUS_MIN = -5;
 const ATTACK_BONUS_MAX = 15;
@@ -114,29 +115,22 @@ export function validateEnemyAttackBonus(value) {
 export const validateEnemySaveBonus = validateEnemyAttackBonus;
 
 /**
- * NdM(±K) with an optional trailing damage TYPE. "2d8+4 bludgeoning" /
- * "1d8 + 2 (slashing)" is how statblocks write damage, not a hallucination —
- * the suffix used to reject the whole notation to the 1d6 default silently
- * for the whole fight (2026-09-15 audit P1; the companion twin
- * boundCompanionDamage strips it since 09-09). The suffix admits no digits,
- * so multi-part damage ("1d8+2, plus 1d6 poison") still rejects: that is not
- * one notation.
+ * A bounded NdM(+/-K) weapon-damage notation, or undefined (→ engine default)
+ * if invalid/out-of-range. A trailing damage TYPE ("2d8+4 bludgeoning",
+ * "1d8 + 2 (slashing)") is statblock spelling, stripped (2026-09-15 audit P1);
+ * multi-part damage still rejects. Read through the ONE tolerant reader
+ * (2026-11-05 strengthening P2): the count-less `d8` / `d8+2` is one die — it
+ * used to leave the foe swinging the default 1d6 all fight with no note.
  */
-const ENEMY_DAMAGE_NOTATION = /^(\d{1,2})\s*d\s*(\d{1,3})\s*(?:([+-])\s*(\d{1,3}))?\s*(\(?[a-z][a-z ,/()-]*)?$/i;
-
-/** A bounded NdM(+/-K) weapon-damage notation, or undefined (→ engine default) if invalid/out-of-range. */
 export function sanitizeEnemyDamage(notation) {
-    if (typeof notation !== 'string') return undefined;
-    const m = notation.trim().match(ENEMY_DAMAGE_NOTATION);
-    if (!m) return undefined;
-    const count = parseInt(m[1], 10);
-    const sides = parseInt(m[2], 10);
-    const mod = m[3] ? parseInt(`${m[3]}${m[4]}`, 10) : 0;
+    const parts = normalizeDiceNotation(notation);
+    if (!parts) return undefined;
+    const { count, sides, modifier: mod } = parts;
     if (count < 1 || count > DAMAGE_DICE_MAX) return undefined;
     if (!DAMAGE_SIDES.includes(sides)) return undefined;
     if (mod < DAMAGE_MOD_MIN || mod > DAMAGE_MOD_MAX) return undefined;
     const cleaned = `${count}d${sides}${mod ? (mod > 0 ? `+${mod}` : `${mod}`) : ''}`;
-    if (m[5]) console.warn(`[enemyStats] Dropped trailing damage type from "${notation.trim()}" → ${cleaned}.`);
+    if (parts.suffix) console.warn(`[enemyStats] Dropped trailing damage type from "${notation.trim()}" → ${cleaned}.`);
     return cleaned;
 }
 
@@ -160,6 +154,22 @@ export function clampEnemyHP(value, fallback = 20) {
     return (Number.isFinite(n) && n >= 1)
         ? Math.min(HP_MAX, Math.round(n))
         : fallback;
+}
+
+/**
+ * How far below its maximum a foe may be DECLARED at the opening (2026-11-05
+ * enemy-stats nit): a wounded returning ogre (8 of 34) is the feature; a
+ * `max_hp` more than ten times `hp` is a typo (`hp: 7, max_hp: "1e9"` fielded
+ * 7/999 — "critical" on a fresh foe, and the XP estimator reads `maxHp`, so a
+ * `boss` flag on it cleared the boss floor). Beyond the ratio the declaration
+ * is ignored and the foe fields fresh, like a `max_hp` below `hp`.
+ */
+export const DECLARED_WOUND_MAX_RATIO = 10;
+
+/** The opening maximum HP of a foe declared at `hp` with an optional `declaredMax` (already HP-clamped). */
+export function boundDeclaredMaxHp(hp, declaredMax) {
+    if (!Number.isFinite(declaredMax) || declaredMax <= hp) return hp;
+    return declaredMax <= hp * DECLARED_WOUND_MAX_RATIO ? declaredMax : hp;
 }
 
 /** Current HP may legitimately be zero; keep it separate from maximum-HP validation. */
@@ -231,7 +241,10 @@ export function normalizeEnemyAttackProfile(enemy) {
  */
 export function typeEnemyFields(raw, { fallbackName = 'Enemy' } = {}) {
     const out = {
-        name: (typeof raw?.name === 'string' ? raw.name.trim().slice(0, 100) : '') || fallbackName,
+        // The cleanText shelf (2026-11-05 enemy-stats P2): a trim-only name
+        // kept its line breaks, so one `combat_start` forged `## ` headings in
+        // the combat block on both calls per round and in every autosave.
+        name: (typeof raw?.name === 'string' ? cleanText(raw.name, 100) : '') || fallbackName,
         conditions: normalizeEnemyConditions(raw?.conditions),
         isUndead: toFlag(raw?.is_undead ?? raw?.isUndead),
         // Untrusted narrative flag, strict by policy — the XP estimator gates it

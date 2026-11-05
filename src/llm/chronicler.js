@@ -42,6 +42,20 @@ export function describeRevealedFronts(fronts, fromIndex, toIndex) {
         .map(front => `- "${String(front.title || 'A hidden threat').slice(0, 160)}"${front.outcome === 'prevailed' ? ' (CAME TO PASS — nobody ended it; what it wanted, it got)' : ' (ENDED by the hero)'}: ${describeFrontReveal(front)}`);
 }
 
+/**
+ * The resume point's anchor: the FURTHEST `toIndex` over the chapters, -1 for
+ * none (2026-11-05 strengthening P2 — both readers read the LAST chapter, so
+ * saved chapters `toIndex` 50 then 5 re-told 6-50). One rule for the close
+ * and the Journal's pending count.
+ */
+export function lastChronicledIndex(chapters) {
+    if (!Array.isArray(chapters)) return -1;
+    return chapters.reduce((furthest, chapter) => {
+        const toIndex = Number(chapter?.toIndex);
+        return Number.isFinite(toIndex) ? Math.max(furthest, toIndex) : furthest;
+    }, -1);
+}
+
 /** The chronicler's own read of the transcript: the epilogue reply included. */
 export function collectChronicleEntries(messages, fromIndex, toIndex) {
     return collectNarrativeEntries(messages, fromIndex, toIndex, { keepEpilogue: true });
@@ -184,7 +198,10 @@ export async function writeChronicleChapters({ state, title = '', onProgress = n
         throw new Error('Add your AI provider API key in Settings before writing a chapter.');
     }
     const chapters = state.chronicle || [];
-    const fromIndex = chapters.length > 0 ? (chapters[chapters.length - 1].toIndex ?? -1) + 1 : 0;
+    // The FURTHEST chapter, not the last (2026-11-05 strengthening P2): a
+    // foreign / hand-edited save with chapters out of order re-told spans
+    // the record already holds.
+    const fromIndex = lastChronicledIndex(chapters) + 1;
     const toIndex = (state.messages || []).length - 1;
     const eligible = collectChronicleEntries(state.messages, fromIndex, toIndex);
     if (eligible.length < CHRONICLE_MIN_MESSAGES) {

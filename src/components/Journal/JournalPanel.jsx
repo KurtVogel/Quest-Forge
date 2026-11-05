@@ -9,7 +9,7 @@ import { describeLastHere, describeTravelLink, groupPlacesByRegion, listVisitedP
 import { NPC_PORTRAIT_SIZE, requestPortrait } from '../../llm/providers/imageGen.js';
 import { buildNpcPortraitPrompt } from '../CharacterSheet/portraitPrompt.js';
 import LookEditor from './LookEditor.jsx';
-import { writeChronicleChapters, chronicleToMarkdown, collectChronicleEntries, planChroniclePassages, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNKS_PER_CHAPTER } from '../../llm/chronicler.js';
+import { writeChronicleChapters, chronicleToMarkdown, collectChronicleEntries, lastChronicledIndex, planChroniclePassages, CHRONICLE_MIN_MESSAGES, CHRONICLE_CHUNKS_PER_CHAPTER } from '../../llm/chronicler.js';
 import { CHRONICLE_TITLE_MAX } from '../../config/contentLimits.js';
 import { campaignStamp } from '../../state/handlers/shared.js';
 import './Journal.css';
@@ -381,7 +381,8 @@ function ChronicleTab({ chapters, messages, heroName, chapterTitle, onChapterTit
     // A long quest arc closed (WOW 2026-11-04): the player's own storyline ended.
     const suggestedQuest = suggested?.reason === 'quest';
     const [removeArmed, setRemoveArmed] = useState(false);
-    const lastChronicled = chapters.length > 0 ? (chapters[chapters.length - 1].toIndex ?? -1) : -1;
+    // The FURTHEST chapter, the close's own rule (2026-11-05 strengthening P2).
+    const lastChronicled = lastChronicledIndex(chapters);
     // The pending walk and the passage plan are memoized on the transcript
     // (2026-09-26 chronicler nit): they used to re-run on every keystroke of
     // the title input and every progress tick of a write.

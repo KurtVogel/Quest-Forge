@@ -37,10 +37,14 @@ import { isHeroRef } from './spellcasting.js';
  * can't be re-read mid-loop).
  *
  * @param {Array} requestedRolls
- * @param {object} ctx - { character, inventory, party, dispatch }
+ * @param {object} ctx - { character, inventory, party, dispatch, onDiceLanded? }
+ *   `onDiceLanded` fires when ANOTHER actor's dice land (an NPC / companion
+ *   roll): those never enter the roll ledger (2026-11-05), so the runner's
+ *   "did dice land" probe, which reads the ledger, hears about them here.
  * @returns {{ results: Array, appliedHp: boolean }}
  */
-export function resolveRolls(requestedRolls, { character, inventory, party, dispatch }) {
+export function resolveRolls(requestedRolls, { character, inventory, party, dispatch, onDiceLanded = null }) {
+    const otherActorDiceLanded = typeof onDiceLanded === 'function' ? onDiceLanded : () => {};
     const companions = party || [];
 
     // Working HP copies — mutated as the batch resolves, flushed to state at the end.
@@ -108,6 +112,7 @@ export function resolveRolls(requestedRolls, { character, inventory, party, disp
                 // band (a +15 stat with a +3 blade is 18, not a hallucination).
                 engineModifier: true,
             }, character, dispatch, inventory, roll.dc ?? DEFAULT_ROLL_DC);
+            otherActorDiceLanded();
             if (result) results.push(result);
         } else if (roll.type === 'npc_attack' || roll.type === 'npc_save') {
             // Resolve the to-hit vs the correct target's AC (companion AC if targeting
@@ -120,10 +125,12 @@ export function resolveRolls(requestedRolls, { character, inventory, party, disp
                 // no damage: the engine tracks no HP for this person, so the
                 // DM narrates the outcome and the hero's HP is untouched.
                 const result = resolveNpcRoll(roll, character, dispatch, inventory, roll.dc ?? DEFAULT_ROLL_DC, null);
+                otherActorDiceLanded();
                 if (result) results.push({ ...result, targetName: target.name, untrackedTarget: true });
                 continue;
             }
             const result = resolveNpcRoll(roll, character, dispatch, inventory, comp?.ac, comp?.conditions);
+            otherActorDiceLanded();
             if (!result) continue;
             results.push(result);
 
@@ -356,7 +363,8 @@ function buildRollOutcomePrompt({ summary, preNarrated = false, setupNarrative =
  * @returns {Promise<{ revealedIds: string[] }|undefined>} — `revealedIds` ONLY when
  *   every roll resolved to nothing and the withheld rows were revealed (the caller
  *   extracts the fiction that just became canon); "did dice land" is still read off
- *   the roll ledger, never off a return value.
+ *   the roll ledger, never off a return value — plus `onDiceLanded` for another
+ *   actor's dice, which leave no ledger row (2026-11-05).
  */
 export async function handleRequestedRolls(requestedRolls, {
     getState,
@@ -371,6 +379,7 @@ export async function handleRequestedRolls(requestedRolls, {
     setupMessageId = null,
     rulingMessageId = null,
     setupLocation = null,
+    onDiceLanded = null,
 }) {
     const state = getState();
     const character = state.character;
@@ -388,6 +397,7 @@ export async function handleRequestedRolls(requestedRolls, {
         inventory,
         party: state.party,
         dispatch,
+        onDiceLanded,
     });
 
     // Every proposed roll resolved to nothing (an initiative-only request, a
@@ -518,14 +528,17 @@ function damageLine({ label, notation, result, crit = false, rerolls = [] }) {
 }
 
 /**
- * An NPC's inline damage on a hit: rolled, surfaced (ADD_ROLL + chat line),
+ * An NPC's inline damage on a hit: rolled, surfaced (a chat line, no ledger row),
  * doubled on a crit. The notation is already band-checked by the caller; a
  * string the dice parser still refuses rolls the kernel's 1d4.
  * @returns {{ total: number }}
  */
 function rollAndShowDamage(notation, label, dispatch, { crit = false } = {}) {
     const out = rollDamage(notation, label, { critical: crit });
-    dispatch({ type: 'ADD_ROLL', payload: out.roll });
+    // The chat line only, no ledger row (2026-11-05 strengthening P2): the
+    // roll ledger is the HERO's dice (`appendRollHistory`'s membership rule,
+    // the exchange's `heroRolls` precedent) — an NPC's damage read back as
+    // the hero's record in the recall dossier.
     dispatch({ type: 'ADD_MESSAGE', payload: systemMessage(damageLine({ label, notation: out.notation, result: out.roll, crit })) });
     return { total: out.total };
 }
@@ -580,8 +593,10 @@ function resolveNpcRoll(roll, character, dispatch, inventory, targetAC, targetCo
         condNote = eff.note ? ` (target${eff.note})` : '';
     }
 
+    // Another actor's d20 (an NPC attack / save, a companion's swing): the
+    // chat line below, never a ledger row (2026-11-05 strengthening P2 — the
+    // roll ledger is the hero's; see rollAndShowDamage).
     const result = rollWithAdvantage(npcMod, roll.description || `${roll.attacker || 'Enemy'} attack`, effAdvantage, effDisadvantage);
-    dispatch({ type: 'ADD_ROLL', payload: result });
 
     // Determine the DC to beat. Saves use the spell/ability DC; attacks use the target's AC.
     // For attacks on the PLAYER, always compute AC live from inventory — never trust the DM.

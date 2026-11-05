@@ -18,7 +18,7 @@ import { sanitizeHeroTells } from '../../engine/heroTells.js';
 import { buildHeroDeath, describeEpitaph } from '../../engine/heroDeath.js';
 import { sanitizeQuestRecords } from './quests.js';
 import { normalizeJournalEntry } from '../../engine/journalEntry.js';
-import { cleanTextField, LOCATION_NAME_MAX, MESSAGE_CONTENT_MAX, normalizeCampaignPremise } from '../../config/contentLimits.js';
+import { cleanTextField, LOCATION_NAME_MAX, MAX_COMBAT_ENEMIES, MESSAGE_CONTENT_MAX, normalizeCampaignPremise } from '../../config/contentLimits.js';
 import { normalizeRollRuling, RECENT_RULING_LIMIT, sanitizePendingRoleplayCheck, sanitizeRecentChecks } from '../../engine/roleplayCheck.js';
 import { canonicalEnemyId, enemyOutcome, normalizeEnemyConditions, sanitizeLoadedEnemy } from '../../engine/enemyStats.js';
 import { COMBAT_PHASES } from '../../engine/combatPredicates.js';
@@ -251,7 +251,7 @@ function sanitizeStoredExchangeResult(result) {
                     const condition = cleanTextField(enemy.condition, 40);
                     return {
                         id: cleanTextField(enemy.id, 120) || undefined,
-                        name: cleanTextField(enemy.name, EXCHANGE_NAME_MAX) || 'Enemy',
+                        name: cleanTextField(enemy.name, EXCHANGE_NAME_MAX, { singleLine: true }) || 'Enemy',
                         hp,
                         maxHp,
                         ...(condition && { condition }),
@@ -263,7 +263,7 @@ function sanitizeStoredExchangeResult(result) {
             companions: Array.isArray(result.postState.companions)
                 ? result.postState.companions.filter(isRecord).slice(0, 4).map(companion => ({
                     id: cleanTextField(companion.id, 120) || undefined,
-                    name: cleanTextField(companion.name, EXCHANGE_NAME_MAX) || 'Companion',
+                    name: cleanTextField(companion.name, EXCHANGE_NAME_MAX, { singleLine: true }) || 'Companion',
                     hp: Math.trunc(finiteOr(companion.hp, 0)),
                     maxHp: Math.max(1, Math.trunc(finiteOr(companion.maxHp, 1))),
                     status: cleanTextField(companion.status, 20) || undefined,
@@ -302,7 +302,9 @@ function sanitizeTurnOrderEntry(actor) {
     if (!actor || typeof actor !== 'object' || Array.isArray(actor)) return null;
     if (!TURN_ORDER_TYPES.has(actor.type)) return null;
     const id = cleanTextField(actor.id, 120);
-    const name = cleanTextField(actor.name, EXCHANGE_NAME_MAX);
+    // One line (2026-11-05 enemy-stats P2): a newline in a loaded name forged
+    // prompt headings through the turn order, like the enemy name it mirrors.
+    const name = cleanTextField(actor.name, EXCHANGE_NAME_MAX, { singleLine: true });
     if (actor.type !== 'player' && !id && !name) return null;
     return {
         type: actor.type,
@@ -536,9 +538,14 @@ function validateSaveState(payload) {
             const active = strictFlag(merged.active);
             // Loaded saves are untrusted input: re-validate enemy stats so a tampered or
             // legacy save can't reintroduce an absurd attackBonus/damage/AC/HP after load.
-            const enemies = assignUniqueEnemyIds(Array.isArray(merged.enemies)
+            // The live lane's count bound (2026-11-05 enemy-stats-conditions P1):
+            // the turn order was capped at 40 and the enemies not at all, so a
+            // reloaded 60-foe fight had 21 foes with no turn row attacking every round.
+            const loadedEnemies = Array.isArray(merged.enemies)
                 ? merged.enemies.map(sanitizeLoadedEnemy).filter(Boolean)
-                : []);
+                : [];
+            const enemies = assignUniqueEnemyIds(loadedEnemies.slice(0, MAX_COMBAT_ENEMIES));
+            const droppedEnemyIds = new Set(loadedEnemies.slice(MAX_COMBAT_ENEMIES).map(enemy => enemy.id).filter(Boolean));
             const knownPhases = new Set(Object.values(COMBAT_PHASES));
             let phase = active && knownPhases.has(merged.phase)
                 ? merged.phase
@@ -550,8 +557,18 @@ function validateSaveState(payload) {
             if (phase === COMBAT_PHASES.AWAITING_NARRATION && !lastExchangeResult?.exchangeId) {
                 phase = COMBAT_PHASES.AWAITING_PLAYER;
             }
+            // …and the SAME bound on the turn order's enemy rows; a row naming a
+            // foe trimmed above goes with it.
+            let enemyRows = 0;
             const turnOrder = Array.isArray(merged.turnOrder)
-                ? merged.turnOrder.map(sanitizeTurnOrderEntry).filter(Boolean).slice(0, 40)
+                ? merged.turnOrder.map(sanitizeTurnOrderEntry).filter(Boolean)
+                    .filter(actor => {
+                        if (actor.type !== 'enemy') return true;
+                        if (droppedEnemyIds.has(actor.id) && !enemies.some(enemy => enemy.id === actor.id)) return false;
+                        enemyRows += 1;
+                        return enemyRows <= MAX_COMBAT_ENEMIES;
+                    })
+                    .slice(0, 40)
                 : [];
             const playerIdx = turnOrder.findIndex(actor => actor.type === 'player');
             const currentTurn = phase === COMBAT_PHASES.AWAITING_PLAYER && playerIdx >= 0

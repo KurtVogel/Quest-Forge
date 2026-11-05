@@ -139,7 +139,7 @@ describe('export round-trip', () => {
             appearance: 'Broad dwarf with a black braided beard and a broken nose.',
             portraitUrl,
             portraitPrompt: 'Waist-up dwarf fighter portrait.',
-            portraitUpdatedAt: 12345,
+            portraitUpdatedAt: 1767312000000,
         }, inventory));
         const imported = parseCharacterExport(file);
 
@@ -147,7 +147,7 @@ describe('export round-trip', () => {
         expect(imported.character.portraitUrl).toBe(portraitUrl);
         // Never read anywhere — not part of a hero any more (2026-09-21 audit P2).
         expect(imported.character).not.toHaveProperty('portraitPrompt');
-        expect(imported.character.portraitUpdatedAt).toBe(12345);
+        expect(imported.character.portraitUpdatedAt).toBe(1767312000000);
     });
 
     it('strips an over-ceiling portrait but imports the hero (2026-08-04 queue P2)', () => {
@@ -448,7 +448,7 @@ describe('2026-09-03 audit: vault test depth', () => {
         const { character } = makeFighter();
         const portraitUrl = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
         expect(sanitizeCharacter({ ...character, portraitUrl, portraitUpdatedAt: 'yesterday' }).portraitUpdatedAt).toBeNull();
-        expect(sanitizeCharacter({ ...character, portraitUrl, portraitUpdatedAt: 1700000000000 }).portraitUpdatedAt).toBe(1700000000000);
+        expect(sanitizeCharacter({ ...character, portraitUrl, portraitUpdatedAt: 1767312000000 }).portraitUpdatedAt).toBe(1767312000000);
     });
 
     it('import → export → import is stable, and begin-from-roster keeps the roster id by construction', () => {

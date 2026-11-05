@@ -136,7 +136,7 @@ describe('hero tells — reducer, cadence tick, load, prompt (2026-09-23)', () =
         const unnamed = gameReducer(base, { type: 'ADD_HERO_TELLS', payload: [{ text: 'never draws first', kind: 'principle', witnesses: [] }] });
         expect(unnamed.heroTells[0].witnesses).toEqual(['Osma']);
         const named = gameReducer(base, { type: 'ADD_HERO_TELLS', payload: [{ ...PIPE }] });
-        expect(named.heroTells[0].witnesses).toEqual(['Maren', 'Osma']);
+        expect(named.heroTells[0].witnesses).toEqual(['Osma', 'Maren']); // party first (2026-11-05)
         const bed = gameReducer(base, { type: 'ADD_HERO_TELLS', payload: [{ text: 'likes to be held afterwards', kind: 'intimate', witnesses: ['Maren'] }] });
         expect(bed.heroTells[0].witnesses).toEqual(['Maren']);
         // No party, no witness: nothing recorded, the state is untouched.

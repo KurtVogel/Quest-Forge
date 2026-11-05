@@ -45,6 +45,7 @@ import {
     getAllFeaturesUpToLevel,
     isKnownClass,
     isKnownRace,
+    isSaneHeroId,
     mintHeroId,
     normalizeAbilityScoreImprovementState,
     normalizeFightingStyle,
@@ -355,7 +356,9 @@ function healLoadedCharacter(character) {
         // non-string id (`42`, `{}`) rode the spread, `toHeroTemplate` kept a
         // string id only, and the sheet's adoption guard (`!character.id`)
         // was false for it — every Save to Roster minted a fresh row.
-        id: typeof character.id === 'string' && character.id.trim() ? character.id : mintHeroId(),
+        // Since 2026-11-05 (strengthening P2) also BOUNDED: an over-long or
+        // odd-charset id is the roster's key too, so it mints fresh.
+        id: isSaneHeroId(character.id) ? character.id : mintHeroId(),
         name,
         gender: cleanTextField(character.gender, HERO_TEXT_LIMITS.gender),
         appearance: cleanTextField(character.appearance, HERO_TEXT_LIMITS.appearance),

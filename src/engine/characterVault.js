@@ -11,14 +11,21 @@ import { RACES } from '../data/races.js';
 import { CLASSES } from '../data/classes.js';
 import { normalizeItem } from '../data/items.js';
 import { getMaxHitPoints, getModifier } from './rules.js';
-import { ABILITY_NAMES, SKILL_LABELS, buildDerivedCharacterFields, isKnownClass, isKnownRace, mintHeroId, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from './characterUtils.js';
+import { ABILITY_NAMES, SKILL_LABELS, buildDerivedCharacterFields, isKnownClass, isKnownRace, isSaneHeroId, mintHeroId, normalizeAbilityScoreImprovementState, normalizeFightingStyle, normalizeMartialArchetype } from './characterUtils.js';
 import { getExperienceThreshold, MAX_CHARACTER_LEVEL } from './progression.js';
 import { normalizeEquippedSlots } from './equipment.js';
 import { HERO_TEXT_LIMITS, MAX_COIN_HELD, cleanTextField } from '../config/contentLimits.js';
 import { sanitizePortraitUrl } from './portraitUrl.js';
+import { saneEpochMs } from '../state/handlers/shared.js';
 
 export const EXPORT_FORMAT = 'quest-forge-character';
 export const EXPORT_VERSION = 1;
+/**
+ * Largest hero file the import reads (2026-11-05 strengthening P2): a real
+ * file is the template plus one ≤300k-char portrait and ≤200 items — well
+ * under 1 MB. The wizard gates on `file.size` before `file.text()`.
+ */
+export const MAX_CHARACTER_FILE_BYTES = 5 * 1024 * 1024;
 
 // DECISIONS.md 2026-06-15: level-up HP is fixed-average (deterministic), so a
 // hero has exactly ONE legitimate maxHP for their class / CON / level and the
@@ -74,7 +81,9 @@ function clampInt(value, min, max, fallback) {
  */
 export function toHeroTemplate(character, inventory) {
     const rested = sanitizeCharacter(character);
-    const id = typeof character?.id === 'string' && character.id.trim() ? character.id : rested.id;
+    // Bounded key (2026-11-05 strengthening P2): an over-long / odd-charset id
+    // is minted fresh like a missing one (the sheet writes the new id back).
+    const id = isSaneHeroId(character?.id) ? character.id : rested.id;
     return { character: { ...rested, id }, inventory: sanitizeInventory(inventory) };
 }
 
@@ -204,9 +213,12 @@ export function sanitizeCharacter(raw) {
         // ONLY with a picture that landed (2026-10-19, the vault twin of
         // DECISIONS 2026-09-09's "a rejected URL never stamps the pair").
         portraitProvider: portraitUrl ? cleanTextField(raw.portraitProvider, HERO_TEXT_LIMITS.portraitProvider) : '',
-        portraitUpdatedAt: portraitUrl && Number.isFinite(raw.portraitUpdatedAt) ? raw.portraitUpdatedAt : null,
+        // Both stamps inside the sane epoch band (2026-11-05 strengthening P2):
+        // `1e300` / `-1e300` imported intact. An absurd createdAt becomes now
+        // (the template's own stamp for a file without one).
+        portraitUpdatedAt: portraitUrl && Number.isFinite(raw.portraitUpdatedAt) ? saneEpochMs(raw.portraitUpdatedAt) : null,
         notes: cleanTextField(raw.notes, HERO_TEXT_LIMITS.notes),
-        createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now(),
+        createdAt: saneEpochMs(raw.createdAt),
     };
 
     return {

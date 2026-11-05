@@ -1199,11 +1199,15 @@ export function createTurnRunner({
         // — the normal state after one fight — never grows, and the old
         // length probe read "no dice" forever.
         const newestRollBefore = newestRollMarker(getState().rollHistory);
+        // Another actor's dice (an NPC / companion roll) leave no ledger row
+        // (2026-11-05 strengthening P2), so the resolver reports them here.
+        let otherActorDiceLanded = false;
         try {
             const outcome = await handleRequestedRolls(proposal.rolls, {
                 getState,
                 dispatch,
                 sendToLLM,
+                onDiceLanded: () => { otherActorDiceLanded = true; },
                 playerAction: proposal.playerAction,
                 preNarrated: proposal.preNarrated,
                 setupNarrative: proposal.setupNarrative,
@@ -1244,7 +1248,7 @@ export function createTurnRunner({
             // Two questions, asked once each. Did dice land? That decides what
             // happens to the proposal. Was it a deliberate Stop? That decides
             // only whether a line is posted (the player chose the silence).
-            const diceRolled = newestRollMarker(getState().rollHistory) !== newestRollBefore;
+            const diceRolled = otherActorDiceLanded || newestRollMarker(getState().rollHistory) !== newestRollBefore;
             const stopped = error.name === 'AbortError';
             if (diceRolled) {
                 // The dice are final: restoring the proposal would reopen the

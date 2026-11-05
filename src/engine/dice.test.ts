@@ -131,7 +131,8 @@ describe('parseNotation', () => {
     });
 
     it('rejects malformed notations', () => {
-        for (const bad of ['d20', '2d', 'abc', '', '2d6+', '1d6+2d4', '-1d6']) {
+        // 'd20' left this list 2026-11-05: the count-less shorthand is one die now (queue1105.dice.test.js).
+        for (const bad of ['2d', 'abc', '', '2d6+', '1d6+2d4', '-1d6', 'd', '1d8+2, plus 1d6 poison']) {
             expect(() => parseNotation(bad)).toThrow(/Invalid dice notation/);
         }
     });

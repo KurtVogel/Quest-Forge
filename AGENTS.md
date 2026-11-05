@@ -129,6 +129,9 @@ docs/         STATUS, IDEAS, DECISIONS, the three queues, ARCHITECTURE.md, flows
 - Never string-append a response mode after the builder returns; never add a DM event channel
   outside `eventChannels.js` (the agreement test fails if the registry and the format example drift).
 - Never rely on provider goodwill for OOC or refusals; a refusal is an error, never a blank turn.
+- Never add or tune fuzzy name / text matching (`namesMatch`, `containment`, token presence) to decide
+  whether two LLM-written strings mean the same person, item, tell or claim: the LLM picks from a list
+  it is shown (an id, or an exact copy like `recorded_as`) and the engine compares exactly (2026-11-05).
 - Never silently contradict a `docs/DECISIONS.md` entry — revisit it explicitly with Vesa first.
 
 ## Gotchas worth a sentence

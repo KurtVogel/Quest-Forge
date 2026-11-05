@@ -462,6 +462,10 @@ export default function ChatPanel() {
         // re-embeds only what's missing — no wipe, no cross-campaign leakage, and a
         // page reload no longer re-embeds the whole corpus. One mount = one campaign
         // (AppShell is keyed by session id), so mount-time seeding is sound.
+        const postSeedIncomplete = (missing, reason) => dispatch({
+            type: 'ADD_MESSAGE',
+            payload: { role: 'system', kind: 'error', content: describeMemorySeedIncomplete(missing, reason, stateRef.current.settings) },
+        });
         seedMemories(machineryKey, items, s.session?.id || null, {
             // The superseded facts' cached rows retire with them — the belt
             // under the record rule (a retired fact is out of the seed too).
@@ -476,14 +480,19 @@ export default function ChatPanel() {
             // Rows the seed could not embed (a rate limit, an outage, a
             // rejected key) leave the whole session on a partial store — said
             // once, as an infrastructure line (2026-09-29 vector-memory P2).
-            onIncomplete: ({ missing, reason }) => dispatch({
-                type: 'ADD_MESSAGE',
-                payload: { role: 'system', kind: 'error', content: describeMemorySeedIncomplete(missing, reason, stateRef.current.settings) },
-            }),
+            // A cache that could not be opened (2026-11-05 strengthening P2)
+            // is not a partial store — said once in the Inspector instead.
+            onIncomplete: ({ missing, reason, cacheUnavailable }) => {
+                if (cacheUnavailable) captureProviderNote('Memory seed: the embedding cache could not be opened — this campaign\'s memories live in memory only and are embedded again after a reload.');
+                if (missing > 0) postSeedIncomplete(missing, reason);
+            },
         })
             .catch((e) => {
                 console.error('[RAG] Memory seeding failed — will retry next mount:', e);
                 memorySeededRef.current = false; // Allow retry on next mount
+                // A thrown seed leaves the session on an EMPTY store — the same
+                // notice as a partial one, not console-only (2026-11-05 strengthening nit).
+                postSeedIncomplete(items.length, { message: typeof e?.message === 'string' ? e.message : '' });
             });
         // Re-runs when the machinery key first appears (a key entered in
         // Settings after mount previously left the session unseeded AND its

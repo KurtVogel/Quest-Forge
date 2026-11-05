@@ -11,7 +11,9 @@ import {
     BLOB_SWEEP_STORES,
     PAYLOAD_STORE,
     STORE_NAME,
+    addressableKey,
     ensureLaneBlobs,
+    metaEpochMs,
     metaNumber,
     metaText,
     metadataRefs,
@@ -108,6 +110,8 @@ export function serializeGameState(gameState, { keepStamps = false } = {}) {
 
 // === Slot metadata: ONE field table for the write and the read ===
 
+const metaCount = (min) => (value, fallback) => Math.max(min, Math.floor(metaNumber(value, fallback)));
+
 /**
  * THE slot metadata fields (2026-10-06 persistence P2): `read` is the typed
  * reader (`metaText` / `metaNumber`), `fallback` what an absent or junk value
@@ -115,6 +119,9 @@ export function serializeGameState(gameState, { keepStamps = false } = {}) {
  * the table and `projectSaveMetadata` reads it back, so the two cannot drift
  * (the 08-27 queue fixed exactly that drift once, by hand). Local and cloud
  * add their own `slotId` / `savedAt` / lane ref lists around these.
+ * Counts and stats read through `metaCount` (2026-11-05 strengthening P2): a
+ * whole number at or above its floor — `characterLevel: -5` or `2.5` rendered
+ * as is on the list row.
  */
 const SAVE_METADATA_FIELDS = [
     // Campaign identity stamp: lets deletion decide whether any slot still
@@ -123,19 +130,19 @@ const SAVE_METADATA_FIELDS = [
     { field: 'sessionId', read: metaText, fallback: null, from: s => s.session?.id },
     { field: 'name', read: metaText, fallback: 'Unnamed Save', from: s => s.session?.name },
     { field: 'characterName', read: metaText, fallback: 'Unknown', from: s => s.character?.name },
-    { field: 'characterLevel', read: metaNumber, fallback: 1, from: s => s.character?.level },
+    { field: 'characterLevel', read: metaCount(1), fallback: 1, from: s => s.character?.level },
     { field: 'characterClass', read: metaText, fallback: 'Unknown', from: s => s.character?.class },
-    { field: 'characterHP', read: metaNumber, fallback: 0, from: s => s.character?.currentHP },
-    { field: 'characterMaxHP', read: metaNumber, fallback: 0, from: s => s.character?.maxHP },
-    { field: 'characterAC', read: metaNumber, fallback: 10, from: s => s.character?.armorClass },
-    { field: 'gold', read: metaNumber, fallback: 0, from: s => s.character?.gold },
-    { field: 'silver', read: metaNumber, fallback: 0, from: s => s.character?.silver },
-    { field: 'copper', read: metaNumber, fallback: 0, from: s => s.character?.copper },
-    { field: 'inventoryCount', read: metaNumber, fallback: 0, from: s => countOf(s.inventory) },
+    { field: 'characterHP', read: metaCount(0), fallback: 0, from: s => s.character?.currentHP },
+    { field: 'characterMaxHP', read: metaCount(0), fallback: 0, from: s => s.character?.maxHP },
+    { field: 'characterAC', read: metaCount(0), fallback: 10, from: s => s.character?.armorClass },
+    { field: 'gold', read: metaCount(0), fallback: 0, from: s => s.character?.gold },
+    { field: 'silver', read: metaCount(0), fallback: 0, from: s => s.character?.silver },
+    { field: 'copper', read: metaCount(0), fallback: 0, from: s => s.character?.copper },
+    { field: 'inventoryCount', read: metaCount(0), fallback: 0, from: s => countOf(s.inventory) },
     { field: 'location', read: metaText, fallback: null, from: s => s.currentLocation },
-    { field: 'questCount', read: metaNumber, fallback: 0, from: s => countOf(s.quests, q => q?.status === 'active') },
-    { field: 'partySize', read: metaNumber, fallback: 0, from: s => countOf(s.party) },
-    { field: 'messageCount', read: metaNumber, fallback: 0, from: s => countOf(s.messages) },
+    { field: 'questCount', read: metaCount(0), fallback: 0, from: s => countOf(s.quests, q => q?.status === 'active') },
+    { field: 'partySize', read: metaCount(0), fallback: 0, from: s => countOf(s.party) },
+    { field: 'messageCount', read: metaCount(0), fallback: 0, from: s => countOf(s.messages) },
 ];
 
 /** A list's count, or nothing for a non-list (a string has a `.length` too). */
@@ -163,11 +170,12 @@ export function buildSaveMetadata(gameState) {
 export function projectSaveMetadata(data, fallbackSlotId = null) {
     const record = data && typeof data === 'object' && !Array.isArray(data) ? data : {};
     const slotId = metaText(record.slotId, null) || (typeof fallbackSlotId === 'string' && fallbackSlotId.trim() ? fallbackSlotId : null);
-    const savedAt = typeof record.savedAt === 'number' || typeof record.savedAt === 'string' ? record.savedAt : 0;
     return {
         slotId,
         ...Object.fromEntries(SAVE_METADATA_FIELDS.map(({ field, read, fallback }) => [field, read(record[field], fallback)])),
-        savedAt,
+        // Typed since 2026-11-05 (strengthening P2): the one raw passthrough
+        // of the row — `new Date('junk')` rendered "Invalid Date".
+        savedAt: metaEpochMs(record.savedAt),
     };
 }
 
@@ -306,14 +314,22 @@ export function listSaves() {
     return withDb((db, resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readonly');
         const store = tx.objectStore(STORE_NAME);
+        // The KEYS beside the records (2026-11-05 strengthening P2): a row is
+        // addressed by its exact stored key — a key the text clamp trimmed or
+        // sliced, or a non-string key, listed nothing loadable or deletable
+        // while the sweep still counted its refs live. Same key order, and
+        // requests settle in order.
+        const keysRequest = store.getAllKeys();
         const request = store.getAll();
         request.onsuccess = () => {
+            const keys = keysRequest.result || [];
             // Typed projection (never the raw record — a legacy record still
             // carries its whole `state`, and the renderers trust every field).
             const saves = request.result
-                .filter(s => s && typeof s === 'object' && s.slotId !== AUTOSAVE_SLOT)
-                .map(record => projectSaveMetadata(record))
-                .filter(save => save.slotId)
+                .map((record, index) => ({ record, key: keys[index] }))
+                .filter(({ record, key }) => record && typeof record === 'object' && key !== AUTOSAVE_SLOT)
+                .map(({ record, key }) => ({ ...projectSaveMetadata(record), slotId: addressableKey(key) }))
+                .filter(save => save.slotId !== null)
                 .sort((a, b) => metaNumber(b.savedAt, 0) - metaNumber(a.savedAt, 0));
             resolve(saves);
         };
