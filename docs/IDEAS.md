@@ -4315,3 +4315,27 @@ on a rollback deploy or a blocked store. Every `catch { return [] }` on a cache 
 to the lane that reports, and the pin counts the second mount. Payoff: a crowd the DM narrates instead
 of sixty engine-rolled attacks, a combat block that stays one block, a cache row that is only its row,
 and a quota bill the Inspector can explain.
+
+### [strengthening] A rung without its siblings' gate is the door; a revival is a rebirth; a cap that counts one cost is blind to the other; the day-old ruling is grepped by shelf name — status: `idea` (2026-11-06)
+Four rules from the quests + story-memory pass of 2026-11-06 (Lap 2, hostile input), each reproduced
+with a throwaway probe over the real reducer, the real wire normalizer and the real prompt builder.
+**(1)** `findStoryMemoryMatch` has five identity rungs and four of them require the same type; the
+exact-text rung does not, and the merge then spreads the incoming card over the stored one keeping only
+`id` / `source` / `status` / `text` — an engine wound became a `callback`, then a `relationship`, and
+lost the six-cadence dormancy rule its type carried. When N rungs share a precondition, hoist it above
+the rungs, and the merge keeps every field a rung was allowed to assume. **(2)** A card retracted with
+its message (`dormant`, `retractedAtMessage`) is revived by the next re-report through the ordinary
+dormant-revive rule — with the dead message still its `sourceMessage` and the stamp still on it; delete
+the reviving message and the card stays live forever, because retraction follows `sourceMessage`. The
+path that flips a terminal-ish status back to live re-runs the birth composer for the stamps that
+status owned. **(3)** `capNovelCards` bounds the Scribe's NEW cards and lets re-reports through free;
+a re-report is a sighting, and the merge stamps `lastSeenMessage = now` — eight agreeing id echoes
+reset the age of eight cards in one turn, the age the callback lane measures from. A bounded lane with
+two effects gives each a bound, or the entry says why one is free. **(4)** The sworn quest record was
+built on 11-04 and the no-name-matching ruling landed on 11-05: the patron resolves through
+`resolveNpcRef`'s `namesMatch` rung and the open lane through `questNameMatcher`, both with pins
+("Hesper" → Hesper Vane; "Deliver letter 1" and "Deliver letter 2" are one row). The audit after a
+ruling greps the ruled shelves by name (`namesMatch`, `containment`, `resolveNpcRef`) across the newest
+feature first and lists every site, pin included, for the redesign instead of tuning any of them.
+Payoff: an engine card that keeps its type and its ending, a retraction that holds the second time, a
+callback block the Scribe cannot empty by echoing, and a redesign list that is complete before it starts.
