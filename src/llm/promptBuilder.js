@@ -867,7 +867,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "conditions_gained": [],
   "conditions_removed": [],
   "healing": 0,
-  "quest_updates": [{ "status": "new|updated|completed|failed", "name": "Quest Name", "description": "Quest description", "patron": "who asked, by their full known name (omit when the hero took it up alone)", "promised": "the fee or stake agreed, a few words", "outcome": "how it ended — on completed/failed only" }],
+  "quest_updates": [{ "status": "new|updated|completed|failed", "id": "on updated/completed/failed: the [id: …] printed beside that quest in ACTIVE QUESTS, copied exactly — omit on new", "name": "Quest Name", "description": "Quest description", "patron": "who asked, by their full known name (omit when the hero took it up alone)", "promised": "the fee or stake agreed, a few words", "outcome": "how it ended — on completed/failed only" }],
   "location": "<the exact name of the place the hero PHYSICALLY stands at the END of this response, ONLY when it changed — never a place merely mentioned, discussed, or being left behind; omit when unchanged>",
   "world_facts": [
     { "fact": "The bandit captain Rarg is dead, killed by the player at the crossroads.", "category": "event" },
@@ -929,6 +929,7 @@ If no game events occurred, just provide the narrative text without any JSON blo
 
 ## QUEST TRACKING INSTRUCTIONS
 - The Quests panel only shows what you emit — whenever the hero ACCEPTS a job, deal, debt, errand, hunt, or investigation (even an informal handshake like "clear the rats and the room is yours"), emit \`quest_updates\` with \`status: "new"\`, a short name, what was agreed as the description, \`patron\` (who asked, by their full known name — omit when nobody did) and \`promised\` (the fee or stake agreed, a few words). The record keeps the agreement and every later stage; the panel shows them.
+- A quest already in ACTIVE QUESTS is named by its \`id\` (the \`[id: …]\` on its line, copied exactly): the engine moves the quest that id names, so a re-worded name can never open a twin or close the wrong one. A \`new\` quest carries no id.
 - When an objective meaningfully changes, emit \`status: "updated"\` with the new situation; when it is fulfilled or becomes impossible, emit \`status: "completed"\` or \`status: "failed"\` in the same response that narrates it, with \`outcome\`: one line of how it ended (what was delivered, who paid what, what was lost). \`failed\` means the GOAL itself can no longer be reached — never a quest whose route changed (a lost ship, a new plan, a different road to the same promise): that is \`updated\` with the new route, never a failed quest beside a new one.
 - Completing a quest pays engine-computed XP automatically (a visible system line confirms it). NEVER emit \`exp_awarded\` for a quest completion — that double-pays. Failed quests pay nothing.
 - One quest per actual agreement — don't open quests for vague rumors, mere invitations, or things the hero declined.

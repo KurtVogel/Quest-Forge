@@ -98,23 +98,36 @@ describe('a DOWN hero stays down through the engine-amount XP folds a DM channel
     });
 });
 
-describe('on the close lane the id is a hint, the name is identity (2026-10-23 P1)', () => {
+// Revised 2026-11-06 (night): an echoed id DECIDES on the close lane. The
+// 10-23 protection (one arc's id with another arc's exact name must not close
+// both) is kept as an exact refusal; the name gate on the id is gone.
+describe('on the close lane an echoed id decides (2026-11-06; was "the id is a hint", 2026-10-23 P1)', () => {
     const twoArcs = () => {
         let state = gameReducer(withHero(), { type: 'ADD_QUEST', payload: { id: 'q-relic', name: 'Find the Relic of Kel' } });
         state = gameReducer(state, { type: 'ADD_QUEST', payload: { id: 'q-caravan', name: 'Escort the salt caravan' } });
         return passTurns(state, 4);
     };
 
-    it('a ref pairing the caravan\'s name with the relic\'s id closes the caravan ALONE and pays it', () => {
+    it('a ref pairing the caravan\'s exact name with the relic\'s id closes NEITHER and says so', () => {
         const next = gameReducer(twoArcs(), {
             type: 'COMPLETE_QUEST',
             payload: { id: 'q-relic', name: 'Escort the salt caravan', status: 'completed' },
         });
         expect(next.quests.find(q => q.id === 'q-relic').status).toBe('active');
+        expect(next.quests.find(q => q.id === 'q-caravan').status).toBe('active');
+        expect(next.quests).toHaveLength(2);
+        expect(next.character.exp).toBe(0);
+        expect(next.messages.at(-1)).toMatchObject({ dmVisible: true });
+        expect(next.messages.at(-1).content).toContain('the id of "Find the Relic of Kel" and the name of "Escort the salt caravan"');
+        expect(next.messages.at(-1).content).toContain('nothing was completed');
+    });
+
+    it('a finished row\'s id beside a live arc\'s exact name closes the live arc (only a LIVE id decides)', () => {
+        let state = gameReducer(twoArcs(), { type: 'COMPLETE_QUEST', payload: { id: 'q-relic' } });
+        state = passTurns(state, 2);
+        const next = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { id: 'q-relic', name: 'Escort the salt caravan' } });
         expect(next.quests.find(q => q.id === 'q-caravan').status).toBe('completed');
         expect(next.quests).toHaveLength(2);
-        expect(next.character.exp).toBe(75);
-        expect(next.messages.at(-1).content).toContain('quest completed: Escort the salt caravan');
     });
 
     it('an id whose name agrees fuzzily still closes by the id; an id-only ref keeps its by-id close', () => {
@@ -128,15 +141,28 @@ describe('on the close lane the id is a hint, the name is identity (2026-10-23 P
         expect(idOnly.character.exp).toBe(75);
     });
 
-    it('a name the record never held beside a wrong id records ITS OWN finished row, never the id\'s arc', () => {
+    it('a live id closes its arc whatever words ride beside it — a re-worded name mints no phantom row', () => {
+        // The price of trusting the id, pinned on purpose: the id names the
+        // arc, the name beside it is commentary. The ✦ row says which closed.
         const next = gameReducer(twoArcs(), {
             type: 'COMPLETE_QUEST',
-            payload: { id: 'q-relic', name: 'Deliver the letter' },
+            payload: { id: 'q-relic', name: 'Bring Kel\'s lost reliquary home' },
+        });
+        expect(next.quests.find(q => q.id === 'q-relic').status).toBe('completed');
+        expect(next.quests.find(q => q.id === 'q-caravan').status).toBe('active');
+        expect(next.quests).toHaveLength(2);
+        expect(next.character.exp).toBe(75);
+        expect(next.messages.some(m => /Quest done.*Find the Relic of Kel/.test(m.content || ''))).toBe(true);
+    });
+
+    it('an id the record never held falls to the name rungs: an unknown name records its own finished row', () => {
+        const next = gameReducer(twoArcs(), {
+            type: 'COMPLETE_QUEST',
+            payload: { id: 'q-nope', name: 'Deliver the letter' },
         });
         expect(next.quests.find(q => q.id === 'q-relic').status).toBe('active');
         expect(next.quests).toHaveLength(3);
         expect(next.quests.at(-1)).toMatchObject({ name: 'Deliver the letter', status: 'completed' });
-        expect(next.quests.at(-1).id).not.toBe('q-relic');
         expect(next.character.exp).toBe(0);
     });
 });

@@ -15,6 +15,7 @@ import {
     findStoryMemoryMatch,
     ID_REPORT_CONTAINMENT,
     idReportAgrees,
+    idReportDrifted,
     isNameSubject,
     normalizeKnownBy,
     normalizeStoryMemoryCard,
@@ -95,19 +96,31 @@ describe('P1 — the payoff judge scores what the scene did not supply', () => {
     });
 });
 
-describe('P2 — an id is a claim: an echo rewrites nothing', () => {
+// Revised 2026-11-06 (night; was "an id is a claim: an echo rewrites
+// nothing"): the echoed id decides, the TYPE is the one structural check,
+// and the old word floor only marks a drifted rewrite for the log.
+describe('P2 — an echoed id of the same type decides; the word floor is a diagnostic', () => {
     const ferry = card({ id: 'c-ferry', type: 'promise', subject: 'Harl', text: 'Harl the ferryman promised the hero a free crossing at the spring flood.' });
 
-    it('an id re-report with another type or unrelated text matches nothing; one that touches the wording matches', () => {
+    it('another type under the id matches nothing; the same type lands on the card whatever the words', () => {
         expect(ID_REPORT_CONTAINMENT).toBe(0.3);
         const echo = { id: 'c-ferry', type: 'mystery', subject: 'Ilse', text: 'Nobody knows where Ilse goes on the new moon.' };
         expect(idReportAgrees(ferry, echo)).toBe(false);
         expect(findStoryMemoryMatch([ferry], echo)).toBe(-1);
-        const sameTypeUnrelated = { id: 'c-ferry', type: 'promise', subject: 'Ilse', text: 'Ilse swore to bring the hero bread every morning.' };
-        expect(findStoryMemoryMatch([ferry], sameTypeUnrelated)).toBe(-1);
+        const reworded = { id: 'c-ferry', type: 'promise', subject: 'the spring passage', text: 'The boatman at the weir will carry the hero over for nothing once the thaw comes.' };
+        expect(idReportAgrees(ferry, reworded)).toBe(true);
+        expect(findStoryMemoryMatch([ferry], reworded)).toBe(0);
+        expect(idReportDrifted(ferry, reworded)).toBe(true);
         const touching = { id: 'c-ferry', type: 'promise', subject: 'Harl', text: 'Harl still owes the hero that free crossing at the flood.' };
-        expect(idReportAgrees(ferry, touching)).toBe(true);
         expect(findStoryMemoryMatch([ferry], touching)).toBe(0);
+        expect(idReportDrifted(ferry, touching)).toBe(false);
+    });
+
+    it('the id is read first over the whole pool: an earlier look-alike never wins over the card the id names', () => {
+        const lookalike = card({ id: 'c-old', type: 'promise', subject: 'Harl', text: 'Harl the ferryman promised the hero a free crossing at the spring flood, and a meal.' });
+        const named = card({ id: 'c-new', type: 'promise', subject: 'Harl', text: 'Harl asked the hero to bring word from the mill.' });
+        const report = { id: 'c-new', type: 'promise', subject: 'Harl', text: 'Harl the ferryman promised the hero a free crossing at the spring flood.' };
+        expect(findStoryMemoryMatch([lookalike, named], report)).toBe(1);
     });
 
     it('a roster promotion snapshot keeps its stable id across the type flip and a wholesale text change', () => {

@@ -390,15 +390,41 @@ describe('finished quests stay closed (documented 2026-07-23)', () => {
     });
 });
 
-describe('the name is identity, a DM-chosen id only a hint (2026-10-10 quests P2)', () => {
-    it('an id reused for a DIFFERENT arc opens a second row and leaves the first untouched', () => {
-        const first = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q1', name: 'Find the Relic of Kel' } });
-        const second = gameReducer(first, { type: 'ADD_QUEST', payload: { id: 'q1', name: 'Escort the salt caravan' } });
+// Revised 2026-11-06 (night): a `new` never matches by id (the 10-10 case
+// holds), and an `updated` lands on the row its id names — no name gate.
+describe('a new quest names no id; an update lands on the id it echoes (2026-11-06; was 2026-10-10 quests P2)', () => {
+    it('an id reused on a NEW quest opens a second row and leaves the first untouched', () => {
+        const first = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q1', status: 'new', name: 'Find the Relic of Kel' } });
+        const second = gameReducer(first, { type: 'ADD_QUEST', payload: { id: 'q1', status: 'new', name: 'Escort the salt caravan' } });
         expect(second.quests.map(q => q.name)).toEqual(['Find the Relic of Kel', 'Escort the salt caravan']);
         expect(second.quests[0]).toMatchObject({ id: 'q1', status: 'active' });
         // The invented id is re-minted — it may not collide with the live arc.
         expect(second.quests[1].id).not.toBe('q1');
         expect(second.quests[1].id).toMatch(/^quest-/);
+    });
+
+    it('an update re-worded past any name rule still lands on the arc its id names, and keeps the held name', () => {
+        const first = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q1', status: 'new', name: 'Find the Relic of Kel', description: 'Recover it for the abbot.' } });
+        const second = gameReducer(first, { type: 'ADD_QUEST', payload: { id: 'q1', status: 'updated', name: 'The abbot\'s lost reliquary', description: 'The trail leads to the sunken vault.' } });
+        expect(second.quests).toHaveLength(1);
+        expect(second.quests[0]).toMatchObject({ id: 'q1', name: 'Find the Relic of Kel', description: 'The trail leads to the sunken vault.', agreement: 'Recover it for the abbot.' });
+    });
+
+    it('two jobs one digit apart stay two when the second is NEW, and an update by id moves only its own', () => {
+        let state = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { status: 'new', name: 'Deliver letter 1', description: 'To Ada.' } });
+        const firstId = state.quests[0].id;
+        state = gameReducer(state, { type: 'ADD_QUEST', payload: { id: firstId, status: 'updated', name: 'Deliver letter 1', description: 'Ada has moved to the mill.' } });
+        expect(state.quests).toHaveLength(1);
+        expect(state.quests[0].description).toBe('Ada has moved to the mill.');
+    });
+
+    it('an update whose id names one arc and whose exact name is another changes nothing and says so', () => {
+        let state = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q-relic', status: 'new', name: 'Find the Relic of Kel', description: 'Recover it.' } });
+        state = gameReducer(state, { type: 'ADD_QUEST', payload: { id: 'q-caravan', status: 'new', name: 'Escort the salt caravan', description: 'North by the weir.' } });
+        const next = gameReducer(state, { type: 'ADD_QUEST', payload: { id: 'q-relic', status: 'updated', name: 'Escort the salt caravan', description: 'The road is cut.' } });
+        expect(next.quests.map(q => q.description)).toEqual(['Recover it.', 'North by the weir.']);
+        expect(next.messages.at(-1)).toMatchObject({ dmVisible: true });
+        expect(next.messages.at(-1).content).toContain('nothing changed');
     });
 
     it('an id with a drifted but compatible name refreshes the tracked arc', () => {

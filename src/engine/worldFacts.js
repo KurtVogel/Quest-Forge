@@ -93,13 +93,17 @@ export function liveWorldFacts(list) {
  * `flip` (the same claim with its negation reversed — store, and supersede
  * `of`). `existingSets` may be passed to reuse token sets across a batch.
  */
-export function classifyFactCandidate(candidate, liveFacts = [], existingSets = null) {
+export function classifyFactCandidate(candidate, liveFacts = [], existingSets = null, { exceptId = null } = {}) {
     const tokens = factTokenSet(candidate);
     if (tokens.size === 0) return { kind: 'duplicate', of: null };
     const facts = Array.isArray(liveFacts) ? liveFacts : [];
     for (let i = 0; i < facts.length; i++) {
         const existing = facts[i];
         if (!existing || typeof existing.fact !== 'string') continue;
+        // The fact a lane NAMED as replaced is never the candidate's twin
+        // (2026-11-06, night): the id is the lane's reading, and the words
+        // do not get to overrule it.
+        if (exceptId && existing.id === exceptId) continue;
         const set = existingSets?.[i] || factTokenSet(existing.fact);
         if (containment(tokens, set) < NEAR_DUPLICATE_FACT_CONTAINMENT) continue;
         return hasNegation(candidate) !== hasNegation(existing.fact)
@@ -256,6 +260,11 @@ export function sanitizeWorldFactPayload(payload) {
     return { fact, category, knownBy: normalizeKnownBy(payload.knownBy ?? payload.known_by), ...(pinned && { pinned: true }) };
 }
 
+/** A fact's text with case, punctuation and spacing folded — an exact compare, never a word match. */
+function foldFactText(text) {
+    return String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
 function mintFactId() {
     return `fact-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
@@ -290,7 +299,17 @@ export function planWorldFactAdditions(worldFacts, payload, { messageCount = 0, 
     for (const f of (Array.isArray(payload) ? payload : [])) {
         const sanitized = sanitizeWorldFactPayload(f);
         if (!sanitized) continue;
-        const verdict = classifyFactCandidate(sanitized.fact, live, liveSets);
+        // The ref is read FIRST (2026-11-06, night). The containment judge
+        // used to run before it: "the sail was moved from the net-loft to
+        // the foredeck" holds every word of "the sail is in the net-loft",
+        // so the new truth was dropped as a restatement of the very fact the
+        // Scribe named as replaced, and the old place stayed live. A fact a
+        // lane names is set aside from the word judge; only a character-for-
+        // character copy of it (a restatement carrying its own id) is still
+        // a restatement.
+        const named = standingRefs ? findRetirableFact(live, f?.supersedes) : findOpenPlan(live, f?.supersedes);
+        const replaced = named && foldFactText(named.fact) !== foldFactText(sanitized.fact) ? named : null;
+        const verdict = classifyFactCandidate(sanitized.fact, live, liveSets, { exceptId: replaced?.id || null });
         if (verdict.kind === 'duplicate') {
             // A state is not a fact (M0, 2026-09-30): a restatement of a
             // STATE fact ("the road is still flooded") re-stamps its age
@@ -318,7 +337,7 @@ export function planWorldFactAdditions(worldFacts, payload, { messageCount = 0, 
                 }
                 // The new truth is already on record under another line: the
                 // change still retires what the ref names, onto that line.
-                const retired = standingRefs ? findRetirableFact(live, f?.supersedes) : null;
+                const retired = replaced;
                 if (retired && retired.id !== ofId) {
                     facts = facts.map(existing => (existing.id === retired.id
                         ? { ...existing, supersededBy: ofId, supersededAtMessage: messageCount }
@@ -342,25 +361,22 @@ export function planWorldFactAdditions(worldFacts, payload, { messageCount = 0, 
             ...(aspect && { aspect }),
             ...(stamp && { sourceMessage: stamp }),
         };
-        if (verdict.kind === 'flip' && verdict.of?.id) {
-            next.supersedes = verdict.of.id;
-            facts = facts.map(existing => (existing.id === verdict.of.id
+        // An intent is not a deed (memory-research M0, 2026-10-07): a lane
+        // that read KNOWN OPEN PLANS names the plan this fact settles
+        // (`supersedes: <id>`) and the plan closes exactly as a flipped twin
+        // does. The Scribe may also name a standing truth the new fact
+        // replaces (2026-11-06, the file header); every other lane reaches
+        // intents only. The named fact closes whatever the word judge says
+        // of the OTHER facts — a flip of a third line still closes that line
+        // too (the retraction restores every row this id buried).
+        const buried = new Set();
+        if (verdict.kind === 'flip' && verdict.of?.id) buried.add(verdict.of.id);
+        if (replaced && replaced.id !== id) buried.add(replaced.id);
+        if (buried.size > 0) {
+            next.supersedes = replaced && buried.has(replaced.id) ? replaced.id : verdict.of.id;
+            facts = facts.map(existing => (buried.has(existing.id)
                 ? { ...existing, supersededBy: id, supersededAtMessage: messageCount }
                 : existing));
-        } else {
-            // An intent is not a deed (memory-research M0, 2026-10-07): a
-            // lane that read KNOWN OPEN PLANS names the plan this fact
-            // settles (`supersedes: <id>`) and the plan closes exactly as a
-            // flipped twin does. The Scribe may also name a standing truth
-            // the new fact replaces (2026-11-06, the file header); every
-            // other lane reaches intents only.
-            const closed = standingRefs ? findRetirableFact(live, f?.supersedes) : findOpenPlan(live, f?.supersedes);
-            if (closed && closed.id !== id) {
-                next.supersedes = closed.id;
-                facts = facts.map(existing => (existing.id === closed.id
-                    ? { ...existing, supersededBy: id, supersededAtMessage: messageCount }
-                    : existing));
-            }
         }
         facts = [...facts, next];
         added.push(next);

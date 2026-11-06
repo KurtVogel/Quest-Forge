@@ -9,6 +9,7 @@ import {
     applyStoryMemoryDormancy,
     bornStoryMemoryCard,
     findStoryMemoryMatch,
+    idReportDrifted,
     normalizeStoryMemoryCard,
     normalizeStoryMemoryUpdate,
     pickMergedCardText,
@@ -146,9 +147,8 @@ export const handlers = {
         const idx = findStoryMemoryMatch(pool, card);
         const messageCount = (state.messages || []).length;
         if (idx === -1) {
-            // An id ECHO that names a held card it does not agree with
-            // (2026-10-24 P2, `idReportAgrees`) is a new card with the id
-            // DROPPED — two cards may never share one id (memory_updates
+            // An id ECHO that names a held card of ANOTHER type
+            // (`idReportAgrees`) is a new card with the id DROPPED — two cards may never share one id (memory_updates
             // addresses the first it finds).
             const fresh = card.id && pool.some(memory => memory?.id === card.id)
                 ? normalizeStoryMemoryCard({ ...card, id: null })
@@ -157,6 +157,12 @@ export const handlers = {
             return { ...state, storyMemory: [...pool, born] };
         }
         const existing = state.storyMemory[idx];
+        // The id decided (2026-11-06, night); the old word check is a log
+        // line now, so a playtest can count wrong-id echoes: a rewrite that
+        // shares almost nothing with the card it replaced.
+        if (idReportDrifted(existing, card) && existing.status !== 'resolved' && existing.source !== 'engine') {
+            console.warn(`[storyMemory] id re-report rewrote card ${existing.id} in unrelated words — was: "${String(existing.text || '').slice(0, 120)}"`);
+        }
         // `resolved` is TERMINAL here (2026-09-06 P1, the fronts' 2026-09-01
         // ruling): a normalized incoming card always carries status 'active',
         // and the Scribe — which never sees the card pool — re-reports a

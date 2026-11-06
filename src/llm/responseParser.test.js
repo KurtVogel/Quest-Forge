@@ -892,7 +892,7 @@ describe('applyEvents dispatch coverage', () => {
         }));
         expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_CONDITION', payload: 'prone' });
         expect(dispatch).toHaveBeenCalledWith({ type: 'REMOVE_CONDITION', payload: 'blinded' });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_QUEST', payload: { name: 'Find the relic', description: 'It was lost long ago.' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'ADD_QUEST', payload: { status: 'new', name: 'Find the relic', description: 'It was lost long ago.' } });
         expect(dispatch).toHaveBeenCalledWith({ type: 'COMPLETE_QUEST', payload: { id: 'q1', name: 'Find the relic' } });
     });
 
@@ -905,7 +905,7 @@ describe('applyEvents dispatch coverage', () => {
         });
         expect(dispatch).toHaveBeenCalledWith({
             type: 'ADD_QUEST',
-            payload: { id: 'q1', name: 'Find the relic', description: 'The trail leads to the sunken vault.' },
+            payload: { id: 'q1', status: 'updated', name: 'Find the relic', description: 'The trail leads to the sunken vault.' },
         });
         expect(dispatch).toHaveBeenCalledWith({ type: 'FAIL_QUEST', payload: { id: 'q2', name: 'Save the caravan' } });
     });
@@ -982,7 +982,7 @@ describe('applyEvents dispatch coverage', () => {
         expect(dispatch).toHaveBeenCalledWith({ type: 'FAIL_QUEST', payload: { id: 'q5', name: 'Guard the Shrine' } });
         expect(dispatch).toHaveBeenCalledWith({
             type: 'ADD_QUEST',
-            payload: { id: 'q6', name: 'Chart the Marsh' },
+            payload: { id: 'q6', status: 'updated', name: 'Chart the Marsh' },
         });
     });
 

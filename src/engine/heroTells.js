@@ -212,21 +212,19 @@ export function isSameTell(a, b) {
 }
 
 /**
- * An `id` on a report is the Scribe's CLAIM that this is a held tell, and
- * the KNOWN HERO TELLS line invites id reuse — so the claim is checked
- * (2026-09-24 sweep, the `findStoryMemoryMatch` same-type rule): the kinds
- * must agree, and the text must be the same pattern (the 0.8 floor) or at
- * least touch it (a shorthand re-report — "the pipe again" — shares a
- * meaningful token with the held wording; a bare reference with no
- * meaningful token is taken on the id alone). "Pays the poor double" under
- * the jokes tell's id is a NEW tell, not a fourth scene for the jokes.
+ * An `id` on a report is the Scribe's PICK from KNOWN HERO TELLS, and the
+ * pick decides (2026-11-06, night; Vesa 2026-11-05: "sameness of a tell
+ * belongs to the Scribe"; revises the 2026-09-24 sweep, which checked the
+ * claim against the wording). No word rule second-guesses it: a re-report in
+ * other words, or under another kind, is a sighting of the tell the id names
+ * — the held kind and the held text stand. The one refusal is structural:
+ * an id never crosses the intimate boundary, because an intimate tell's
+ * witnesses are the ones who shared the bed and a public report must not
+ * join them (nor the reverse). The price, taken on purpose: an id copied
+ * from the wrong line adds a sighting to the wrong tell.
  */
 function idClaimHolds(held, candidate) {
-    if (normalizeHeroTellKind(held?.kind) !== normalizeHeroTellKind(candidate?.kind)) return false;
-    if (isSameTell(held, candidate)) return true;
-    const reported = tellTokens(text(candidate?.text).toLowerCase());
-    if (reported.size === 0) return true;
-    return containment(tellTokens(text(held?.text).toLowerCase()), reported) > 0;
+    return isIntimateTell(held) === isIntimateTell(candidate);
 }
 
 export function findHeroTellMatch(tells = [], candidate = {}) {
@@ -234,6 +232,14 @@ export function findHeroTellMatch(tells = [], candidate = {}) {
     if (candidate?.id) {
         const byId = tells.findIndex(t => t && t.id === candidate.id);
         if (byId !== -1 && idClaimHolds(tells[byId], candidate)) return byId;
+    }
+    // The same words are the same tell whatever kind the report filed them
+    // under (the 11-01 kind-flip fork: `habit` → `manner` for one text minted
+    // a second record) — an exact compare, on one side of the intimate line.
+    const exact = text(candidate?.text).toLowerCase();
+    if (exact) {
+        const byText = tells.findIndex(t => t && text(t.text).toLowerCase() === exact && idClaimHolds(t, candidate));
+        if (byText !== -1) return byText;
     }
     return tells.findIndex(t => isSameTell(t, candidate));
 }
@@ -244,8 +250,8 @@ export function findHeroTellMatch(tells = [], candidate = {}) {
  * than HERO_TELL_SCENE_MESSAGES conversational rows since the last one,
  * judged on the transcript when the caller passes `messages`, the raw gap
  * otherwise — the same scene restated three times is still one sighting),
- * unions the witnesses, and keeps the richer text (a fragment never clobbers
- * a fuller wording). A new pattern joins with its first sighting. Reports are
+ * unions the witnesses, and keeps the held text and kind (a sighting never
+ * rewrites the tell). A new pattern joins with its first sighting. Reports are
  * capped per pass, and the store evicts the least-established, least-seen
  * tell past the cap.
  */
@@ -315,12 +321,13 @@ export function recordHeroTells(existing = [], reports = [], { messageCount, mes
         // record gained a witness who never saw the hero do it. Witnesses are
         // who SAW; a voiced-only report stamps the speaker on `voicedBy` alone.
         const witnesses = normalizeWitnesses([...(held.witnesses || []), ...(sighted ? report.witnesses : [])]);
-        const richer = report.text.length > (held.text || '').length && containment(tellTokens(held.text), tellTokens(report.text)) >= SAME_TELL_CONTAINMENT
-            ? report.text
-            : held.text;
+        // The held wording stands (2026-11-06, night): the "richer" rule —
+        // a longer report that contained the held words replaced them —
+        // grafted a new claim onto an established tell ("…and spits at the
+        // feet of whoever asked" under two sightings it never had). A
+        // sighting adds a sighting, never words.
         const next = {
             ...held,
-            text: richer,
             witnesses,
             // A remark alone never makes a held private tell PUBLIC
             // (2026-10-19 hero-tells P2 — the 10-07 rule gated the mint
@@ -336,7 +343,7 @@ export function recordHeroTells(existing = [], reports = [], { messageCount, mes
             next.voicedCount = (held.voicedCount || 0) + 1;
             next.voicedBy = normalizeWitnesses([...(held.voicedBy || []), ...voicedBy]).slice(0, MAX_HERO_TELL_VOICES);
         }
-        if (voiced || next.text !== held.text || next.witnesses.length !== (held.witnesses || []).length
+        if (voiced || next.witnesses.length !== (held.witnesses || []).length
             || next.public !== !!held.public || next.sightings !== held.sightings || next.lastSeenMessage !== held.lastSeenMessage) {
             tells = tells.map((t, i) => (i === idx ? next : t));
             changed = true;

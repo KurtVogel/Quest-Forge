@@ -44,19 +44,28 @@ describe('hero tells — recording (2026-09-23)', () => {
         expect(sameScene[0].lastSeenMessage).toBe(10 + HERO_TELL_SCENE_MESSAGES);
     });
 
-    it('a re-worded restatement merges into the held tell (id or containment), unions witnesses, keeps the richer text', () => {
+    it('a re-worded restatement merges into the held tell (id or containment), unions witnesses, keeps the HELD text', () => {
         const held = recordHeroTells([], [PIPE], { messageCount: 10 });
         const reworded = { text: 'he digs out his pipe and walks away whenever the conversation turns on him', kind: 'habit', witnesses: ['Bran'] };
         const merged = recordHeroTells(held, [reworded], { messageCount: 40 });
         expect(merged).toHaveLength(1);
         expect(merged[0].sightings).toEqual([10, 40]);
         expect(merged[0].witnesses).toEqual(['Maren', 'Bran']);
-        expect(merged[0].text).toBe(reworded.text);
+        // The held wording stands (2026-11-06; was "keeps the richer text"): a sighting never rewrites the tell.
+        expect(merged[0].text).toBe(PIPE.text);
         const byId = recordHeroTells(merged, [{ id: merged[0].id, text: 'the pipe again', kind: 'habit', witnesses: ['Maren'] }], { messageCount: 80 });
         expect(byId).toHaveLength(1);
         expect(byId[0].sightings).toEqual([10, 40, 80]);
-        // A fragment never clobbers the fuller wording.
-        expect(byId[0].text).toBe(reworded.text);
+        expect(byId[0].text).toBe(PIPE.text);
+    });
+
+    it('a longer report that contains the held words grafts nothing onto the tell (the 11-01 "richer" finding)', () => {
+        const held = recordHeroTells([], [PIPE], { messageCount: 10 });
+        const grafted = { id: held[0].id, text: `${PIPE.text} and spits at the feet of whoever asked`, kind: 'habit', witnesses: ['Bran'] };
+        const next = recordHeroTells(held, [grafted], { messageCount: 40 });
+        expect(next).toHaveLength(1);
+        expect(next[0].text).toBe(PIPE.text);
+        expect(next[0].sightings).toEqual([10, 40]);
     });
 
     it('a different KIND under similar words is a different tell; opposite manners sharing words stay apart; junk reports are dropped; the per-pass cap holds', () => {
@@ -300,19 +309,29 @@ describe('hero tells — queue sweep 2026-09-24 (scene window, id claim, witness
         expect(sightings([PIPE], [10, 12, 10 + HERO_TELL_SCENE_MESSAGES + 1])[0].sightings).toEqual([10, 27]);
     });
 
-    it('a Scribe id from another tell does not attach: the kind must agree and the text must touch the held wording; a shorthand by id still lands', () => {
+    // Revised 2026-11-06 (night; was the 09-24 "id claim" pin: the kind must
+    // agree and the text must touch the held wording). The id is the Scribe's
+    // pick and decides; the held kind and text stand. The price, pinned on
+    // purpose: an id copied from the wrong line is a sighting of that tell.
+    it('a Scribe id decides: other words or another kind are a sighting of the tell it names; only the intimate line refuses', () => {
         const jokes = sightings([JOKES], [10, 40]);
-        const wrongKind = recordHeroTells(jokes, [{ id: jokes[0].id, text: 'pays the poor double without being asked', kind: 'principle', witnesses: ['Brother Anselm'] }], { messageCount: 80 });
-        expect(wrongKind).toHaveLength(2);
-        expect(wrongKind[0]).toMatchObject({ sightings: [10, 40], witnesses: ['Maren', 'Bran'] });
-        expect(wrongKind[1]).toMatchObject({ kind: 'principle', witnesses: ['Brother Anselm'], sightings: [80] });
-        // Same kind, no shared meaningful token: still a new tell.
-        const sameKind = recordHeroTells(jokes, [{ id: jokes[0].id, text: 'pays the poor double without being asked', kind: 'manner', witnesses: ['Brother Anselm'] }], { messageCount: 80 });
-        expect(sameKind).toHaveLength(2);
-        expect(sameKind[0].sightings).toEqual([10, 40]);
-        // A shorthand re-report by id ("the jokes again") shares a token: the id claim holds.
+        const otherKind = recordHeroTells(jokes, [{ id: jokes[0].id, text: 'pays the poor double without being asked', kind: 'principle', witnesses: ['Brother Anselm'] }], { messageCount: 80 });
+        expect(otherKind).toHaveLength(1);
+        expect(otherKind[0]).toMatchObject({ kind: 'manner', text: JOKES.text, sightings: [10, 40, 80] });
+        expect(otherKind[0].witnesses).toContain('Brother Anselm');
+        // A kind flip under the held id no longer forks the record (the 11-01 finding).
+        const flipped = recordHeroTells(jokes, [{ id: jokes[0].id, text: JOKES.text, kind: 'habit', witnesses: ['Maren'] }], { messageCount: 80 });
+        expect(flipped).toHaveLength(1);
+        expect(flipped[0].kind).toBe('manner');
+        // …nor does the same text without an id (an exact compare).
+        const flippedNoId = recordHeroTells(jokes, [{ text: JOKES.text.toUpperCase(), kind: 'habit', witnesses: ['Maren'] }], { messageCount: 80 });
+        expect(flippedNoId).toHaveLength(1);
+        // The intimate boundary is structural: an id never carries a public report onto an intimate tell, or the reverse.
+        const crossing = recordHeroTells(jokes, [{ id: jokes[0].id, text: 'laughs low when kissed on the neck', kind: 'intimate', witnesses: ['Maren'] }], { messageCount: 80 });
+        expect(crossing).toHaveLength(2);
+        expect(crossing[0]).toMatchObject({ kind: 'manner', sightings: [10, 40] });
+        expect(crossing[1]).toMatchObject({ kind: 'intimate', sightings: [80] });
         expect(findHeroTellMatch(jokes, { id: jokes[0].id, text: 'the jokes again', kind: 'manner' })).toBe(0);
-        // A bare reference with no meaningful token rides the id alone.
         expect(findHeroTellMatch(jokes, { id: jokes[0].id, text: 'it', kind: 'manner' })).toBe(0);
         expect(findHeroTellMatch(jokes, { id: 'nope', text: JOKES.text, kind: 'manner' })).toBe(0);
     });

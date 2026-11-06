@@ -91,10 +91,11 @@ function applyQuestUpdates(events, dispatch, { openOnly = false } = {}) {
         // for the terminal statuses — so this loop routes and never re-types.
         if (!quest || (!quest.id && !quest.name)) continue;
         if (quest.status === 'new' || quest.status === 'updated') {
-            // ADD_QUEST upserts by name (an id only when the name agrees), so
-            // "updated" refreshes the existing entry or self-heals into a new one
-            // if the DM never opened it; the reducer refuses a nameless row.
-            dispatch({ type: 'ADD_QUEST', payload: { ...(quest.id && { id: quest.id }), name: quest.name, description: quest.description, patron: quest.patron, promised: quest.promised } });
+            // ADD_QUEST upserts: an `updated` lands on the row its id names
+            // (2026-11-06), else by name, or self-heals into a new one if the
+            // DM never opened it; a `new` never matches by id (the status
+            // rides for that); the reducer refuses a nameless row.
+            dispatch({ type: 'ADD_QUEST', payload: { ...(quest.id && { id: quest.id }), status: quest.status, name: quest.name, description: quest.description, patron: quest.patron, promised: quest.promised } });
         } else if (openOnly) {
             continue;
         } else if (quest.status === 'completed') {

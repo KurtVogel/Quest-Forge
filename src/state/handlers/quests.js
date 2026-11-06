@@ -257,18 +257,31 @@ export const handlers = {
         // reusing its name is a new arc ("Guard the caravan" can recur), never a
         // silent reopen that would erase how the first one ended.
         //
-        // The NAME is identity; a DM-chosen id is only a hint (2026-10-10 quests
-        // P2): the format example carries no id, so an id on a `new` is the
-        // DM's invention, and `{ id: 'q1', name: 'Escort the caravan' }` after
-        // `{ id: 'q1', name: 'Find the Relic' }` used to RENAME the relic arc in
-        // place — no terminal row, no XP. An id match counts only when the
-        // name agrees with the row (exact or the fuzzy near-equality).
-        let existing = state.quests.find(quest =>
-            quest.status === 'active' && (
-                (payload.id && quest.id === payload.id && (!nameToken || sameName(quest) || fuzzyMatch(quest.name)))
-                || sameName(quest)
-            )
-        );
+        // An echoed id DECIDES (2026-11-06, night; revises 2026-10-10 quests
+        // P2 "the name is identity; an id is only a hint"): ACTIVE QUESTS
+        // prints `[id: …]` and the format example asks for it on every
+        // status but `new`, so an id that names an active row is the DM's
+        // pick from the list it was shown and no name rule second-guesses
+        // it. A `new` names none — an id beside it is the DM's invention and
+        // is never matched (the 10-10 case: `{ id: 'q1', name: 'Escort the
+        // caravan' }` after `{ id: 'q1', name: 'Find the Relic' }` opens a
+        // second arc). The one refusal is an exact one: the id names one
+        // tracked quest and the name is, character for character, ANOTHER —
+        // the wire contradicts itself, nothing moves, and a line says so.
+        const opens = raw.status === 'new';
+        const active = state.quests.filter(quest => quest.status === 'active');
+        const byId = !opens && payload.id ? active.find(quest => quest.id === payload.id) : null;
+        const byName = active.find(sameName);
+        if (byId && byName && byName.id !== byId.id) {
+            return {
+                ...state,
+                messages: [...state.messages, systemMessage(
+                    `⚖ A quest update carried the id of "${byId.name}" and the name of "${byName.name}" — nothing changed. Send the id printed beside the quest that moved.`,
+                    { dmVisible: true }
+                )],
+            };
+        }
+        let existing = byId || byName;
         // Fuzzy fallback, unambiguous only: a re-phrased "updated" must refresh
         // the tracked arc, not mint a drifted twin beside it.
         if (!existing && nameToken) {
@@ -336,24 +349,38 @@ export const handlers = {
         const nameToken = normalizeRefToken(refName);
         const sameName = (q) => !!nameToken && normalizeRefToken(q.name) === nameToken;
         const fuzzyMatch = nameToken ? questNameMatcher(refName) : () => false;
-        // The open lane's identity rule, on the close lane too (2026-10-23
-        // quests P1): ACTIVE QUESTS prints `[id: …]` for the DM to echo, and an
-        // echo that pairs one arc's name with another's id —
-        // `{ id: 'q-relic', name: 'Escort the salt caravan' }` — used to close
-        // BOTH arcs and pay one. With a name on the ref, the id's row counts
-        // only when the name agrees with it (exact or the fuzzy near-equality);
-        // an id-ONLY ref (the panel's ✓, a nameless terminal wire) keeps its
-        // by-id close.
-        const idGated = isObjectRef && !!nameToken;
-        const byId = (q) => !!refId && q.id === refId && (!idGated || sameName(q) || fuzzyMatch(q.name));
+        const byId = (q) => !!refId && q.id === refId;
         // Recurring quest names must never rewrite closed-arc history: when a
         // match hits BOTH an active row and a terminal row (arc 2 of a reused
         // name), the active rows alone are the target — failing arc 2 used to
         // flip arc 1's completed row to failed. A terminal-only match is the
         // one-shot guard (see below).
         const liveFirst = (rows) => rows.some(q => q.status === 'active') ? rows.filter(q => q.status === 'active') : rows;
-        let targets = liveFirst(state.quests.filter(sameName));
-        if (targets.length === 0) targets = liveFirst(state.quests.filter(byId));
+        const named = liveFirst(state.quests.filter(sameName));
+        const pointed = liveFirst(state.quests.filter(byId));
+        // An echoed id DECIDES on the close lane too (2026-11-06, night;
+        // revises the 2026-10-23 quests P1 name gate): the wire's id is the
+        // DM's pick from ACTIVE QUESTS and closes that arc whatever the name
+        // beside it says. The 10-23 case — one arc's id with ANOTHER arc's
+        // exact name, `{ id: 'q-relic', name: 'Escort the salt caravan' }`,
+        // which once closed both and paid one — is the wire contradicting
+        // itself: nothing closes and one line says so (an exact compare, no
+        // word rule). A bare-string ref (the panel's ✓) keeps name-then-id.
+        // Only an id that names a LIVE arc decides; a finished row's id beside
+        // a live arc's exact name is that arc closing (the name rung, as ever).
+        const pointedLive = pointed.some(q => q.status === 'active');
+        if (isObjectRef && pointedLive && named.some(q => q.status === 'active' && !pointed.some(p => p.id === q.id))) {
+            const other = named.find(q => q.status === 'active' && !pointed.some(p => p.id === q.id));
+            return {
+                ...state,
+                messages: [...state.messages, systemMessage(
+                    `⚖ A quest close carried the id of "${pointed[0].name}" and the name of "${other.name}" — nothing was ${terminalStatus}. Send the id printed beside the quest that ended.`,
+                    { dmVisible: true }
+                )],
+            };
+        }
+        let targets = isObjectRef && pointedLive ? pointed : named;
+        if (targets.length === 0) targets = pointed;
         let ambiguous = null;
         if (targets.length === 0 && nameToken) {
             // Fuzzy fallback before the fallback INSERT: a drifted completion name

@@ -77,13 +77,14 @@ function landOfPlace(locations, place) {
 export const CALLBACK_PAYOFF_CONTAINMENT = 0.3;
 export const CALLBACK_PAYOFF_MIN_HITS = 2;
 /**
- * An id is a CLAIM, not an identity (2026-10-24 story-memory P2, the
- * hero-tells 09-24 rule): KNOWN STORY CARDS asks the Scribe for the id, and a
- * card carrying ANOTHER card's id with an unrelated type / subject / text
- * used to rewrite that card wholesale (the ferryman promise became the Ilse
- * mystery). An id re-report stands only when the type agrees and the text
- * touches the held wording at this containment; otherwise the id is dropped
- * and the card is judged by the other rungs.
+ * A DIAGNOSTIC since 2026-11-06 (night), no longer a judge. From 2026-10-24
+ * an id re-report stood only when its text touched the held wording at this
+ * containment — a word rule overruling the id the Scribe was shown and told
+ * to echo "with the COMPLETE updated text". The id now decides
+ * (`idReportAgrees`: the type alone must agree); this floor only marks a
+ * rewrite that shares almost nothing with the card it replaced
+ * (`idReportDrifted`), which the reducer logs so a playtest can count how
+ * often the Scribe echoes the wrong id.
  */
 export const ID_REPORT_CONTAINMENT = 0.3;
 /**
@@ -440,8 +441,17 @@ export const STORY_MEMORY_UPDATE_FIELDS = Object.freeze(['status', 'salience', '
 export function idReportAgrees(held, card) {
     if (!held || !card) return false;
     if (held.source === 'npc_roster' && card.source === 'npc_roster') return true;
-    if (held.type !== card.type) return false;
-    return tokenContainment(meaningTokens(held.text), meaningTokens(card.text)) >= ID_REPORT_CONTAINMENT;
+    // The id is the Scribe's pick from KNOWN STORY CARDS and it decides
+    // (2026-11-06, night). The type is a structural check, not a reading of
+    // words: a promise's id on a wound is not a continuation of the promise.
+    return held.type === card.type;
+}
+
+/** Diagnostic only: an id re-report whose text shares almost nothing with the card it lands on. */
+export function idReportDrifted(held, card) {
+    if (!held || !card || !card.id || held.id !== card.id) return false;
+    if (held.source === 'npc_roster' && card.source === 'npc_roster') return false;
+    return tokenContainment(meaningTokens(held.text), meaningTokens(card.text)) < ID_REPORT_CONTAINMENT;
 }
 
 const SUBJECT_FILLER_WORDS = new Set(['the', 'of', 'and', 'a', 'an', 'at', 'in', 'on']);
@@ -473,10 +483,11 @@ function sameSubjectAgrees(held, card) {
 }
 
 /**
- * The stored card an incoming card is a report OF, or -1. Four rungs, each a
- * CLAIM the content must bear out (2026-10-24: the id and exact-subject rungs
- * used to merge before any text comparison — see idReportAgrees and
- * SAME_SUBJECT_CONTAINMENT); a rung that fails falls through to the next.
+ * The stored card an incoming card is a report OF, or -1 (`findStoryMemoryMatch`,
+ * below). An echoed id of the same type decides, read first over the whole
+ * pool (2026-11-06, night). A report with no id, or one whose id does not
+ * hold, is judged by the text rungs — each a CLAIM the content must bear out
+ * (2026-10-24, SAME_SUBJECT_CONTAINMENT); a rung that fails falls through.
  */
 /**
  * A PROMISE re-minted in new words about the same person (2026-10-30 Opus
@@ -514,8 +525,14 @@ function sameCommitmentReworded(held, card) {
 export function findStoryMemoryMatch(memories = [], card = {}) {
     const subject = cleanText(card.subject).toLowerCase();
     const text = cleanText(card.text).toLowerCase();
+    // The id is read FIRST, over the whole pool (2026-11-06, night): one
+    // `findIndex` over every rung let an EARLIER card that merely resembled
+    // the report win over the later card whose id it carried.
+    if (card.id) {
+        const byId = memories.findIndex(m => m && m.id === card.id);
+        if (byId !== -1 && idReportAgrees(memories[byId], card)) return byId;
+    }
     return memories.findIndex(m => {
-        if (card.id && m.id === card.id && idReportAgrees(m, card)) return true;
         if (subject && m.subject?.toLowerCase() === subject && m.type === card.type && sameSubjectAgrees(m, card)) return true;
         if (text && m.text?.toLowerCase() === text) return true;
         if (sameCommitmentReworded(m, card)) return true;
