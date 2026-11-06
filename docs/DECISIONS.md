@@ -8,6 +8,24 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-11-06 (later) · M1's verdict at 40 turns: not adopted, `RETRIEVED_PARTNER_ROWS` stays false — and the real failure is a stale world fact, not retrieval. REVISIT PENDING with Vesa: "a standing truth closes by a flip alone".**
+Vesa: run the longer A/B. Two rounds at 40 turns with checkpoints at 20 and 40, off and on side by side, 68 lines each:
+
+| Arm | Survival | RETRIEVAL / USE | Precision at 20 / 40 | Partner lines |
+|---|---|---|---|---|
+| Off, round 1 | 25/26 | 1 / 0 | 42 % / 42 % | 0 |
+| Off, round 2 | 25/26 | 1 / 0 | 51 % / 48 % | 0 |
+| On, round 1 | 28/28 | 0 / 0 | 54 % / 44 % | 460 |
+| On, round 2 | 26/26 | 0 / 0 | 58 % / 41 % | 457 |
+
+The rule does not clear: USE misses on RAG-tagged points were 0 in both arms, so there is nothing to fall. Noise did not rise (precision at 40 flat). Rag-only points held 9/9 off and 12/12 on, so retrieval was under pressure this time and held without the partner line. Mean DM prompt +0.4 %.
+
+The 50/52 vs 54/54 gap is one question and it is not the partner rows. Both off misses are F1-recall at checkpoint 20, the sail that moved. Across all seven Sol runs today that answer follows one thing, 7 for 7: **whether the Scribe's old fact "the sail is in the net-loft" was still live.** Three runs held it, all flag-off, and all three answered net-loft (one even said "I haven't moved it"). Four did not (the fact read foredeck, or there was no sail fact), and all four answered foredeck, including the inert run with no partner line and one flag-on run where the sail row carried no partner line. The split by arm is chance as far as we can trace: the fact is written at turn 2, and partner lines never reach the Scribe. What partner rows would do against a live stale fact is untested, because no flag-on run happened to hold one.
+
+The finding: `superseded` reads 0 at every checkpoint of every run. A flip is a negation of a near-duplicate; a thing that MOVED is not a negation, and `findOpenPlan` deliberately refuses to close a standing truth by id, so **a moved thing keeps its old location as live canon**, and in 3 of 7 runs the DM confidently told the player the wrong place. The probe labels this RETRIEVAL ("missing"), which undersells it: the wrong fact was in the prompt. The direct fix (let the Scribe, which already sees the facts, name the one a state change retires, the engine comparing the id exactly) contradicts the 10-07 rule "a standing truth closes by a flip alone, so no lane can bury canon by id", so it waits for Vesa. Queued P1 in the strengthening queue. Reports: `test-results/commitments/2026-11-06T16-45-49-sol40-off-r1`, `test-results/commitments/2026-11-06T16-45-49-sol40-on-r1`, `test-results/commitments/2026-11-06T17-17-32-sol40-off-r2`, `test-results/commitments/2026-11-06T17-17-33-sol40-on-r2`.
+
+---
+
 **2026-11-06 · The Sol breakpoint is proven (C4) and the partner rows are NOT adopted: `RETRIEVED_PARTNER_ROWS` stays false. EXTENDS the 2026-11-04 M1 trial.**
 Cache: the Chat Completions breakpoint is honored on `gpt-6.1-sol` — 0 HTTP 400 over 109 DM requests, 17,365 tokens written once, 17,365 read on every later request, cached share 72.4 / 76.9 / 74.9 %. The prefix is 17,365 tokens, not the ≈ 6k the research doc assumed, so the saving beats the estimate (≈ $0.012 of input per ordinary call at the doc's prices, against ≈ $0.032 predicted and ≈ $0.045 uncached). `openaiCompatible.js` is unchanged.
 
