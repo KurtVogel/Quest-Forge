@@ -235,8 +235,12 @@ function attachCapture(page) {
                         windowText = (body.contents || []).map(c => `[${c.role}] ${(c.parts || []).map(p => p.text || '').join('\n')}`).join('\n\n');
                         reqModel = (url.match(/models\/([^:/?]+)/) || [])[1] || '';
                     } else {
-                        const m = (body.messages || []).find(x => x.role === 'system' || x.role === 'developer');
-                        sys = typeof m?.content === 'string' ? m.content : JSON.stringify(m?.content || '');
+                        // The explicit-cache shape splits the prompt: the prefix as a
+                        // text-part array, the dynamic blocks in a SECOND system message.
+                        // Read every one as plain text, or all the evidence (RAG, journal,
+                        // the record) reads "missing" on an OpenAI DM (2026-11-06).
+                        const messageText = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map(p => p?.text || '').join('\n') : '');
+                        sys = (body.messages || []).filter(x => x.role === 'system' || x.role === 'developer').map(x => messageText(x.content)).join('\n\n');
                         windowText = (body.messages || []).filter(x => x.role === 'user' || x.role === 'assistant')
                             .map(x => `[${x.role}] ${typeof x.content === 'string' ? x.content : JSON.stringify(x.content)}`).join('\n\n');
                         reqModel = body.model || '';
@@ -266,7 +270,7 @@ function attachCapture(page) {
                     } else {
                         observedModels.add(reqModel);
                     }
-                    entry = { t: Date.now(), kind, lane, model: reqModel, requestedModel, sys, window: windowText, bytes: Buffer.byteLength(raw, 'utf8'), usage: null, embedDims, status: null };
+                    entry = { t: Date.now(), kind, lane, model: reqModel, requestedModel, sys, window: windowText, bytes: Buffer.byteLength(raw, 'utf8'), usage: null, embedDims, status: null, explicitCache: !!body.prompt_cache_options };
                     captured.push(entry);
                     byRequest.set(req, entry);
                 }
@@ -299,11 +303,21 @@ function attachCapture(page) {
                 }
             } else if (text.trimStart().startsWith('{')) {
                 usage = JSON.parse(text).usage || null;
+            } else {
+                // An OpenAI stream: the last chunk carries `usage` (stream_options.include_usage).
+                const lines = text.split(/\r?\n/).filter(l => l.startsWith('data:'));
+                for (let i = lines.length - 1; i >= 0; i--) {
+                    try {
+                        const j = JSON.parse(lines[i].slice(5).trim());
+                        if (j.usage) { usage = j.usage; break; }
+                    } catch { /* [DONE], keep looking */ }
+                }
             }
             if (usage) {
                 entry.usage = {
                     prompt: usage.promptTokenCount ?? usage.prompt_tokens ?? null,
                     cached: usage.cachedContentTokenCount ?? usage.prompt_tokens_details?.cached_tokens ?? null,
+                    written: usage.prompt_tokens_details?.cache_write_tokens ?? null,
                     output: usage.candidatesTokenCount ?? usage.completion_tokens ?? null,
                     thoughts: usage.thoughtsTokenCount ?? null,
                     total: usage.totalTokenCount ?? usage.total_tokens ?? null,
@@ -1170,6 +1184,21 @@ function writeReport({ startedAt, finishedAt, buildInfo }) {
     } else {
         lines.push(`- DM cache share per turn (${DM.model}): no per-turn usage reported by the provider.`);
     }
+    // Every DM request, not just the turn's newest (a dice turn sends two): the
+    // cached and written tokens side by side, the breakpoint's fate, and the
+    // partner rows the prompt really carried (the M1 trial's proof it fired).
+    const dmCalls = captured.filter(c => c.kind === 'dm');
+    const dmWithUsage = dmCalls.filter(c => c.usage && Number.isFinite(c.usage.prompt) && c.usage.prompt > 0);
+    if (dmWithUsage.length > 0) {
+        const sum = (key) => dmWithUsage.reduce((a, c) => a + (c.usage[key] || 0), 0);
+        const promptTotal = sum('prompt');
+        lines.push(`- DM cached / written tokens per request (${dmWithUsage.length} of ${dmCalls.length} DM requests with usage): ${dmWithUsage.map(c => `${c.usage.prompt}p ${c.usage.cached ?? '?'}c ${c.usage.written ?? '?'}w`).join(', ')}.`);
+        lines.push(`- DM cache totals: prompt ${promptTotal}, cached ${sum('cached')} (${(sum('cached') / promptTotal * 100).toFixed(1)} %), written ${sum('written')} (${(sum('written') / promptTotal * 100).toFixed(1)} %).`);
+    }
+    lines.push(`- Explicit breakpoint: sent on ${dmCalls.filter(c => c.explicitCache).length} of ${dmCalls.length} DM requests; HTTP 400 on ${dmCalls.filter(c => c.explicitCache && c.status === 400).length} (the one-time fallback in openaiCompatible.js drops the fields after such a 400).`);
+    const partnerRows = dmCalls.reduce((a, c) => a + (c.sys.match(/\n {2}↳ (?:the player had said|the DM answered):/g) || []).length, 0);
+    const retrievedRequests = dmCalls.filter(c => c.sys.includes('## RETRIEVED MEMORIES')).length;
+    lines.push(`- Retrieved block on ${retrievedRequests} of ${dmCalls.length} DM requests; partner lines printed across the run: ${partnerRows}${PARTNER_ROWS ? '' : ' (flag off)'}.`);
     lines.push(`- Console errors: ${consoleLines.filter(c => c.type === 'error').length}; warnings: ${consoleLines.filter(c => c.type === 'warning').length}.`);
     lines.push('');
     lines.push('## Caveats');

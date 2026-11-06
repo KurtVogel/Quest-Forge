@@ -122,8 +122,11 @@ describe('M1: every composer stamps atMessage from its record', () => {
         const stamped = rows.find(r => r.text.includes('flooded'));
         const bare = rows.find(r => r.text === 'I draw my blade.');
         expect(stamped.atMessage).toBe(40);
+        // The partner-row trial reads the source off the retrieved row (2026-11-06).
+        expect(stamped.sourceMessage).toBe('a9');
         expect(bare).toBeDefined();
         expect(bare.atMessage).toBeUndefined();
+        expect(bare.sourceMessage).toBeUndefined();
     });
 
     // Flipped 2026-10-23 (vector-memory P2): the stamp FOLLOWS the record —

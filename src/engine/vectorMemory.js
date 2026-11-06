@@ -958,6 +958,9 @@ export async function retrieveRelevant(apiKey, query, topN = 8, minScore = 0.55,
         hits: m.entry.hits,
         ...(m.location && { location: m.location }),
         ...(Number.isFinite(m.atMessage) && { atMessage: m.atMessage }),
+        // The partner-row trial reads it (promptBuilder.findPartnerRow): this
+        // projection dropped it, so the trial printed nothing live (2026-11-06).
+        ...(typeof m.entry.sourceMessage === 'string' && m.entry.sourceMessage && { sourceMessage: m.entry.sourceMessage }),
     }));
 }
 
