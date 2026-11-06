@@ -126,7 +126,7 @@ in flight when the player loads another save lands nothing.
 - **Window:** `MARK_MESSAGES_SUMMARIZED` flags rows; `buildMessageWindow` skips them. Rows
   are never deleted; soft-delete (`deleted: true`) keeps indexes stable.
 - **Facts:** a near-duplicate is dropped (a passing-state or intent fact re-stamps its age
-  instead); a negation flip supersedes its twin; `liveWorldFacts` filters superseded and
+  instead); a negation flip supersedes its twin, and the Scribe may retire an unpinned fact by exact id (`supersedes`, its lane only; removing the replacing message restores it); `liveWorldFacts` filters superseded and
   retracted facts for every present-tense reader while the record keeps them.
 - **Cards:** low-salience cards go dormant after a few untouched cadences, engine wound cards
   after more, promises and salience-3/4 cards after twelve (the player's canon and salience 5

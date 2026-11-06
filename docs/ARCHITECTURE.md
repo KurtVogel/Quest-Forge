@@ -203,7 +203,7 @@ and `outOfCombatRollPolicy.js` (the check proposal and its arbiter), `progressio
 
 ### `src/engine/` — memory
 
-`worldFacts.js` (`planWorldFactAdditions`: dedupe, negation flips as supersession, state and
+`worldFacts.js` (`planWorldFactAdditions`: dedupe, negation flips and the Scribe's by-id `supersedes` as supersession, state and
 intent aspects, `liveWorldFacts` for every present-tense reader), `worldJournal.js`
 (`maybeAutoSummarize`: the cadence that summarizes pruned chat, keeps a tail, commits in
 order and runs the reflection), `journalEntry.js`, `storyMemory.js` (`curateStoryMemory`,

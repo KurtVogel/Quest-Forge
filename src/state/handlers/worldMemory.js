@@ -123,6 +123,8 @@ export const handlers = {
         const plan = planWorldFactAdditions(state.worldFacts, action.payload, {
             messageCount: (state.messages || []).length,
             sourceMessage,
+            // The Scribe lane alone may retire a standing truth by id (2026-11-06).
+            standingRefs: action.standingRefs === true,
         });
         if (!plan.changed) return state;
         return { ...state, worldFacts: plan.worldFacts };

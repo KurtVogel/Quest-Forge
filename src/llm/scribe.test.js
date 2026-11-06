@@ -2289,7 +2289,7 @@ describe('KNOWN OPEN PLANS — an intent is not a deed (2026-10-07)', () => {
         expect(request.userMessage).toContain('KNOWN OPEN PLANS');
         expect(request.userMessage).toContain('id: fact-plan');
         expect(request.systemPrompt).toContain('AN INTENT IS NOT A DEED');
-        expect(request.systemPrompt).toContain('"supersedes": "ONLY when this fact is the OUTCOME of a plan listed under KNOWN OPEN PLANS');
+        expect(request.systemPrompt).toContain('"supersedes": "ONLY when this fact REPLACES');
     });
 
     it('a campaign without open plans carries no block', async () => {

@@ -46,7 +46,7 @@ export const SCRIBE_SYSTEM_PROMPT = `You are a meticulous game world record-keep
 Output ONLY valid JSON:
 {
   "world_facts": [
-    { "fact": "A canonical statement of something now true in this world", "category": "lore|character|location|event|relationship", "knownBy": "a LIST of the exact names of who knows it, ONLY for private information (use 'the hero' for the player) — omit entirely for common knowledge (never echo a placeholder)", "supersedes": "ONLY when this fact is the OUTCOME of a plan listed under KNOWN OPEN PLANS — carried out, failed, or abandoned — that plan's exact id; omit otherwise" }
+    { "fact": "A canonical statement of something now true in this world", "category": "lore|character|location|event|relationship", "knownBy": "a LIST of the exact names of who knows it, ONLY for private information (use 'the hero' for the player) — omit entirely for common knowledge (never echo a placeholder)", "supersedes": "ONLY when this fact REPLACES a line under KNOWN FACTS or KNOWN OPEN PLANS because that line is no longer true — a thing moved, changed hands, or was destroyed, a person died or changed sides, a plan was carried out, failed, or was abandoned — that line's exact id; omit otherwise" }
   ],
   "npc_updates": [
     {
@@ -106,6 +106,7 @@ Rules:
 - Do NOT record transient action descriptions, scene-level detail, prices, purchases, minor chatter, or restatements of anything already implied by an existing fact ("Player attacked goblin" is not a world fact)
 - A STATE THAT WILL PASS — a flooded road, a siege, a fever, a wound healing, a gate shut for the night, a person away or in hiding — is written in its progressive or temporary form exactly as the fiction has it ("The harbor road is flooded", "Tammo is recovering from the fever"), NEVER flattened into a standing truth ("The harbor road floods", "Tammo was ill"). When the state is local to one place or one person, it belongs in location_profile.last_state or that NPC's lastNotes rather than world_facts. Never rewrite an existing state fact as permanent.
 - AN INTENT IS NOT A DEED — a plan, promise, threat, appointment, or expectation ("the baron plans to seize the mill", "Tammo swore to return the knife", "Odo will hang at dawn") is never written as a standing truth. A personal commitment belongs in story_memory (type promise or npcAgenda) or that NPC's agenda / openThread; only a CAMPAIGN-LEVEL plan goes to world_facts, and then in its own forward-looking words exactly as the fiction has it ("The Guild means to seize the mill at the new moon"), never as if already done. When this turn's narrative shows a plan under KNOWN OPEN PLANS carried out, failed, or abandoned, write the OUTCOME as its own fact with "supersedes": that plan's exact id — never re-report the plan itself.
+- A CHANGE RETIRES WHAT IT REPLACES — when this turn's narrative makes a line under KNOWN FACTS untrue, write the new truth as its own fact with "supersedes": that line's exact id, even for a fact you would not otherwise call durable ("The spare sail is lashed under the Kittiwake's foredeck" replaces "The spare sail is in the net-loft"). The narrative must SHOW the change: never on a player's word alone, never for a detail merely added to a fact that still holds, never for a past event retold, and never to tidy a fact that is simply old
 - DO record outcomes: "The goblin captain Rarg is dead", "The village of Millhaven burned to the ground"
 - Story memory is for emotionally or dramatically useful callbacks: promises, debts, named objects, scars, injuries, insults, flirtation, fears, private vows, unresolved clues, player-authored proper nouns, foreshadowing, NPC agendas, and relationship tension. A card must earn its slot: if you cannot picture the DM paying it off in a later scene, do not write it.
 - WHAT EACH CARD TYPE IS FOR (one place per thing): a job, contract, hire, fee, or errand is a QUEST — the DM tracks it — never a promise or npcAgenda card; "promise" is a personal vow or debt between people that a later scene can keep or break. "playerCanon" is ONLY what the PLAYER authored about the hero — backstory, identity, a vow, a name they coined — never a fight recap, a feat of strength, an HP total, a wound, or a need to rest. A "wound" is a lasting injury or scar, never a passing HP state. A fight's outcome is already recorded by the engine: write no card that only retells it. A beat already listed under KNOWN STORY CARDS is updated by its id or omitted — never minted again in new words. A promise made TO someone is kept only when the fiction shows it reach them; buying the gift or finding the proof is progress — never rewrite the card as fulfilled before then.
@@ -467,7 +468,8 @@ const KNOWN_FACT_TEXT_MAX = 160;
  * plans but never the facts, so it re-extracted what was already canon in
  * new words: 1,814 facts in the megacampaign and 151 near-duplicate pairs in
  * the newest 400, visible in the DM's own WORLD FACTS block. Plans ride
- * KNOWN OPEN PLANS instead. Text lines only — the record judges the rest.
+ * KNOWN OPEN PLANS instead. Each line carries its id (2026-11-06): the Scribe
+ * names the fact a change replaces and the engine compares the copy exactly.
  */
 export function buildKnownFacts({ worldFacts = [] } = {}, ...texts) {
     const live = liveWorldFacts(worldFacts)
@@ -489,7 +491,10 @@ export function buildKnownFacts({ worldFacts = [] } = {}, ...texts) {
             .map(entry => entry.fact);
         chosen.push(...related);
     }
-    return chosen.map(fact => `- ${fact.fact.trim().slice(0, KNOWN_FACT_TEXT_MAX)}`).join('\n');
+    return chosen.map(fact => {
+        const line = fact.fact.trim().slice(0, KNOWN_FACT_TEXT_MAX);
+        return typeof fact.id === 'string' && fact.id ? `- id: ${fact.id} | "${line}"` : `- "${line}"`;
+    }).join('\n');
 }
 
 /**
@@ -738,7 +743,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                     ? `KNOWN STORY CARDS (beats already on record for the people and threads in this exchange — update one by its exact "id" instead of minting a duplicate; a resolved card is paid off and must NOT be re-reported):\n${knownStoryCards}`
                     : null,
                 knownFacts
-                    ? `KNOWN FACTS (world facts already on record — never restate one, in any wording; write a world_fact only for something genuinely NEW, or for a CHANGE to one of these, stated as the new truth):\n${knownFacts}`
+                    ? `KNOWN FACTS (world facts already on record — never restate one, in any wording; write a world_fact only for something genuinely NEW, or for a CHANGE to one of these, stated as the new truth with "supersedes": the old line's exact id):\n${knownFacts}`
                     : null,
                 knownOpenPlans
                     ? `KNOWN OPEN PLANS (plans, promises, and threats on record that have NOT yet happened — when this turn's narrative shows one carried out, failed, or abandoned, write the outcome as its own world fact with "supersedes": that plan's exact id; never re-report the plan itself):\n${knownOpenPlans}`
@@ -796,11 +801,12 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
             ? planWorldFactAdditions(memoryContext.worldFacts, candidateFacts, {
                 messageCount: Number.isFinite(memoryContext.messageCount) ? memoryContext.messageCount : 0,
                 sourceMessage: sourceMessageId,
+                standingRefs: true,
             })
             : null;
         const worldFacts = factPlan ? capAcceptedFacts(candidateFacts, factPlan) : candidateFacts.slice(0, SCRIBE_FACT_CAP);
         if (worldFacts.length > 0) {
-            dispatch({ type: 'ADD_WORLD_FACTS', payload: worldFacts, ...(laneMeta && { meta: laneMeta }) });
+            dispatch({ type: 'ADD_WORLD_FACTS', payload: worldFacts, standingRefs: true, ...(laneMeta && { meta: laneMeta }) });
             console.log(`[Scribe] Added ${worldFacts.length} world fact(s)`);
             // The Scribe is the dominant fact source and its facts never
             // embedded live before (2026-10-11 P2 — the mount seed was their

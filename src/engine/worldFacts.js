@@ -41,8 +41,17 @@
  *   ago): …`), a restatement re-stamps the age, and the DEED closes it: a
  *   lane that read KNOWN OPEN PLANS writes the outcome with `supersedes:
  *   <the plan's id>`, and `findOpenPlan` lets the reducer stamp the plan
- *   `supersededBy` exactly as a FLIP does. Only an INTENT closes by ref — a
- *   standing truth closes by a flip alone, so no lane can bury canon by id.
+ *   `supersededBy` exactly as a FLIP does.
+ *
+ * Standing truths close by ref too since 2026-11-06 (Vesa, reversing the
+ * 10-07 "a standing truth closes by a flip alone"): a flip is a negation, a
+ * thing that MOVED is not one, so "the sail is in the net-loft" stayed live
+ * canon after the sail went aboard and the DM said so, 3 of 7 Sol runs. The
+ * Scribe alone may name a KNOWN FACT its new fact replaces (`standingRefs`);
+ * the DM and the journal never see a fact id and keep the plan-only rule. A
+ * pinned fact never answers to a ref (`findRetirableFact`), the id compares
+ * exactly, and removing the replacing message restores the old fact
+ * (`planRetraction`), so nothing is lost to a deleted turn.
  */
 import { containment, coverage, tokenSet } from './textMatch.js';
 import { conversationalDistance } from './replayLedger.js';
@@ -152,6 +161,17 @@ export function findOpenPlan(liveFacts, ref) {
 }
 
 /**
+ * The live fact the Scribe's `supersedes` ref names — any aspect, a standing
+ * truth included (2026-11-06). Null for a junk ref, an unknown id, a buried
+ * fact, or a PINNED one: a fact sworn on the record stays until a flip.
+ */
+export function findRetirableFact(liveFacts, ref) {
+    if (typeof ref !== 'string' || !ref.trim()) return null;
+    const id = ref.trim();
+    return (Array.isArray(liveFacts) ? liveFacts : []).find(f => f && f.id === id && f.pinned !== true && isLiveFact(f)) || null;
+}
+
+/**
  * `'intent'` when the fact is a plan, promise, threat, or expectation not
  * yet carried out; `'state'` when it describes a condition that will pass
  * (a flood, a siege, a fever, a closed gate); `null` for a standing truth
@@ -254,12 +274,13 @@ function mintFactId() {
  * Per candidate: sanitized; a ≥ 0.9 same-polarity restatement is a
  * `duplicate` (dropped — or, for a STATE / INTENT fact, its age re-stamped);
  * a restatement whose negation differs is a FLIP (stored, superseding its
- * twin); a lane's `supersedes` ref closes a live INTENT fact only
- * (`findOpenPlan`); a new fact is born with its id, `atMessage`, aspect and
- * (when the lane stamped one) `sourceMessage`. Returns the next list, the
+ * twin); a lane's `supersedes` ref closes a live INTENT fact (`findOpenPlan`),
+ * and with `standingRefs` (the Scribe lane) any unpinned live fact
+ * (`findRetirableFact`); a new fact is born with its id, `atMessage`, aspect
+ * and (when the lane stamped one) `sourceMessage`. Returns the next list, the
  * rows born, and whether anything changed. Pure.
  */
-export function planWorldFactAdditions(worldFacts, payload, { messageCount = 0, sourceMessage = null, now = Date.now() } = {}) {
+export function planWorldFactAdditions(worldFacts, payload, { messageCount = 0, sourceMessage = null, now = Date.now(), standingRefs = false } = {}) {
     let facts = Array.isArray(worldFacts) ? worldFacts : [];
     let live = liveWorldFacts(facts);
     let liveSets = live.map(f => factTokenSet(f.fact));
@@ -295,6 +316,17 @@ export function planWorldFactAdditions(worldFacts, payload, { messageCount = 0, 
                     live = liveWorldFacts(facts);
                     changed = true;
                 }
+                // The new truth is already on record under another line: the
+                // change still retires what the ref names, onto that line.
+                const retired = standingRefs ? findRetirableFact(live, f?.supersedes) : null;
+                if (retired && retired.id !== ofId) {
+                    facts = facts.map(existing => (existing.id === retired.id
+                        ? { ...existing, supersededBy: ofId, supersededAtMessage: messageCount }
+                        : existing));
+                    live = liveWorldFacts(facts);
+                    liveSets = live.map(x => factTokenSet(x.fact));
+                    changed = true;
+                }
             }
             continue;
         }
@@ -319,13 +351,13 @@ export function planWorldFactAdditions(worldFacts, payload, { messageCount = 0, 
             // An intent is not a deed (memory-research M0, 2026-10-07): a
             // lane that read KNOWN OPEN PLANS names the plan this fact
             // settles (`supersedes: <id>`) and the plan closes exactly as a
-            // flipped twin does. Only a live INTENT fact answers to the ref
-            // (`findOpenPlan`) — a standing truth closes by a FLIP alone, so
-            // the ref can never bury canon.
-            const plan = findOpenPlan(live, f?.supersedes);
-            if (plan && plan.id !== id) {
-                next.supersedes = plan.id;
-                facts = facts.map(existing => (existing.id === plan.id
+            // flipped twin does. The Scribe may also name a standing truth
+            // the new fact replaces (2026-11-06, the file header); every
+            // other lane reaches intents only.
+            const closed = standingRefs ? findRetirableFact(live, f?.supersedes) : findOpenPlan(live, f?.supersedes);
+            if (closed && closed.id !== id) {
+                next.supersedes = closed.id;
+                facts = facts.map(existing => (existing.id === closed.id
                     ? { ...existing, supersededBy: id, supersededAtMessage: messageCount }
                     : existing));
             }

@@ -137,6 +137,18 @@ export function planRetraction(state, messageId) {
         return verdict.record;
     });
 
+    // A retracted fact gives back what it replaced (2026-11-06): the Scribe
+    // can retire a standing truth by id now, and a row closed by a fact that
+    // no longer exists would be canon gone with nothing in its place.
+    if (plan.retractedFacts.length > 0) {
+        const gone = new Set(plan.retractedFacts.map(fact => fact.id).filter(Boolean));
+        plan.worldFacts = plan.worldFacts.map(fact => {
+            if (!fact || !gone.has(fact.supersededBy)) return fact;
+            const { supersededBy: _by, supersededAtMessage: _at, ...restored } = fact;
+            return restored;
+        });
+    }
+
     plan.storyMemory = cards.map(card => {
         if (!card || typeof card !== 'object') return card;
         if (card.sourceMessage !== id) {
