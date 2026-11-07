@@ -97,19 +97,18 @@ function rulingFlags(ruling) {
 
 // Applied automatically while a flank persists between exchanges; a slot's own
 // explicit ruling always replaces it so the DM stays the adjudicator.
-const STANDING_FLANK_RULING = Object.freeze({ mode: 'advantage', reason: 'flanking (standing)' });
+const STANDING_FLANK_RULING = Object.freeze({ mode: 'advantage', reason: 'flanking (standing)', flank: true });
 
+/**
+ * A shared (standing) flank is the DM's `"flank": true` on an advantage
+ * ruling (combatWire.normalizeSituationalRuling) — identity by reference,
+ * lane 11, 2026-11-08. The word list that read the reason ("flanks",
+ * "opposite side", "pincer", "boxed in", …) is gone: an unflagged ruling
+ * still gives its own slot the advantage the DM granted, it just does not
+ * persist as a flank the engine applies on later exchanges.
+ */
 function isSharedFlankingRuling(ruling) {
-    if (ruling?.mode !== 'advantage') return false;
-    const reason = String(ruling.reason || '').toLowerCase();
-    return /\bflank(?:ed|ing|s)?\b/.test(reason)
-        || /\bopposite side\b/.test(reason)
-        || /\bopposite sides\b/.test(reason)
-        || /\bpincer\b/.test(reason)
-        || /\bbetween\b.+\band\b/.test(reason)
-        || /\bboxed in\b/.test(reason)
-        || /\bsurrounded\b/.test(reason)
-        || /\bhemmed in\b/.test(reason);
+    return ruling?.mode === 'advantage' && ruling.flank === true;
 }
 
 /**

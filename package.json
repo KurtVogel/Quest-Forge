@@ -25,7 +25,8 @@
     "eval:questid": "node scripts/questIdEval.mjs",
     "eval:combatants": "node scripts/combatantTagEval.mjs",
     "eval:itemlinks": "node scripts/itemLinkEval.mjs",
-    "eval:tellid": "node scripts/tellIdEval.mjs"
+    "eval:tellid": "node scripts/tellIdEval.mjs",
+    "eval:arbiter": "node scripts/arbiterEval.mjs"
   },
   "dependencies": {
     "firebase": "^12.9.0",

@@ -9,12 +9,20 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { runScribeMock } = vi.hoisted(() => ({ runScribeMock: vi.fn(async () => {}) }));
+const { runScribeMock, reviewMock } = vi.hoisted(() => ({ runScribeMock: vi.fn(async () => {}), reviewMock: vi.fn() }));
 
 vi.mock('./scribe.js', async (importOriginal) => ({
     ...(await importOriginal()),
     runScribe: runScribeMock,
 }));
+// The roll arbiter, scripted where a test needs a rejection (lane 11,
+// 2026-11-08: the regex rules that used to reject with no machinery key are
+// gone, so the verdict is scripted; the default is the real function).
+vi.mock('../engine/outOfCombatRollPolicy.js', async (importOriginal) => {
+    const original = await importOriginal();
+    reviewMock.mockImplementation(original.reviewOutsideCombatRolls);
+    return { ...original, reviewOutsideCombatRolls: reviewMock };
+});
 
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
 import { createCharacter } from '../engine/characterUtils.js';
@@ -172,7 +180,7 @@ describe('a rejected check takes ONE correction route (2026-10-05)', () => {
 
     it('challenge hop: a re-proposal the arbiter rejects is withdrawn AND answered with the no-dice correction', async () => {
         // The player authored the composure; the DM's REVISE asks a check to decide it.
-        // No machinery key in this harness, so the arbiter's sync rulebook judges.
+        // The arbiter is scripted to reject it (an agency violation).
         const streamMessage = replies(
             fence({ requested_rolls: [{ type: 'skill_check', skill: 'wisdom', dc: 12, description: 'Maintain your composure and hide your fear' }] }),
             'Your face gives nothing away. The warden grunts and waves you on.',
@@ -181,6 +189,7 @@ describe('a rejected check takes ONE correction route (2026-10-05)', () => {
         const action = 'I stay calm and do not flinch as I walk past the warden.';
         runner.stageRoleplayCheck(CHECK, action);
 
+        reviewMock.mockImplementationOnce(async (rolls) => ({ acceptedRolls: [], rejectedRolls: [...rolls], attackAsCheck: false, preNarrated: undefined }));
         await runner.challengeRoleplayCheck('Staying calm is my call, not a roll.');
 
         expect(streamMessage).toHaveBeenCalledTimes(2);

@@ -457,7 +457,7 @@ describe('engine-owned exchange resolution', () => {
             player_slots: [{
                 action: 'attack',
                 strikes: [{ target: 'Goblin' }],
-                situational_ruling: { mode: 'advantage', reason: 'Wit flanks the goblin from the opposite side' },
+                situational_ruling: { mode: 'advantage', reason: 'Wit flanks the goblin from the opposite side', flank: true },
             }],
             companion_intents: [{ companion_id: 'wit', action: 'attack', target: 'Goblin' }],
             enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
@@ -498,7 +498,7 @@ describe('engine-owned exchange resolution', () => {
             player_slots: [{
                 action: 'attack',
                 strikes: [{ target: 'Goblin' }],
-                situational_ruling: { mode: 'advantage', reason: 'Wit flanks the goblin from the opposite side' },
+                situational_ruling: { mode: 'advantage', reason: 'Wit flanks the goblin from the opposite side', flank: true },
             }],
             companion_intents: [{
                 companion_id: 'wit',
@@ -1322,7 +1322,7 @@ describe('standing flank persistence', () => {
             player_slots: [{
                 action: 'attack',
                 strikes: [{ target: 'Goblin' }],
-                situational_ruling: { mode: 'advantage', reason: 'Wit flanks the goblin from the opposite side' },
+                situational_ruling: { mode: 'advantage', reason: 'Wit flanks the goblin from the opposite side', flank: true },
             }],
             companion_intents: [{ companion_id: 'wit', action: 'attack', target: 'Goblin' }],
             enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
@@ -1330,6 +1330,28 @@ describe('standing flank persistence', () => {
         expect(plan.payload.flankedEnemyIds).toEqual(['Goblin']);
         expect(plan.payload.result.events.some(event =>
             event.type === 'note' && /Flanking established against Goblin/.test(event.text))).toBe(true);
+    });
+
+    // Identity by reference, lane 11 (2026-11-08): the flank is the DM's flag,
+    // never a word read out of the reason.
+    it('an advantage ruling whose reason only SAYS "flanks … opposite side" grants its slot the advantage but establishes no standing flank', () => {
+        rollQueue.push(2, 3, 4, 18, 1);
+        const plan = planCombatExchange(flankedState({ combat: { flankedEnemyIds: [] } }), normalizeCombatExchange({
+            player_slots: [{
+                action: 'attack',
+                strikes: [{ target: 'Goblin' }],
+                situational_ruling: { mode: 'advantage', reason: 'Wit flanks the goblin from the opposite side, boxed in and surrounded' },
+            }],
+            companion_intents: [{ companion_id: 'wit', action: 'attack', target: 'Goblin' }],
+            enemy_intents: [{ enemy_id: 'Goblin', action: 'defend' }],
+        }));
+        const attack = plan.payload.result.events.find(event => event.type === 'attack' && event.actor !== 'Wit');
+        expect(attack.mode).toContain('DM ruling — advantage');
+        expect(plan.payload.flankedEnemyIds || []).toEqual([]);
+        expect(plan.payload.result.events.some(event => event.type === 'note' && /Flanking established/.test(event.text))).toBe(false);
+        // The wire keeps the flag only when it is set, and only on advantage.
+        expect(normalizeCombatExchange({ player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }], situational_ruling: { mode: 'advantage', reason: 'r', flank: 'true' } }] }).playerSlots[0].situationalRuling).toEqual({ mode: 'advantage', reason: 'r', flank: true });
+        expect(normalizeCombatExchange({ player_slots: [{ action: 'attack', strikes: [{ target: 'Goblin' }], situational_ruling: { mode: 'disadvantage', reason: 'r', flank: true } }] }).playerSlots[0].situationalRuling).toEqual({ mode: 'disadvantage', reason: 'r' });
     });
 
     it('applies standing flank advantage to the player without a re-emitted ruling', () => {

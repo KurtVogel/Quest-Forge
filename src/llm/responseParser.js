@@ -13,8 +13,6 @@
  */
 
 import { parseBalancedJsonAt, parseJsonObjectLoose, parseJsonText, scanBalancedObject } from './utils/jsonExtractor.js';
-import { findSkillInText, SKILL_ABILITIES } from '../engine/rules.js';
-import { markTurn } from './turnFlags.js';
 import { sendMessage } from './adapter.js';
 import { getPreCommitConfig } from './machinery.js';
 import { normalizeEvents, EVENT_CHANNELS, KNOWN_WIRE_KEYS } from './eventChannels.js';
@@ -42,36 +40,6 @@ const UNFENCED_EVENT_ANCHORS = EVENT_CHANNELS
     .flatMap(c => [c.wire, ...(c.aliases || [])])
     .filter(key => key.includes('_'));
 
-// The skill / ability / attack phrases the prose detector listens for, DERIVED
-// from the engine's own skill table (2026-10-11 audit P2): the old private
-// 27-entry list was substring-matched both ways, so "Roll an Int check" read
-// as Intimidation (Charisma −1 on a rogue with INT 14), "Make an Int save"
-// as an Intimidation SAVE, and "Thieves' Tools check" minted a key the engine
-// has no skill for, at +0 — a wrong stat rolled silently where a roll the
-// engine cannot name is refused out loud ("Roll skipped", 2026-09-10). Every
-// detected phrase is canonicalized through `findSkillInText`, the one lookup
-// the wire's `resolveRollSkill` runs one step later.
-const ROLL_SKILL_PHRASES = [
-    ...Object.keys(SKILL_ABILITIES).map(key => key.replace(/([A-Z])/g, ' $1').toLowerCase().trim()),
-    'strength', 'dexterity', 'constitution', 'intelligence', 'wisdom', 'charisma',
-    // 'initiative' retired 2026-08-27 (DECISIONS.md): initiative is engine-owned
-    // (START_COMBAT rolls it); a detected prose request had no consumer.
-    'attack',
-];
-
-// Pattern 2 of detectTextRollRequests, compiled ONCE (2026-09-28 audit P2: it
-// built one RegExp per known skill on every prose-only reply). Non-global, so
-// `.test` carries no lastIndex state between calls. Word-bounded on both
-// sides of the phrase, like findSkillInText.
-const SKILL_REQUEST_PATTERNS = ROLL_SKILL_PHRASES.map(phrase => ({
-    phrase,
-    pattern: new RegExp(
-        // `\)?` admits 5e's paren spelling, "Wisdom (Insight) check" (2026-10-24).
-        `\\b(?:rolls?|makes?|attempts?|gives? me|need)\\b[\\s\\S]{0,40}?\\b${phrase.replace(/ /g, '[\\s-]*')}\\)?\\s+(?:check|save|saving throw)\\b`,
-        'i',
-    ),
-}));
-
 // Outcome language that should never appear BEFORE dice are rolled.
 // 'you notice' was dropped 2026-10-24 (audit P2 nit): it is the ordinary
 // opener of SETUP prose ("You notice the lock is old iron. Pick it?") and
@@ -84,70 +52,6 @@ const OUTCOME_KEYWORDS = [
     'falls dead', 'you spot', 'you find the', 'critical hit',
     'you successfully', 'your attack lands', 'your blow', 'you strike',
 ];
-
-/**
- * Scan narrative text for roll requests the DM wrote in plain text instead of JSON.
- * Returns a requestedRolls array (may be empty).
- * @param {string} narrative
- * @returns {Array}
- */
-export function detectTextRollRequests(narrative) {
-    const rolls = [];
-
-    // Pattern 1: "roll a/an [skill] check/save" — the skill phrase may carry
-    // 5e's own paren spelling, "Wisdom (Insight) check" (the paren group is
-    // part of the captured phrase; findSkillInText names the skill inside it).
-    const rollPattern = /(?:roll|make|attempt)\s+(?:a|an)\s+([\w\s']+?(?:\s*\([\w\s']+\))?)\s+(?:check|save|saving throw)/gi;
-    let match;
-    while ((match = rollPattern.exec(narrative)) !== null) {
-        // The engine's own lookup names the skill, or there is no roll here.
-        const skill = findSkillInText(match[1]);
-        if (skill) {
-            // Note: "saving" does NOT contain the substring "save" — match both forms.
-            const type = /sav(e|ing)/i.test(match[0]) ? 'saving_throw' : 'skill_check';
-            const dc = dcForMatch(narrative, match.index, match[0].length);
-            rolls.push({ type, skill, dc, description: match[0].trim() });
-        }
-    }
-
-    // Pattern 2: "[Skill] check" NEAR a request verb (e.g. "give me a Perception
-    // check"). A request verb is required like Pattern 1 — the bare noun phrase
-    // fired on RECAP prose ("your earlier Perception check served you well") and
-    // minted a phantom DC-10 proposal (2026-08-29 audit). Genuinely verb-less
-    // prose requests stay covered by the semantic detector + arbiter.
-    if (rolls.length === 0) {
-        for (const { phrase, pattern: skillPattern } of SKILL_REQUEST_PATTERNS) {
-            const hit = narrative.match(skillPattern);
-            if (!hit) continue;
-            const skill = findSkillInText(phrase);
-            if (!skill) continue;
-            const type = /save|saving throw/i.test(hit[0]) ? 'saving_throw' : 'skill_check';
-            const dc = dcForMatch(narrative, hit.index, hit[0].length);
-            rolls.push({ type, skill, dc, description: `${phrase} check (DC ${dc})` });
-            break; // One detected roll per response is enough to trigger the system
-        }
-    }
-
-    return rolls;
-}
-
-/**
- * The DC of ONE detected prose request: the number inside the match or in the
- * clause right after it ("Make a Stealth check (DC 12)", "Roll Athletics, DC
- * 15"), else the engine's one default. The detector used to read the FIRST
- * "DC n" in the whole reply (2026-10-24 audit P2): two requests in one reply
- * both priced at the first, and a recap's "your DC 18 Athletics feat" re-priced
- * a new Persuasion check at 18 — the 10-05 ruling class through the detector.
- */
-const DC_AFTER_MATCH_CHARS = 40;
-const DC_PATTERN = /\b(?:dc|difficulty class)\s*(\d+)\b/i;
-function dcForMatch(narrative, index, length) {
-    const matched = narrative.slice(index, index + length);
-    // The clause right after the match: up to a sentence end, within a short window.
-    const after = narrative.slice(index + length, index + length + DC_AFTER_MATCH_CHARS).split(/[.!?\n]/)[0];
-    const hit = matched.match(DC_PATTERN) || after.match(DC_PATTERN);
-    return hit ? parseInt(hit[1], 10) : DEFAULT_ROLL_DC;
-}
 
 /**
  * Check if narrative contains outcome language that shouldn't be there yet
@@ -343,19 +247,13 @@ export function parseResponse(response) {
             return unfencedResult(response, plainWires.start, plainWires.end, plainWires.value);
         }
 
-        // Fallback 2: text roll detector — DM put roll request in narrative prose
-        debugLog('[ResponseParser] No JSON block — scanning for text-based roll requests.');
-        debugLog('[ResponseParser] Response tail (last 200 chars):', response.slice(-200));
-
-        const detectedRolls = detectTextRollRequests(response);
-        if (detectedRolls.length > 0) {
-            console.warn(`[ResponseParser] Detected ${detectedRolls.length} text-based roll request(s) — converting to JSON events.`);
-            const events = normalizeEvents({ requested_rolls: detectedRolls });
-            markTurn(events, { textRollDetected: true }); // read by turnVisibility's proposal-from-prose rule
-            return { narrative: response.trim(), events };
-        }
-
-        // Pure narrative — no events
+        // Pure narrative — no events. A roll request the DM wrote in prose
+        // ("Make a Perception check (DC 12)") is no longer minted here by a
+        // regex (identity by reference, lane 11, 2026-11-08; the detector
+        // and its DC reader are gone): the orchestrator's semantic detector
+        // (`detectSemanticTextRolls`, machinery Flash) reads an eventless
+        // reply and stamps `textRollDetected` itself.
+        debugLog('[ResponseParser] No JSON block — pure narrative; the semantic roll detector reads it next.');
         return { narrative: response.trim(), events: null };
     }
 

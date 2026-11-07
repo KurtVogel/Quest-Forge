@@ -14,7 +14,7 @@ const { sendMessage } = vi.hoisted(() => ({ sendMessage: vi.fn() }));
 vi.mock('./adapter.js', () => ({ sendMessage }));
 
 import {
-    parseResponse, detectTextRollRequests, detectPreNarratedOutcome, detectSemanticTextRolls, findFencedJsonBlocks,
+    parseResponse, detectPreNarratedOutcome, detectSemanticTextRolls, findFencedJsonBlocks,
 } from './responseParser.js';
 import { DEFAULT_ROLL_DC } from '../config/contentLimits.js';
 
@@ -126,33 +126,16 @@ describe('P2 — the fence grammar: the balanced body whatever follows, the wide
     });
 });
 
-describe('P2 — the prose detector prices each request by its own DC and reads the paren form', () => {
-    it('two DCs in one reply price separately', () => {
-        const rolls = detectTextRollRequests('Roll a Stealth check (DC 12) to slip by. If you are seen, make a Perception check (DC 15) to find cover.');
-        expect(rolls.map(r => [r.skill, r.dc])).toEqual([['stealth', 12], ['perception', 15]]);
-    });
-
-    it('a recap\'s "DC 18 Athletics feat" does not re-price a new Persuasion check', () => {
-        const rolls = detectTextRollRequests('Your earlier DC 18 Athletics feat is the talk of the yard. Now make a Persuasion check to win the foreman over.');
-        expect(rolls).toHaveLength(1);
-        expect(rolls[0]).toMatchObject({ skill: 'persuasion', dc: DEFAULT_ROLL_DC });
-    });
-
-    it('a DC stated right after the match prices it; one a sentence later does not', () => {
-        expect(detectTextRollRequests('Make an Athletics check, DC 14, to haul yourself up.')[0].dc).toBe(14);
-        expect(detectTextRollRequests('Make an Athletics check to haul yourself up. The far wall is DC 20, but that is for later.')[0].dc).toBe(DEFAULT_ROLL_DC);
-    });
-
-    it('5e\'s "Wisdom (Insight) check" paren form stages a roll with the SKILL in both patterns', () => {
-        const p1 = detectTextRollRequests('Make a Wisdom (Insight) check (DC 13) to read her.');
-        expect(p1[0]).toMatchObject({ type: 'skill_check', skill: 'insight', dc: 13 });
-        const p2 = detectTextRollRequests('Give me one Dexterity (Acrobatics) check as the beam sways, DC 11.');
-        expect(p2[0]).toMatchObject({ type: 'skill_check', skill: 'acrobatics', dc: 11 });
-    });
-
-    it('a prose request without a DC still falls to DEFAULT_ROLL_DC (the one constant, no literal 10)', () => {
-        const [roll] = detectTextRollRequests('Make a Perception check to listen at the door.');
-        expect(roll.dc).toBe(DEFAULT_ROLL_DC);
+// The regex prose detector and its DC reader are gone (identity by reference,
+// lane 11, 2026-11-08): the semantic detector is the one reader of a prose
+// roll request, and it names DEFAULT_ROLL_DC in its own prompt.
+describe('P2 — a prose roll request is the semantic detector\'s, priced by the one DC constant', () => {
+    it('the parser mints nothing from "DC 12" prose — two requests, a recap, the paren form alike', () => {
+        for (const prose of [
+            'Roll a Stealth check (DC 12) to slip by. If you are seen, make a Perception check (DC 15) to find cover.',
+            'Your earlier DC 18 Athletics feat is the talk of the yard. Now make a Persuasion check to win the foreman over.',
+            'Make a Wisdom (Insight) check (DC 13) to read her.',
+        ]) expect(parseResponse(prose).events).toBeNull();
     });
 
     it('the semantic detector\'s prompt shows a comment-free JSON example and names DEFAULT_ROLL_DC', async () => {

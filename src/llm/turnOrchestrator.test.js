@@ -4,6 +4,17 @@ import { createCharacter } from '../engine/characterUtils.js';
 import { createTurnRunner } from './turnOrchestrator.js';
 import { markTurn } from './turnFlags.js';
 
+// The roll arbiter, scripted where a test needs a rejection (lane 11,
+// 2026-11-08: the regex rules that used to reject with no machinery key are
+// gone, so the verdict is scripted; the default is the real function, which
+// lets every roll stand without a key).
+const { reviewMock } = vi.hoisted(() => ({ reviewMock: vi.fn() }));
+vi.mock('../engine/outOfCombatRollPolicy.js', async (importOriginal) => {
+    const original = await importOriginal();
+    reviewMock.mockImplementation(original.reviewOutsideCombatRolls);
+    return { ...original, reviewOutsideCombatRolls: reviewMock };
+});
+
 /**
  * The turn runner against the REAL parser, applyEvents, and reducer — only the
  * LLM adapter calls are scripted. The harness uses an OpenAI DM with NO Gemini
@@ -470,9 +481,9 @@ describe('turn runner — change approach (reveal + set-aside ruling)', () => {
 describe('turn runner — the post-roll outcome is a first-class turn (2026-09-02 P1)', () => {
     it('runs the roll arbiter on a chained check: a belief/innocence check after a truthful answer is rejected and corrected', async () => {
         // Outcome narration chains a persuasion check whose only purpose is whether
-        // Galdric BELIEVES the hero — the sync arbiter rejects it (no machinery key
-        // in this harness), the rejected narration is withheld, and the runner
-        // sends the no-dice correction exactly as the first hop's routing does.
+        // Galdric BELIEVES the hero — the arbiter (scripted) rejects it, the
+        // rejected narration is withheld, and the runner sends the no-dice
+        // correction exactly as the first hop's routing does.
         const outcome = 'Galdric studies the ring, then you.\n'
             + '```json\n{"requested_rolls": [{"type": "skill_check", "skill": "persuasion", "dc": 12,'
             + ' "description": "Convince Galdric of your innocent intentions"}]}\n```';
@@ -483,6 +494,7 @@ describe('turn runner — the post-roll outcome is a first-class turn (2026-09-0
             'Honestly, it was my mother\'s ring — I am telling the truth.',
         );
 
+        reviewMock.mockImplementationOnce(async (rolls) => ({ acceptedRolls: [], rejectedRolls: [...rolls], attackAsCheck: false, preNarrated: undefined }));
         await runner.acceptRoleplayCheck();
 
         expect(streamMessage).toHaveBeenCalledTimes(2);

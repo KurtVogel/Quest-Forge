@@ -38,10 +38,14 @@ describe('arbiter verdict tri-state (2026-11-05)', () => {
         expect(review.rejectedRolls).toEqual([]);
     });
 
-    it('approved omitted → no verdict: the sync floor still rejects what it rejects', async () => {
+    // Flipped 2026-11-08 (identity by reference, lane 11): the regex floor is
+    // gone — no verdict means the roll stands, even on a line the old word
+    // rules would have read as a belief check.
+    it('approved omitted → no verdict: the roll stands (was: the sync floor still rejects)', async () => {
         arbiter({ rolls_evaluation: [{ index: 0 }] });
         const review = await reviewOutsideCombatRolls([belief], truthful, 'narrative', SETTINGS);
-        expect(review.rejectedRolls).toEqual([belief]);
+        expect(review.acceptedRolls).toEqual([belief]);
+        expect(review.rejectedRolls).toEqual([]);
     });
 
     it("approved: 'yes' approves; junk ('maybe') is no verdict; 'false' still rejects", async () => {

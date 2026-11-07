@@ -3,69 +3,32 @@ import { getPreCommitConfig } from '../llm/machinery.js';
 import { parseLlmJson } from '../llm/utils/jsonExtractor.js';
 import { triFlag } from './text.js';
 
-const SOCIAL_SKILLS = new Set(['persuasion', 'deception', 'intimidation', 'charisma']);
-
-const EXPLICIT_TRUTH_RE = /\b(?:i\s+(?:am\s+)?(?:telling|speaking|answering)\s+(?:you\s+)?(?:the\s+)?truth|i\s+tell\s+(?:you\s+)?(?:the\s+)?truth|truthfully|honestly|i\s+(?:am|'m)\s+not\s+lying)\b/i;
-const BELIEF_ONLY_RE = /\b(?:convince|persuade|assure|prove)\b.*\b(?:truth|truthful|honest|honesty|innocen(?:t|ce)|intentions?|sincere|sincerity|believe|story|account|explanation|promise)\b/i;
-const CONCRETE_CONCESSION_RE = /\b(?:release|free|let\s+(?:me|us|him|her|them)\s+(?:go|pass|enter|leave)|grant|give|hand\s+over|open|allow|permit|join|help|aid|risk|betray|stand\s+down|surrender|withdraw|hire|sell|buy|waive|lower\s+the\s+price)\b/i;
-const AUTHORED_PORTRAYAL_RE = /\bi\b[^.!?]{0,100}\b(?:remain|stay|keep|act|appear|seem|am|do\s+not|don't|won't)\b[^.!?]{0,80}\b(?:calm|stoic|composed|steady|emotionless|unafraid|brave|confident|sincere|truthful|flinch|cry|tremble|panic|show\s+fear)\b/i;
-const PORTRAYAL_CHECK_RE = /\b(?:remain|maintain|keep|stay|appear|seem|hide|conceal|suppress|resist)\b[^.!?]{0,100}\b(?:calm|stoic|composure|composed|emotionless|facade|façade|demeanor|fear|panic|tears|pain|flinch|trembl\w*|emotion|courage|confidence|sincerity|truthful)\b/i;
-
-function isTruthOnlyBeliefCheckSync(roll, playerMessage) {
-    const skill = String(roll?.skill || roll?.ability || '').toLowerCase();
-    if (!SOCIAL_SKILLS.has(skill) || !EXPLICIT_TRUTH_RE.test(String(playerMessage || ''))) return false;
-    const description = String(roll?.description || '');
-    return BELIEF_ONLY_RE.test(description) && !CONCRETE_CONCESSION_RE.test(description);
-}
-
-function isAuthoredPortrayalCheckSync(roll, playerMessage) {
-    const type = String(roll?.type || 'skill_check').toLowerCase();
-    if (type === 'saving_throw' || type === 'death_save') return false;
-    return AUTHORED_PORTRAYAL_RE.test(String(playerMessage || ''))
-        && PORTRAYAL_CHECK_RE.test(String(roll?.description || ''));
-}
-
-// Attack-staged-as-check (Codex 2026-08-09): "I attack the lookout with my
-// longsword" got a DC 12 roleplay-check proposal instead of combat_start.
-// Approach checks (Stealth to close in, Deception to get near) remain valid —
-// only a check that itself resolves the violence is a violation.
-const ATTACK_DECLARATION_RE = /\b(?:i|we)\s+(?:attack|strike(?:\s+at)?|stab|shoot|slash(?:\s+at)?|charge\s+(?:at|into|the)|lunge\s+at|swing\s+(?:my|the)\s+\w+\s+at|cut\s+(?:him|her|them|it)\s+down|run\s+(?:him|her|them|it)\s+through)\b/i;
-const ATTACK_RESOLUTION_RE = /\b(?:attack|strike|stab|shoot|slash|slay|kill|wound|cut\s+\w+\s+down|land\s+(?:the|a)\s+blow|blade|sword|axe|spear|dagger|bow|arrow)\b/i;
-const APPROACH_SKILLS = new Set(['stealth', 'deception', 'sleightofhand', 'sleight_of_hand', 'acrobatics', 'athletics']);
-
-function isAttackStagedAsCheckSync(roll, playerMessage) {
-    const type = String(roll?.type || 'skill_check').toLowerCase();
-    if (type === 'saving_throw' || type === 'death_save') return false;
-    const skill = String(roll?.skill || roll?.ability || '').toLowerCase().replace(/\s+/g, '');
-    if (APPROACH_SKILLS.has(skill)) return false;
-    return ATTACK_DECLARATION_RE.test(String(playerMessage || ''))
-        && ATTACK_RESOLUTION_RE.test(String(roll?.description || ''));
-}
-
-export function reviewOutsideCombatRollsSync(rolls, playerMessage) {
-    const acceptedRolls = [];
-    const rejectedRolls = [];
-    let attackAsCheck = false;
-    for (const roll of rolls || []) {
-        if (isAttackStagedAsCheckSync(roll, playerMessage)) {
-            attackAsCheck = true;
-            rejectedRolls.push(roll);
-        } else if (isTruthOnlyBeliefCheckSync(roll, playerMessage) || isAuthoredPortrayalCheckSync(roll, playerMessage)) {
-            rejectedRolls.push(roll);
-        } else {
-            acceptedRolls.push(roll);
-        }
-    }
-    return { acceptedRolls, rejectedRolls, attackAsCheck };
+/**
+ * The outside-combat roll arbiter (machinery Flash) reads the player's line,
+ * the narration and the DM's proposed checks against the player-agency
+ * rules, and its verdict STANDS (identity by reference, lane 11,
+ * 2026-11-08). The regex rules that lived beside it since 2026-08 — the
+ * truth / demeanor / attack-as-check word lists, first as the fallback, then
+ * (2026-09-02) as a FLOOR that overruled an arbiter approval — are gone:
+ * they read words to decide a ruling the arbiter had already read in full.
+ * Where no arbiter can run (no machinery key, no player line, an unreadable
+ * or failed reply) every proposed roll stands, with one warning; the
+ * player's adjudication card can still Challenge a check. The old rules are
+ * frozen in scripts/arbiterEval.mjs for comparison, nowhere in play.
+ */
+function everyRollStands(rolls, why = null) {
+    if (why) console.warn(`[RollPolicy] Roll review skipped (${why}) — every proposed roll stands; the player's card can Challenge it.`);
+    return { acceptedRolls: [...(rolls || [])], rejectedRolls: [], attackAsCheck: false };
 }
 
 export async function reviewOutsideCombatRolls(rolls, playerMessage, dmNarrative = '', settings = null, { signal } = {}) {
     // A pre-commit lane: the player is waiting on this call with the narration
     // already received — one attempt, 20 s, then the sync rules (2026-09-29).
     const background = getPreCommitConfig(settings);
-    // Fall back to synchronous regex-based rules if settings, API key, or inputs are missing
-    if (!background.apiKey || !playerMessage || !rolls || rolls.length === 0) {
-        return reviewOutsideCombatRollsSync(rolls, playerMessage);
+    // No arbiter can run: every proposed roll stands (see the header).
+    if (!rolls || rolls.length === 0) return everyRollStands(rolls);
+    if (!background.apiKey || !playerMessage) {
+        return everyRollStands(rolls, !background.apiKey ? 'no machinery key' : 'no player line');
     }
 
     const systemPrompt = `You are a game mechanics arbiter for a tabletop RPG. Analyze a player's action, the Dungeon Master's (DM) subsequent narration, and the DM's proposed out-of-combat rolls to determine if they violate the game's core player agency rules.
@@ -115,40 +78,30 @@ Output ONLY the JSON, no prose outside the JSON.`;
         // `}` fell to the sync rules alone and a verdict the arbiter had
         // written as an agency REJECTION landed as an accept.
         const result = parseLlmJson(response, { anchors: ['rolls_evaluation'], wholeObject: true })?.value;
-        if (!result) {
-            console.warn('[RollPolicy] Scribe review returned invalid JSON, falling back to regex.');
-            return reviewOutsideCombatRollsSync(rolls, playerMessage);
-        }
+        if (!result) return everyRollStands(rolls, 'the arbiter returned no readable JSON');
+        if (!Array.isArray(result.rolls_evaluation)) return everyRollStands(rolls, 'the arbiter reply had no rolls_evaluation');
 
-        if (!result || !Array.isArray(result.rolls_evaluation)) {
-            return reviewOutsideCombatRollsSync(rolls, playerMessage);
-        }
-
-        // The deterministic rules are the FLOOR, not a fallback (2026-09-02
-        // audit): a Flash-Lite "approved" on "I attack the lookout" used to skip
-        // isAttackStagedAsCheckSync entirely, so the 2026-08-09 attack-as-check
-        // fix held only when the arbiter agreed. A sync rejection always wins; a
-        // roll the arbiter never evaluated takes the sync verdict.
-        const sync = reviewOutsideCombatRollsSync(rolls, playerMessage);
-        const syncRejected = new Set(sync.rejectedRolls);
+        // The arbiter's verdict stands, roll by roll (lane 11, 2026-11-08;
+        // was: the regex rules as the floor since 2026-09-02). A roll it never
+        // evaluated, or answered with junk, has no verdict and stands.
         const acceptedRolls = [];
         const rejectedRolls = [];
-        let attackAsCheck = sync.attackAsCheck;
+        let attackAsCheck = false;
 
         for (let i = 0; i < rolls.length; i++) {
             // Coerced index: a string "0" or a missing entry must not read as approval.
             const evaluation = result.rolls_evaluation.find(e => e && typeof e === 'object' && Number(e.index) === i);
             // Tri-state (2026-11-05 strengthening P2): `approved` omitted /
-            // junk is NO verdict — the sync floor decides alone, exactly as
-            // for a missing entry. It used to REJECT (fail-closed for junk,
-            // fail-open for absence) and route a false authority correction.
+            // junk is NO verdict, exactly as for a missing entry — the roll
+            // stands. It used to REJECT (fail-closed for junk, fail-open for
+            // absence) and route a false authority correction.
             const verdict = evaluation ? triFlag(evaluation.approved) : undefined;
             const llmApproved = verdict !== false;
             if (verdict === false) {
                 console.log(`[RollPolicy] Scribe REJECTED proposed check: "${rolls[i].description || rolls[i].skill || 'Check'}". Reason: ${evaluation.reason}`);
                 if (String(evaluation.violation || '').toLowerCase() === 'attack') attackAsCheck = true;
             }
-            if (!llmApproved || syncRejected.has(rolls[i])) {
+            if (!llmApproved) {
                 rejectedRolls.push(rolls[i]);
             } else {
                 acceptedRolls.push(rolls[i]);
@@ -162,11 +115,10 @@ Output ONLY the JSON, no prose outside the JSON.`;
 
         return { acceptedRolls, rejectedRolls, preNarrated, attackAsCheck };
     } catch (e) {
-        // A deliberate Stop propagates — the sync floor is a fallback for the
+        // A deliberate Stop propagates — "every roll stands" is for the
         // arbiter FAILING, not for the player cancelling the turn.
         if (e?.name === 'AbortError' && signal?.aborted) throw e;
-        console.warn('[RollPolicy] Scribe review failed, falling back to regex. Error:', e.message || e);
-        return reviewOutsideCombatRollsSync(rolls, playerMessage);
+        return everyRollStands(rolls, `the arbiter failed: ${e?.message || e}`);
     }
 }
 

@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { sendMessage } = vi.hoisted(() => ({ sendMessage: vi.fn() }));
 vi.mock('./adapter.js', () => ({ sendMessage }));
 
-import { detectTextRollRequests, parseResponse } from './responseParser.js';
+import { parseResponse } from './responseParser.js';
 import { extractLlmJson, parseJsonObjectLoose, parseJsonText, parseLlmJson } from './utils/jsonExtractor.js';
 import { parseDirectorJson, tryParseDirectorJson } from './directorUtils.js';
 import { extractNudgeEventFields } from '../components/Chat/missingEventsNudge.js';
@@ -111,25 +111,14 @@ describe('the fence grammar is ONE function (P2)', () => {
     });
 });
 
-describe('the prose detector names skills through findSkillInText (P2)', () => {
-    it('"Int" is not Intimidation: an abbreviation the engine cannot name is no roll, not a wrong stat', () => {
-        expect(detectTextRollRequests('Roll an Int check (DC 12) to recall the rite.')).toEqual([]);
-        expect(detectTextRollRequests('Make an Int save against the glyph.')).toEqual([]);
+// The prose detector is gone (identity by reference, lane 11, 2026-11-08):
+// the wire's skill lookup is what the semantic detector's output passes through.
+describe('the wire names skills through findSkillInText (P2)', () => {
+    it('"Int" is not Intimidation: an abbreviation the engine cannot name is no skill', () => {
         expect(findSkillInText('Int')).toBeNull();
     });
 
-    it("a Thieves' Tools check mints no key the engine lacks", () => {
-        expect(detectTextRollRequests("Make a Thieves' Tools check (DC 14) on the lock.")).toEqual([]);
-    });
-
-    it('a real skill lands under its canonical key, multi-word and ability alike', () => {
-        expect(detectTextRollRequests('Make a Sleight of Hand check (DC 12) to palm the coin.')[0]).toMatchObject({ type: 'skill_check', skill: 'sleightOfHand', dc: 12 });
-        expect(detectTextRollRequests('Make an Intelligence check (DC 12) to recall the rite.')[0]).toMatchObject({ skill: 'intelligence' });
-        expect(detectTextRollRequests('Give me one Animal Handling check as the horse rears.')[0]).toMatchObject({ skill: 'animalHandling' });
-        expect(detectTextRollRequests('You need a constitution saving throw now.')[0]).toMatchObject({ type: 'saving_throw', skill: 'constitution' });
-    });
-
-    it('every phrase the detector listens for resolves through the engine lookup', () => {
+    it('every phrase a DM is likely to write resolves through the engine lookup', () => {
         for (const phrase of ['perception', 'sleight of hand', 'animal handling', 'wisdom', 'attack']) {
             expect(findSkillInText(phrase)).not.toBeNull();
         }
@@ -148,9 +137,9 @@ describe('the turn flags are ONE object (P2 nit)', () => {
         expect(markTurn(null, { a: 1 })).toBeNull();
     });
 
-    it('the parser stamps a prose-detected roll on the turn object, not an underscore key', () => {
+    it('the parser mints no roll from prose (lane 11): a prose request is null events, and the stamp is the semantic lane\'s', () => {
         const { events } = parseResponse('Make a Perception check (DC 12) to spot the trap.');
-        expect(turnFlags(events).textRollDetected).toBe(true);
-        expect(Object.keys(events).some(key => key.startsWith('_'))).toBe(false);
+        expect(events).toBeNull();
+        expect(turnFlags(events).textRollDetected).toBeUndefined();
     });
 });

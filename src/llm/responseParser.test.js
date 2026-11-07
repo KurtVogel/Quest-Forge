@@ -264,32 +264,19 @@ describe('defenses against LLM misbehavior', () => {
         expect(narrative).toBe('The guard eyes you.');
     });
 
-    it('detects prose roll requests the DM wrote as text', () => {
-        const { events } = parseResponse('The shadows shift around you. Make a Perception check (DC 12) to spot the danger.');
-        expect(events?.requestedRolls?.length).toBeGreaterThan(0);
-        expect(events.requestedRolls[0]).toMatchObject({ type: 'skill_check', skill: 'perception', dc: 12 });
-    });
-
-    it('detects prose saving throw requests as saving_throw', () => {
-        const { events } = parseResponse('Poison gas fills the corridor! Make a constitution saving throw (DC 13).');
-        expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'saving_throw', skill: 'constitution', dc: 13 });
-    });
-
-    it('uses the standard solo-play DC when a prose roll request omits one', () => {
-        const { events } = parseResponse('Make a Perception check to listen at the door.');
-        expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'skill_check', skill: 'perception', dc: 10 });
-    });
-
-    it('detects a "[Skill] check" phrase near a request verb Pattern 1 misses', () => {
-        // "make one final ... check" dodges Pattern 1's required "a/an" article;
-        // Pattern 2 catches it because a request verb precedes the skill noun.
-        const { events } = parseResponse('You make one final Perception check as you scan the room.');
-        expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'skill_check', skill: 'perception' });
-    });
-
-    it('detects a "[Skill] saving throw" near a request verb as a saving_throw', () => {
-        const { events } = parseResponse('Give me one constitution saving throw as the poison spreads.');
-        expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'saving_throw', skill: 'constitution' });
+    // Flipped 2026-11-08 (identity by reference, lane 11): the regex prose
+    // detector is gone. A roll request the DM wrote in prose parses as pure
+    // narrative; the orchestrator's semantic detector (machinery Flash) reads
+    // it and stamps `textRollDetected` (turnOrchestrator.semanticRolls.test.js).
+    it('a prose roll request is pure narrative to the parser — no regex mints a roll (lane 11)', () => {
+        for (const prose of [
+            'The shadows shift around you. Make a Perception check (DC 12) to spot the danger.',
+            'Poison gas fills the corridor! Make a constitution saving throw (DC 13).',
+            'You make one final Perception check as you scan the room.',
+            'Give me one constitution saving throw as the poison spreads.',
+        ]) {
+            expect(parseResponse(prose)).toEqual({ narrative: prose, events: null });
+        }
     });
 
     it('does NOT mint a phantom proposal from verb-less recap prose (2026-08-29 audit)', () => {
@@ -642,10 +629,10 @@ describe('parseResponse JSON repair paths', () => {
         expect(events?.requestedRolls).toHaveLength(1);
     });
 
-    it('falls through to the text-roll detector when unfenced JSON is irreparable', () => {
+    it('irreparable unfenced JSON beside a prose roll request is pure narrative (the semantic detector\'s turn, lane 11)', () => {
         const raw = 'Make a Perception check (DC 12) to notice the trap.\n{ requested_rolls: [broken] }';
         const { events } = parseResponse(raw);
-        expect(events?.requestedRolls?.[0]).toMatchObject({ type: 'skill_check', skill: 'perception' });
+        expect(events).toBeNull();
     });
 
     it('returns empty narrative and null events for an empty response', () => {

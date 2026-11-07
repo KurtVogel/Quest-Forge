@@ -1,6 +1,6 @@
 # Identity by reference: inventory and proposed order
 
-**Status: order approved by Vesa 2026-11-07. Lanes 1, 4, 5, 3 and 2 are built and deployed. Next in the order: lane 11, then lane 6 — decisions 2 to 4 at the end come due before lane 6 starts.** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
+**Status: order approved by Vesa 2026-11-07. Lanes 1, 4, 5, 3, 2 and 11 are built and deployed. Next in the order: lane 6 — decisions 2 to 4 at the end come due before it starts.** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
 2026-11-07 for the live proof. Line numbers hold at `667295b`, which changed no app code. Rule behind it: DECISIONS.md 2026-11-05 (first entry), with 2026-11-03 evening
 (`recorded_as`), 2026-11-02 (the repeat judge) and 2026-11-06 night (the id decides) as the lanes already moved.
 
@@ -247,7 +247,9 @@ Lowest harm. I'd build these only if you want the last of it gone, or if a playt
 | `engine/locationRegistry.js:165` `isLocationEvidencedInText`, `:302` direction (read at `scribe.js:907`, `npcs.js:772-786`, `:663`) | Scribe string vs narration | a | `evidence`: a verbatim span of the narration; the engine does an exact `includes`. This is the `recorded_as` shape applied to prose | No evidence, no move (as today) |
 | `state/handlers/shared.js:894` `settledInPresence`, `engine/relationshipArc.js:454` `inScene` | name in prose | a | Scribe's `id` on a same-turn report; a turn beat reads the Scribe's last cast | As today |
 
-## Lane 11. Phrase rules over the player's words (new)
+## Lane 11. Phrase rules over the player's words (new) (done 2026-11-08)
+
+**Built as below in two slices** (DECISIONS.md 2026-11-08): the four repeat rows through the repeat judge (an XP award, a cast or a rest the judge books has no Undo); the arbiter's verdict stands and without an arbiter every roll stands; the prose roll detector is gone and the semantic detector is the one reader; the flank is `"flank": true` on the ruling. **One row deferred:** `isRecordedDead` goes to lane 6, because a death field on the record and the one-time migration from today's regex are the frozen-matcher question (decision 4). **Measured:** `eval:arbiter` (new), Flash, 12 turns × 3: the arbiter alone 36 of 36 right; the old word rules wrong on 9 of 36. `eval:repeats` with the XP / cast / rest cases 62 of 62. The table below is the design as proposed.
 
 Added from the other session's audit. These aren't identity, so the 11-05 ruling doesn't strictly cover them,
 but they're the class Vesa ruled against on 11-02, and that decision left XP and spell repeats as "next if they
@@ -295,7 +297,7 @@ Ordered by: the id is already shown to the LLM, a defect closes, nothing else de
 | ~~5~~ | ~~Items and ledger~~ | **Done 2026-11-07** | the last deferred item | |
 | ~~3~~ | ~~Quests, no-id leftovers~~ | **Done 2026-11-07**, the queue item closed | | |
 | ~~2~~ | ~~Tells, no-id leftover~~ | **Done 2026-11-08**; the count came from `eval:tellid` | | |
-| 11 | Phrase rules | Independent; the four repeat rows share one route, the repeat judge. The roll rows are a separate call | | Medium |
+| ~~11~~ | ~~Phrase rules~~ | **Done 2026-11-08** in two slices; `isRecordedDead` deferred to lane 6 | | |
 | 6 | People | The keystone: aliases, `findNpcByRef`, `name_links`, `same_person`, the migration | 1 queue item | Large |
 | 7 | People reads | Needs 6 | `namesMatch` leaves decisions | Medium |
 | 8 | Story cards | Needs a merge lane first; needs a before and after | | Large |

@@ -27,6 +27,10 @@ const mocks = vi.hoisted(() => ({
     flushMemoryQueue: vi.fn(async () => {}),
     adapterSend: vi.fn(async () => ''),
     detect: vi.fn(async () => null),
+    // The roll arbiter, scripted per test (lane 11, 2026-11-08: the regex
+    // rules that used to reject with no machinery key are gone, so a test
+    // about the rejection ROUTE scripts the verdict itself).
+    review: vi.fn(),
 }));
 
 vi.mock('./scribe.js', async (importOriginal) => ({
@@ -49,6 +53,13 @@ vi.mock('./responseParser.js', async (importOriginal) => ({
     ...(await importOriginal()),
     detectSemanticTextRolls: mocks.detect,
 }));
+vi.mock('../engine/outOfCombatRollPolicy.js', async (importOriginal) => {
+    const original = await importOriginal();
+    mocks.review.mockImplementation(original.reviewOutsideCombatRolls);
+    return { ...original, reviewOutsideCombatRolls: mocks.review };
+});
+/** One arbiter verdict: every proposed roll rejected, as an attack staged as a check or an agency violation. */
+const arbiterRejects = (violation) => async (rolls) => ({ acceptedRolls: [], rejectedRolls: [...rolls], attackAsCheck: violation === 'attack', preNarrated: undefined });
 
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
 import { createCharacter } from '../engine/characterUtils.js';
@@ -184,6 +195,7 @@ const approachCheck = `${APPROACH_PROSE}\n\`\`\`json\n{"requested_rolls": [{"typ
 const FIGHT = 'Steel rings.\n```json\n{"combat_start": {"enemies": [{"name": "Lookout", "hp": 9, "ac": 12}]}, "combat_exchange": {"player_slots": [{"action": "attack", "strikes": [{"target": "lookout-1"}]}]}}\n```';
 
 async function rejectedFirstHop(h) {
+    mocks.review.mockImplementationOnce(arbiterRejects('attack'));
     const events = await h.runner.sendToLLM(ATTACK, ATTACK);
     expect(routeTurnEvents(events).route).toBe(TURN_ROUTES.ATTACK_AS_CHECK);
     return events;
@@ -228,6 +240,8 @@ describe('P2 — sendRollCorrection routes its reply like a first hop, ONCE', ()
         const h = createHarness({ streamMessage: scriptedStream([attackAsCheck('The lookout turns.'), attackAsCheck(SECOND)]) });
         await rejectedFirstHop(h);
 
+        // The correction's reply stages the attack as a check AGAIN; the arbiter rejects it again.
+        mocks.review.mockImplementationOnce(arbiterRejects('attack'));
         const result = await h.runner.sendRollCorrection({ attackAsCheck: true, playerAction: ATTACK });
 
         expect(result.route).toBe('revealed');
@@ -248,6 +262,8 @@ describe('P2 — sendRollCorrection routes its reply like a first hop, ONCE', ()
         expect(routeTurnEvents(events).route).toBe(TURN_ROUTES.ROLL_PROPOSAL);
         h.runner.stageRoleplayCheck(events.requestedRolls, ATTACK, { events, narrative: APPROACH_PROSE });
 
+        // The outcome's chained check is the one the arbiter rejects.
+        mocks.review.mockImplementationOnce(arbiterRejects('attack'));
         await h.runner.acceptRoleplayCheck();
 
         expect(h.streamMessage).toHaveBeenCalledTimes(3);

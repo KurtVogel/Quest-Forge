@@ -80,7 +80,11 @@ function normalizeSituationalRuling(raw) {
     const mode = text(source.roll_mode || source.rollMode || source.mode, 20).toLowerCase();
     const reason = text(source.roll_reason || source.rollReason || source.reason, 180);
     if (!['advantage', 'disadvantage'].includes(mode) || !reason) return null;
-    return { mode, reason };
+    // A flank is a structured flag the DM sets (identity by reference, lane
+    // 11, 2026-11-08), never a word read out of the reason: only an advantage
+    // ruling flagged `flank: true` becomes a standing flank in the engine.
+    const flank = mode === 'advantage' && (source.flank === true || source.flank === 'true' || source.flanking === true || source.flanking === 'true');
+    return { mode, reason, ...(flank && { flank: true }) };
 }
 
 /** Normalize an LLM-authored intent envelope without consulting mutable game state. */
