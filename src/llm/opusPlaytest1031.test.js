@@ -30,7 +30,7 @@ function clericState(overrides = {}) {
         party: [],
         npcs: [
             { id: 'npc-ottilie', name: 'Sister Ottilie', rosterTier: 'character', kind: 'character', disposition: 'friendly' },
-            { id: 'npc-marv', name: 'Marv', rosterTier: 'character', kind: 'character', lastNotes: 'Killed by Brenna.' },
+            { id: 'npc-marv', name: 'Marv', rosterTier: 'character', kind: 'character', lastNotes: 'Killed by Brenna.' , dead: true },
         ],
         messages: [],
         ...overrides,

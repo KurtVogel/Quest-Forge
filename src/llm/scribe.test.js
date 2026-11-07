@@ -517,6 +517,8 @@ describe('cadenced living-world reflection', () => {
         expect(payload).toBe(JSON.stringify(JSON.parse(payload)));
 
         const ALLOWED_NPC_KEYS = new Set([
+            // id and aliases ride for the reflection's npc_updates / same_person echo (lane 6C).
+            'id', 'aliases',
             'name', 'gender', 'species', 'disposition', 'personality', 'goals', 'secrets',
             'agenda', 'relationshipTension', 'stanceToPlayer', 'lastNotes',
             'callbackHooks', 'bondMoments', 'basedIn', 'lastLocation',

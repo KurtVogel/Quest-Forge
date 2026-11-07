@@ -40,7 +40,8 @@ describe('a person is present when the scene NAMES them', () => {
     it('never an archived creature or the recorded dead', () => {
         const npcs = [
             { name: 'Scarred Cave-Worg', rosterTier: 'archived_creature' },
-            { name: 'Marv', rosterTier: 'character', lastNotes: 'Killed by Vesa.' },
+            // The record's own dead flag (lane 6C); the notes are no longer read for it.
+            { name: 'Marv', rosterTier: 'character', lastNotes: 'Killed by Vesa.', dead: true },
             { name: 'Ketta Mor', rosterTier: 'character' },
         ];
         const found = findNamedPeople(npcs, { sceneText: 'Marv\'s ghost? No — Ketta laughs at the Scarred Cave-Worg tale.' });

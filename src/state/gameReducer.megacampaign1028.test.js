@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { compactDossierText, curateNpcsForPrompt, isRecordedDead, KNOWN_NPC_STALE_MESSAGES } from '../engine/npcRoster.js';
+import { legacyRecordedDead } from './legacyNpcIdentity.js';
 import { FAR_LAND_CALLBACK_PENALTY, LONG_AGO_CALLBACK_MESSAGES, normalizeStoryMemoryCard, scoreStoryMemory } from '../engine/storyMemory.js';
 import { buildSystemPromptParts, isThreatFact, MEMORY_UNAVAILABLE_NOTE } from '../llm/promptBuilder.js';
 
@@ -141,12 +142,18 @@ describe('KNOWN NPCs seats the living and the near', () => {
             .toBe('Pragmatic, ribald, affectionate, cynical about nobility, protective, resilient, vigilant, gritty, loyal.');
     });
 
-    it('isRecordedDead reads the record\'s own latest note — never a note about someone the NPC killed', () => {
-        expect(isRecordedDead({ lastNotes: 'Dead; looted by Vesa.' })).toBe(true);
-        expect(isRecordedDead({ lastNotes: 'Bounty hunter defeated and executed by the player.' })).toBe(true);
-        expect(isRecordedDead({ lastNotes: 'Struck down by Vesa and impaled; dead on the street.' })).toBe(true);
-        expect(isRecordedDead({ lastNotes: 'Killed two guards at the gate and fled.' })).toBe(false);
-        expect(isRecordedDead({ lastNotes: 'Mourns her brother, who was killed by bandits.' })).toBe(true); // the conservative edge: a recorded "killed by" reads as death
+    // Flipped 2026-11-08 (identity by reference, lane 6C): the live reader is
+    // the record's own `dead` flag; the notes regex is frozen for the one-time
+    // save-version-5 migration and keeps its 10-28 readings there.
+    it('isRecordedDead reads the record\'s dead flag; the frozen notes regex (migration only) keeps its readings', () => {
+        expect(isRecordedDead({ dead: true, lastNotes: 'Alive and well.' })).toBe(true);
+        expect(isRecordedDead({ lastNotes: 'Dead; looted by Vesa.' })).toBe(false);
+        expect(isRecordedDead({ dead: 'true' })).toBe(false);
+        expect(legacyRecordedDead({ lastNotes: 'Dead; looted by Vesa.' })).toBe(true);
+        expect(legacyRecordedDead({ lastNotes: 'Bounty hunter defeated and executed by the player.' })).toBe(true);
+        expect(legacyRecordedDead({ lastNotes: 'Struck down by Vesa and impaled; dead on the street.' })).toBe(true);
+        expect(legacyRecordedDead({ lastNotes: 'Killed two guards at the gate and fled.' })).toBe(false);
+        expect(legacyRecordedDead({ lastNotes: 'Mourns her brother, who was killed by bandits.' })).toBe(true); // the conservative edge: a recorded "killed by" reads as death
     });
 });
 

@@ -132,6 +132,19 @@ export function legacyFoldForkedNpcs(npcs = []) {
     return kept;
 }
 
+// `isRecordedDead` as of 2026-11-08 (before lane 6C): a note OPENING on "Killed"
+// is the NPC's death only when nothing follows it but by/in/at/during or the
+// end ("Killed by Vesa.", "Killed in combat.") — "Killed two guards and fled"
+// is a living NPC's deed. Frozen for the save-version-5 migration, which turns
+// the reading into the record's own `dead: true`; nothing in play reads notes.
+const LEGACY_RECORDED_DEATH_RE = /^\s*(?:dead|died)\b|^\s*(?:killed|slain|executed|murdered)(?:\s+(?:by|in|at|during)\b|\s*[.;!]|\s*$)|\b(?:killed|slain|executed|murdered|beheaded)\s+(?:by|in)\b|\b(?:is|was|lies|lay)\s+(?:now\s+)?dead\b|\bdead\s+on\s+the\b/i;
+
+/** The record's own latest note says this person is dead (frozen 2026-11-08). */
+export function legacyRecordedDead(npc) {
+    const notes = typeof npc?.lastNotes === 'string' ? npc.lastNotes.replace(/\s+/g, ' ').trim() : '';
+    return LEGACY_RECORDED_DEATH_RE.test(notes);
+}
+
 /**
  * The name strings an old save holds about people, outside the roster: who a
  * quest was for, who a story card links, who witnessed or voiced a tell, who a

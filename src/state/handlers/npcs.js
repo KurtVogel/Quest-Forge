@@ -2,7 +2,7 @@
  * NPC roster and locations: upsert/pin/archive/portrait/migration plus the
  * canonical location registry writes.
  */
-import { addNpcAlias, buildStoryMemoryPromotion, findNpcByRef, gradeBondMoments, normalizeNpcRecord, selectKeyBondMoments, shortlistNpcCandidates } from '../../engine/npcRoster.js';
+import { addNpcAlias, buildStoryMemoryPromotion, findNpcByRef, gradeBondMoments, mergeNpcRecords, normalizeNpcRecord, selectKeyBondMoments, shortlistNpcCandidates } from '../../engine/npcRoster.js';
 import { heroNameForms } from '../../engine/textMatch.js';
 import { TURN_BEAT_TIMING_DIE_SIDES, beatTargets, deriveRelationshipStage, detectBondTurn, isRelationshipBeatExpired, mintTurnBeat, sanitizeRelationshipBeat } from '../../engine/relationshipArc.js';
 import { rollDie } from '../../engine/dice.ts';
@@ -266,6 +266,37 @@ export const handlers = {
     // means the per-turn Scribe and the DM's inline npc_updates can introduce a
     // brand-new NPC the instant it appears, instead of being silently dropped
     // until the next journal pass.
+    /**
+     * The reflection said two records are one person (lane 6C, 2026-11-08):
+     * `{ keepId, dropId }`, both ids it was shown under possibleSamePerson.
+     * The engine folds by id (mergeNpcRecords) and repoints every reference
+     * the dropped id held — quest patrons, ledger counterparties, other
+     * records' ties, held-name shortlists. A missing or identical id merges
+     * nothing. One console line; the roster shows one person afterwards.
+     */
+    MERGE_NPC_RECORDS(state, action) {
+        if (isStaleCampaignAction(state, action)) return state;
+        const keepId = typeof action.payload?.keepId === 'string' ? action.payload.keepId.trim() : '';
+        const dropId = typeof action.payload?.dropId === 'string' ? action.payload.dropId.trim() : '';
+        const npcs = mergeNpcRecords(state.npcs || [], keepId, dropId);
+        if (npcs === (state.npcs || [])) return state;
+        const kept = npcs.find(n => n?.id === keepId);
+        console.info(`[NPC] Merged ${dropId} into ${keepId} ${kept?.name || ''} — the reflection read them as one person.`);
+        const repoint = (id) => (id === dropId ? keepId : id);
+        return {
+            ...state,
+            npcs: npcs.map(n => (Array.isArray(n?.ties) && n.ties.some(tie => tie?.npcId === dropId)
+                ? { ...n, ties: n.ties.map(tie => (tie?.npcId === dropId ? { ...tie, npcId: keepId, name: kept?.name || tie.name } : tie)) }
+                : n)),
+            quests: (state.quests || []).map(q => (q?.patronId === dropId ? { ...q, patronId: keepId, ...(kept?.name && { patron: kept.name }) } : q)),
+            ledger: Array.isArray(state.ledger) ? state.ledger.map(entry => (entry?.partyId === dropId ? { ...entry, partyId: keepId } : entry)) : state.ledger,
+            session: {
+                ...state.session,
+                heldNpcUpdates: (state.session?.heldNpcUpdates || []).map(entry => ({ ...entry, candidates: [...new Set((entry.candidates || []).map(repoint))] })),
+            },
+        };
+    },
+
     /**
      * The Scribe's answers to HELD NAMES (rung 3, lane 6). Payload
      * `{ links: [{ said, id }] }`: `id` is a roster id or "new". A linked id

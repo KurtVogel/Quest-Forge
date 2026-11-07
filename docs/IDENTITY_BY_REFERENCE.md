@@ -1,6 +1,6 @@
 # Identity by reference: inventory and proposed order
 
-**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2 and 11 are built and deployed; lane 6's slices A and B (aliases, `findNpcByRef`, the migration, the Scribe's ids, the DM hold) are built and deployed 2026-11-08. Open: 6C (`same_person`, ties by id, `isRecordedDead`), then 7, 8, 9 (review first), 10.** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
+**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11 and 6 (all three slices) are built and deployed 2026-11-08. Open: 7, 8, 9 (review first), 10.** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
 2026-11-07 for the live proof. Line numbers hold at `667295b`, which changed no app code. Rule behind it: DECISIONS.md 2026-11-05 (first entry), with 2026-11-03 evening
 (`recorded_as`), 2026-11-02 (the repeat judge) and 2026-11-06 night (the id decides) as the lanes already moved.
 
@@ -149,9 +149,9 @@ The `different` route costs one Flash call and a one-line "Checked" row when som
 amount inside the window. The alternative is to rely on lane 6's roster merge, but that only heals at the next
 cadence. I'd take the judge route.
 
-## Lane 6. People: the keystone (slices A + B done 2026-11-08)
+## Lane 6. People: the keystone (done 2026-11-08, three slices)
 
-**Built as below** (DECISIONS.md 2026-11-08, later), with these notes: the DM lane holds a miss, the Scribe lane and the engine mint on one (the Scribe was shown every id); the four director sites and `resolvePatron` moved to the exact lookup in the same commit; the per-load fold did not stop at load but moved whole into the save-version-4 migration beside the alias seeding (one frozen module, `src/state/legacyNpcIdentity.js`); the ties row lost its `namesMatch` fold but the `id` on the tie is still 6C's. **Measured** (`eval:npcid`, Flash, 11 turns × 3): ids 15 of 15, new 6 of 6, held names 12 of 12. **Still open as 6C:** `same_person` from reflection, ties carrying an id, and `isRecordedDead` (deferred from lane 11) as a death field on the record with its own migration. The table below is the design as proposed.
+**Built as below** (DECISIONS.md 2026-11-08, later), with these notes: the DM lane holds a miss, the Scribe lane and the engine mint on one (the Scribe was shown every id); the four director sites and `resolvePatron` moved to the exact lookup in the same commit; the per-load fold did not stop at load but moved whole into the save-version-4 migration beside the alias seeding (one frozen module, `src/state/legacyNpcIdentity.js`); the ties row lost its `namesMatch` fold but the `id` on the tie is still 6C's. **Measured** (`eval:npcid`, Flash, 11 turns × 3): ids 15 of 15, new 6 of 6, held names 12 of 12. **Slice C (2026-11-08, night):** `same_person` from the reflection's `possibleSamePerson` shortlist, merged by id and only for an offered pair; ties carry an id; `isRecordedDead` reads `npc.dead`, written by the Scribe's `died: true` and seeded once by save version 5 from the frozen notes regex. **Measured:** `eval:npcid` extended, Flash, 15 turns × 3: 45 of 45, the fork merged and the two Marens kept apart 3 of 3. The table below is the design as proposed.
 
 Two new things, used by everything in lane 7:
 
@@ -300,7 +300,7 @@ Ordered by: the id is already shown to the LLM, a defect closes, nothing else de
 | ~~3~~ | ~~Quests, no-id leftovers~~ | **Done 2026-11-07**, the queue item closed | | |
 | ~~2~~ | ~~Tells, no-id leftover~~ | **Done 2026-11-08**; the count came from `eval:tellid` | | |
 | ~~11~~ | ~~Phrase rules~~ | **Done 2026-11-08** in two slices; `isRecordedDead` deferred to lane 6 | | |
-| 6 | People | **Slices A + B done 2026-11-08** (aliases, `findNpcByRef`, `name_links`, the migration); 6C open (`same_person`, ties by id, `isRecordedDead`) | 1 queue item closed | Large |
+| ~~6~~ | ~~People~~ | **Done 2026-11-08** in three slices (aliases, `findNpcByRef`, `name_links`, the migration; `same_person`, ties by id, `npc.dead`) | 1 queue item closed | |
 | 7 | People reads | Needs 6 | `namesMatch` leaves decisions | Medium |
 | 8 | Story cards | Needs a merge lane first; needs a before and after | | Large |
 | 9 | Places | Needs what 6 teaches. **Stop and review the design before building** | `findLocationRecord` fuzzy rung | Large |

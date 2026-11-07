@@ -65,7 +65,7 @@ import { listFrontsLeftBehind } from '../engine/regionProfile.js';
 import { applyStoryMemoryDormancy } from '../engine/storyMemory.js';
 import { migrateLegacyNpc, normalizeNpcAliases } from '../engine/npcRoster.js';
 import { heroNameForms } from '../engine/textMatch.js';
-import { legacyFoldForkedNpcs, legacyNamesMatch, legacyPeopleNamesInSave } from './legacyNpcIdentity.js';
+import { legacyFoldForkedNpcs, legacyNamesMatch, legacyPeopleNamesInSave, legacyRecordedDead } from './legacyNpcIdentity.js';
 
 /**
  * Save-format version stamped into every persisted payload (persistence.js
@@ -78,8 +78,11 @@ import { legacyFoldForkedNpcs, legacyNamesMatch, legacyPeopleNamesInSave } from 
  *        folded ONCE with the frozen fuzzy matcher and every people-name the
  *        save holds outside the roster is seeded as an alias of the record
  *        it resolved to; the live roster compares exactly from then on.
+ *   5:   lane 6C (2026-11-08): a person's death is the record's own `dead`
+ *        flag; the old reading of `lastNotes` runs once more, frozen, to
+ *        seed it.
  */
-export const CURRENT_SAVE_VERSION = 4;
+export const CURRENT_SAVE_VERSION = 5;
 
 /** Stamped version of a save payload; pre-versioned or junk stamps read as 0. */
 export function getSaveVersion(save) {
@@ -731,6 +734,23 @@ function seedNpcAliasesAndFoldForks(save) {
     return { ...save, npcs };
 }
 
+/**
+ * Save version 5 (lane 6C, 2026-11-08): `isRecordedDead` used to read the
+ * record's latest note through a regex on every turn; now it reads
+ * `npc.dead`, which the Scribe's `died: true` writes. The regex runs ONCE
+ * more here, frozen, over an old save's notes. Idempotent.
+ */
+function seedNpcDeathFlags(save) {
+    if (!Array.isArray(save?.npcs) || save.npcs.length === 0) return save;
+    let changed = false;
+    const npcs = save.npcs.map(npc => {
+        if (!npc || typeof npc !== 'object' || npc.dead === true || !legacyRecordedDead(npc)) return npc;
+        changed = true;
+        return { ...npc, dead: true };
+    });
+    return changed ? { ...save, npcs } : save;
+}
+
 export const MIGRATIONS = [
     {
         toVersion: 3,
@@ -747,6 +767,12 @@ export const MIGRATIONS = [
             + 'the roster seeded as an alias of the one record it resolved to. The live roster compares '
             + 'ids, exact names and exact aliases from this version on.',
         migrate: seedNpcAliasesAndFoldForks,
+    },
+    {
+        toVersion: 5,
+        description: 'Identity by reference, lane 6C (DECISIONS.md 2026-11-08): a person\'s death is the record\'s '
+            + 'own dead flag, seeded once from the frozen notes regex.',
+        migrate: seedNpcDeathFlags,
     },
 ];
 

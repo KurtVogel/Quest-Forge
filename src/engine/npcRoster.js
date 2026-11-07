@@ -63,6 +63,8 @@ export const NPC_LANE_KEYS = new Set([
     'id', 'kind', 'rosterEligible', 'roster_eligible', 'rosterTier', 'disposition', 'trust',
     'bondMoment', 'bondMoments', 'openThread', 'openThreadResolved', 'callbackHooks',
     'gradedMoments', '_seen', 'ties',
+    // The Scribe's death report (lane 6C, 2026-11-08): a flag, read through toFlag.
+    'died',
 ]);
 /** Every key a persisted roster record may hold — the LOAD_GAME projection. */
 export const NPC_RECORD_KEYS = new Set([
@@ -73,6 +75,9 @@ export const NPC_RECORD_KEYS = new Set([
     // Engine-written only (lane 6): a lane never sends aliases; the record
     // gains one when the Scribe links a held name, or when a fold renames it.
     'aliases',
+    // The person is dead (lane 6C): set by the Scribe's `died: true`, or the
+    // version-5 migration from the old notes regex. Never read from words.
+    'dead',
     'knownFacts', 'firstMet', 'lastSeen', 'lastSeenMessage',
     // Joining and leaving are moments (WOW 2026-10-13): the reducer stamps
     // when a companion joined / left the party; never lane-writable.
@@ -933,7 +938,8 @@ export function mergeNpcTies(existing = [], additions = [], { npcs = [], self = 
         const name = cleanText(raw.name, NPC_NAME_MAX);
         const regard = cleanText(raw.regard, NPC_TIE_REGARD_MAX);
         if (!name || !regard) continue;
-        const resolved = findNpcByRef(npcs, { name });
+        // The tie's own id (lane 6C: the Scribe copies it from KNOWN NPCS), else the exact name or alias.
+        const resolved = findNpcByRef(npcs, { ...(typeof raw.id === 'string' && raw.id.trim() && { id: raw.id.trim() }), name });
         const person = resolved.npc;
         if (!person || typeof person.name !== 'string' || !person.name.trim()) continue;
         if (self && ((self.id && person.id === self.id) || (typeof self.name === 'string' && self.name.trim().toLowerCase() === person.name.trim().toLowerCase()))) continue;
@@ -1683,14 +1689,89 @@ export function curateNpcsForPrompt(npcs = [], { location = '', limit = 8, now =
 /** Conversational rows unseen after which a non-friend leaves the score-fill. */
 export const KNOWN_NPC_STALE_MESSAGES = 300;
 
-// A note OPENING on "Killed" is the NPC's death only when nothing follows
-// it but by/in/at/during or the end ("Killed by Vesa.", "Killed in combat.")
-// — "Killed two guards and fled" is a living NPC's deed.
-const RECORDED_DEATH_RE = /^\s*(?:dead|died)\b|^\s*(?:killed|slain|executed|murdered)(?:\s+(?:by|in|at|during)\b|\s*[.;!]|\s*$)|\b(?:killed|slain|executed|murdered|beheaded)\s+(?:by|in)\b|\b(?:is|was|lies|lay)\s+(?:now\s+)?dead\b|\bdead\s+on\s+the\b/i;
-
-/** The record's own latest note says this person is dead. */
+/**
+ * The person is on record as dead (identity by reference, lane 6C,
+ * 2026-11-08): the record's own `dead` flag, written by the Scribe's
+ * `died: true` or seeded once by the save-version-5 migration from the old
+ * notes regex (frozen in state/legacyNpcIdentity.js). The regex over
+ * `lastNotes` that decided this in play is gone: who may be healed or seated
+ * is no longer a reading of words.
+ */
 export function isRecordedDead(npc) {
-    return RECORDED_DEATH_RE.test(cleanText(npc?.lastNotes));
+    return npc?.dead === true;
+}
+
+/**
+ * Two records the reflection may be asked about (lane 6C; decision 2: a
+ * matcher may shortlist, never decide): roster people whose names contain
+ * one another (`namesMatch`), or one of whose aliases is the other's name.
+ * Pairs of ids with the names, at most four, for the reflection's
+ * `possibleSamePerson`; the reflection's `same_person` answer merges by id.
+ */
+export const SAME_PERSON_PAIRS_CAP = 4;
+export function possibleSamePersonPairs(npcs = []) {
+    const roster = (Array.isArray(npcs) ? npcs : []).filter(n => n && typeof n.id === 'string' && typeof n.name === 'string' && n.name.trim() && isPromptRosterNpc(n));
+    const forms = (n) => [n.name, ...(Array.isArray(n.aliases) ? n.aliases : [])].filter(v => typeof v === 'string' && v.trim()).map(v => v.trim().toLowerCase());
+    const pairs = [];
+    for (let i = 0; i < roster.length && pairs.length < SAME_PERSON_PAIRS_CAP; i++) {
+        for (let j = i + 1; j < roster.length && pairs.length < SAME_PERSON_PAIRS_CAP; j++) {
+            const a = roster[i];
+            const b = roster[j];
+            const aliasHit = forms(a).some(form => forms(b).includes(form));
+            if (aliasHit || namesMatch(a.name, b.name)) pairs.push({ ids: [a.id, b.id], names: [a.name.trim(), b.name.trim()] });
+        }
+    }
+    return pairs;
+}
+
+/**
+ * Fold the record `dropId` into `keepId` (lane 6C): the reflection said the
+ * two are one person. The kept record keeps its id and name; the dropped
+ * name joins its aliases; dossier prose merges through the fragment /
+ * restatement policy; moments, hooks, impressions, facts, ties and aliases
+ * union; current-state fields come from whichever was seen last; pinned and
+ * dead are OR-ed. Returns the roster unchanged when either id is missing or
+ * the ids are one.
+ */
+export function mergeNpcRecords(npcs, keepId, dropId) {
+    const roster = Array.isArray(npcs) ? npcs : [];
+    if (!keepId || !dropId || keepId === dropId) return roster;
+    const keep = roster.find(n => n?.id === keepId);
+    const drop = roster.find(n => n?.id === dropId);
+    if (!keep || !drop) return roster;
+    const [base, newer] = (drop.lastSeen || 0) > (keep.lastSeen || 0) ? [keep, drop] : [drop, keep];
+    const current = {};
+    for (const [key, value] of Object.entries(newer)) {
+        if (value === '' || value === null || value === undefined) continue;
+        current[key] = value;
+    }
+    const merged = {
+        ...base,
+        ...current,
+        id: keep.id,
+        name: keep.name,
+        aliases: normalizeNpcAliases([...(keep.aliases || []), ...(drop.aliases || []), drop.name], keep.name),
+        firstMet: Math.min(keep.firstMet || Infinity, drop.firstMet || Infinity) === Infinity ? undefined : Math.min(keep.firstMet || Infinity, drop.firstMet || Infinity),
+        lastSeen: Math.max(keep.lastSeen || 0, drop.lastSeen || 0) || undefined,
+        lastSeenMessage: Number.isFinite(keep.lastSeenMessage) || Number.isFinite(drop.lastSeenMessage)
+            ? Math.max(keep.lastSeenMessage || 0, drop.lastSeenMessage || 0)
+            : undefined,
+        pinned: !!(keep.pinned || drop.pinned),
+        dead: keep.dead === true || drop.dead === true ? true : undefined,
+        trust: Number.isFinite(newer.trust) ? newer.trust : base.trust,
+        kind: keep.kind === 'character' || drop.kind === 'character' ? 'character' : (keep.kind || drop.kind),
+        rosterTier: keep.rosterTier === 'character' || drop.rosterTier === 'character' ? 'character' : (keep.rosterTier || drop.rosterTier),
+        bondMoments: appendBondMoments(base.bondMoments, newer.bondMoments),
+        recentImpressions: normalizeImpressions([...(base.recentImpressions || []), ...(newer.recentImpressions || [])]),
+        callbackHooks: appendCallbackHooks(base.callbackHooks, newer.callbackHooks),
+        knownFacts: [...new Set([...(base.knownFacts || []), ...(newer.knownFacts || [])])],
+        ties: normalizeNpcTies([...(keep.ties || []), ...(drop.ties || [])].filter(tie => tie?.npcId !== keep.id && tie?.npcId !== drop.id)),
+    };
+    for (const field of NPC_DURABLE_TEXT_FIELDS) {
+        merged[field] = mergeNpcDossierText(base[field], newer[field]);
+    }
+    const record = Object.fromEntries(Object.entries(normalizeNpcRecord(merged)).filter(([, value]) => value !== undefined));
+    return roster.filter(n => n?.id !== dropId).map(n => (n?.id === keepId ? record : n));
 }
 
 /**

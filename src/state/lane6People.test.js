@@ -36,10 +36,10 @@ const oldSave = () => ({
 
 describe('save version 4 — the one run of the frozen matcher', () => {
     it('is version 4, and the pipeline folds forks once and seeds aliases from the names the save holds about people', () => {
-        expect(CURRENT_SAVE_VERSION).toBe(4);
-        expect(MIGRATIONS.at(-1).toVersion).toBe(4);
+        expect(CURRENT_SAVE_VERSION).toBe(5);
+        expect(MIGRATIONS.map(m => m.toVersion)).toEqual([3, 4, 5]);
         const migrated = migrateLoadedSave(oldSave());
-        expect(migrated.saveVersion).toBe(4);
+        expect(migrated.saveVersion).toBe(5);
         const names = migrated.npcs.map(n => n.name);
         // The fork folded into the longer name; the short name is its alias.
         expect(names).toEqual(['Mira Vane', 'Old Tammo', 'Brother Anselm', 'Tam Reed']);
@@ -60,7 +60,7 @@ describe('save version 4 — the one run of the frozen matcher', () => {
         const once = migrateLoadedSave(oldSave());
         const twice = migrateLoadedSave({ ...once, saveVersion: 3 });
         expect(twice.npcs).toEqual(once.npcs);
-        const current = migrateLoadedSave({ ...oldSave(), saveVersion: 4 });
+        const current = migrateLoadedSave({ ...oldSave(), saveVersion: 5 });
         expect(current.npcs.map(n => n.name)).toContain('Mira');
     });
 });

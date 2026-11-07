@@ -33,7 +33,7 @@ import {
     sanitizeNpcLanePayload,
 } from '../../engine/npcRoster.js';
 import { NPC_OPEN_THREAD_MAX } from '../../engine/relationshipArc.js';
-import { clampNumber, systemMessage, toFlag } from '../../engine/text.js';
+import { clampNumber, systemMessage, toFlag, triFlag } from '../../engine/text.js';
 
 // Re-exported for the ledger's importers; the constant itself lives in
 // config/contentLimits.js so persistence.js reads the same one.
@@ -834,6 +834,12 @@ export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, pre
     // left the settled thread standing on the record.
     const threadResolved = toFlag(update.openThreadResolved);
     delete update.openThreadResolved;
+    // The person died (lane 6C, 2026-11-08): the Scribe's flag writes the
+    // record's `dead`; a flag that is not true writes nothing (the dead stay
+    // dead until the engine says otherwise). No lane reads notes for this.
+    const died = triFlag(update.died);
+    delete update.died;
+    if (died === true) update.dead = true;
     if (update.openThread !== undefined) {
         const thread = typeof update.openThread === 'string'
             ? update.openThread.trim().slice(0, NPC_OPEN_THREAD_MAX)

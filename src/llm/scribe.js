@@ -15,7 +15,7 @@ import { campaignStamp } from '../state/handlers/shared.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { conversationalGap } from '../engine/replayLedger.js';
-import { BOND_SCENE_WINDOW_MESSAGES, bondKindLabel, curateNpcsForPrompt, dispatchClassifiedNpcUpdate, isPromptRosterNpc, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
+import { BOND_SCENE_WINDOW_MESSAGES, bondKindLabel, curateNpcsForPrompt, dispatchClassifiedNpcUpdate, isPromptRosterNpc, listNpcImpressions, possibleSamePersonPairs, SAME_PERSON_PAIRS_CAP, splitBondMoments } from '../engine/npcRoster.js';
 import { collectKnownRegions, isLocationEvidencedInText, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
 import { regionOfPlace } from '../engine/regionProfile.js';
 import { tryParseDirectorJson } from './directorUtils.js';
@@ -73,7 +73,8 @@ Output ONLY valid JSON:
       "openThreadResolved": "true ONLY when this exchange settles the recorded open thread WITH THAT PERSON PRESENT (the promise kept TO them, the question answered TO them, the debt paid TO them) and nothing new is pending — progress made elsewhere (the gift bought, the proof found, the road taken) settles nothing; omit otherwise",
       "trust": "a number 0-100 ONLY when this exchange visibly changes how far they trust the hero — omit otherwise (never echo a placeholder)",
       "privateNotes": "hidden NPC intent or unrevealed motive useful for future consistency",
-      "ties": [{ "name": "another KNOWN person (their full recorded name) this NPC showed a regard for in THIS exchange — never the hero, never a stranger", "regard": "how they regard that person, from this NPC's side, with the reason the scene showed — one clause" }],
+      "died": "true ONLY when this exchange establishes that this person is now dead — shown in the narrative, or stated by AUTHORITATIVE ENGINE STATE; omit otherwise, never false",
+      "ties": [{ "id": "that person's exact id from KNOWN NPCS when listed there — omit when not listed", "name": "another KNOWN person (their full recorded name) this NPC showed a regard for in THIS exchange — never the hero, never a stranger", "regard": "how they regard that person, from this NPC's side, with the reason the scene showed — one clause" }],
       "callbackHooks": ["an unresolved THING this NPC could bring back later — an object, a debt, a favor, a line once said, a name — a complete phrase in the neutral REGISTER; never scenery, a sound, a gesture, or the room. Usually omit"]
     }
   ],
@@ -124,6 +125,7 @@ Rules:
 - A person listed under KNOWN NPCS is named by that line's exact "id" on their npc_updates entry (copy it; the engine files the update under that record whatever spelling the narrative used). A person NOT on that list is new: no id. Never re-word a listed person into a second record.
 - HELD NAMES are names the DM used this turn that match no record exactly; answer EVERY one in name_links with the id of the listed person it means, or "new" when the narrative shows it is nobody on record.
 - Only include npc_updates for NPCs that appeared in this specific exchange
+- "died" is the record of a death: set it (true) on the person who died when the narrative or the engine state establishes it this turn; a death they CAUSED, mourned or mentioned is not theirs. Nothing else marks a person dead
 - ties record one person's regard of ANOTHER recorded person, only when THIS exchange SHOWED it — a warning given about someone, a grudge named, a fondness or deference shown, two people sizing each other up in the room. Never the hero (that is stanceToPlayer), never someone not yet on record, never inferred from roles alone; at most 2 per NPC per turn, and never restate a tie already listed under KNOWN PLAYER-RELATIONSHIP STANCES unless it changed
 - The hero's PARTY COMPANIONS are NPCs for record-keeping: emit npc_updates for them (stanceToPlayer, bondMoment, appearance, personality, goals) exactly like any other character — never skip someone because they travel with the hero. The party is the game's most sustained relationship, so companion stance shifts and bond moments matter MORE than a stranger's, not less.
 - basedIn is the NPC's current anchor in the world (not permanent): update it when they are reassigned, relocate, or fiction establishes a new base. lastLocation is ephemeral — where they were this turn
@@ -722,7 +724,7 @@ export const SCRIBE_ANCHORS = [
     'name_links',
 ];
 /** The reflection schema's keys — a quiet cadence honestly answers with the tempo directive alone. */
-export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'settled_cards', 'story_memory', 'tempo_directive', 'front_proposals'];
+export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'settled_cards', 'story_memory', 'tempo_directive', 'front_proposals', 'same_person'];
 
 /**
  * The Scribe's contract on a "remember when…" turn (2026-09-18): the DM's
@@ -1066,6 +1068,7 @@ Output ONLY valid JSON:
 {
   "npc_updates": [
     {
+      "id": "the exact id of this person from the context's npcs list — copy it",
       "name": "Exact NPC name",
       "basedIn": "current anchor — command post, town, territory. Update when they relocate; omit if unknown",
       "agenda": "what they likely try next",
@@ -1106,6 +1109,9 @@ Output ONLY valid JSON:
   "settled_cards": [
     { "id": "an id from openCards ONLY", "outcome": "resolved|dormant", "reason": "what in the journal or facts settled it, in a few words" }
   ],
+  "same_person": [
+    ["the id of the record to KEEP (the fuller name)", "the id of the record that is the SAME person and folds into it"]
+  ],
   "story_memory": [
     {
       "type": "callback|promise|wound|relationship|mystery|playerCanon|foreshadow|npcAgenda",
@@ -1134,6 +1140,7 @@ Rules:
 - If RECENT HEAT in the context is high, strongly prefer a quiet directive with a restorative quiet_hook — the table needs air after violence.
 - The inverse binds too: when RECENT HEAT sits BELOW the campaign pace's appetite (calm on a standard campaign, calm OR lively on breakneck) and the scenes since the last fight have already given the table its air, LEAN toward granting a window at whatever intensity the arc supports. On breakneck, consecutive quiet directives need an explicit arc reason in the rationale — the player chose that dial to be pushed.
 - FRONT PROPOSALS: only when the PLAYER has repeatedly and deliberately engaged a concrete recurring threat that existing fronts do not cover and it has proven durable across scenes (a raided den that keeps mattering, a rival who keeps returning). At most one, complete or omitted entirely. This is rare — most reflections propose nothing.
+- SAME PERSON: possibleSamePerson lists pairs of records that MAY be one person (a short form beside a full name, a title variant). Confirm a pair in same_person ONLY when the facts, the journal and both records show one person — the same place, the same role, the same history with the hero. Two people who merely share a first name are two. Leave same_person empty when unsure: two records are cheaper than one wrong merge, and a merge cannot be undone.
 - Potential companions may be seeded as hooks, but never add them to the party.
 - Intriguing NPCs should emerge from agenda, competence, danger, secrets, attraction, rivalry, vulnerability, or leverage, not default sexualization.
 - Keep every field unvarnished: record attraction, resentment, and bodily or intimate canon plainly and completely, never softened into vagueness or omission — but always in neutral anatomical language, never profanity or crude slang.
@@ -1208,7 +1215,10 @@ export function projectJournalForReflection(entry) {
 // spread: any new roster field stays out of this payload until listed here.
 function projectNpcForReflection(npc = {}) {
     const projected = {
+        // The id the reflection echoes on npc_updates and same_person (lane 6C).
+        id: reflectionText(npc.id, 80),
         name: reflectionText(npc.name, 100),
+        ...(Array.isArray(npc.aliases) && npc.aliases.length > 0 && { aliases: npc.aliases.slice(0, 4).map(alias => reflectionText(alias, 80)).filter(Boolean) }),
         gender: reflectionText(npc.gender, 40),
         species: reflectionText(npc.species, 40),
         disposition: reflectionText(npc.disposition, 100),
@@ -1291,6 +1301,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
     if (npcs.length === 0 && fronts.length === 0) return;
 
     const heat = computeRecentHeat(state);
+    const samePersonPairs = possibleSamePersonPairs(state.npcs || []);
     const recentJournal = (state.journal || []).slice(-3).map(projectJournalForReflection).filter(Boolean);
     // The cards this cadence may settle (2026-10-31): touched by the cadence's
     // own text first, then the longest silent.
@@ -1312,6 +1323,9 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
         recentHeat: { level: heat.level, reasons: heat.reasons },
         recentEncounters: (state.recentEncounters || []).slice(-4),
         ...(openCards.length > 0 && { openCards }),
+        // Records that may be one person (lane 6C): the shortlist the
+        // reflection confirms or leaves; the engine merges only a pair it offered.
+        ...(samePersonPairs.length > 0 && { possibleSamePerson: samePersonPairs }),
         knownLocations: (state.locations || []).slice(-12).map(record => ({
             name: record.name,
             type: record.type,
@@ -1388,6 +1402,16 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
         const settled = settleReflectedCards(reflected.settled_cards, openCards);
         for (const { id, status } of settled) {
             dispatch({ type: 'UPDATE_STORY_MEMORY', payload: { id, status } });
+        }
+        // same_person (lane 6C): only a pair the reflection was SHOWN merges,
+        // in either order; the first id is kept. Anything else is ignored.
+        for (const pair of (Array.isArray(reflected.same_person) ? reflected.same_person : []).slice(0, SAME_PERSON_PAIRS_CAP)) {
+            if (!Array.isArray(pair) || pair.length !== 2 || pair.some(id => typeof id !== 'string' || !id.trim())) continue;
+            const [keepId, dropId] = pair.map(id => id.trim());
+            const offered = samePersonPairs.some(({ ids }) => (ids[0] === keepId && ids[1] === dropId) || (ids[0] === dropId && ids[1] === keepId));
+            if (!offered || keepId === dropId) continue;
+            dispatch({ type: 'MERGE_NPC_RECORDS', payload: { keepId, dropId } });
+            console.log(`[Reflection] Merged ${dropId} into ${keepId} — read as one person.`);
         }
         if (reflectedCards.length > 0) {
             // No `meta.sourceMessage` by design: the reflection reads a journal
