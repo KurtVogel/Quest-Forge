@@ -1,6 +1,6 @@
 # Identity by reference: inventory and proposed order
 
-**Status: order approved by Vesa 2026-11-07. Lanes 1 and 4 are built and deployed; lane 5 is next. Decisions 2 to 5 at the end come due at lanes 5 and 6.** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
+**Status: order approved by Vesa 2026-11-07. Lanes 1, 4 and 5 are built and deployed: the natural stopping point. Lane 3 is cleared to build. Decisions 2 to 4 at the end come due at lane 6.** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
 2026-11-07 for the live proof. Line numbers hold at `667295b`, which changed no app code. Rule behind it: DECISIONS.md 2026-11-05 (first entry), with 2026-11-03 evening
 (`recorded_as`), 2026-11-02 (the repeat judge) and 2026-11-06 night (the id decides) as the lanes already moved.
 
@@ -122,7 +122,9 @@ The party block prints companion ids, and the hero is one record, so this lane i
 | `engine/rollResolver.js:74-76` | the same, but the hero is tested first | a | Test the companion first, as the exchange and cast lanes do. **A real bug:** a hit aimed at companion "Mika" beside hero "Mika Stone" lands on the hero | |
 | `state/handlers/npcs.js:112` `isHeroName`, `engine/heroTells.js:390` `notHero` | same | a | same list, but the full name only. **A real bug:** with a hero "Astra Vane", a "Lord Vane" is dropped on every update with only a console warning | |
 
-## Lane 5. Items and the ledger
+## Lane 5. Items and the ledger (done 2026-11-07)
+
+**Built as below, with these differences** (DECISIONS.md 2026-11-07, night): decision 5's log line became a card, because logging an unlinked lookalike would have granted it; a word match now only sends an item to the player or a pair to the judge. The audit lane drops the fuzzy pass rather than using `recorded_as` there. Purchases carry their raw name as `said` for the shortlist, and `judgePurchase` also looks in the same reply, because items_found dispatches first. `normalizeItemKey` stays. The table below is the design as proposed.
 
 The DM sees every carried item by name since 11-03, so rung 2 is available everywhere. Closes the **third
 deferred queue item**.
@@ -286,7 +288,7 @@ Ordered by: the id is already shown to the LLM, a defect closes, nothing else de
 | ~~0~~ | ~~Live proof of `16f6d9f`~~ | **Done 2026-11-07** for quests, 6 of 6. Tells and cards still unmeasured | | |
 | ~~1~~ | ~~Combat filter~~ | **Done 2026-11-07** | the rule's named example | |
 | ~~4~~ | ~~Party and hero~~ | **Done 2026-11-07**, two bugs closed | | |
-| 5 | Items and ledger | Names shown since 11-03 | the last deferred item | Medium |
+| ~~5~~ | ~~Items and ledger~~ | **Done 2026-11-07** | the last deferred item | |
 | 3 | Quests, no-id leftovers | Cleared by the proof | 1 queue item | Small |
 | 2 | Tells, no-id leftover | After a playtest counts Scribe ids | | Small |
 | 11 | Phrase rules | Independent; the four repeat rows share one route, the repeat judge. The roll rows are a separate call | | Medium |
@@ -313,7 +315,7 @@ Lanes 1, 4 and 5 fix the known defects and close the last deferred item, with no
    migration file and called nowhere else. This is a fuzzy decision, but on old data, once, and it gives the
    same answer the game gives today. The alternative is an LLM pass at load, which is slow and could fail.
    Recommended: the frozen matcher.
-5. **Belts.** `recorded_as` left the word rule running as a belt, and `16f6d9f` turned its card veto into a log
+5. **Belts (settled at lane 5: a word match may only ask, the player or the judge, and never moves anything).** `recorded_as` left the word rule running as a belt, and `16f6d9f` turned its card veto into a log
    line. The task's definition of done says "matcher removed", so this plan removes belts in lanes 5 and 8. If
    you'd rather keep a belt where it can only log or suppress a card and never write, those lanes get safer and
    less pure. I'd follow the 11-06 precedent: a belt may stay as a log line, never as a veto.

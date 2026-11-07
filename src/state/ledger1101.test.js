@@ -34,10 +34,14 @@ const base = (overrides = {}) => ({
 const coin = (type, state, cp, sourceId, extra = {}) => gameReducer(state, { type, payload: { copper: cp, _meta: { sourceId, ...extra } } });
 
 describe('the counterparty decides the window', () => {
-    it('two same-value payments to two people the roster knows apart both charge', () => {
+    it('two same-value payments to two recorded people are the repeat judge\'s to read (2026-11-07), in the same reply both charge', () => {
         const first = coin('APPLY_COIN_LOSS', base(), 20, 'msg-1', { party: 'Jethro' });
         const second = coin('APPLY_COIN_LOSS', turns(first, 2), 20, 'msg-2', { party: 'Marta Vell' });
-        expect(purse(base()) - purse(second)).toBe(40);
+        expect(purse(base()) - purse(second)).toBe(20);
+        expect(second.messages.at(-1).recovery).toMatchObject({ status: 'judging', mode: 'repeat', party: 'Marta Vell' });
+        expect(second.messages.at(-1).recovery.judge.earlier).toContain('Jethro');
+        const sameReply = coin('APPLY_COIN_LOSS', first, 20, 'msg-1:second', { party: 'Marta Vell' });
+        expect(purse(base()) - purse(sameReply)).toBe(40);
         // The old rule still holds when nobody is named: a recap.
         const unnamed = coin('APPLY_COIN_LOSS', turns(coin('APPLY_COIN_LOSS', base(), 20, 'msg-1'), 2), 20, 'msg-2');
         expect(purse(base()) - purse(unnamed)).toBe(20);
@@ -59,7 +63,9 @@ describe('the counterparty decides the window', () => {
 
     it('a name the roster cannot tell apart is never "different"', () => {
         expect(partyRelation({ party: 'the guard' }, { party: 'Sergeant Holt' })).toBe('unknown');
-        expect(partyRelation({ party: 'Nib' }, { party: 'Nib Ashwhistle' })).toBe('same');
+        // Only the roster's ids or the same name can say `same` (2026-11-07).
+        expect(partyRelation({ party: 'Nib' }, { party: 'Nib Ashwhistle' })).toBe('unknown');
+        expect(partyRelation({ party: 'Nib' }, { party: 'the nib' })).toBe('same');
         expect(partyRelation({ party: 'Jethro', partyId: 'a' }, { party: 'Marta', partyId: 'b' })).toBe('different');
     });
 });

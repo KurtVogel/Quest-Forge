@@ -16,7 +16,6 @@ import { normalizeItem, normalizeItemKey } from '../data/items.js';
 import { toFlag } from '../engine/text.js';
 import { isLowLevelSolo } from '../engine/combatPredicates.js';
 import { findSpell } from '../data/spells.js';
-import { itemIdentityMatches } from '../engine/textMatch.js';
 import { normalizeRefToken } from './handlers/shared.js';
 
 const withMeta = (entry, meta) => {
@@ -288,7 +287,7 @@ export function applyEvents(events, dispatch, getState = null, opts = {}) {
             const k = itemKeyOf(it);
             const n = itemNameOf(it);
             const dup = (k && traded.identities.has(tradeIdentity(k)))
-                || (n && (traded.identities.has(tradeIdentity(n)) || traded.names.some(name => itemIdentityMatches(n, name))));
+                || (n && traded.identities.has(tradeIdentity(n)));
             if (dup) console.warn(`[applyEvents] Ignored a found/lost "${n || k}" already handled by the atomic ${action}.`);
             return !dup;
         });

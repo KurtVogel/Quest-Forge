@@ -87,7 +87,9 @@ export function buildRepeatJudgeInput(state, card) {
             ? [`Player said: ${before.player || '(nothing)'}`, `DM narrated: ${before.narration || '(nothing)'}`]
             : ['(That turn has scrolled out of the record.)']),
         '',
-        between !== null ? `${between} player turn(s) passed in between.` : '',
+        before?.at === now.at
+            ? 'Both are the SAME turn: did the narration show two separate things, or one thing recorded twice under two names?'
+            : (between !== null ? `${between} player turn(s) passed in between.` : ''),
         '',
         'CURRENT TURN (asks to record it again)',
         `Asked: ${describeReplay(recovery.replay, recovery.party)}`,

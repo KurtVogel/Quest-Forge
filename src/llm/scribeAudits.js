@@ -6,7 +6,8 @@
  * injects the *_AUDIT_RULES into the extraction prompt and hands the parsed
  * report to runNarrationAudits.
  */
-import { cleanParty, lastLongRestAt, movedItems, normalizeLedger, resolvePartyId, withinWindow } from '../engine/transactionLedger.js';
+import { cleanParty, lastLongRestAt, LONG_WINDOW, movedItems, normalizeLedger, resolvePartyId, withinWindow } from '../engine/transactionLedger.js';
+import { conversationalDistance } from '../engine/replayLedger.js';
 import { formatCurrency } from '../engine/currency.js';
 import { itemIdentityMatches } from '../engine/textMatch.js';
 import { isSpellcaster, resolveSpellForCharacter } from '../engine/spellcasting.js';
@@ -22,7 +23,7 @@ export const LOOT_AUDIT_RULES = `
 ADDITIONAL TASK — LOOT & PAYMENT PERSISTENCE AUDIT:
 The game engine persists coins and items ONLY from structured events; anything narrated but not emitted as an event silently vanishes. Your task here is pure OBSERVATION: report what THIS DM narrative shows changing hands, at the full narrated amounts. The engine deterministically reconciles your report against the events it already applied — NEVER do that subtraction yourself, and never omit a coin movement just because EVENTS ALREADY APPLIED lists it.
 Report the coins and items the narrative shows the hero ACQUIRING, as one extra top-level field:
-"narrated_loot": { "gold": 0, "silver": 0, "copper": 0, "items": [{ "name": "exact item name from the narrative", "quantity": 1, "recorded_as": "the applied item this IS, copied verbatim from EVENTS ALREADY APPLIED — or null" }], "from": "the person who handed it to the hero, or empty" }
+"narrated_loot": { "gold": 0, "silver": 0, "copper": 0, "items": [{ "name": "exact item name from the narrative", "quantity": 1, "recorded_as": "the applied item this IS, copied verbatim from EVENTS ALREADY APPLIED or ITEMS THAT ARRIVED RECENTLY — or null" }], "from": "the person who handed it to the hero, or empty" }
 Also report the coins the narrative shows the hero PAYING OUT, as another top-level field:
 "narrated_payment": { "gold": 0, "silver": 0, "copper": 0, "to": "the person who received it, or empty" }
 
@@ -42,7 +43,7 @@ Loot rules:
 - Change returned from the hero's own payment is never an acquisition: when the hero pays with a larger coin and gets change back, report nothing in narrated_loot for the change.
 - The HERO'S CURRENT INVENTORY line lists what the hero already owns. Using, drawing, lighting, striking, wearing, or retrieving an owned item is NOT an acquisition — "she takes out her flint and steel and strikes a spark" grants nothing. Report an item the hero already owns ONLY when the narrative explicitly completes acquiring an ADDITIONAL copy (a second rope, another potion).
 - Identifying, appraising, examining, or recognizing an item the hero ALREADY carries is NOT an acquisition — realizing the corked vial in her pack is a healing potion, or that the old ring is silver, changes what the item IS, never what the hero HAS. Report nothing for it, under either name.
-- SAME THING, DIFFERENT WORDS — "recorded_as": the DM often records an item under one name and narrates it under another ("transit manifest stamped with Vane's seal" in the prose IS the "Syndicate cargo manifest" under EVENTS ALREADY APPLIED; "a heavy brass token" IS the "Brass toll-token"). You are the reader who can tell: for every item you report, when it IS one of the items listed under EVENTS ALREADY APPLIED (an "item:", "purchase:" or "starting item:" entry) under ANY wording, set "recorded_as" to that entry's name copied EXACTLY as listed — the engine matches your copy character for character. Still report the item itself (never omit it); set "recorded_as" to null when no applied item is that thing, and never guess a link between two genuinely different items.
+- SAME THING, DIFFERENT WORDS — "recorded_as": the DM often records an item under one name and narrates it under another ("transit manifest stamped with Vane's seal" in the prose IS the "Syndicate cargo manifest" under EVENTS ALREADY APPLIED; "a heavy brass token" IS the "Brass toll-token"). You are the reader who can tell: for every item you report, when it IS one of the items listed under EVENTS ALREADY APPLIED (an "item:", "purchase:" or "starting item:" entry) or under ITEMS THAT ARRIVED RECENTLY, under ANY wording, set "recorded_as" to that entry's name copied EXACTLY as listed — the engine matches your copy character for character. Still report the item itself (never omit it); set "recorded_as" to null when no applied item is that thing, and never guess a link between two genuinely different items.
 
 Payment rules:
 - Report a payment ONLY when the DM narrative explicitly completes it: the HERO counts out, hands over, or drops THEIR OWN coins and the other party takes them. Coins moving in the opposite direction — into the hero's hands — are never a payment (see DIRECTION above). Intentions, promises, IOUs, haggling, and prices merely quoted are never payments.
@@ -55,14 +56,14 @@ Payment rules:
 - When in doubt, omit. Omit "narrated_loot" and "narrated_payment" entirely when this narrative moves no coins or items.
 
 Also report gear the narrative shows the hero handing to a COMPANION that the companion accepts and takes up, when the engine applied no matching companion update, as another top-level field:
-"missing_gear_handoffs": [{ "companion": "the companion's full name, copied exactly from PARTY COMPANIONS' CURRENT GEAR", "item": "exact item name", "kind": "weapon" }]
+"missing_gear_handoffs": [{ "companion": "the companion's full name, copied exactly from PARTY COMPANIONS' CURRENT GEAR", "item": "the item's name copied exactly from HERO'S CURRENT INVENTORY, or the narrative's words when the hero never owned it", "kind": "weapon" }]
 
 Gear handoff rules:
 - Report ONLY handoffs the DM narrative completes: the companion accepts and takes up the item (straps it on, sheathes it, dons it, tucks it away). Offers, refusals, loans for a single moment, and mere suggestions are never handoffs.
 - "kind" is "weapon" for weapons, "armor" or "shield" for protection the companion now wears, "keepsake" for a sentimental item with no combat use.
 - PARTY COMPANIONS' CURRENT GEAR lists what each companion already carries — an item already listed there is NOT a new handoff, and narration merely referencing or admiring their existing gear reports nothing.
 - Anything under EVENTS ALREADY APPLIED (companion gear or keepsake updates, items lost by the hero) is NOT missing.
-- Copy the companion's and the item's names exactly as the narrative writes them.
+- Copy the companion's name exactly from PARTY COMPANIONS' CURRENT GEAR, and an item the hero owned exactly from HERO'S CURRENT INVENTORY (the narrative's "your blade" is the inventory's "Longsword +1"): the engine matches your copy character for character. Only an item the hero never owned keeps the narrative's words.
 - When in doubt, omit — an invented handoff is worse than a missed one. Omit "missing_gear_handoffs" entirely when nothing is missing.
 
 Also report the ITEMS the narrative shows LEAVING the hero's possession, as another top-level field:
@@ -204,26 +205,20 @@ function findCompanionByName(party, reported) {
     return null;
 }
 
-/** Sentinel: a narrated name matched several owned stacks — never guess. */
-const AMBIGUOUS = Symbol('ambiguous-item');
-
 /**
- * THE owned-item resolver for the audit family: exact name first; otherwise
- * the shared fuzzy identity (engine/textMatch) is honored only when it is
- * UNAMBIGUOUS — whole-stack removal/handoff must never guess which stack the
- * fiction meant. Returns the item, null (nothing owned), or AMBIGUOUS.
+ * THE owned-item resolver for the audit family (2026-11-07, identity by
+ * reference, lane 5): the Scribe reads HERO'S CURRENT INVENTORY and copies a
+ * row, so the compare is a character compare (case and punctuation folded,
+ * as `recorded_as`), against the row as that list prints it too ("Wax Candles
+ * x5"). No word rule: a removal or handoff takes a whole stack on its say-so.
+ * Returns the item or null.
  */
-function resolveOwnedItem(inventory, name, label) {
+function resolveOwnedItem(inventory, name) {
+    const wanted = compactIdentity(name);
+    if (!wanted) return null;
     const items = Array.isArray(inventory) ? inventory : [];
-    const exact = items.find(item => String(item?.name || '').trim().toLowerCase() === String(name || '').toLowerCase());
-    if (exact) return exact;
-    const fuzzy = items.filter(item => itemIdentityMatches(name, item?.name));
-    if (fuzzy.length === 1) return fuzzy[0];
-    if (fuzzy.length > 1) {
-        console.warn(`[Scribe] ${label} "${name}" matches ${fuzzy.length} owned stacks — ambiguous; skipping.`);
-        return AMBIGUOUS;
-    }
-    return null;
+    return items.find(item => compactIdentity(item?.name) === wanted
+        || (item?.quantity > 1 && compactIdentity(`${item?.name} x${item.quantity}`) === wanted)) || null;
 }
 
 /**
@@ -262,8 +257,8 @@ function applyMissingGearHandoffs(missing, lootAudit, dispatch) {
             // its loss, and the audit built to backstop it left "Mother's
             // locket" in two places. Unambiguous-only, one unit (a bare name
             // takes one of a stack), once per stack per narration.
-            const keepsakeOwned = resolveOwnedItem(state?.inventory, entry.item, 'Narrated keepsake');
-            if (keepsakeOwned && keepsakeOwned !== AMBIGUOUS && !handedOffItemIds.has(keepsakeOwned.id)) {
+            const keepsakeOwned = resolveOwnedItem(state?.inventory, entry.item);
+            if (keepsakeOwned && !handedOffItemIds.has(keepsakeOwned.id)) {
                 handedOffItemIds.add(keepsakeOwned.id);
                 dispatch({ type: 'REMOVE_ITEM_BY_NAME', payload: keepsakeOwned.name });
             }
@@ -271,12 +266,11 @@ function applyMissingGearHandoffs(missing, lootAudit, dispatch) {
             applied += 1;
             continue;
         }
-        // Shared fuzzy item identity, unambiguous-only (2026-09-01 scribe P2):
-        // exact-name matching missed "longsword" against the owned "Longsword
-        // +1", fell to the stats-only branch, and the hero kept the sword
-        // while the companion gained an unenchanted copy.
-        const owned = resolveOwnedItem(state?.inventory, entry.item, 'Narrated handoff');
-        if (owned === AMBIGUOUS) continue;
+        // The Scribe copies the inventory row (2026-11-07). A narrative word
+        // that misses the row falls to the stats-only branch below: the hero
+        // keeps the sword and the companion gains a copy (the 2026-09-01 case,
+        // now the price of a Scribe that did not copy).
+        const owned = resolveOwnedItem(state?.inventory, entry.item);
         if (owned) {
             // Two narrated names resolving to one stack hand it off once.
             if (handedOffItemIds.has(owned.id)) continue;
@@ -341,6 +335,18 @@ function recentlyArrivedIdentities(state, party) {
         .flatMap(item => [item.name, item.itemKey])
         .filter(value => value && String(value).trim())
         .map(String);
+}
+
+/** Item names the ledger saw arrive inside the long window, newest first: the list `recorded_as` may copy from. */
+const RECENT_ARRIVALS_SHOWN = 12;
+export function recentArrivalNames(state) {
+    const messages = state?.messages || [];
+    const names = normalizeLedger(state?.ledger)
+        .filter(entry => conversationalDistance(messages, entry.atMessage, messages.length) <= LONG_WINDOW)
+        .flatMap(entry => movedItems(entry, 'in'))
+        .map(item => String(item?.name || '').trim())
+        .filter(Boolean);
+    return [...new Set(names.reverse())].slice(0, RECENT_ARRIVALS_SHOWN);
 }
 
 /**
@@ -409,10 +415,15 @@ const compactIdentity = value => String(value || '').toLowerCase().replace(/[^a-
 /** The Scribe's `recorded_as`, projected: a clamped string or ''. */
 const readRecordedAs = entry => (entry && typeof entry === 'object' && typeof entry.recorded_as === 'string' ? entry.recorded_as.trim().slice(0, 80) : '');
 
-/** True when any identity string in the pool matches the narrated item. */
-function matchesAnyItemIdentity(item, identities) {
-    return identities.some(value =>
-        itemIdentityMatches(item.name, value) || (item.itemKey && itemIdentityMatches(item.itemKey, value)));
+/** The narrated item IS an entry in the pool: the Scribe's link, or the same name character for character. */
+function isSameRecordedItem(item, identities) {
+    const name = compactIdentity(item?.name);
+    return linkedToApplied(item, identities) || (!!name && identities.some(value => compactIdentity(value) === name));
+}
+
+/** A shortlist for the player, never a verdict (2026-11-07): the words say this may be a recent arrival. */
+function readsLikeARecentArrival(item, identities) {
+    return identities.some(value => itemIdentityMatches(item.name, value));
 }
 
 /**
@@ -501,7 +512,7 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
     // grants carry `audit: true` so the reducer logs them without judging
     // them twice.
     const party = typeof narrated.from === 'string' ? cleanParty(narrated.from) : '';
-    const recentGrantIdentities = recentlyArrivedIdentities(state, party);
+    const recentGrantIdentities = [...recentlyArrivedIdentities(state, party), ...recentArrivalNames(state)];
     // ONE ACCOUNTANT PER NARRATION (2026-10-31, Vesa: "the worst problem for
     // the game, always"): when the event path granted ANY item for this
     // narration, the DM owns this narration's items and the audit grants none.
@@ -517,21 +528,30 @@ function reconcileNarratedLoot(narrated, lootAudit, dispatch) {
         console.log(`[Scribe] Loot audit: the event path granted items for this narration — standing down on items (${items.map(item => `"${item.name}"`).join(', ')}).`);
     }
     const unrecorded = items.filter(item => {
-        const recentlyGranted = matchesAnyItemIdentity(item, recentGrantIdentities);
+        const recentlyGranted = isSameRecordedItem(item, recentGrantIdentities);
         if (recentlyGranted) console.warn(`[Scribe] Narrated item "${item.name}" was already granted moments ago (ledger); skipping.`);
         return !recentlyGranted;
     });
-    const missingItems = itemsEvented ? [] : unrecorded.map(({ name, quantity }) => ({ name, quantity }));
+    // The Scribe saw the arrivals and did not link this item, yet the words
+    // read like one of them. Words may only ask (2026-11-07): it books nothing
+    // and the player decides on the card, where it used to be skipped unseen.
+    const lookalikes = itemsEvented ? [] : unrecorded.filter(item => readsLikeARecentArrival(item, recentGrantIdentities));
+    if (lookalikes.length > 0) {
+        postRecoveryCard(dispatch, { sourceId, direction: 'in', items: lookalikes.map(({ name, quantity }) => ({ name, quantity })), party });
+    }
+    const missingItems = itemsEvented ? [] : unrecorded
+        .filter(item => !lookalikes.includes(item))
+        .map(({ name, quantity }) => ({ name, quantity }));
     // The evented reply's leftovers go to the player, never into the pack —
     // and a narrated item the Scribe LINKED to an applied one is no leftover.
     if (itemsEvented) {
         const applied = appliedItemIdentities(appliedEvents);
         const leftovers = unrecorded.filter(item => {
-            if (linkedToApplied(item, applied)) {
-                console.log(`[Scribe] Loot audit: narrated "${item.name}" is the recorded "${item.recordedAs}" (Scribe link) — no card.`);
+            if (isSameRecordedItem(item, applied)) {
+                console.log(`[Scribe] Loot audit: narrated "${item.name}" is on the record (Scribe link or the same name) — no card.`);
                 return false;
             }
-            return !matchesAnyItemIdentity(item, applied);
+            return true;
         }).map(({ name, quantity }) => ({ name, quantity }));
         postRecoveryCard(dispatch, { sourceId, direction: 'in', items: leftovers, party });
     }
@@ -731,7 +751,7 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
     // audit never removes it a second time.
     const soldNames = (appliedEvents?.sells || []).flatMap(sale => [sale?.name, sale?.itemKey, sale?.key]).filter(Boolean).map(String);
     const lostNames = (appliedEvents?.itemsLost || []).map(entry => (typeof entry === 'string' ? entry : entry?.name)).filter(name => name && String(name).trim()).map(String);
-    const unsold = items.filter(item => !matchesAnyItemIdentity(item, soldNames) && !linkedToApplied(item, soldNames));
+    const unsold = items.filter(item => !isSameRecordedItem(item, soldNames));
 
     // One accountant per narration (2026-10-31): when the event path removed
     // ANY item for this narration, the DM owns its losses and the audit removes
@@ -741,14 +761,14 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
     if (lostNames.length > 0 || soldNames.length > 0) {
         const leftovers = unsold
             .filter(item => {
-                if (linkedToApplied(item, lostNames)) {
-                    console.log(`[Scribe] Loss audit: narrated "${item.name}" is the recorded loss "${item.recordedAs}" (Scribe link) — no card.`);
+                if (isSameRecordedItem(item, lostNames)) {
+                    console.log(`[Scribe] Loss audit: narrated "${item.name}" is on the record (Scribe link or the same name) — no card.`);
                     return false;
                 }
-                return !matchesAnyItemIdentity(item, lostNames);
+                return true;
             })
-            .map(item => ({ ...item, owned: resolveOwnedItem(state?.inventory, item.name, 'Narrated loss') }))
-            .filter(item => item.owned && item.owned !== AMBIGUOUS)
+            .map(item => ({ ...item, owned: resolveOwnedItem(state?.inventory, item.name) }))
+            .filter(item => item.owned)
             .map(item => ({ name: item.owned.name, quantity: typeof item.quantity === 'number' ? item.quantity : 1 }));
         postRecoveryCard(dispatch, { sourceId: lossSourceId, direction: 'out', items: leftovers });
         console.log('[Scribe] Loss audit: the event path removed or sold items for this narration — standing down.');
@@ -758,12 +778,7 @@ function reconcileNarratedLosses(narrated, lootAudit, dispatch) {
     const removed = [];
     const removedItemIds = new Set();
     for (const { name, quantity } of unsold) {
-        // Exact name first; otherwise a fuzzy match is honored only when it is
-        // UNAMBIGUOUS — REMOVE_ITEM_BY_NAME takes whole stacks, so "wax candles"
-        // matching both a lowercase shadow row and "Wax Candles (x5)" must skip
-        // rather than guess which stack the fiction destroyed.
-        const owned = resolveOwnedItem(state?.inventory, name, 'Narrated loss');
-        if (owned === AMBIGUOUS) continue;
+        const owned = resolveOwnedItem(state?.inventory, name);
         if (!owned) {
             console.warn(`[Scribe] Narrated loss "${name}" matches nothing the hero owns; skipping.`);
             continue;

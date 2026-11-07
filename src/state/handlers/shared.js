@@ -4,7 +4,7 @@
  */
 import { addConditionCapped, computeACFromInventory, normalizeConditionList } from '../../engine/rules.js';
 import { conversationalDistance } from '../../engine/replayLedger.js';
-import { itemIdentityMatches, nameTokensPresent, textWordSet } from '../../engine/textMatch.js';
+import { nameTokensPresent, textWordSet } from '../../engine/textMatch.js';
 import { isArmorItem, isShieldItem, isWeaponItem } from '../../engine/equipment.js';
 import { ITEM_CATALOG, clampMagicBonus, normalizeItemKey, parseMagicBonusFromName, MAX_ITEM_QUANTITY } from '../../data/items.js';
 import { MAX_CHARACTER_LEVEL, reviveHero } from '../../engine/progression.js';
@@ -1045,21 +1045,17 @@ function equipmentKindMatches(item, kind) {
  * equips also sells and removes (2026-08-28 audit). Rungs: id → the given
  * catalog key → the exact name (compact token — a row named exactly what
  * was said is the row, before a catalog key that two rows may share) → the
- * name's catalog key → fuzzy token containment, UNAMBIGUOUS only (a narrated
- * "hempen rope" resolves to "Hempen Rope (50 ft)" — the Scribe audits' own
- * identity rule — but two candidate stacks resolve to nothing rather than a
- * guess) → a generic equipment kind.
- * Returns `{ item, ambiguous }`: `ambiguous` is the number of fuzzy
- * candidates when the ladder stopped on more than one (removal names it —
- * "matches N stacks"), else 0. Walked once (2026-10-07 inventory-economy P2:
- * REMOVE_ITEM_BY_NAME re-ran the exact and fuzzy rungs itself to count them).
+ * name's catalog key → a generic equipment kind. No word rung (2026-11-07,
+ * identity by reference, lane 5): the DM sees every carried row by name, so a
+ * name that is none of these resolves to nothing and the caller says so.
+ * Returns `{ item }`, null when nothing matched.
  */
 export function resolveInventoryItemRef(inventory, ref, { preferEquipped = false } = {}) {
     const payload = typeof ref === 'string' ? { name: ref } : (ref || {});
     const candidates = preferEquipped
         ? [...inventory].sort((a, b) => Number(!!b.equipped) - Number(!!a.equipped))
         : inventory;
-    const found = (item) => ({ item: item || null, ambiguous: 0 });
+    const found = (item) => ({ item: item || null });
 
     const id = payload.itemId || payload.id;
     if (id) {
@@ -1087,13 +1083,6 @@ export function resolveInventoryItemRef(inventory, ref, { preferEquipped = false
     if (nameKey) {
         const byNameKey = candidates.find(i => i.itemKey === nameKey);
         if (byNameKey) return found(byNameKey);
-    }
-
-    if (name) {
-        const fuzzy = candidates.filter(i =>
-            itemIdentityMatches(name, i.name) || (i.itemKey && itemIdentityMatches(name, i.itemKey)));
-        if (fuzzy.length === 1) return found(fuzzy[0]);
-        if (fuzzy.length > 1) return { item: null, ambiguous: fuzzy.length };
     }
 
     const kind = payload.type || payload.slot || payload.category || name;

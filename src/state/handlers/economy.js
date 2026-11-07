@@ -82,6 +82,7 @@ function buildPurchaseTransaction(payload = {}) {
         // A purchase with no item name or key (`item: []` spread to `{}`) used
         // to buy "Unknown item" for the stated price — refused visibly instead.
         nameless: (!itemKeyRef || !!unknownKey) && !nameRef,
+        said: nameRef,
         unknownKey,
     };
 }
@@ -150,7 +151,7 @@ function purseLine(character) {
     return formatCurrency(characterCurrencyToCopper(character));
 }
 
-const itemRef = (item, quantity) => ({ name: item.name, itemKey: item.itemKey, quantity });
+const itemRef = (item, quantity, said = null) => ({ name: item.name, itemKey: item.itemKey, quantity, ...(said && { said }) });
 const withParty = (twin, word) => (twin?.party ? ` ${word} ${twin.party}` : '');
 const itemsOf = (entry) => (entry?.itemsOut?.length ? entry.itemsOut : entry?.itemsIn || []).map(item => item.name).join(', ');
 
@@ -172,7 +173,7 @@ function ignore(state, ctx, fields, line, ask = null) {
 
 /** The purse receipt for a judgment — or, when it is the judge's to settle, its card. */
 function receipt(state, ctx, line, ask) {
-    return (ask && repeatCard(state, ctx, ask.twin, line, ask.replay)) || coinLine(line);
+    return (ask && repeatCard(state, ctx, ask.twin, line, ask.replay, { loose: ask.loose })) || coinLine(line);
 }
 
 const GRANT_LINES = {
@@ -338,7 +339,7 @@ export const handlers = {
         }
         const meta = action.payload?._meta || {};
         const ctx = ledgerContext(state, meta);
-        const claim = { kind: 'purchase', cp: -priceCp, itemsIn: [itemRef(item, quantity)] };
+        const claim = { kind: 'purchase', cp: -priceCp, itemsIn: [itemRef(item, quantity, transaction.said)] };
         const verdict = judgePurchase(state, ctx, transaction);
         const purchaseReplay = { type: 'PURCHASE_ITEM', payload: { name: item.name, itemKey: item.itemKey, quantity, priceCp } };
         if (verdict.suppress) {
@@ -383,7 +384,7 @@ export const handlers = {
                 character: payment.character,
                 ledger: logMovement(state, ctx, { ...claim, itemsMoved: false }),
                 messages: [...state.messages, receipt(state, ctx, `Paid ${formatCurrency(priceCp)} for ${label} — it already reached your pack recently, so no second one was added; purse: ${purseLine(payment.character)}.`,
-                    { twin: verdict.itemTwin, replay: { type: 'ADD_ITEM', payload: { name: item.name, itemKey: item.itemKey, quantity, type: item.type } } })],
+                    { twin: verdict.itemTwin, loose: verdict.itemLoose, replay: { type: 'ADD_ITEM', payload: { name: item.name, itemKey: item.itemKey, quantity, type: item.type } } })],
             };
         }
         // The purchase receipt carries the purse like the coin lines do
@@ -409,14 +410,11 @@ export const handlers = {
         const payload = action.payload || {};
         const ref = payload.itemId || payload.itemKey || payload.name || '';
         // Same resolution ladder as equip/remove (2026-08-28 audit), reading
-        // `ambiguous` like REMOVE_ITEM_BY_NAME (2026-10-20 P2).
-        const { item, ambiguous } = resolveInventoryItemRef(state.inventory, payload);
+        const { item } = resolveInventoryItemRef(state.inventory, payload);
         if (!item) {
             return {
                 ...state,
-                messages: [...state.messages, coinLine(ambiguous > 1
-                    ? `Can't sell "${ref}" — it matches ${ambiguous} different stacks; say which one.`
-                    : `Can't sell "${ref}" — it's not in your inventory.`)],
+                messages: [...state.messages, coinLine(`Can't sell "${ref}" — nothing in your inventory has that exact name.`)],
             };
         }
         // Finite + trunc (2026-09-03 P2); "all" sells the whole stack (2026-09-12 P2).

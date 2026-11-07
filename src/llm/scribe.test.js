@@ -1047,7 +1047,7 @@ describe('Scribe loot persistence audit', () => {
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ITEM' }));
     });
 
-    it('matches a raw-named recount against the item-grant ledger fuzzily across messages', async () => {
+    it('a raw-named recount the words tie to a recent arrival books nothing and asks the player (2026-11-07)', async () => {
         sendMessage.mockResolvedValue(scribeResponse({
             items: [{ name: 'brass token', quantity: 1 }],
         }));
@@ -1068,6 +1068,8 @@ describe('Scribe loot persistence audit', () => {
         });
 
         expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_ITEM' }));
+        expect(dispatch.mock.calls.some(([action]) => action.payload?.recovery?.items?.[0]?.name === 'brass token'
+            || JSON.stringify(action).includes('Narrated, not recorded'))).toBe(true);
     });
 
     it('one accountant per narration: when the event path granted ANY item or coin, the audit grants nothing more (2026-10-31)', async () => {
@@ -1560,8 +1562,8 @@ describe('Scribe narrated-loss audit (queue P2, live playtest #8)', () => {
         expect(actions.find(a => a.type === 'ADD_MESSAGE')).toBeUndefined();
     });
 
-    it('matches a narrated loss to its catalog-cased stack (live playtest 2026-08-20)', async () => {
-        sendMessage.mockResolvedValue(lossResponse({ items: [{ name: 'wax candles' }] }));
+    it('a copied inventory row is the stack, in any case (live playtest 2026-08-20; exact since 2026-11-07)', async () => {
+        sendMessage.mockResolvedValue(lossResponse({ items: [{ name: 'wax candles (X5)' }] }));
         const dispatch = vi.fn();
         await runScribe({
             playerMessage: 'I let the candle burn overnight.',
@@ -1775,8 +1777,8 @@ describe('gear-handoff audit identity (2026-09-01 scribe P2)', () => {
         appliedLootSourceIds: [],
     });
 
-    it('matches a narrated "longsword" to the owned "Longsword +1" and hands THAT off — never a stats-only copy', async () => {
-        sendMessage.mockResolvedValue(extraction([{ companion: 'Kaarina Tammi', item: 'longsword', kind: 'weapon' }]));
+    it('the copied row "Longsword +1" hands THAT off — never a stats-only copy', async () => {
+        sendMessage.mockResolvedValue(extraction([{ companion: 'Kaarina Tammi', item: 'Longsword +1', kind: 'weapon' }]));
         const dispatch = vi.fn();
         await runScribe({
             playerMessage: 'Take my longsword.',
@@ -1788,10 +1790,10 @@ describe('gear-handoff audit identity (2026-09-01 scribe P2)', () => {
         expect(dispatch.mock.calls.some(([a]) => a.type === 'UPDATE_COMPANION' && a.payload.weapon)).toBe(false);
     });
 
-    it('dedupes two narrated names that resolve to one owned item, and skips an ambiguous fuzzy match', async () => {
+    it('one stack copied twice hands off once', async () => {
         sendMessage.mockResolvedValue(extraction([
-            { companion: 'Kaarina Tammi', item: 'longsword', kind: 'weapon' },
             { companion: 'Kaarina Tammi', item: 'Longsword +1', kind: 'weapon' },
+            { companion: 'Kaarina Tammi', item: 'longsword +1', kind: 'weapon' },
         ]));
         const dispatch = vi.fn();
         await runScribe({
@@ -1801,20 +1803,19 @@ describe('gear-handoff audit identity (2026-09-01 scribe P2)', () => {
             lootAudit: { sourceId: 'msg-21:scribe-loot', appliedEvents: null, getState: () => auditState([{ id: 'i1', name: 'Longsword +1', type: 'weapon' }]) },
         });
         expect(dispatch.mock.calls.filter(([a]) => a.type === 'GIVE_GEAR_TO_COMPANION')).toHaveLength(1);
+    });
 
+    it('a word that misses the row is a stats-only update: the stated price of a Scribe that did not copy', async () => {
         sendMessage.mockResolvedValue(extraction([{ companion: 'Kaarina Tammi', item: 'longsword', kind: 'weapon' }]));
-        const ambiguous = vi.fn();
+        const dispatch = vi.fn();
         await runScribe({
             playerMessage: 'Take a longsword.',
             dmNarrative: 'Kaarina takes a sword.',
-            settings, dispatch: ambiguous,
-            lootAudit: {
-                sourceId: 'msg-22:scribe-loot', appliedEvents: null,
-                getState: () => auditState([{ id: 'i1', name: 'Longsword +1', type: 'weapon' }, { id: 'i2', name: 'Longsword +2', type: 'weapon' }]),
-            },
+            settings, dispatch,
+            lootAudit: { sourceId: 'msg-22:scribe-loot', appliedEvents: null, getState: () => auditState([{ id: 'i1', name: 'Longsword +1', type: 'weapon' }]) },
         });
-        // Ambiguous: neither handed off, and no stats-only weapon copy minted either.
-        expect(ambiguous.mock.calls.some(([a]) => ['GIVE_GEAR_TO_COMPANION', 'UPDATE_COMPANION'].includes(a.type))).toBe(false);
+        expect(dispatch.mock.calls.some(([a]) => a.type === 'GIVE_GEAR_TO_COMPANION')).toBe(false);
+        expect(dispatch.mock.calls.some(([a]) => a.type === 'UPDATE_COMPANION' && a.payload.weapon === 'longsword')).toBe(true);
     });
 });
 
@@ -1973,7 +1974,7 @@ describe('loss audit carries the narrated quantity (2026-09-03 P1: one torch bur
     it('forwards a count / "all" as { name, quantity } and a bare item as the plain name', async () => {
         sendMessage.mockResolvedValue(JSON.stringify({
             world_facts: [], npc_updates: [], story_memory: [], location: null,
-            narrated_losses: { items: [{ name: 'Torch', quantity: 2 }, { name: 'Rations (1 day)', quantity: 'all' }, { name: 'Rope' }] },
+            narrated_losses: { items: [{ name: 'Torch', quantity: 2 }, { name: 'Rations (1 day)', quantity: 'all' }, { name: 'Hempen Rope (50 ft)' }] },
         }));
         const dispatch = vi.fn();
         await runScribe({

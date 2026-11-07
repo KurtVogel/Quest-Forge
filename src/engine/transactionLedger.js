@@ -30,7 +30,7 @@
  */
 import { conversationalDistance, describeTurnsAgo } from './replayLedger.js';
 import { itemIdentityMatches } from './textMatch.js';
-import { namesMatch, resolveNpcRef } from './npcRoster.js';
+import { resolveNpcRef } from './npcRoster.js';
 import { formatCurrency } from './currency.js';
 import { normalizeItemKey } from '../data/items.js';
 
@@ -64,7 +64,10 @@ function sanitizeItemRef(raw) {
     const name = clampText(raw.name, 160);
     const itemKey = clampText(raw.itemKey, 100);
     if (!name && !itemKey) return null;
-    return { name, itemKey, quantity: Math.max(1, Math.min(9999, toInt(raw.quantity) || 1)) };
+    // `said`: the name the lane used when the catalog renamed the row ("Hempen
+    // rope" became "Hempen Rope (50 ft)"), kept for the word shortlist alone.
+    const said = clampText(raw.said, 160);
+    return { name, itemKey, quantity: Math.max(1, Math.min(9999, toInt(raw.quantity) || 1)), ...(said && said !== name && { said }) };
 }
 
 const itemList = (list) => (Array.isArray(list) ? list.map(sanitizeItemRef).filter(Boolean).slice(0, 6) : []);
@@ -122,7 +125,8 @@ export function sameItem(a, b, { fuzzy = false } = {}) {
     if (ia && ia === itemIdentity(b)) return true;
     if (!fuzzy) return false;
     if (a.itemKey && b.itemKey && a.itemKey === b.itemKey) return true;
-    return !!(a.name && b.name && itemIdentityMatches(a.name, b.name));
+    const names = (ref) => [ref.name, ref.said].filter(Boolean);
+    return names(a).some(x => names(b).some(y => itemIdentityMatches(x, y)));
 }
 
 /** Claim signature: one entry per (sourceId, kind, claim) — a re-record replaces. */
@@ -186,7 +190,6 @@ export function partyRelation(a, b, resolve = null) {
     const fa = foldParty(a.party);
     const fb = foldParty(b.party);
     if (fa && fa === fb) return 'same';
-    if (fa && fb && namesMatch(a.party, b.party)) return 'same';
     return 'unknown';
 }
 
@@ -221,19 +224,36 @@ export function withinWindow(entry, ctx) {
 }
 
 /**
+ * Two ids are not proof of two people (2026-11-07, identity by reference,
+ * lane 5): "Tuomas" and "Tuomas the furrier" can be two roster records for one
+ * man, and `different` let a second same-value payment through with no card.
+ * On the DM lane, from an EARLIER message, inside the short window, the pair
+ * is the repeat judge's to read (both names on the card). The same reply's
+ * pair stays two people, and so does the audit lane, which has no judge: the
+ * dockmaster's silver must never be stripped out of the gambler's pot.
+ */
+function askAcrossPeople(entry, ctx) {
+    if (ctx.lane !== 'dm' || !ctx.base || baseOf(entry.sourceId) === ctx.base) return false;
+    if (partyRelation(entry, ctx, typeof ctx.resolveParty === 'function' ? ctx.resolveParty : null) !== 'different') return false;
+    const distance = conversationalDistance(ctx.messages, entry.atMessage, ctx.atMessage);
+    return distance >= 0 && distance <= SHORT_WINDOW;
+}
+
+/**
  * The newest entry matching `predicate` that may be a twin of `ctx`'s
  * movement: an exact-source match needs no window; anything else must sit
  * inside its counterparty window. `crossBase` skips the SAME narration's
  * entries (the audits are already reconciled against their own narration).
+ * `acrossPeople` also returns a pair the judge should read (askAcrossPeople).
  */
-export function findTwin(ledger, ctx, predicate, { crossBase = false, exactSource = true } = {}) {
+export function findTwin(ledger, ctx, predicate, { crossBase = false, exactSource = true, acrossPeople = false } = {}) {
     const entries = normalizeLedger(ledger);
     for (let i = entries.length - 1; i >= 0; i -= 1) {
         const entry = entries[i];
         if (!predicate(entry)) continue;
         if (exactSource && ctx.sourceId && entry.sourceId === ctx.sourceId) return entry;
         if (crossBase && ctx.base && baseOf(entry.sourceId) === ctx.base) continue;
-        if (withinWindow(entry, ctx)) return entry;
+        if (withinWindow(entry, ctx) || (acrossPeople && askAcrossPeople(entry, ctx))) return entry;
     }
     return null;
 }

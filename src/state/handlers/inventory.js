@@ -99,7 +99,7 @@ export const handlers = {
                         // dmVisible: the DM must learn its re-emission was suppressed
                         // (the item is already owned) or it keeps trying. A
                         // cross-message twin asks the player instead (repeatCard).
-                        repeatCard(state, ctx, verdict.twin, line, { type: 'ADD_ITEM', payload: { ...ref, type: item.type, description: item.description, valueCp: item.valueCp } })
+                        repeatCard(state, ctx, verdict.twin, line, { type: 'ADD_ITEM', payload: { ...ref, type: item.type, description: item.description, valueCp: item.valueCp } }, { loose: verdict.loose })
                             || systemMessage(line, { dmVisible: true }),
                     ],
                 };
@@ -285,7 +285,7 @@ export const handlers = {
         // shared ladder — exact name, catalog key, descriptor prefix, then the
         // audits' fuzzy token-containment, UNAMBIGUOUS only, because removal
         // takes whole stacks and must never guess between two candidates.
-        const { item: matchToRemove, ambiguous } = resolveInventoryItemRef(state.inventory, ref);
+        const { item: matchToRemove } = resolveInventoryItemRef(state.inventory, ref);
         // A DM / audit / player removal is judged against the transaction log
         // (2026-11-01 — the one economic channel that had no replay guard): an
         // items_lost re-emitted for a torch already burned, or for the letter
@@ -305,7 +305,7 @@ export const handlers = {
                     ledger: logMovement(state, ctx, { kind: 'item', itemsOut: [probe], status: 'ignored' }),
                     messages: [
                         ...state.messages,
-                        repeatCard(state, ctx, verdict.twin, line, { type: 'REMOVE_ITEM_BY_NAME', payload: { name: probe.name } })
+                        repeatCard(state, ctx, verdict.twin, line, { type: 'REMOVE_ITEM_BY_NAME', payload: { name: probe.name } }, { loose: verdict.loose })
                             || systemMessage(line, { dmVisible: true }),
                     ],
                 };
@@ -316,9 +316,9 @@ export const handlers = {
             // fiction disagreeing with no trace the player could dispute.
             return {
                 ...state,
-                messages: [...state.messages, systemMessage(ambiguous > 1
-                    ? `Could not remove "${ref}" — it matches ${ambiguous} different stacks; say which one.`
-                    : `Could not remove "${ref}" — nothing in the pack matches it.`)],
+                // DM-visible (2026-11-07): the name must match a row exactly, and
+                // the DM reads this and can send the name INVENTORY prints.
+                messages: [...state.messages, systemMessage(`Could not remove "${ref}" — nothing in the pack has that exact name.`, { dmVisible: true })],
             };
         }
         const owned = Math.max(1, Math.trunc(matchToRemove.quantity || 1));

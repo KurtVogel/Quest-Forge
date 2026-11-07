@@ -38,6 +38,7 @@ const coinOut = (copper, party) => ({ type: 'APPLY_COIN_LOSS', payload: { copper
 const sale = (name, priceCp, party) => ({ type: 'SELL_ITEM', payload: { name, quantity: 1, priceCp, _meta: { party } } });
 const buy = (name, priceCp, party) => ({ type: 'PURCHASE_ITEM', payload: { name, quantity: 1, priceCp, _meta: { party } } });
 const burn = (name) => ({ type: 'REMOVE_ITEM_BY_NAME', payload: { name, _meta: {} } });
+const found = (name) => ({ type: 'ADD_ITEM', payload: { name, _meta: {} } });
 
 const CASES = [
     // ── retold: "new" here is a DOUBLE ──
@@ -90,6 +91,29 @@ const CASES = [
     { id: 'pay-up-front', expect: 'new',
         earlier: ['I hand Velka a silver for the hand.', 'Velka takes your silver and deals.', coinOut(10, 'Velka')],
         now: ['i pay her for nother hand', 'She takes the coin, shuffles, and deals the three placards face down.', coinOut(10, 'Velka')] },
+    // ── two roster ids (2026-11-07): one man forked in the record, or two people ──
+    { id: 'fork-retold', expect: 'same',
+        earlier: ['I pay Tuomas for the winter fur.', 'Tuomas counts your five gold and hands the fur across the counter.', coinOut(500, 'Tuomas')],
+        now: ['What did that fur cost me again?', 'Tuomas the furrier scratches his beard. "Five gold, same as I told you, and you paid it."', coinOut(500, 'Tuomas the furrier')] },
+    { id: 'fork-receipt', expect: 'same',
+        earlier: ['I settle up with Tuomas.', 'You count out five gold and Tuomas sweeps it into his apron.', coinOut(500, 'Tuomas')],
+        now: ['I head for the door.', 'Tuomas the furrier nods you out. Your five gold is already in his till and the debt is square.', coinOut(500, 'Tuomas the furrier')] },
+    { id: 'two-people-pay', expect: 'new',
+        earlier: ['I pay Jethro his two silver for the mending.', 'Jethro bites the silver and nods.', coinOut(20, 'Jethro')],
+        now: ['Now I pay Marta for the room.', 'Marta Vell holds out her palm; you count two silver into it and she hands you the key.', coinOut(20, 'Marta Vell')] },
+    { id: 'two-people-wage', expect: 'new',
+        earlier: ['I collect from Jethro for the crates.', 'Jethro flips you a silver for the morning\'s work.', coinIn(10, 'Jethro')],
+        now: ['I carry Marta\'s barrels too.', 'Marta Vell pays you a silver of her own once the last barrel is racked.', coinIn(10, 'Marta Vell')] },
+    { id: 'two-people-buy', expect: 'new',
+        earlier: ['I buy a rope from Jethro.', 'Jethro takes your silver and coils a length of rope into your arms.', buy('Hemp rope', 100, 'Jethro')],
+        now: ['Marta sells rope too, I buy another for the climb.', 'Marta Vell sells you a second length of rope from her own stock.', buy('Hemp rope', 100, 'Marta Vell')] },
+    // ── one reply, two names (2026-11-07): the words ask, the judge reads ──
+    { id: 'same-reply-one-rope', expect: 'same',
+        reply: ['I buy a coil of rope.', 'Jethro takes your silver and hands you a coil of hempen rope.', [found('hempen rope coil'), buy('Hempen rope', 100, 'Jethro')]] },
+    { id: 'same-reply-one-lantern', expect: 'same',
+        reply: ['I buy the lantern.', 'You pay Marta and she passes you the old tin lantern from the shelf.', [found('old tin lantern'), buy('Tin lantern', 500, 'Marta Vell')]] },
+    { id: 'same-reply-two-ropes', expect: 'new',
+        reply: ['I buy a rope and search the crate.', 'Jethro sells you a coil of hempen rope. In the crate behind him you turn up a second, older hempen rope coil of your own.', [found('hempen rope coil'), buy('Hempen rope', 100, 'Jethro')]] },
 ];
 
 function buildCase(spec) {
@@ -97,6 +121,12 @@ function buildCase(spec) {
         ...initialGameState,
         settings: { ...initialGameState.settings, llmProvider: 'gemini', apiKey: GEMINI_KEY, geminiApiKey: GEMINI_KEY },
         character: { ...initialGameState.character, name: 'Saila', gold: 50, silver: 0, copper: 0 },
+        npcs: [
+            { id: 'npc-tuomas', name: 'Tuomas', rosterTier: 'character', kind: 'character' },
+            { id: 'npc-tuomas-2', name: 'Tuomas the furrier', rosterTier: 'character', kind: 'character' },
+            { id: 'npc-jethro', name: 'Jethro', rosterTier: 'character', kind: 'character' },
+            { id: 'npc-marta', name: 'Marta Vell', rosterTier: 'character', kind: 'character' },
+        ],
         inventory: [
             { id: 'p1', name: 'Wolf pelts', quantity: 4, valueCp: 100 },
             { id: 't1', name: 'Torch', itemKey: 'torch', quantity: 3 },
@@ -106,9 +136,15 @@ function buildCase(spec) {
     const turn = (n, [player, dm, action]) => {
         state = gameReducer(state, { type: 'ADD_MESSAGE', payload: { id: `u${n}`, role: 'user', content: player } });
         state = gameReducer(state, { type: 'ADD_MESSAGE', payload: { id: `msg-${n}`, role: 'assistant', content: dm } });
-        const meta = { ...action.payload._meta, sourceId: `msg-${n}`, playerMessage: player };
-        state = gameReducer(state, { ...action, payload: { ...action.payload, _meta: meta } });
+        for (const one of Array.isArray(action) ? action : [action]) {
+            const meta = { ...one.payload._meta, sourceId: `msg-${n}`, playerMessage: player };
+            state = gameReducer(state, { ...one, payload: { ...one.payload, _meta: meta } });
+        }
     };
+    if (spec.reply) {
+        turn(1, spec.reply);
+        return state;
+    }
     turn(1, spec.earlier);
     // One ordinary turn in between, as play usually has.
     state = gameReducer(state, { type: 'ADD_MESSAGE', payload: { id: 'u2', role: 'user', content: 'I look around.' } });

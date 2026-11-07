@@ -34,6 +34,7 @@ import { compareCardRecency, findStoryMemoryMatch, normalizeStoryMemoryCard, sel
 import {
     CAST_AUDIT_RULES,
     describeAppliedLoot,
+    recentArrivalNames,
     describeOwnedInventory,
     describePartyGear,
     hasAuditPayload,
@@ -701,6 +702,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
 
     const auditState = (lootAudit && typeof lootAudit.getState === 'function') ? lootAudit.getState() : null;
     const ownedInventory = auditState ? describeOwnedInventory(auditState) : null;
+    const recentArrivals = auditState ? recentArrivalNames(auditState).join('; ') : '';
     const partyGear = auditState ? describePartyGear(auditState) : null;
     // Narrated-cast audit rides the ordinary-turn loot audit only (auditCasts flag):
     // victory narration recaps in-fight casts and mid-combat casting is exchange
@@ -759,6 +761,9 @@ ${COMBATANT_TAG_RULE}`
                     : null,
                 lootAudit
                     ? `EVENTS ALREADY APPLIED BY THE ENGINE THIS TURN (the engine reconciles narrated_loot/narrated_payment against these itself — for the gear-handoff audit, anything listed here is NOT missing): ${describeAppliedLoot(lootAudit.appliedEvents)}`
+                    : null,
+                recentArrivals
+                    ? `ITEMS THAT ARRIVED RECENTLY (already in the pack, already recorded): ${recentArrivals}`
                     : null,
                 ownedInventory
                     ? `HERO'S CURRENT INVENTORY (already owned — using, drawing, or lighting these is NOT an acquisition): ${ownedInventory}`

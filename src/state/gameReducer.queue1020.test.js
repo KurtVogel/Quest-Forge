@@ -179,8 +179,8 @@ describe('PURCHASE_ITEM auto-equips like ADD_ITEM (2026-10-20 inventory-economy 
     });
 });
 
-describe('SELL_ITEM reads the ladder\'s ambiguity (2026-10-20 inventory-economy P2)', () => {
-    it('"fire potion" against two fire potions says which, never "not in your inventory"', () => {
+describe('SELL_ITEM takes an exact name (2026-11-07, revises 2026-10-20 inventory-economy P2)', () => {
+    it('a name no row carries sells nothing and says so', () => {
         const state = fighterState({
             inventory: [
                 { id: 'p-1', name: 'Potion of Fire Breath', type: 'consumable', quantity: 1, equipped: false, valueCp: 100 },
@@ -189,9 +189,9 @@ describe('SELL_ITEM reads the ladder\'s ambiguity (2026-10-20 inventory-economy 
         });
         const next = gameReducer(state, { type: 'SELL_ITEM', payload: { name: 'fire potion' } });
         expect(next.inventory).toHaveLength(2);
-        expect(last(next).content).toMatch(/Can't sell "fire potion" — it matches 2 different stacks; say which one\./);
+        expect(last(next).content).toMatch(/Can't sell "fire potion" — nothing in your inventory has that exact name\./);
         const missing = gameReducer(state, { type: 'SELL_ITEM', payload: { name: 'moon rock' } });
-        expect(last(missing).content).toMatch(/Can't sell "moon rock" — it's not in your inventory\./);
+        expect(last(missing).content).toMatch(/Can't sell "moon rock" — nothing in your inventory has that exact name\./);
     });
 });
 

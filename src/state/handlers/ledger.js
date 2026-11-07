@@ -170,11 +170,13 @@ export function movementLabel(replay, party = '') {
  * the two turns for: a "new" verdict books exactly this movement on the
  * judge lane, with an Undo; anything else leaves the player's "Record it
  * again". An exact-source replay and a same-reply twin stay plain notes:
- * those are certain.
+ * those are certain. `loose` marks a twin found by the word shortlist alone
+ * (2026-11-07): words may only ask, so that pair reaches the judge from the
+ * same reply too.
  */
-export function repeatCard(state, ctx, twin, line, replay) {
-    if (ctx.lane !== 'dm' || !twin || isExact(twin, ctx)) return null;
-    if (ctx.base && baseOf(twin.sourceId) === ctx.base) return null;
+export function repeatCard(state, ctx, twin, line, replay, { loose = false } = {}) {
+    if (ctx.lane !== 'dm' || !twin) return null;
+    if (!loose && (isExact(twin, ctx) || (ctx.base && baseOf(twin.sourceId) === ctx.base))) return null;
     const projected = projectRepeatReplay(replay);
     if (!projected) return null;
     return {
@@ -310,7 +312,7 @@ export function judgeCoinIn(state, ctx, amounts) {
     if (decided(ctx)) return { bundled: null };
     const isAudit = ctx.lane === 'audit';
     const ledger = state.ledger;
-    const duplicate = findTwin(ledger, ctx, entry => entry.kind === 'coin' && entry.cp === total, { crossBase: isAudit });
+    const duplicate = findTwin(ledger, ctx, entry => entry.kind === 'coin' && entry.cp === total, { crossBase: isAudit, acrossPeople: true });
     if (duplicate) return { suppress: 'duplicate', twin: duplicate };
     if (isAudit) {
         // R4: a recap may drift low — a recent reward at least this large is it.
@@ -342,7 +344,7 @@ export function judgeCoinOut(state, ctx, amounts) {
         const replay = findTwin(state.ledger, ctx, entry => entry.kind === 'coin' && entry.cp === -total);
         return isExact(replay, ctx) ? { suppress: 'duplicate', twin: replay } : {};
     }
-    const duplicate = findTwin(state.ledger, ctx, entry => entry.kind === 'coin' && entry.cp === -total);
+    const duplicate = findTwin(state.ledger, ctx, entry => entry.kind === 'coin' && entry.cp === -total, { acrossPeople: true });
     if (duplicate) return { suppress: 'duplicate', twin: duplicate };
     // The price already left through an atomic purchase, retold as loose coin.
     const purchase = findTwin(state.ledger, ctx, entry => entry.kind === 'purchase' && movedOut(entry) && -entry.movedCp === total, { crossBase: true, exactSource: false });
@@ -393,11 +395,13 @@ export function judgeItemIn(state, ctx, item) {
         const replay = findTwin(state.ledger, ctx, entry => carriesIn(entry) && entry.itemsIn.some(held => sameItem(held, item)));
         return isExact(replay, ctx) ? { suppress: 'duplicate', twin: replay } : {};
     }
-    const twin = findTwin(state.ledger, ctx, entry => carriesIn(entry) && entry.itemsIn.some(held => sameItem(held, item)))
-        // A recap rarely repeats the name exactly ("the brass token" for
-        // "Brass toll-token"): the audits' own identity rule counts too.
-        || findTwin(state.ledger, ctx, entry => movedItems(entry, 'in').some(held => sameItem(held, item, { fuzzy: true })), { exactSource: false });
-    return twin ? { suppress: 'duplicate', twin } : {};
+    const twin = findTwin(state.ledger, ctx, entry => carriesIn(entry) && entry.itemsIn.some(held => sameItem(held, item)), { acrossPeople: true });
+    if (twin) return { suppress: 'duplicate', twin };
+    // A recap rarely repeats the name exactly ("the brass token" for "Brass
+    // toll-token"). The word rule is a shortlist, never a verdict (2026-11-07):
+    // what it finds books nothing and the repeat judge reads the pair.
+    const loose = findTwin(state.ledger, ctx, entry => movedItems(entry, 'in').some(held => sameItem(held, item, { fuzzy: true })), { exactSource: false });
+    return loose ? { suppress: 'duplicate', twin: loose, loose: true } : {};
 }
 
 /** An item OUT of the pack (items_lost, an audit's loss). `{ suppress, twin }` or `{}`. */
@@ -408,9 +412,13 @@ export function judgeItemOut(state, ctx, item) {
         return isExact(replay, ctx) ? { suppress: 'duplicate', twin: replay } : {};
     }
     const isAudit = ctx.lane === 'audit';
-    const twin = findTwin(state.ledger, ctx, claim, { crossBase: isAudit })
-        || findTwin(state.ledger, ctx, entry => movedItems(entry, 'out').some(held => sameItem(held, item, { fuzzy: true })), { crossBase: isAudit, exactSource: false });
-    return twin ? { suppress: 'duplicate', twin } : {};
+    const twin = findTwin(state.ledger, ctx, claim, { crossBase: isAudit, acrossPeople: true });
+    if (twin) return { suppress: 'duplicate', twin };
+    // The audit names the inventory row itself and has no judge to ask: its
+    // twin is the exact one above. The DM lane's shortlist goes to the judge.
+    if (isAudit) return {};
+    const loose = findTwin(state.ledger, ctx, entry => movedItems(entry, 'out').some(held => sameItem(held, item, { fuzzy: true })), { exactSource: false });
+    return loose ? { suppress: 'duplicate', twin: loose, loose: true } : {};
 }
 
 // ── Trades ──────────────────────────────────────────────────────────────
@@ -421,25 +429,32 @@ export function judgeItemOut(state, ctx, item) {
  * `itemTwin` (the goods already arrived as loot).
  */
 export function judgePurchase(state, ctx, transaction) {
-    const { item, quantity, priceCp } = transaction;
+    const { item, quantity, priceCp, said } = transaction;
     const duplicate = findTwin(state.ledger, ctx, entry => entry.kind === 'purchase'
         && entry.cp === -priceCp
-        && entry.itemsIn.some(held => sameItem(held, item) && held.quantity === quantity));
+        && entry.itemsIn.some(held => sameItem(held, item) && held.quantity === quantity), { acrossPeople: true });
     // A decided lane (a confirmed card, the judge) is never second-guessed but as an exact replay.
     if (duplicate && (isExact(duplicate, ctx) || !decided(ctx))) return { suppress: 'duplicate', twin: duplicate };
     if (decided(ctx)) return { coinTwin: null, itemTwin: null };
     const coinTwin = priceCp > 0
         ? findTwin(state.ledger, ctx, entry => entry.kind === 'coin' && movedOut(entry) && -entry.movedCp === priceCp, { crossBase: true, exactSource: false })
         : null;
-    const itemTwin = findTwin(state.ledger, ctx, entry => entry.kind === 'item' && movedItems(entry, 'in').some(held => sameItem(held, item, { fuzzy: true })), { crossBase: true, exactSource: false });
-    return { coinTwin, itemTwin };
+    const spoken = { ...item, said };
+    const looksLikeTheGoods = entry => entry.kind === 'item' && movedItems(entry, 'in').some(held => sameItem(held, spoken, { fuzzy: true }));
+    const itemTwin = findTwin(state.ledger, ctx, looksLikeTheGoods, { crossBase: true, exactSource: false });
+    if (itemTwin) return { coinTwin, itemTwin };
+    // applyEvents grants a reply's items_found before its purchases, so a
+    // same-reply drift ("hempen rope coil" beside the bought "Hempen rope")
+    // arrives here. Words may only ask (2026-11-07): the goods wait for the judge.
+    const sameReply = findTwin(state.ledger, ctx, entry => sameBase(entry, ctx) && looksLikeTheGoods(entry), { exactSource: false });
+    return { coinTwin, itemTwin: sameReply, itemLoose: !!sameReply };
 }
 
 /** An atomic sale. `{ suppress, twin }` for a replay; otherwise `coinTwin` (proceeds already paid as found coin). */
 export function judgeSale(state, ctx, item, quantity, proceedsCp) {
     const duplicate = findTwin(state.ledger, ctx, entry => entry.kind === 'sale'
         && entry.cp === proceedsCp
-        && entry.itemsOut.some(held => sameItem(held, item) && held.quantity === quantity));
+        && entry.itemsOut.some(held => sameItem(held, item) && held.quantity === quantity), { acrossPeople: true });
     if (duplicate && (isExact(duplicate, ctx) || !decided(ctx))) return { suppress: 'duplicate', twin: duplicate };
     if (decided(ctx) || !(proceedsCp > 0)) return { coinTwin: null };
     const coinTwin = findTwin(state.ledger, ctx, entry => entry.kind === 'coin' && movedIn(entry) && entry.movedCp === proceedsCp, { crossBase: true, exactSource: false });

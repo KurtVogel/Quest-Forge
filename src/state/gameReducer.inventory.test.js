@@ -451,17 +451,17 @@ describe('item removal (2026-08-05 queue P2 — previously untested)', () => {
         expect(next.inventory.find(i => i.id === 'rope-1')).toBeUndefined();
     });
 
-    it('REMOVE_ITEM_BY_NAME refuses an AMBIGUOUS fuzzy match with a visible line', () => {
+    it('REMOVE_ITEM_BY_NAME takes an exact name only, and a miss is a line the DM reads (2026-11-07)', () => {
         const state = makeState();
         state.inventory.push(
             { id: 'rope-1', itemKey: 'ropeHempen', name: 'Hempen Rope (50 ft)', type: 'gear', quantity: 1 },
             { id: 'rope-2', itemKey: 'ropeSilk', name: 'Silk Rope (50 ft)', type: 'gear', quantity: 1 },
         );
-        // Removal takes whole stacks — two candidate ropes must never be a guess.
         const next = gameReducer(state, { type: 'REMOVE_ITEM_BY_NAME', payload: 'rope' });
         expect(next.inventory.find(i => i.id === 'rope-1')).toBeTruthy();
         expect(next.inventory.find(i => i.id === 'rope-2')).toBeTruthy();
-        expect(next.messages.at(-1).content).toMatch(/matches 2 different stacks/);
+        expect(next.messages.at(-1).content).toMatch(/nothing in the pack has that exact name/);
+        expect(next.messages.at(-1).dmVisible).toBe(true);
     });
 });
 
