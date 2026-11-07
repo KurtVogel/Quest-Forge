@@ -13,7 +13,6 @@ import {
     findHeroTellMatch,
     isHeroTellEstablished,
     isHeroTellLive,
-    isSameTell,
     listVoiceableTells,
     mintHeroTellBeat,
     normalizeHeroTell,
@@ -44,19 +43,34 @@ describe('hero tells — recording (2026-09-23)', () => {
         expect(sameScene[0].lastSeenMessage).toBe(10 + HERO_TELL_SCENE_MESSAGES);
     });
 
-    it('a re-worded restatement merges into the held tell (id or containment), unions witnesses, keeps the HELD text', () => {
+    // Flipped 2026-11-07 (identity by reference, lane 2; was "merges by id or
+    // containment"): the Scribe is shown every tell with its id and told to
+    // echo it, so an id-less report in OTHER words is a new tell — a visible
+    // twin on the sheet, never a sighting grafted onto a guessed pattern.
+    it('a re-worded report with no id is a NEW tell; the same report under the held id is a sighting that keeps the HELD text', () => {
         const held = recordHeroTells([], [PIPE], { messageCount: 10 });
         const reworded = { text: 'he digs out his pipe and walks away whenever the conversation turns on him', kind: 'habit', witnesses: ['Bran'] };
-        const merged = recordHeroTells(held, [reworded], { messageCount: 40 });
-        expect(merged).toHaveLength(1);
-        expect(merged[0].sightings).toEqual([10, 40]);
-        expect(merged[0].witnesses).toEqual(['Maren', 'Bran']);
-        // The held wording stands (2026-11-06; was "keeps the richer text"): a sighting never rewrites the tell.
-        expect(merged[0].text).toBe(PIPE.text);
-        const byId = recordHeroTells(merged, [{ id: merged[0].id, text: 'the pipe again', kind: 'habit', witnesses: ['Maren'] }], { messageCount: 80 });
+        const twin = recordHeroTells(held, [reworded], { messageCount: 40 });
+        expect(twin).toHaveLength(2);
+        expect(twin[0]).toMatchObject({ text: PIPE.text, sightings: [10], witnesses: ['Maren'] });
+        expect(twin[1]).toMatchObject({ text: reworded.text, sightings: [40], witnesses: ['Bran'] });
+        expect(twin[1].id).not.toBe(twin[0].id);
+
+        const byId = recordHeroTells(held, [{ ...reworded, id: held[0].id }], { messageCount: 40 });
         expect(byId).toHaveLength(1);
-        expect(byId[0].sightings).toEqual([10, 40, 80]);
+        expect(byId[0].sightings).toEqual([10, 40]);
+        expect(byId[0].witnesses).toEqual(['Maren', 'Bran']);
+        // The held wording stands (2026-11-06; was "keeps the richer text"): a sighting never rewrites the tell.
         expect(byId[0].text).toBe(PIPE.text);
+        const again = recordHeroTells(byId, [{ id: byId[0].id, text: 'the pipe again', kind: 'habit', witnesses: ['Maren'] }], { messageCount: 80 });
+        expect(again).toHaveLength(1);
+        expect(again[0].sightings).toEqual([10, 40, 80]);
+        expect(again[0].text).toBe(PIPE.text);
+
+        // The exact text, case- and whitespace-folded, is still the same tell with no id.
+        const exact = recordHeroTells(held, [{ text: `  ${PIPE.text.toUpperCase()}  `, kind: 'habit', witnesses: ['Bran'] }], { messageCount: 40 });
+        expect(exact).toHaveLength(1);
+        expect(exact[0].sightings).toEqual([10, 40]);
     });
 
     it('a longer report that contains the held words grafts nothing onto the tell (the 11-01 "richer" finding)', () => {
@@ -68,9 +82,12 @@ describe('hero tells — recording (2026-09-23)', () => {
         expect(next[0].sightings).toEqual([10, 40]);
     });
 
-    it('a different KIND under similar words is a different tell; opposite manners sharing words stay apart; junk reports are dropped; the per-pass cap holds', () => {
-        expect(isSameTell({ text: 'never strikes first', kind: 'principle' }, { text: 'never strikes first', kind: 'manner' })).toBe(false);
-        expect(isSameTell({ text: 'jokes when things get serious', kind: 'manner' }, { text: 'goes quiet when things get serious', kind: 'manner' })).toBe(false);
+    it('findHeroTellMatch is id, then exact text, then nothing — opposite manners sharing words stay apart; junk reports are dropped; the per-pass cap holds', () => {
+        const held = [{ id: 't1', text: 'jokes when things get serious', kind: 'manner' }, { id: 't2', text: 'never strikes first', kind: 'principle' }];
+        expect(findHeroTellMatch(held, { text: 'goes quiet when things get serious', kind: 'manner' })).toBe(-1);
+        expect(findHeroTellMatch(held, { text: 'jokes whenever things get serious', kind: 'manner' })).toBe(-1);
+        expect(findHeroTellMatch(held, { text: 'Jokes when things get serious', kind: 'habit' })).toBe(0);
+        expect(findHeroTellMatch(held, { id: 't2', text: 'keeps the blade sheathed until struck', kind: 'manner' })).toBe(1);
         const tells = recordHeroTells([], [null, 'string', { text: '   ' }, PIPE, JOKES, { text: 'third one over the cap', kind: 'manner' }], { messageCount: 5 });
         expect(tells).toHaveLength(2);
         expect(recordHeroTells([], [null, 42], { messageCount: 5 })).toEqual([]);

@@ -1,6 +1,6 @@
 # Identity by reference: inventory and proposed order
 
-**Status: order approved by Vesa 2026-11-07. Lanes 1, 4, 5 and 3 are built and deployed. Next in the order: lane 2 (waits on a playtest), lane 11, then lane 6 — decisions 2 to 4 at the end come due before lane 6 starts.** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
+**Status: order approved by Vesa 2026-11-07. Lanes 1, 4, 5, 3 and 2 are built and deployed. Next in the order: lane 11, then lane 6 — decisions 2 to 4 at the end come due before lane 6 starts.** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
 2026-11-07 for the live proof. Line numbers hold at `667295b`, which changed no app code. Rule behind it: DECISIONS.md 2026-11-05 (first entry), with 2026-11-03 evening
 (`recorded_as`), 2026-11-02 (the repeat judge) and 2026-11-06 night (the id decides) as the lanes already moved.
 
@@ -27,7 +27,7 @@ of four lanes below. Lane numbers are unchanged because STATUS.md and DECISIONS.
 
 | Lane | Done in `16f6d9f` | Still open here |
 |---|---|---|
-| 2 Hero tells | The id decides, `richer` gone, kind flip gone; both deferred items closed | `isSameTell` for a report with no id |
+| 2 Hero tells | The id decides, `richer` gone, kind flip gone; both deferred items closed | ~~`isSameTell` for a report with no id~~ done 2026-11-08 |
 | 3 Quests | `id` in the format example; the id decides on open and close; an exact name clash refuses with a line | ~~`questNameMatcher` with no id~~ done 2026-11-07 |
 | 8 Story cards | An echoed id of the same type decides, read first; the 0.3 floor is now a log line | The subject, commitment and near-duplicate rungs |
 | 10 Facts | `supersedes` is read before the word judge | The word judge when no ref is given |
@@ -86,7 +86,9 @@ I still think it wins, because naming a fate in a structured field is easier tha
 prose. But nothing measures how often this filter fires today, so the lane starts by adding a small
 `eval:` with hand-built fights to compare both shapes.
 
-## Lane 2. Hero tells: what's left
+## Lane 2. Hero tells: what's left (done 2026-11-08)
+
+**Built as below.** The playtest it waited on became `npm run eval:tellid` (real `runScribe`, hand-built turns, a five-tell record): held patterns in other words 21 of 21 by the right id, voiced 6 of 6, new 9 of 9 with no id, 0 twins. Caveat: all five tells were shown; the unshown-tell twin is only counted live. ADD_HERO_TELLS counts id-less mints on the console for the real campaign. The table below is the design as proposed.
 
 | Site | Compares | Mark | Replacement | When the id is absent |
 |---|---|---|---|---|
@@ -292,7 +294,7 @@ Ordered by: the id is already shown to the LLM, a defect closes, nothing else de
 | ~~4~~ | ~~Party and hero~~ | **Done 2026-11-07**, two bugs closed | | |
 | ~~5~~ | ~~Items and ledger~~ | **Done 2026-11-07** | the last deferred item | |
 | ~~3~~ | ~~Quests, no-id leftovers~~ | **Done 2026-11-07**, the queue item closed | | |
-| 2 | Tells, no-id leftover | After a playtest counts Scribe ids | | Small |
+| ~~2~~ | ~~Tells, no-id leftover~~ | **Done 2026-11-08**; the count came from `eval:tellid` | | |
 | 11 | Phrase rules | Independent; the four repeat rows share one route, the repeat judge. The roll rows are a separate call | | Medium |
 | 6 | People | The keystone: aliases, `findNpcByRef`, `name_links`, `same_person`, the migration | 1 queue item | Large |
 | 7 | People reads | Needs 6 | `namesMatch` leaves decisions | Medium |

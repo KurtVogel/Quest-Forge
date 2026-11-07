@@ -77,6 +77,17 @@ export const handlers = {
         const messageCount = messages.length;
         const heroTells = recordHeroTells(existing, reports, { messageCount, messages });
         if (heroTells === existing) return state;
+        // The playtest counter lane 2 waits on (2026-11-07): with the word
+        // rung gone, an id-less report the Scribe should have echoed by id
+        // mints a twin instead of a sighting. Count the mints that happened
+        // beside a non-empty record so a real campaign's console says how
+        // often the Scribe omits the id (and whether KNOWN HERO TELLS' cap of
+        // 12 must rise). A diagnostic, never a veto.
+        const minted = heroTells.filter(t => !existing.some(e => e?.id === t?.id));
+        const idLess = reports.filter(r => !r?.id).length;
+        if (existing.length > 0 && minted.length > 0 && idLess > 0) {
+            console.info(`[heroTells] ${minted.length} new tell(s) minted from ${idLess} id-less report(s) beside ${existing.length} on record: ${minted.map(t => `"${String(t.text || '').slice(0, 60)}"`).join(', ')}`);
+        }
         // Voiced by the fiction (slice 3): a character said the open beat's
         // tell aloud — the window is spent, the exact turn is stamped, and
         // the cooldown runs from the voice.

@@ -22,7 +22,7 @@
  *
  * Lives in engine/ (not llm/) so reducer handlers never import from llm/.
  */
-import { containment, heroNameForms, tokenSet } from './textMatch.js';
+import { heroNameForms } from './textMatch.js';
 import { toFlag } from './text.js';
 import { clampMessageStamp, conversationalAgeSince, conversationalGap } from './replayLedger.js';
 import { BOND_SCENE_WINDOW_MESSAGES, namesMatch } from './npcRoster.js';
@@ -58,21 +58,10 @@ export const MAX_HERO_TELL_VOICES = 6;
 export const HERO_TELL_ABSENCE_COOLDOWN_MESSAGES = 120;
 export const HERO_TELL_BEAT_MODES = new Set(['remark', 'absence']);
 
-const TELL_STOP_WORDS = new Set([
-    'the', 'a', 'an', 'and', 'or', 'of', 'to', 'in', 'on', 'at', 'for', 'with', 'when', 'whenever',
-    'he', 'she', 'they', 'his', 'her', 'their', 'him', 'them', 'it', 'its', 'is', 'are', 'was',
-    'were', 'be', 'has', 'have', 'had', 'does', 'do', 'did', 'that', 'this', 'as', 'by', 'from',
-    'into', 'out', 'up', 'off', 'own', 'always', 'never', 'ever', 'hero', 'then', 'than', 'about',
-]);
-
 function text(value, max) {
     if (typeof value !== 'string') return '';
     const clean = value.replace(/\s+/g, ' ').trim();
     return max ? clean.slice(0, max) : clean;
-}
-
-function tellTokens(value) {
-    return tokenSet(value, { stopWords: TELL_STOP_WORDS, minLength: 3, foldPossessives: true });
 }
 
 export function normalizeHeroTellKind(value) {
@@ -192,26 +181,17 @@ export function sanitizeHeroTells(list, { maxMessageCount } = {}) {
 }
 
 /**
- * Same kind + the same pattern under other words (meaningful-token
- * containment ≥ 0.8 — a strict bar on purpose: "jokes when things get
- * serious" and "goes quiet when things get serious" share three of four
- * tokens and are opposite manners).
- */
-const SAME_TELL_CONTAINMENT = 0.8;
-export function isSameTell(a, b) {
-    if (!a || !b) return false;
-    if (normalizeHeroTellKind(a.kind) !== normalizeHeroTellKind(b.kind)) return false;
-    const ta = text(a.text).toLowerCase();
-    const tb = text(b.text).toLowerCase();
-    if (!ta || !tb) return false;
-    if (ta === tb) return true;
-    const setA = tellTokens(ta);
-    const setB = tellTokens(tb);
-    if (setA.size < 2 || setB.size < 2) return false;
-    return containment(setA, setB) >= SAME_TELL_CONTAINMENT;
-}
-
-/**
+ * A tell's identity is the id the Scribe echoes from KNOWN HERO TELLS, else
+ * the exact text — nothing else (identity by reference, lane 2, 2026-11-07;
+ * DECISIONS.md 2026-11-05: no word rule decides whether two LLM strings mean
+ * the same thing). The fuzzy `isSameTell` (2026-09-23; same kind + token
+ * containment ≥ 0.8) that caught an id-less re-wording is gone: the Scribe is
+ * shown every established tell with its id and told to echo it, so an id-less
+ * report in other words is a NEW tell. The cost is a twin row on the hero's
+ * sheet, where the player can strike it, never a sighting grafted onto the
+ * wrong pattern; ADD_HERO_TELLS counts those mints for the playtest that
+ * decides whether the KNOWN list's cap must rise.
+ *
  * An `id` on a report is the Scribe's PICK from KNOWN HERO TELLS, and the
  * pick decides (2026-11-06, night; Vesa 2026-11-05: "sameness of a tell
  * belongs to the Scribe"; revises the 2026-09-24 sweep, which checked the
@@ -241,7 +221,8 @@ export function findHeroTellMatch(tells = [], candidate = {}) {
         const byText = tells.findIndex(t => t && text(t.text).toLowerCase() === exact && idClaimHolds(t, candidate));
         if (byText !== -1) return byText;
     }
-    return tells.findIndex(t => isSameTell(t, candidate));
+    // No word rung (lane 2, 2026-11-07): anything else is a new tell.
+    return -1;
 }
 
 /**
