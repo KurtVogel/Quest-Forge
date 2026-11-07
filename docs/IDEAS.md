@@ -74,6 +74,16 @@ The 10-28 ruling stands ("the land is the signal, not the clock"); this is the l
 - **Slice 4 — a one-line geography for the DM.** Under the place card: "Other lands the hero knows:
   <Land> (home; <2–3 places>) — far from here." from `groupPlacesByRegion(listVisitedPlaces)`, ≤ 300 chars,
   dynamic half only. The direct answer to Vesa's reminder; measure the Flash prefix cost before keeping it.
+- **Slice 5 — retrieval weighs the land (Vesa's question, 2026-11-07: can the memory system do location
+  checks?).** Not geography — a cosine knows what a row is ABOUT, never where that place lies; the registry
+  owns distance and the 11-05 ruling bars embeddings as a same-place judge. But retrieval should CONSUME
+  the registry's land: every vector row carries `location` (recorded at) and `retrieveRelevant` penalizes
+  absent SUBJECTS only, so a Tervola row returns at full weight abroad whenever the semantics match
+  ("harbor", "guild"), and the block's preamble merely warns. Mirror the story cards' 10-28 rule: a row
+  whose `location` resolves (`landOfPlace`) to another land than the hero's pays a gate-side penalty like
+  `PRESENCE_ABSENT_PENALTY`, and a surviving far row's label reads `recorded at: <place>, <Land> — far from
+  here`. A row with no location or an unresolvable one is untouched (the safe direction). Zero calls.
+  The Scribe's `location_profile.region` stays the ONE LLM-side location check.
 - **Deferred, argued against for now:** sleeping every home front on the crossing. A dormant clock stops
   (`applyFrontAdvanceBatch` skips non-active), and a held doom that ripened while the hero was away is the
   living-world payoff worth keeping; slices 1–2 remove the harm without stopping the world. Revisit if the
