@@ -32,11 +32,34 @@ land is inferred from the regions of the records in `theaterFrontIds`. Five gaps
    (`npcLand` null ⇒ never far) — a home friend seats in KNOWN NPCs a sea away.
 4. **The reflection cannot see distance.** `runNpcFrontReflection` ships `knownLocations` as name / type /
    danger / `homeOfFronts` — no `region` — and no hero land, so its prompt rule "a pressure far from its
-   home territory reaches the hero only as news" has nothing to read; `where` lands on the home town and
-   the gate clamps to whispers one cadence late, or not at all (point 3).
+   home territory reaches the hero only as news" has nothing to read; `where` lands on the home town —
+   and because the gate counts a `where` that resolves to a theater as IN theater (the 2026-07-15 rule),
+   the grant is FULL band, not whispers, and it renders into the overseas scene.
 5. **Rows that name the home town carry no place:** ACTIVE QUESTS rows, DM REMINDERS threat facts (age
    only, since 10-28), and world facts have no `location` field at all.
+**Supplemented by a Codex read of the same code (2026-11-07, reproduced in synthetic fixtures, none kept):**
+(a) **a doom window that opened BEFORE the crossing follows the hero** — the 10-31 hold skips a far front
+only at open time (`openDoomIfFull`); `findOpenDoom` has no geography, so the card still renders abroad with
+the faction, its final step and "arrives as NEWS", the exact card that put the spear-hunters on the causeway;
+(b) **a permission granted before the crossing carries over** — `isTempoWindowActive` reads the timer only, so
+a window granted at the home quay is still the scene's card on the far shore; (c) **the inherited region is a
+leak in the gap** — `regionForPrompt` borrows the land last visited while the new port is untagged, so for the
+first turns abroad the hero's land IS the old land and nothing is "left behind"; the `inherited` flag hedges
+the place line only, `listFrontsLeftBehind` and `isFarAndForgotten` read the name regardless. Codex's order:
+fix the scene permissions first, one geography check at grant time AND prompt time; keep the doom hold and
+test crossing after a window opens. Agreed, and folded in as slice 0. Its "treat an untagged arrival as
+unknown" I'd NOT take as stated: most inland places are never tagged, so an unknown-when-untagged rule would
+switch the far-check off for most of a stay abroad; the inherit rule is right everywhere but the gap, and
+`front.land` (slice 1) plus the Scribe's "a land the hero has now ARRIVED in" rule shorten the gap itself.
 The 10-28 ruling stands ("the land is the signal, not the clock"); this is the land made explicit.
+- **Slice 0 — one geography check, at grant and at render.** `isFrontFar(front, state)` in
+  `engine/regionProfile.js` (reads `front.land` when stamped, the theaters' regions otherwise, against the
+  hero's land). `normalizeTempoDirective`: a `where` counts as in-theater only when it ALSO lies in the hero's
+  land; a far front's grant is quiet, not whispers. `buildWorldTempoBlock`: a live window for a front that is
+  far NOW renders the quiet line (the grant may have predated the crossing); an open doom for a far front
+  renders nothing — the window is re-stamped as held and reopens on the return (`heldDoomPending` already
+  exists), never the NEWS card with the faction's name. Pins: grant at home then cross; cross then grant with
+  `where` = home; doom opens then cross. The first thing to build.
 - **Slice 1 — `front.land`.** Every installer stamps the land the front is born in: the regional installer
   has `pending.region`; the initial / emergent / aftermath fronts take `regionForPrompt(hero)` at birth (an
   aftermath successor inherits its parent's); a load heal stamps legacy fronts from their theaters' regions
