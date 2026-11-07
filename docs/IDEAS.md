@@ -4341,3 +4341,28 @@ ruling greps the ruled shelves by name (`namesMatch`, `containment`, `resolveNpc
 feature first and lists every site, pin included, for the redesign instead of tuning any of them.
 Payoff: an engine card that keeps its type and its ending, a retraction that holds the second time, a
 callback block the Scribe cannot empty by echoing, and a redesign list that is complete before it starts.
+
+### [strengthening] A wire read by truthiness is a flag; a list without a cap is a quadratic bill; a closer that can open is not a closer; the loaded row is the third twin — status: `idea` (2026-11-07)
+Four rules from the response-parsing + chat-orchestration pass of 2026-11-07 (Lap 2, hostile input),
+each reproduced with a throwaway probe over the real registry, the real parser, the real reducer and the
+real window builder. **(1)** `level_up` learned `toFlag` on 09-19 because models write `"false"` for a
+"no" flag; `player_death` is still read by `!raw.player_death`, so `"false"`, `"none"`, `{}` and `[]`
+each end the campaign on a level-5 hero at full HP (the 09-02 ruling that a death needs no HP gate
+stands — a flag word is not a declaration). Every truthiness read of a DM value in the registry is a
+`toFlag` / `triFlag` / documented-shape read, and the irreversible channel gets the strictest one;
+`grep '!raw\.' eventChannels.js` is the audit. **(2)** `guardedList`'s default cap is `Infinity` and
+exactly two channels take it — `world_facts` and `requested_rolls` — whose consumers scale worst: the
+fact judge compares every new fact against every held one (1,000 facts → 942 ms in one dispatch, 5,000
+→ 25 s), and every roll's description rides the arbiter's payload before the proposal caps at 6. A
+registry entry states its `cap`; an unbounded one writes `cap: Infinity` with the reason beside it, so
+the review reads the bill. **(3)** The tagged fence's lazy closer (`/^[\s\S]*?```/`) accepts the next
+``` whatever follows it, so a later block's OPENER closes an unclosed earlier block and the later block
+becomes prose — raw JSON in the story with its events silently dropped. A delimiter grammar checks what
+a candidate closer opens before it accepts it. **(4)** A chat row has three shapes — the orchestrator's
+commit, the window's row, the loaded row — and they disagree exactly where a reader's predicate was
+never typed at load (`exchangeLine` read by truthiness; `MESSAGE_FLAGS` types three of four flags) or
+where the live writer lacks the load clamp (60,000 chars live, 20,000 in the window and after
+Continue). List every reader's predicate over a record, type each at the load boundary, and give the
+live writer the same clamp — the 10-23 "twin lane" rule with the save as the second lane. Payoff: a
+death the DM has to declare, a reducer no reply can hold for 25 seconds, a story no block leaks into,
+and a chat row that is the same row before and after Continue.
