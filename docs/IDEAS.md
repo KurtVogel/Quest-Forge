@@ -11,6 +11,56 @@ Companion file: [DECISIONS.md](DECISIONS.md) — settled design decisions. Check
 
 ## Campaign & Narrative (the money-maker)
 
+### [wow] Where things are: a front knows its LAND, and the DM is told which pressures lie a sea away — status: `idea` (2026-11-07, Vesa from the megacampaign: the starting town and its fronts travelled with him to another continent, and he had to remind the DM the town is nowhere near)
+Read end to end on 2026-11-07. Every far / near judgement in the engine keys on ONE thing: `record.region`
+on a LOCATION record, set only by the Scribe's `location_profile.region`. A front has no land of its own; its
+land is inferred from the regions of the records in `theaterFrontIds`. Five gaps follow, all engine, all zero-call:
+1. **The tempo stub lists every active front with its faction and no place.** `buildWorldTempoBlock`:
+   "Off-screen pressures exist: front-x (The Salt Brotherhood), …" rides every turn whatever land the hero
+   stands in — a standing invitation to field the home town's people on the far shore. The DM is never told
+   a pressure is rooted elsewhere; the only distance word in the whole prompt is the RETRIEVED MEMORIES
+   preamble's "recorded at a DIFFERENT place".
+2. **A front is only left behind when the web is full.** `sleepFrontLeftBehind` runs on slot pressure
+   (a regional seed or a deferred land finding `MAX_ACTIVE_FRONTS`), never on the crossing itself. Two
+   home fronts in a web of four stay `active` abroad: stubs, clock gains, permission cards.
+3. **A theater without a region is invisible to every far-check.** `listFrontsLeftBehind`,
+   `holdsGroundIn/Elsewhere` and `normalizeTempoDirective`'s gate read `record.region`; most records are
+   never tagged (a road, a cistern, every record from before the lands system, 2026-10-26), and the 10-28
+   heal tagged seven Eir-Vael places only. A front homed on untagged records is "everywhere": its doom is
+   not held (the "arrives as NEWS" card opens abroad), and a theaterless front gets a FULL-band window on
+   any continent ("stays permissive until one grows"). The same null fails `isFarAndForgotten` for NPCs
+   (`npcLand` null ⇒ never far) — a home friend seats in KNOWN NPCs a sea away.
+4. **The reflection cannot see distance.** `runNpcFrontReflection` ships `knownLocations` as name / type /
+   danger / `homeOfFronts` — no `region` — and no hero land, so its prompt rule "a pressure far from its
+   home territory reaches the hero only as news" has nothing to read; `where` lands on the home town and
+   the gate clamps to whispers one cadence late, or not at all (point 3).
+5. **Rows that name the home town carry no place:** ACTIVE QUESTS rows, DM REMINDERS threat facts (age
+   only, since 10-28), and world facts have no `location` field at all.
+The 10-28 ruling stands ("the land is the signal, not the clock"); this is the land made explicit.
+- **Slice 1 — `front.land`.** Every installer stamps the land the front is born in: the regional installer
+  has `pending.region`; the initial / emergent / aftermath fronts take `regionForPrompt(hero)` at birth (an
+  aftermath successor inherits its parent's); a load heal stamps legacy fronts from their theaters' regions
+  where any exist, else leaves null. Every far-check reads `front.land` vs the hero's `regionForPrompt` FIRST
+  and theaters second — the crossing no longer depends on a cistern being tagged. ~40 lines + pins.
+- **Slice 2 — the stub says where.** Two stub lines instead of one: "Pressures native to THIS land: …" and
+  "Pressures rooted ELSEWHERE — <land>, far from here: … They reach this scene only as news, letters,
+  travellers or the hero's return; never their people or places in person." The permission card for a far
+  front names the land in the same breath (its band is whispers already). Dormant fronts stay unlisted.
+- **Slice 3 — the reflection sees land.** `knownLocations` gains `region`; each front projection gains `land`;
+  the context gains `heroLand`. Zero new calls; the rule it already carries becomes checkable.
+- **Slice 4 — a one-line geography for the DM.** Under the place card: "Other lands the hero knows:
+  <Land> (home; <2–3 places>) — far from here." from `groupPlacesByRegion(listVisitedPlaces)`, ≤ 300 chars,
+  dynamic half only. The direct answer to Vesa's reminder; measure the Flash prefix cost before keeping it.
+- **Deferred, argued against for now:** sleeping every home front on the crossing. A dormant clock stops
+  (`applyFrontAdvanceBatch` skips non-active), and a held doom that ripened while the hero was away is the
+  living-world payoff worth keeping; slices 1–2 remove the harm without stopping the world. Revisit if the
+  web fills with far fronts faster than the slot rule frees them.
+- **Follow-up, separate:** land by inheritance for untagged records (an untagged record visited between two
+  records of the same land, by journal trail order, lies in that land; the crossing's ship and sea stay
+  untagged) — fixes NPC far-ness and legacy theaters at the root; pairs with the open "A ship is a moving
+  place" idea. Proof: `QF_LANDS_START=port` crossing on Flash, then a 20-turn stay abroad counting home-town
+  names in the DM's prose (the megacampaign's own measure).
+
 ### [wow] Quests: a sworn record, and the close as a ceremony — status: `built` (both slices 2026-11-04, the same day — DECISIONS.md 2026-11-04 points 2–3; live proof pending) (wow audit 2026-11-04, W1 ×2; `docs/SCHEDULED_WOW.md` 2026-11-04)
 The quest ENGINE is genre-best at identity and payment (the name over the DM's id, the fuzzy
 near-equality, a finished quest never changes its ending, engine XP chosen on live evidence —
