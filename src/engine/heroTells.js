@@ -22,7 +22,7 @@
  *
  * Lives in engine/ (not llm/) so reducer handlers never import from llm/.
  */
-import { containment, tokenSet } from './textMatch.js';
+import { containment, heroNameForms, tokenSet } from './textMatch.js';
 import { toFlag } from './text.js';
 import { clampMessageStamp, conversationalAgeSince, conversationalGap } from './replayLedger.js';
 import { BOND_SCENE_WINDOW_MESSAGES, namesMatch } from './npcRoster.js';
@@ -385,9 +385,8 @@ export function recordHeroTells(existing = [], reports = [], { messageCount, mes
  */
 export function prepareHeroTellReports(reports = [], { partyNames = [], heroName = '' } = {}) {
     const party = normalizeWitnesses(partyNames);
-    const hero = text(heroName, HERO_TELL_NAME_MAX);
-    const notHero = (names) => normalizeWitnesses(names)
-        .filter(name => !hero || !(name.toLowerCase() === hero.toLowerCase() || namesMatch(name, hero)));
+    const heroForms = heroNameForms(heroName);
+    const notHero = (names) => normalizeWitnesses(names).filter(name => !heroForms.has(name.toLowerCase()));
     const out = [];
     for (const report of (Array.isArray(reports) ? reports : [])) {
         if (!report || typeof report !== 'object' || Array.isArray(report)) continue;

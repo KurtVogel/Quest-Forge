@@ -3,6 +3,7 @@
  * canonical location registry writes.
  */
 import { buildStoryMemoryPromotion, gradeBondMoments, namesMatch, normalizeNpcRecord, resolveNpcRef, selectKeyBondMoments } from '../../engine/npcRoster.js';
+import { heroNameForms } from '../../engine/textMatch.js';
 import { TURN_BEAT_TIMING_DIE_SIDES, beatTargets, deriveRelationshipStage, detectBondTurn, isRelationshipBeatExpired, mintTurnBeat, sanitizeRelationshipBeat } from '../../engine/relationshipArc.js';
 import { rollDie } from '../../engine/dice.ts';
 
@@ -103,14 +104,15 @@ function findTouchedNpc(after = [], payload = {}, context = {}) {
 /** The presence text a lane threaded on the action's meta (the turn's own texts), or ''. */
 const presenceTextOf = (action) => (typeof action?.meta?.presenceText === 'string' ? action.meta.presenceText : '');
 
-/** The payload names the HERO: an exact (case-folded) match or the roster's own short / long form fold. */
-const isHeroName = (heroName, name) => {
-    if (typeof heroName !== 'string' || typeof name !== 'string') return false;
-    const hero = heroName.trim();
-    const candidate = name.trim();
-    if (!hero || !candidate) return false;
-    return hero.toLowerCase() === candidate.toLowerCase() || namesMatch(candidate, hero);
-};
+/**
+ * The payload names the HERO: an exact form of the hero's name (2026-11-07,
+ * the closed list). "Lord Vane" beside a hero "Astra Vane", and "Astra Reed"
+ * beside a hero "Astra", are other people and keep their records.
+ */
+const isHeroName = (heroName, name) => (
+    typeof heroName === 'string' && typeof name === 'string'
+    && heroNameForms(heroName).has(name.trim().toLowerCase())
+);
 
 /** May the regional seed buy a DM call: the installer tops the web to MAX_ACTIVE_FRONTS - 1, never the cap. */
 function regionalSeedHasRoom(fronts) {

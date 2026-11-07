@@ -140,16 +140,20 @@ describe('REMOVE_COMPANION reference resolution (2026-08-25 player report)', () 
         expect(next.party.map(c => c.name)).toEqual(['Garrick Stonehand']);
     });
 
-    it('removes on the short name the DM uses in prose', () => {
+    it('a short name removes nobody and tells the DM to send the id (2026-11-07)', () => {
         const next = gameReducer(makeState({ party: party() }), {
             type: 'REMOVE_COMPANION',
             payload: { name: 'Garrick' },
         });
 
-        expect(next.party.map(c => c.name)).toEqual(['Kaarina']);
+        expect(next.party).toHaveLength(2);
+        expect(next.messages).toHaveLength(1);
+        expect(next.messages[0]).toMatchObject({ role: 'system', dmVisible: true });
+        expect(next.messages[0].content).toContain('"Garrick"');
+        expect(next.messages[0].content).toContain('Send the id');
     });
 
-    it('removes nobody when a fuzzy name is ambiguous', () => {
+    it('a name two companions share in part removes neither', () => {
         const state = makeState({
             party: [
                 { id: 'c1', name: 'Garrick Stonehand', level: 1, hp: 9, maxHp: 9, ac: 12 },
@@ -159,14 +163,14 @@ describe('REMOVE_COMPANION reference resolution (2026-08-25 player report)', () 
         const next = gameReducer(state, { type: 'REMOVE_COMPANION', payload: { name: 'Garrick' } });
 
         expect(next.party).toHaveLength(2);
-        expect(next.messages).toHaveLength(0);
     });
 
-    it('is a silent no-op when nothing matches', () => {
+    it('a name nobody carries changes nothing but says so', () => {
         const state = makeState({ party: party() });
         const next = gameReducer(state, { type: 'REMOVE_COMPANION', payload: { name: 'Someone Else' } });
 
-        expect(next).toBe(state);
+        expect(next.party).toEqual(state.party);
+        expect(next.messages).toHaveLength(1);
     });
 
     it('keeps the departed companion roster record so the bond survives', () => {

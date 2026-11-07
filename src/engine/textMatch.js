@@ -98,6 +98,21 @@ export function identifyingNameTokens(name) {
 }
 
 /**
+ * The forms of the hero's name a lane may use, as a closed list (2026-11-07,
+ * identity by reference, lane 4): the full name, and each of its own words but
+ * particles and titles. The hero's name is typed by the player, not written by
+ * an LLM, so the list is fixed before any lane speaks and a ref is compared
+ * against it exactly. "Astra" and "Vane" are forms of "Astra Vane"; "Lord Vane"
+ * and "Astra Reed" are not.
+ */
+export function heroNameForms(name) {
+    const full = typeof name === 'string' ? name.trim().toLowerCase() : '';
+    if (!full) return new Set();
+    const parts = full.split(/[\s,]+/).filter(part => part.length >= 2 && !NAME_TOKEN_STOP_WORDS.has(part));
+    return new Set([full, ...parts]);
+}
+
+/**
  * THE name-presence tokenizer (2026-08-30 audit): lowercase words on Unicode
  * boundaries, so "Ash" is present in "Ash swore it" but never in "ashes" or
  * "Ashford" — the old raw-substring check quietly re-admitted exactly the

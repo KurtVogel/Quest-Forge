@@ -131,7 +131,7 @@ describe('the parse anchors cover the schema (scribe P2, 2026-10-10)', () => {
     });
 });
 
-describe('the gear-handoff audit resolves a companion through namesMatch (scribe P2, 2026-10-10)', () => {
+describe('the gear-handoff audit reads a companion\'s exact name (2026-11-07, revises scribe P2 2026-10-10)', () => {
     beforeEach(() => sendMessage.mockReset());
 
     const party = [
@@ -162,9 +162,9 @@ describe('the gear-handoff audit resolves a companion through namesMatch (scribe
         expect(await routed([{ companion: 'Old Hesk', item: 'Boarding Axe', kind: 'weapon' }])).toEqual(['hesk']);
     });
 
-    it('a surname alone and a title-stripped name both find their companion', async () => {
-        expect(await routed([{ companion: 'Tammi', item: 'Boarding Axe', kind: 'weapon' }])).toEqual(['tammi']);
-        expect(await routed([{ companion: 'Odo', item: 'Boarding Axe', kind: 'weapon' }])).toEqual(['odo']);
+    it('a short form routes nothing: the gear stays with the hero', async () => {
+        expect(await routed([{ companion: 'Tammi', item: 'Boarding Axe', kind: 'weapon' }])).toEqual([]);
+        expect(await routed([{ companion: 'Odo', item: 'Boarding Axe', kind: 'weapon' }])).toEqual([]);
     });
 
     it('a name nobody carries routes nothing', async () => {

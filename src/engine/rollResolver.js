@@ -63,17 +63,21 @@ export function resolveRolls(requestedRolls, { character, inventory, party, disp
         }
         return null;
     };
-    // An NPC attack's target: the hero (no target, or any hero alias / the
-    // hero's name — isHeroRef, the exchange's predicate), a companion, or an
+    // An NPC attack's target: an exact companion first (2026-11-07: "Mika"
+    // beside a hero "Mika Stone" is the companion, and this lane alone used to
+    // test the hero first and land the hit on the hero — the exchange and the
+    // cast lane already read it this way), then the hero (no target, or any
+    // hero alias / name form — isHeroRef, the exchange's predicate), or an
     // UNTRACKED third party (2026-11-04 roll-resolution P1: "the merchant"
     // used to resolve as null = the hero, priced against the hero's AC with
     // the damage landing on the hero's HP).
     const npcAttackTarget = (roll) => {
         if (roll.type !== 'npc_attack') return { kind: 'hero' };
         const ref = typeof roll.target === 'string' ? roll.target.trim() : '';
-        if (!ref || isHeroRef(ref, character)) return { kind: 'hero' };
+        if (!ref) return { kind: 'hero' };
         const companion = findCompanion(ref);
         if (companion) return { kind: 'companion', companion };
+        if (isHeroRef(ref, character)) return { kind: 'hero' };
         return { kind: 'untracked', name: ref.slice(0, 60) };
     };
 

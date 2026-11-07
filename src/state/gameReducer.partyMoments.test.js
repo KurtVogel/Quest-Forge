@@ -54,7 +54,7 @@ describe('REMOVE_COMPANION mints a farewell moment and the leave stamp; the reco
     it('leaving appends a `farewell` key moment and stamps leftPartyMessage', () => {
         const joined = gameReducer(stateWith(), { type: 'ADD_COMPANION', payload: osma });
         const later = { ...joined, messages: [...joined.messages, ...Array.from({ length: 20 }, (_, i) => ({ id: `n${i}`, role: i % 2 ? 'assistant' : 'user', content: `later ${i}` }))] };
-        const after = gameReducer(later, { type: 'REMOVE_COMPANION', payload: { name: 'Osma' } });
+        const after = gameReducer(later, { type: 'REMOVE_COMPANION', payload: { name: 'Osma Varrow' } });
         expect(after.party).toEqual([]);
         const rec = record('Osma Varrow')(after);
         expect(rec.bondMoments.map(m => m.kind)).toEqual(['meeting', 'farewell']);

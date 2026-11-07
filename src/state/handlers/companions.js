@@ -3,7 +3,7 @@
  * announcements, and the engine-owned gear handoff.
  */
 import { deriveGiftAC } from '../../engine/companionGear.js';
-import { appendBondMoments, findCompanionRecord, namesMatch, normalizeNpcRecord } from '../../engine/npcRoster.js';
+import { appendBondMoments, findCompanionRecord, normalizeNpcRecord } from '../../engine/npcRoster.js';
 import { ensureCompanionRosterRecord, normalizeCompanion, systemMessage, withInventoryAndAC } from './shared.js';
 import { ledgerContext, logMovement } from './ledger.js';
 import { isShieldItem, isWeaponItem } from '../../engine/equipment.js';
@@ -109,16 +109,18 @@ export const handlers = {
         if (!target && rawName) {
             target = party.find(c => String(c.name || '').trim().toLowerCase() === rawName.toLowerCase());
         }
-        if (!target && rawName) {
-            // Fuzzy only when it names exactly ONE companion — "Garrick" for
-            // "Garrick Stonehand" is unambiguous; an ambiguous hit removes nobody
-            // rather than guessing which ally the fiction sent away.
-            const matches = party.filter(c => namesMatch(c.name, rawName));
-            if (matches.length === 1) [target] = matches;
-        }
         if (!target) {
-            console.warn(`[REMOVE_COMPANION] No party member matches "${rawName || rawId}" — nobody left the party.`);
-            return state;
+            // An id or an exact name, nothing else (2026-11-07, identity by
+            // reference): the party block prints every companion's id. A miss
+            // removes nobody and says so where the DM reads it, so the next
+            // reply can send the id; a guess could send away the wrong ally.
+            return {
+                ...state,
+                messages: [...state.messages, systemMessage(
+                    `⚖ "${(rawName || rawId).slice(0, 80)}" is not a name or id in the party — nobody left. Send the id printed beside the companion who left.`,
+                    { dmVisible: true },
+                )],
+            };
         }
 
         return {

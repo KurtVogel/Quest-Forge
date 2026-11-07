@@ -1176,8 +1176,8 @@ describe('Scribe gear-handoff audit', () => {
     it('routes a narrated weapon handoff through GIVE_GEAR_TO_COMPANION and keepsakes through UPDATE_COMPANION', async () => {
         sendMessage.mockResolvedValue(emptyExtraction({
             missing_gear_handoffs: [
-                { companion: 'Kaarina', item: 'Longsword +1', kind: 'weapon' },
-                { companion: 'Kaarina', item: 'carved bone whistle', kind: 'keepsake' },
+                { companion: 'Kaarina Tammi', item: 'Longsword +1', kind: 'weapon' },
+                { companion: 'Kaarina Tammi', item: 'carved bone whistle', kind: 'keepsake' },
             ],
         }));
 
@@ -1204,8 +1204,8 @@ describe('Scribe gear-handoff audit', () => {
     it('falls back to a stats-only weapon update when the narrated item is not in inventory, and skips untracked armor', async () => {
         sendMessage.mockResolvedValue(emptyExtraction({
             missing_gear_handoffs: [
-                { companion: 'Kaarina', item: 'Boarding Axe', kind: 'weapon' },
-                { companion: 'Kaarina', item: 'salvaged breastplate', kind: 'armor' },
+                { companion: 'Kaarina Tammi', item: 'Boarding Axe', kind: 'weapon' },
+                { companion: 'Kaarina Tammi', item: 'salvaged breastplate', kind: 'armor' },
             ],
         }));
 
@@ -1229,7 +1229,7 @@ describe('Scribe gear-handoff audit', () => {
 
     it('is idempotent per narration: an already-claimed gear sourceId applies nothing', async () => {
         sendMessage.mockResolvedValue(emptyExtraction({
-            missing_gear_handoffs: [{ companion: 'Kaarina', item: 'Longsword +1', kind: 'weapon' }],
+            missing_gear_handoffs: [{ companion: 'Kaarina Tammi', item: 'Longsword +1', kind: 'weapon' }],
         }));
 
         const dispatch = vi.fn();
@@ -1776,7 +1776,7 @@ describe('gear-handoff audit identity (2026-09-01 scribe P2)', () => {
     });
 
     it('matches a narrated "longsword" to the owned "Longsword +1" and hands THAT off — never a stats-only copy', async () => {
-        sendMessage.mockResolvedValue(extraction([{ companion: 'Kaarina', item: 'longsword', kind: 'weapon' }]));
+        sendMessage.mockResolvedValue(extraction([{ companion: 'Kaarina Tammi', item: 'longsword', kind: 'weapon' }]));
         const dispatch = vi.fn();
         await runScribe({
             playerMessage: 'Take my longsword.',
@@ -1790,8 +1790,8 @@ describe('gear-handoff audit identity (2026-09-01 scribe P2)', () => {
 
     it('dedupes two narrated names that resolve to one owned item, and skips an ambiguous fuzzy match', async () => {
         sendMessage.mockResolvedValue(extraction([
-            { companion: 'Kaarina', item: 'longsword', kind: 'weapon' },
-            { companion: 'Kaarina', item: 'Longsword +1', kind: 'weapon' },
+            { companion: 'Kaarina Tammi', item: 'longsword', kind: 'weapon' },
+            { companion: 'Kaarina Tammi', item: 'Longsword +1', kind: 'weapon' },
         ]));
         const dispatch = vi.fn();
         await runScribe({
@@ -1802,7 +1802,7 @@ describe('gear-handoff audit identity (2026-09-01 scribe P2)', () => {
         });
         expect(dispatch.mock.calls.filter(([a]) => a.type === 'GIVE_GEAR_TO_COMPANION')).toHaveLength(1);
 
-        sendMessage.mockResolvedValue(extraction([{ companion: 'Kaarina', item: 'longsword', kind: 'weapon' }]));
+        sendMessage.mockResolvedValue(extraction([{ companion: 'Kaarina Tammi', item: 'longsword', kind: 'weapon' }]));
         const ambiguous = vi.fn();
         await runScribe({
             playerMessage: 'Take a longsword.',

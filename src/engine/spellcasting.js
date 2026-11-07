@@ -8,7 +8,7 @@
 import { CLASSES } from '../data/classes.js';
 import { findSpell, SPELL_LIST } from '../data/spells.js';
 import { getModifier, getProficiencyBonus } from './rules.js';
-import { namesMatch } from './npcRoster.js';
+import { heroNameForms } from './textMatch.js';
 
 export const MAX_SPELL_LEVEL = 5;
 
@@ -56,8 +56,9 @@ const SELF_ALIASES = new Set(['', 'self', 'me', 'player', 'the player', 'hero', 
 /**
  * THE "this ref means the hero" predicate (2026-10-30 strengthening P1).
  * Empty / self / me / player / the player / hero / the hero (case-folded,
- * trimmed) and the hero's own name (exact, or `namesMatch` — "Astra" for
- * "Astra Vane"). The cast lane's recipient ladder and the exchange's enemy
+ * trimmed) and the forms of the hero's own name (`heroNameForms`, a closed
+ * list compared exactly, 2026-11-07 — "Astra" and "Vane" for "Astra Vane",
+ * never "Lord Vane"). The cast lane's recipient ladder and the exchange's enemy
  * lane read it alike: a foe aiming at the hero BY NAME used to look the name
  * up among the companions, find nobody, and drop its attack as an
  * "unavailable target" — every blow the DM wrote as "attacks Astra" was
@@ -68,9 +69,7 @@ export function isHeroRef(ref, character) {
     if (typeof ref !== 'string') return false;
     const lc = ref.trim().toLowerCase();
     if (SELF_ALIASES.has(lc)) return true;
-    const heroName = typeof character?.name === 'string' ? character.name.trim() : '';
-    if (!heroName || !lc) return false;
-    return lc === heroName.toLowerCase() || namesMatch(ref.trim(), heroName);
+    return !!lc && heroNameForms(character?.name).has(lc);
 }
 
 /**

@@ -127,3 +127,32 @@ describe('other actors\' dice never enter the roll ledger (2026-11-05)', () => {
         expect(dispatch.mock.calls.map(([a]) => a.type)).not.toContain('ADD_ROLL');
     });
 });
+
+describe('an npc_attack tests the companion before the hero (2026-11-07, identity by reference)', () => {
+    const mikaStone = { ...hero, name: 'Mika Stone' };
+    const mika = { id: 'c-mika', name: 'Mika', hp: 18, maxHp: 18, ac: 12, attackBonus: 4, status: 'healthy' };
+    const swing = (target, party) => {
+        rollQueue.push(18, 4);
+        const dispatch = vi.fn();
+        resolveRolls([{ type: 'npc_attack', attacker: 'Raider', target, modifier: 2, damage: '1d6' }], { character: mikaStone, inventory: [], party, dispatch });
+        return dispatch.mock.calls.map(([action]) => action);
+    };
+    const hitHero = actions => actions.some(action => action.type === 'TAKE_DAMAGE');
+    const hitCompanion = actions => actions.some(action => action.type === 'UPDATE_COMPANION' && action.payload.id === 'c-mika');
+
+    it('a hit aimed at "Mika" beside a hero "Mika Stone" lands on the companion', () => {
+        const actions = swing('Mika', [mika]);
+        expect(hitCompanion(actions)).toBe(true);
+        expect(hitHero(actions)).toBe(false);
+    });
+
+    it('with no such companion the short name is the hero', () => {
+        expect(hitHero(swing('Mika', []))).toBe(true);
+    });
+
+    it('the self words stay the hero with the companion beside her', () => {
+        const actions = swing('the hero', [mika]);
+        expect(hitHero(actions)).toBe(true);
+        expect(hitCompanion(actions)).toBe(false);
+    });
+});

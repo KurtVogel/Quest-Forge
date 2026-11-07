@@ -10,7 +10,6 @@ import { cleanParty, lastLongRestAt, movedItems, normalizeLedger, resolvePartyId
 import { formatCurrency } from '../engine/currency.js';
 import { itemIdentityMatches } from '../engine/textMatch.js';
 import { isSpellcaster, resolveSpellForCharacter } from '../engine/spellcasting.js';
-import { namesMatch } from '../engine/npcRoster.js';
 import { MAX_ITEM_QUANTITY, normalizeItem } from '../data/items.js';
 import { MAX_COIN_EVENT } from '../config/contentLimits.js';
 
@@ -56,7 +55,7 @@ Payment rules:
 - When in doubt, omit. Omit "narrated_loot" and "narrated_payment" entirely when this narrative moves no coins or items.
 
 Also report gear the narrative shows the hero handing to a COMPANION that the companion accepts and takes up, when the engine applied no matching companion update, as another top-level field:
-"missing_gear_handoffs": [{ "companion": "exact companion name", "item": "exact item name", "kind": "weapon" }]
+"missing_gear_handoffs": [{ "companion": "the companion's full name, copied exactly from PARTY COMPANIONS' CURRENT GEAR", "item": "exact item name", "kind": "weapon" }]
 
 Gear handoff rules:
 - Report ONLY handoffs the DM narrative completes: the companion accepts and takes up the item (straps it on, sheathes it, dons it, tucks it away). Offers, refusals, loans for a single moment, and mere suggestions are never handoffs.
@@ -190,11 +189,10 @@ function claimAuditSource(lootAudit, dispatch, suffix, label) {
 const GEAR_HANDOFF_KINDS = new Set(['weapon', 'armor', 'shield', 'keepsake']);
 
 /**
- * The companion a narrated handoff names — REMOVE_COMPANION's own ladder
- * (2026-10-10 scribe P2): an exact name first, then the roster's `namesMatch`
- * when it is UNAMBIGUOUS. The old first-token twin matched "Old Marn" to
- * "Old Hesk" (a handoff narrated to Hesk armed Marn) and missed "Brother Odo"
- * ↔ "Odo"; a bare "Old" now routes nothing instead of the first greybeard.
+ * The companion a narrated handoff names: the exact name, copied from PARTY
+ * COMPANIONS' CURRENT GEAR, on exactly one companion (2026-11-07, identity by
+ * reference). A short form routes nothing: the gear stays with the hero and
+ * the fiction can hand it over again, where a guess armed the wrong ally.
  */
 function findCompanionByName(party, reported) {
     const wanted = String(reported || '').trim().toLowerCase();
@@ -202,8 +200,8 @@ function findCompanionByName(party, reported) {
     const named = (Array.isArray(party) ? party : []).filter(c => typeof c?.name === 'string' && c.name.trim());
     const exact = named.filter(c => c.name.trim().toLowerCase() === wanted);
     if (exact.length === 1) return exact[0];
-    const fuzzy = named.filter(c => namesMatch(c.name, reported));
-    return fuzzy.length === 1 ? fuzzy[0] : null;
+    console.warn(`[Scribe] Narrated handoff names "${reported}", not a companion's exact name; skipping.`);
+    return null;
 }
 
 /** Sentinel: a narrated name matched several owned stacks — never guess. */

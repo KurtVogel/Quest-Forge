@@ -1,6 +1,6 @@
 # Identity by reference: inventory and proposed order
 
-**Status: order approved by Vesa 2026-11-07. Lane 1 is built and deployed; lane 4 is next. Decisions 2 to 5 at the end come due at lanes 5 and 6.** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
+**Status: order approved by Vesa 2026-11-07. Lanes 1 and 4 are built and deployed; lane 5 is next. Decisions 2 to 5 at the end come due at lanes 5 and 6.** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
 2026-11-07 for the live proof. Line numbers hold at `667295b`, which changed no app code. Rule behind it: DECISIONS.md 2026-11-05 (first entry), with 2026-11-03 evening
 (`recorded_as`), 2026-11-02 (the repeat judge) and 2026-11-06 night (the id decides) as the lanes already moved.
 
@@ -108,7 +108,9 @@ showing how often the Scribe omits the id.
 **The risk:** the DM re-announces a quest in new words and two active rows appear. The live proof makes this
 safe to try where the DM sends a move at all: 6 of 6 ids echoed. It didn't measure a re-announced `new`.
 
-## Lane 4. Party and hero references
+## Lane 4. Party and hero references (done 2026-11-07)
+
+**Built as below, with two differences:** `isHeroName` and `notHero` read the same closed list as `isHeroRef`, not the full name only, because a Scribe "Astra" must not mint an NPC for the hero; a bare "Vane" is therefore still refused. The hero's name is `heroNameForms`, without particles or titles. Not played on a real provider. The table below is the design as proposed.
 
 The party block prints companion ids, and the hero is one record, so this lane is nearly exact already.
 
@@ -283,7 +285,7 @@ Ordered by: the id is already shown to the LLM, a defect closes, nothing else de
 |---|---|---|---|---|
 | ~~0~~ | ~~Live proof of `16f6d9f`~~ | **Done 2026-11-07** for quests, 6 of 6. Tells and cards still unmeasured | | |
 | ~~1~~ | ~~Combat filter~~ | **Done 2026-11-07** | the rule's named example | |
-| 4 | Party and hero | Ids already shown; two real bugs | | Small |
+| ~~4~~ | ~~Party and hero~~ | **Done 2026-11-07**, two bugs closed | | |
 | 5 | Items and ledger | Names shown since 11-03 | the last deferred item | Medium |
 | 3 | Quests, no-id leftovers | Cleared by the proof | 1 queue item | Small |
 | 2 | Tells, no-id leftover | After a playtest counts Scribe ids | | Small |
