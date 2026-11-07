@@ -155,14 +155,21 @@ export function findExactSourceReplay(entries, prefix) {
 }
 
 /** A different emission with the same key landing within `window`
- * conversational messages is the DM echoing an already-applied event. */
-export function findNearbyReplay(entries, { key, messages, currentIndex, window }) {
-    return (Array.isArray(entries) ? entries : []).some(entry => {
+ * conversational messages is the DM echoing an already-applied event — the
+ * entry itself ({ sourceId, key, messageIndex }), so the repeat judge can be
+ * shown the turn it came from (lane 11, 2026-11-08), or null. */
+export function findNearbyReplayEntry(entries, { key, messages, currentIndex, window }) {
+    for (const entry of (Array.isArray(entries) ? entries : [])) {
         const parsed = parseLedgerEntry(entry);
-        if (!parsed || parsed.key !== key || parsed.messageIndex === null) return false;
+        if (!parsed || parsed.key !== key || parsed.messageIndex === null) continue;
         const distance = conversationalDistance(messages, parsed.messageIndex, currentIndex);
-        return distance >= 0 && distance <= window;
-    });
+        if (distance >= 0 && distance <= window) return parsed;
+    }
+    return null;
+}
+
+export function findNearbyReplay(entries, options) {
+    return findNearbyReplayEntry(entries, options) !== null;
 }
 
 /** Record (or re-stamp at a new index) a ledger entry; drops non-string

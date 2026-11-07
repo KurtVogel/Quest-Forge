@@ -18,13 +18,13 @@ import {
     isLowLevelSolo,
     isStaleCampaignAction,
     rememberTransaction,
-    repeatIntentNearNoun,
     reviveCharacter,
     systemMessage,
     withCondition,
     withInventoryAndAC,
 } from './shared.js';
 import { gameReducer } from '../gameReducer.js';
+import { repeatCard, repeatContext } from './ledger.js';
 
 /**
  * The last chapter (2026-09-30): a death that ends OUTSIDE a fight (the
@@ -56,7 +56,6 @@ function recordDeathOutsideCombat(state, cause) {
 const RECENT_EXP_AWARD_MESSAGE_WINDOW = 12;
 // Bare alternation for the repeat-intent proximity test ("another 100 xp",
 // "give me the experience again").
-const EXP_NOUN_SRC = /(?:xp|exp|experience)/;
 
 function buildExpAwardTransaction(amount) {
     return {
@@ -68,19 +67,16 @@ function buildExpAwardTransaction(amount) {
     };
 }
 
-function playerMessageSupportsRepeatExpAward(playerMessage) {
-    const text = String(playerMessage || '');
-    if (!text.trim()) return false;
-    return repeatIntentNearNoun(text, EXP_NOUN_SRC);
-}
-
 /**
  * One ledger dance for both DM XP lanes — ADD_EXP and LEVEL_UP's riding
  * bonusExp used to hand-copy it (2026-08-30 audit): probe for a
- * value-signature duplicate inside the window, honor the exact-source replay
- * and the player's repeat-intent escape hatch, and record the outcome. Returns
- * the updated ledger plus whether the award was suppressed — each caller owns
- * its own player-facing suppression line.
+ * value-signature duplicate inside the window and record the outcome. The
+ * player's repeat-intent escape hatch ("another 150 xp") is gone (identity by
+ * reference, lane 11, 2026-11-08): a twin from an earlier message is the
+ * repeat judge's question, asked on a card by ADD_EXP; a decided lane (the
+ * judge's "new", the player's "Record it again") is never suppressed. Returns
+ * the updated ledger, whether the award was suppressed, the twin and whether
+ * it was this very emission re-parsed — each caller owns its own line.
  */
 function guardExpAwardLedger(recentExpAwards, amount, meta, messageIndex, messages) {
     const transaction = buildExpAwardTransaction(amount);
@@ -89,12 +85,15 @@ function guardExpAwardLedger(recentExpAwards, amount, meta, messageIndex, messag
         recentExpAwards, transaction, sourceId, messageIndex, RECENT_EXP_AWARD_MESSAGE_WINDOW, messages
     );
     const exactSourceReplay = !!sourceId && duplicate?.sourceId === sourceId;
-    const suppressed = !!duplicate && (exactSourceReplay || !playerMessageSupportsRepeatExpAward(meta.playerMessage));
+    const decided = meta.lane === 'judge' || meta.lane === 'player';
+    const suppressed = !!duplicate && !decided;
     return {
         recentExpAwards: rememberTransaction(
             recentExpAwards, transaction, sourceId, messageIndex, suppressed ? 'ignored' : 'applied'
         ),
         suppressed,
+        duplicate,
+        exactSourceReplay,
     };
 }
 
@@ -408,13 +407,23 @@ export const handlers = {
             const guarded = guardExpAwardLedger(recentExpAwards, requested, meta, currentMessageIndex(state), state.messages);
             recentExpAwards = guarded.recentExpAwards;
             if (guarded.suppressed) {
+                // The exact re-parse of one narration is certain and stays a
+                // note; a twin from an EARLIER message is the repeat judge's
+                // question (lane 11, 2026-11-08), asked on a dmVisible card:
+                // "new" books exactly this award on the judge lane.
+                const line = `Duplicate XP award ignored — **+${amount} XP** matches an award just granted.`;
+                const card = guarded.exactSourceReplay
+                    ? null
+                    : repeatCard(state, repeatContext(meta), guarded.duplicate, line,
+                        { type: 'ADD_EXP', payload: { amount: requested } },
+                        { earlier: `the hero was awarded ${guarded.duplicate.priceCp} XP` });
                 return {
                     ...state,
                     recentExpAwards,
                     messages: [
                         ...state.messages,
                         // dmVisible: the DM must learn its re-emission was suppressed.
-                        systemMessage(`Duplicate XP award ignored — **+${amount} XP** matches an award just granted. If a second identical award is genuinely owed, ask the DM for it again.`, { dmVisible: true }),
+                        card || systemMessage(`${line} If a second identical award is genuinely owed, ask the DM for it again.`, { dmVisible: true }),
                     ],
                 };
             }

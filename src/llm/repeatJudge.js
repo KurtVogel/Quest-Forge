@@ -14,17 +14,18 @@ import { sendMessage as adapterSend } from './adapter.js';
 import { getBackgroundConfig, getMachineryGeminiKey } from './machinery.js';
 import { parseJsonObjectLoose } from './utils/jsonExtractor.js';
 import { baseOf } from '../engine/transactionLedger.js';
+import { castTargets } from '../state/handlers/ledger.js';
 import { formatCurrency } from '../engine/currency.js';
 import { campaignStamp } from '../state/handlers/shared.js';
 
 const TURN_CHARS = 1600;
 const VERDICTS = new Set(['new', 'same', 'unsure']);
 
-export const REPEAT_JUDGE_SYSTEM_PROMPT = `You are the bookkeeper of a single-player tabletop RPG. The game engine keeps the hero's purse and pack. An EARLIER turn already recorded a movement of coin or goods. In the CURRENT turn the Dungeon Master's structured data asked to record the SAME movement again (same amount, or the same item, in the same direction). That happens two ways:
-- a NEW, second movement really happened this turn: a second crate carried and paid, another pelt sold, another round bought, another bet won or lost, another torch burned;
-- the SAME earlier movement retold: recapped, remembered, counted again, described from another angle, or re-emitted by mistake.
+export const REPEAT_JUDGE_SYSTEM_PROMPT = `You are the bookkeeper of a single-player tabletop RPG. The game engine keeps the hero's purse, pack, experience, spell slots and rests. An EARLIER turn already recorded an event: a movement of coin or goods, an award of experience points, a spell cast, or a rest. In the CURRENT turn the Dungeon Master's structured data asked to record the SAME event again (the same amount, the same item in the same direction, the same spell on the same people, or a rest of the same kind). That happens two ways:
+- a NEW, second event really happened this turn: a second crate carried and paid, another pelt sold, another round bought, another bet won or lost, another torch burned, the same healing spell cast a second time on the same ally, a second night's rest after another day, a second deed rewarded;
+- the SAME earlier event retold: recapped, remembered, counted again, described from another angle, or re-emitted by mistake.
 
-Decide which, from what the player said and what the DM narrated in each turn. Read meaning, not keywords: players and DMs phrase things every way, make typos, and leave words out. Quoted offers and haggling are not hand-overs. A hand-over the current narration shows happening NOW, after the earlier one, is "new". A turn that only refers back to it, or never shows it happening again, is "same". If you cannot tell, say "unsure". Answer unvarnished.
+Decide which, from what the player said and what the DM narrated in each turn. Read meaning, not keywords: players and DMs phrase things every way, make typos, and leave words out. Quoted offers and haggling are not hand-overs. An event the current narration shows happening NOW, after the earlier one, is "new". A turn that only refers back to it, or never shows it happening again, is "same". If you cannot tell, say "unsure". Answer unvarnished.
 
 Output ONLY JSON, no markdown:
 {"verdict": "new" | "same" | "unsure", "reason": "at most 12 words"}
@@ -44,6 +45,10 @@ export function describeReplay(replay, party = '') {
         case 'SELL_ITEM': return `the hero sells ${items} for ${coin}${who}`;
         case 'ADD_ITEM': return `${items} enters the hero's pack${who}`;
         case 'REMOVE_ITEM_BY_NAME': return `${items} leaves the hero's pack${who}`;
+        // The three lanes lane 11 (2026-11-08) brought to the judge.
+        case 'ADD_EXP': return `the hero is awarded ${Number(p.amount) || 0} XP`;
+        case 'CAST_SPELL': return `the hero casts ${p.spell || 'a spell'}${castTargets(p)}`;
+        case 'TAKE_REST': return `the hero takes a ${p.rest ? `${p.rest} ` : ''}rest`;
         default: return 'a movement of coin or goods';
     }
 }

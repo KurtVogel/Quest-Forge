@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
+import { judgeLatest } from './repeatJudge.testUtils.js';
 import { buildSpellSlots } from '../engine/spellcasting.js';
 import { findSpell } from '../data/spells.js';
 import { normalizeEvents } from '../llm/responseParser.js';
@@ -90,16 +91,23 @@ describe('CAST_SPELL (out of combat)', () => {
             payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage: 'How do my wounds feel now?' } },
         });
         expectSuppressed(replayed, withChatter);
+        // The suppression is a "Recorded once" card the repeat judge reads
+        // (lane 11, 2026-11-08): "new" casts it on the judge lane, a slot spent.
+        expect(replayed.messages.at(-1)).toMatchObject({ kind: 'recovery', recovery: { status: 'judging', replay: { type: 'CAST_SPELL', payload: { spell: 'cure wounds' } } } });
+        const cast = judgeLatest(replayed, 'new');
+        expect(cast.character.spellSlots[1].used).toBe(2);
+        expect(cast.messages.find(m => m.kind === 'recovery').recovery).toMatchObject({ status: 'booked', undo: [] });
+        expect(judgeLatest(replayed, 'same').character.spellSlots[1].used).toBe(1);
 
-        // But the player explicitly casting again by name is honored.
+        // The player casting again by name is the judge's to read too — the
+        // words themselves spend nothing (was: honored by the phrase rule).
         const recast = gameReducer(withChatter, {
             type: 'CAST_SPELL',
             payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage: 'I cast Cure Wounds again' } },
         });
-        expect(recast.character.spellSlots[1].used).toBe(2);
+        expectSuppressed(recast, withChatter);
+        expect(judgeLatest(recast, 'new').character.spellSlots[1].used).toBe(2);
 
-        // A stray repeat word plus a distant pronoun is NOT recast intent
-        // (2026-08-22 proximity rule — the coin-grant bypass's spell twin).
         const strayWords = gameReducer(withChatter, {
             type: 'CAST_SPELL',
             payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage: 'Another time, maybe. I let the priest examine it.' } },
@@ -107,7 +115,10 @@ describe('CAST_SPELL (out of combat)', () => {
         expectSuppressed(strayWords, withChatter);
     });
 
-    it('the recast bypass needs the spell as an ordered phrase or a cast-clause repeat — two proven false positives stay suppressed (2026-09-04 P2)', () => {
+    // Flipped 2026-11-08 (lane 11; was the 2026-09-04 P2 phrase rule): no
+    // phrasing spends a slot by itself any more — every nearby same-cast is a
+    // card and the judge's "new" is what casts it.
+    it('no player phrasing recasts by itself — the five 2026-09-04 lines all post the card; the judge\'s "new" spends the slot', () => {
         const once = gameReducer(clericState(), {
             type: 'CAST_SPELL',
             payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-1', playerMessage: 'I cast Cure Wounds on myself' } },
@@ -117,14 +128,12 @@ describe('CAST_SPELL (out of combat)', () => {
             type: 'CAST_SPELL',
             payload: { spell: 'cure wounds', _meta: { sourceId: 'msg-2', playerMessage } },
         });
-        // Scattered name words: not the spell.
-        expectSuppressed(replay('These wounds will not cure themselves; I bind them with cloth'), withChatter);
-        // Bare pronoun + again with no cast in the clause: not a recast.
-        expectSuppressed(replay('I try that again, the lock is stubborn'), withChatter);
-        // Genuine recasts still spend the second slot.
-        expect(replay('I cast it again, louder this time').character.spellSlots[1].used).toBe(2);
-        expect(replay('Cure-Wounds on myself once more').character.spellSlots[1].used).toBe(2);
-        expect(replay('Another casting, then.').character.spellSlots[1].used).toBe(2);
+        for (const line of ['These wounds will not cure themselves; I bind them with cloth', 'I try that again, the lock is stubborn', 'I cast it again, louder this time', 'Cure-Wounds on myself once more', 'Another casting, then.']) {
+            const card = replay(line);
+            expectSuppressed(card, withChatter);
+            expect(card.messages.at(-1)).toMatchObject({ kind: 'recovery', recovery: { status: 'judging' } });
+            expect(judgeLatest(card, 'new').character.spellSlots[1].used).toBe(2);
+        }
     });
 
     it('measures the spell replay window in conversational distance — a dice turn cannot age out the guard (2026-07-30)', () => {

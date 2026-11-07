@@ -113,6 +113,13 @@ const REPEAT_REPLAYS = {
     SELL_ITEM: ['itemId', 'name', 'itemKey', 'quantity', 'priceCp'],
     ADD_ITEM: ['name', 'itemKey', 'quantity', 'type', 'description', 'valueCp'],
     REMOVE_ITEM_BY_NAME: ['name', 'quantity'],
+    // The three lanes that kept their own replay ledgers and a phrase rule
+    // over the player's words (identity by reference, lane 11, 2026-11-08):
+    // a same-value XP award, the same spell on the same people, a rest of
+    // the same kind inside the window now ask the judge like a coin twin.
+    ADD_EXP: ['amount'],
+    CAST_SPELL: ['spell', 'target', 'targets', 'slotLevel'],
+    TAKE_REST: ['rest'],
 };
 
 /** A replay payload projected to its movement's known keys, every value clamped (a save is input too). */
@@ -125,6 +132,11 @@ export function projectRepeatReplay(replay) {
         const value = source[key];
         if (typeof value === 'string' && value.trim()) payload[key] = value.trim().slice(0, 160);
         else if (Number.isFinite(value)) payload[key] = Math.max(0, Math.min(10_000_000, Math.trunc(value)));
+        else if (Array.isArray(value)) {
+            // A group cast's recipients: names only, clamped, at most six.
+            const list = value.filter(v => typeof v === 'string' && v.trim()).map(v => v.trim().slice(0, 160)).slice(0, 6);
+            if (list.length > 0) payload[key] = list;
+        }
     }
     return { type: replay.type, payload };
 }
@@ -156,8 +168,27 @@ export function movementLabel(replay, party = '') {
         case 'SELL_ITEM': return `${items} sold${to('to')} for ${coin}`;
         case 'ADD_ITEM': return `${items} added to your pack`;
         case 'REMOVE_ITEM_BY_NAME': return `${items} taken from your pack`;
+        case 'ADD_EXP': return `+${Number(p.amount) || 0} XP`;
+        case 'CAST_SPELL': return `${p.spell || 'a spell'} cast${castTargets(p)}`;
+        case 'TAKE_REST': return `a ${p.rest ? `${p.rest} ` : ''}rest`;
         default: return 'a movement';
     }
+}
+
+/** " on Mika, Jorun" for a cast's recipients, or nothing. */
+export function castTargets(p) {
+    const names = Array.isArray(p?.targets) && p.targets.length > 0 ? p.targets : (p?.target ? [p.target] : []);
+    return names.length > 0 ? ` on ${names.join(', ')}` : '';
+}
+
+/**
+ * The judge's context for a lane that keeps its own replay ledger instead of
+ * the transaction log (XP, casts, rests — lane 11, 2026-11-08): the DM lane,
+ * the emitting message, no counterparty.
+ */
+export function repeatContext(meta = {}) {
+    const sourceId = String(meta?.sourceId || '').slice(0, 160);
+    return { lane: 'dm', sourceId, base: baseOf(sourceId), party: '', partyId: '', playerMessage: '' };
 }
 
 /**
@@ -172,10 +203,13 @@ export function movementLabel(replay, party = '') {
  * again". An exact-source replay and a same-reply twin stay plain notes:
  * those are certain. `loose` marks a twin found by the word shortlist alone
  * (2026-11-07): words may only ask, so that pair reaches the judge from the
- * same reply too.
+ * same reply too. `audit` admits the payment audit's own twin (lane 11,
+ * 2026-11-08: its player-phrase exception is gone, so the judge reads it);
+ * `earlier` names the recorded event for a lane whose twin is not a log
+ * entry (an XP award, a cast, a rest).
  */
-export function repeatCard(state, ctx, twin, line, replay, { loose = false } = {}) {
-    if (ctx.lane !== 'dm' || !twin) return null;
+export function repeatCard(state, ctx, twin, line, replay, { loose = false, audit = false, earlier = '' } = {}) {
+    if (!twin || !(ctx.lane === 'dm' || (audit && ctx.lane === 'audit'))) return null;
     if (!loose && (isExact(twin, ctx) || (ctx.base && baseOf(twin.sourceId) === ctx.base))) return null;
     const projected = projectRepeatReplay(replay);
     if (!projected) return null;
@@ -193,60 +227,12 @@ export function repeatCard(state, ctx, twin, line, replay, { loose = false } = {
             replay: projected,
             party: ctx.party || '',
             what: movementLabel(projected, ctx.party || '').slice(0, 200),
-            judge: { sourceId: ctx.sourceId, twinSourceId: twin.sourceId || '', earlier: describeEntry(twin).slice(0, 240) },
+            judge: { sourceId: ctx.sourceId, twinSourceId: twin.sourceId || '', earlier: (earlier || describeEntry(twin)).slice(0, 240) },
         },
     };
 }
 
-// ── The player's own words (the audit lane and the bundle only) ─────────
-
-// A message RECAPPING or DISPUTING an earlier payment ("I already paid you",
-// "didn't I pay for this?", "you took my gold twice") is the opposite of a
-// new payment (2026-08-25 report).
-const PAYMENT_RECAP_RE = new RegExp(
-    // "already paid", "just handed over", "earlier I bought"
-    `\\b(?:already|just|earlier|previously|before)\\b(?:\\W+\\w+){0,3}\\W+\\b(?:paid|pay|pays|paying|gave|give|given|handed|hand|bought|buy|purchased|settled|spent|owe[ds]?)\\b`
-    // "paid you already", "handed it over twice", "charged me twice"
-    + `|\\b(?:paid|gave|handed|bought|purchased|settled|spent|charged|took|deducted)\\b(?:\\W+\\w+){0,4}\\W+\\b(?:already|earlier|previously|twice|before)\\b`
-    // "didn't I pay", "haven't I already paid", "why did I pay again"
-    // (the optional n['’]t rides inside the word: "didn't" has no boundary
-    // between "did" and "n", so an anchored \b after the verb never matches it)
-    + `|\\b(?:did|do|does|have|has|had|was|were|is|are)(?:n['’]?t)?\\b\\W+(?:i|we|you|it|that|this)\\b(?:\\W+\\w+){0,3}\\W+\\b(?:pay|paid|charged|deducted|taken|took|billed)\\b`,
-    'i'
-);
-
-const AMOUNT_WORDS = {
-    a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-    eleven: 11, twelve: 12, fifteen: 15, twenty: 20, thirty: 30, forty: 40, fifty: 50, hundred: 100,
-};
-const AMOUNT_MENTION_RE = /\b(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|hundred)\s+(gold|gp|silver|sp|copper|cp)\b/gi;
-const DENOMINATION_CP = { gold: 100, gp: 100, silver: 10, sp: 10, copper: 1, cp: 1 };
-
-/**
- * The player's own line NAMES this payment (2026-10-31, the Opus playtest:
- * "I count out two silver" to Jethro was ignored as a duplicate of the two
- * silver paid the net-mender two turns earlier). One "<amount> <coin>"
- * mention whose value equals the charge, in a line that is not a recap.
- * The payment AUDIT's one exception — the DM lane's repeats go to the judge.
- */
-export function playerMessageNamesAmount(playerMessage, costCp) {
-    const text = String(playerMessage || '');
-    if (!text.trim() || PAYMENT_RECAP_RE.test(text)) return false;
-    for (const match of text.matchAll(AMOUNT_MENTION_RE)) {
-        const raw = match[1].toLowerCase();
-        const count = /^\d+$/.test(raw) ? Number(raw) : AMOUNT_WORDS[raw];
-        if (count * DENOMINATION_CP[match[2].toLowerCase()] === costCp) return true;
-    }
-    return false;
-}
-
 // ── The bundle (R5) ─────────────────────────────────────────────────────
-
-const DENOMINATION_WORD_RE = {
-    gold: /\b(gold|gp)\b/i,
-    silver: /\b(silver|sp)\b/i,
-    copper: /\b(copper|coppers|cp)\b/i,
-};
 
 /** Decompose `targetCp` exactly into the payload's available denominations.
  * Greedy is exact here because 100/10/1 divide each other. Returns the component
@@ -267,32 +253,35 @@ function decomposeWithin(targetCp, { gold, silver, copper }) {
  * novel total the value twin cannot match. Every recent movement in `pool`
  * (newest first) that fits entirely inside the incoming amounts is stripped
  * once — a split grant (2 gp then 28 gp) recapped as one 30 gp bundle pays
- * nothing (live playtest #7) — unless the player's own line names a
- * denomination of the stripped part (an intentional repeat names its coin).
+ * nothing (live playtest #7). The player's denomination words no longer
+ * rescue a stripped part (lane 11, 2026-11-08: a word rule may only ask):
+ * the stripped part reaches the repeat judge on a card instead, with the
+ * newest stripped movement as its twin, and a "new" verdict books it.
  * An entry equal to the WHOLE incoming amount is only strippable after
  * something else already was: the untouched exact-total case is R2's, which
  * asks the repeat judge — the bundle must not answer for it.
+ * `pool` is `[{ valueCp, entry }]`, newest first.
  */
-function stripBundle(poolValues, amounts, playerMessage) {
-    const text = String(playerMessage || '');
+function stripBundle(pool, amounts) {
     let remainder = { gold: amounts.gold, silver: amounts.silver, copper: amounts.copper };
     let strippedCp = 0;
-    for (const valueCp of poolValues) {
+    let twin = null;
+    for (const { valueCp, entry } of pool) {
         const remainderCp = remainder.gold * 100 + remainder.silver * 10 + remainder.copper;
         if (remainderCp <= 0) break;
         if (!(valueCp > 0)) continue;
         if (strippedCp === 0 ? valueCp >= remainderCp : valueCp > remainderCp) continue;
         const component = decomposeWithin(valueCp, remainder);
         if (!component) continue;
-        if (['gold', 'silver', 'copper'].some(denom => component[denom] > 0 && DENOMINATION_WORD_RE[denom].test(text))) continue;
         remainder = {
             gold: remainder.gold - component.gold,
             silver: remainder.silver - component.silver,
             copper: remainder.copper - component.copper,
         };
         strippedCp += valueCp;
+        if (!twin) twin = entry;
     }
-    return strippedCp > 0 ? { strippedCp, remainder } : null;
+    return strippedCp > 0 ? { strippedCp, remainder, twin } : null;
 }
 
 const newestFirst = (state, ctx, predicate) => normalizeLedger(state.ledger)
@@ -333,8 +322,8 @@ export function judgeCoinIn(state, ctx, amounts) {
     const saleCover = findTwin(ledger, ctx, entry => entry.kind === 'sale' && movedIn(entry) && entry.movedCp === total, { crossBase: true, exactSource: false });
     if (saleCover) return { suppress: 'saleCover', twin: saleCover };
     const pool = newestFirst(state, ctx, entry => entry.kind === 'coin' && movedIn(entry) && !(isAudit && sameBase(entry, ctx)))
-        .map(entry => entry.movedCp);
-    return { bundled: stripBundle(pool, amounts, ctx.playerMessage) };
+        .map(entry => ({ valueCp: entry.movedCp, entry }));
+    return { bundled: stripBundle(pool, amounts) };
 }
 
 /** Coin OUT of the purse on the DM lane (a payment, toll, fine, theft). */
@@ -358,28 +347,26 @@ export function judgeCoinOut(state, ctx, amounts) {
 /**
  * Coin OUT of the purse on the audit lane (a payment the narration completed
  * and no event charged). Returns `{ suppress, twin }` or `{ bundled }`.
+ * The one player-phrase exception this lane kept — a line that NAMED the
+ * amount paid for a new payment (2026-10-31, "I count out two silver" to a
+ * second payee) — is gone (lane 11, 2026-11-08): a duplicate or a cover
+ * from an earlier message books nothing and goes to the repeat judge, which
+ * reads both turns; the purchase cover and the same-reply echo stay notes.
  */
 export function judgeAuditPayment(state, ctx, amounts) {
     const total = amounts.totalCp;
-    // The player's own line naming THIS amount is a new payment, not a recap
-    // of another message's (2026-10-31) — but only against a charge from
-    // BEFORE that line: a charge that answered the same line (the 07-31 "gave
-    // 1 gp, charged twice" turn) is still this payment.
-    const named = playerMessageNamesAmount(ctx.playerMessage, total);
-    const lastPlayerLine = (state.messages || []).findLastIndex(message => message?.role === 'user' && !message.hidden && !message.deleted);
-    const paysAfter = (entry) => named && !!entry && entry.atMessage < lastPlayerLine;
     const ledger = state.ledger;
     const duplicate = findTwin(ledger, ctx, entry => entry.kind === 'coin' && entry.cp === -total, { crossBase: true });
-    if (duplicate && !paysAfter(duplicate)) return { suppress: 'duplicate', twin: duplicate };
+    if (duplicate) return { suppress: 'duplicate', twin: duplicate };
     const cover = findTwin(ledger, ctx, entry => entry.kind === 'coin' && movedOut(entry) && -entry.movedCp >= total, { crossBase: true, exactSource: false });
-    if (cover && !paysAfter(cover)) return { suppress: 'cover', twin: cover };
+    if (cover) return { suppress: 'cover', twin: cover };
     const purchase = findTwin(ledger, ctx, entry => entry.kind === 'purchase' && movedOut(entry) && -entry.movedCp >= total, { crossBase: true, exactSource: false });
-    if (purchase && !paysAfter(purchase)) return { suppress: 'purchaseCover', twin: purchase };
+    if (purchase) return { suppress: 'purchaseCover', twin: purchase };
     const echo = findTwin(ledger, ctx, entry => movedIn(entry) && entry.movedCp === total, { exactSource: false });
     if (echo) return { suppress: 'echo', twin: echo };
     const pool = newestFirst(state, ctx, entry => movedOut(entry) && !sameBase(entry, ctx))
-        .map(entry => -entry.movedCp);
-    return { bundled: stripBundle(pool, amounts, ctx.playerMessage) };
+        .map(entry => ({ valueCp: -entry.movedCp, entry }));
+    return { bundled: stripBundle(pool, amounts) };
 }
 
 // ── Items ───────────────────────────────────────────────────────────────

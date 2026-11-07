@@ -20,8 +20,8 @@ import {
 } from './shared.js';
 import { judgeAuditPayment, judgeCoinIn, judgeCoinOut, judgePurchase, judgeSale, ledgerContext, logMovement, projectRepeatReplay, repeatCard } from './ledger.js';
 import { handlers as inventoryHandlers } from './inventory.js';
+import { gameReducer } from '../gameReducer.js';
 
-export { playerMessageNamesAmount } from './ledger.js';
 
 // One transaction event is bounded like coin grants are: quantity so a flat priceCp
 // cannot mint an arbitrary stack, sale proceeds to the same 10,000 gp ceiling as
@@ -173,7 +173,7 @@ function ignore(state, ctx, fields, line, ask = null) {
 
 /** The purse receipt for a judgment — or, when it is the judge's to settle, its card. */
 function receipt(state, ctx, line, ask) {
-    return (ask && repeatCard(state, ctx, ask.twin, line, ask.replay, { loose: ask.loose })) || coinLine(line);
+    return (ask && repeatCard(state, ctx, ask.twin, line, ask.replay, { loose: ask.loose, audit: ask.audit === true })) || coinLine(line);
 }
 
 const GRANT_LINES = {
@@ -223,7 +223,9 @@ export const handlers = {
             ledger: logMovement(state, ctx, { kind: 'coin', cp: grantCp }),
             messages: [
                 ...state.messages,
-                ...(bundled ? [coinLine(`Adjusted a bundled coin grant — ${formatCurrency(bundled.strippedCp)} of it repeats a reward already received recently; granted ${formatCurrency(grantCp)}.`)] : []),
+                // The stripped part is the judge's question (lane 11, 2026-11-08), never the player's words'.
+                ...(bundled ? [receipt(state, ctx, `Adjusted a bundled coin grant — ${formatCurrency(bundled.strippedCp)} of it repeats a reward already received recently; granted ${formatCurrency(grantCp)}.`,
+                    { twin: bundled.twin, replay: { type: 'ADD_COIN_GRANT', payload: { copper: bundled.strippedCp } } })] : []),
                 meta.announce === 'audit'
                     ? coinLine(`**Coins recovered from narration:** ${formatCurrency(grantCp)} added to your purse — purse: ${purseLine(character)}.`)
                     : coinLine(`**+${formatCurrency(grantCp)}** received — purse: ${purseLine(character)}.`),
@@ -281,7 +283,12 @@ export const handlers = {
         const name = formatCurrency(costCp);
         const verdict = judgeAuditPayment(state, ctx, amounts);
         if (verdict.suppress) {
-            return ignore(state, ctx, { kind: 'coin', cp: -costCp }, PAYMENT_LINES[verdict.suppress](name, verdict.twin));
+            // A duplicate or a cover from an EARLIER message is the judge's
+            // question (lane 11, 2026-11-08; was the player's "I count out two
+            // silver" line): the purchase cover and the echo stay notes.
+            const asks = verdict.suppress === 'duplicate' || verdict.suppress === 'cover';
+            return ignore(state, ctx, { kind: 'coin', cp: -costCp }, PAYMENT_LINES[verdict.suppress](name, verdict.twin),
+                asks ? { twin: verdict.twin, replay: { type: 'APPLY_COIN_LOSS', payload: { copper: costCp } }, audit: true } : null);
         }
         const bundled = verdict.bundled;
         const charge = bundled ? bundled.remainder : amounts;
@@ -290,7 +297,8 @@ export const handlers = {
         }
         const chargeCp = charge.gold * 100 + charge.silver * 10 + charge.copper;
         const strippedNote = bundled
-            ? [coinLine(`Adjusted an audited payment — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken recently.`)]
+            ? [receipt(state, ctx, `Adjusted an audited payment — ${formatCurrency(bundled.strippedCp)} of it repeats a payment already taken recently.`,
+                { twin: bundled.twin, replay: { type: 'APPLY_COIN_LOSS', payload: { copper: bundled.strippedCp } }, audit: true })]
             : [];
         const result = spendCurrency(state.character, charge);
         if (result.paid) {
@@ -492,8 +500,7 @@ export const handlers = {
         // save is input too.
         if (recovery.mode === 'repeat') {
             const replay = projectRepeatReplay(recovery.replay);
-            const run = replay && (handlers[replay.type] || inventoryHandlers[replay.type]);
-            return run ? run(next, { type: replay.type, payload: { ...replay.payload, _meta: meta } }) : next;
+            return replay ? runRepeatReplay(next, replay, meta) : next;
         }
         const coinCp = Math.max(0, Math.trunc(Number(recovery.coinCp) || 0));
         const items = Array.isArray(recovery.items) ? recovery.items.slice(0, 4) : [];
@@ -545,12 +552,11 @@ export const handlers = {
                 `**Recorded once:** ${what} matches an earlier turn — checked: the same one${reason ? ` (${reason.replace(/\.$/, '')})` : ''}. If it was new, record it.`);
         }
         const replay = projectRepeatReplay(recovery.replay);
-        const run = verdict === 'new' && replay && (handlers[replay.type] || inventoryHandlers[replay.type]);
-        if (!run) return settle(state, { status: 'open', verdict: verdict === 'new' ? 'new' : 'unsure' });
+        if (verdict !== 'new' || !replay) return settle(state, { status: 'open', verdict: verdict === 'new' ? 'new' : 'unsure' });
         const sourceId = `${card.id}:judge`;
         const undo = inverseReplays(state, replay);
-        const booked = run(state, { type: replay.type, payload: { ...replay.payload, _meta: { lane: 'judge', sourceId, party: recovery.party || '' } } });
-        const landed = (booked.ledger || []).some(entry => entry?.sourceId === sourceId && entry.status === 'applied');
+        const booked = runRepeatReplay(state, replay, { lane: 'judge', sourceId, party: recovery.party || '' });
+        const landed = repeatLanded(booked, replay, sourceId);
         if (!landed) return settle(booked, { status: 'open', verdict: 'new', reason });
         // One short line: a genuine repeat is ordinary play (run 7: four in eight turns).
         return settle(booked, { status: 'booked', verdict: 'new', reason, undo },
@@ -572,16 +578,47 @@ export const handlers = {
         const steps = Array.isArray(recovery.undo) ? recovery.undo.slice(0, 2) : [];
         steps.forEach((step, i) => {
             const replay = projectRepeatReplay(step);
-            const run = replay && (handlers[replay.type] || inventoryHandlers[replay.type]);
-            if (run) next = run(next, { type: replay.type, payload: { ...replay.payload, _meta: { lane: 'player', sourceId: `${messageId}:undo:${i}`, party: recovery.party || '' } } });
+            if (replay) next = runRepeatReplay(next, replay, { lane: 'player', sourceId: `${messageId}:undo:${i}`, party: recovery.party || '' });
         });
         return next;
     },
 };
 
 /**
+ * Run a projected repeat on a decided lane (the judge's "new", the player's
+ * "Record it again", an Undo step): the ledger movements through their own
+ * handlers; the three lanes with their own replay ledgers (XP, casts, rests
+ * — lane 11, 2026-11-08) through the reducer, whose replay guards stand down
+ * for a decided lane. A type the registry does not know runs nothing.
+ */
+function runRepeatReplay(state, replay, meta) {
+    const own = handlers[replay.type] || inventoryHandlers[replay.type];
+    if (own) return own(state, { type: replay.type, payload: { ...replay.payload, _meta: meta } });
+    if (replay.type === 'TAKE_REST') {
+        return gameReducer(state, { type: 'TAKE_REST', payload: replay.payload.rest, meta: { source: meta.lane, sourceId: meta.sourceId } });
+    }
+    if (replay.type === 'ADD_EXP' || replay.type === 'CAST_SPELL') {
+        return gameReducer(state, { type: replay.type, payload: { ...replay.payload, _meta: meta } });
+    }
+    return state;
+}
+
+/** Did the judge's booking land? The log says so for a movement; XP, casts and rests stamp their own ledgers with the sourceId. */
+function repeatLanded(booked, replay, sourceId) {
+    const stamped = (entries) => (entries || []).some(entry => typeof entry === 'string' && entry.startsWith(`${sourceId}|`));
+    switch (replay.type) {
+        case 'ADD_EXP': return (booked.recentExpAwards || []).some(entry => entry?.sourceId === sourceId && entry.status === 'applied');
+        case 'CAST_SPELL': return stamped(booked.recentSpellCasts);
+        case 'TAKE_REST': return stamped(booked.recentRests);
+        default: return (booked.ledger || []).some(entry => entry?.sourceId === sourceId && entry.status === 'applied');
+    }
+}
+
+/**
  * The movements that take a judge-booked repeat back out, read BEFORE it
  * books (a removed or sold item's own fields come from the pack as it was).
+ * An XP award, a cast or a rest has no inverse here: the card then shows no
+ * Undo, and the booking stands as the judge's reading.
  */
 function inverseReplays(state, replay) {
     const { type, payload } = replay;

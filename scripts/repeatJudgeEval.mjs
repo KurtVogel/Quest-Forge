@@ -7,7 +7,9 @@
  * the prompt are what play produces) and judged by the real lane
  * (llm/repeatJudge.js). A RETOLD case judged "new" is a double — the number
  * that matters most; a NEW case judged "same"/"unsure" leaves the player one
- * tap ("Record it again").
+ * tap ("Record it again"). Since lane 11 (2026-11-08) the same card asks
+ * about a same-value XP award, the same spell on the same people and a rest
+ * of the same kind — the lanes that used to read the player's words.
  *
  *   node scripts/repeatJudgeEval.mjs [runsPerCase=2]
  *
@@ -19,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { gameReducer } from '../src/state/gameReducer.js';
 import { initialGameState } from '../src/state/initialState.js';
 import { judgePendingRepeats } from '../src/llm/repeatJudge.js';
+import { buildSpellSlots } from '../src/engine/spellcasting.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..');
@@ -39,6 +42,10 @@ const sale = (name, priceCp, party) => ({ type: 'SELL_ITEM', payload: { name, qu
 const buy = (name, priceCp, party) => ({ type: 'PURCHASE_ITEM', payload: { name, quantity: 1, priceCp, _meta: { party } } });
 const burn = (name) => ({ type: 'REMOVE_ITEM_BY_NAME', payload: { name, _meta: {} } });
 const found = (name) => ({ type: 'ADD_ITEM', payload: { name, _meta: {} } });
+// Lane 11 (2026-11-08): the three lanes that kept a phrase rule over the player's words.
+const exp = (amount) => ({ type: 'ADD_EXP', payload: { amount, _meta: {} } });
+const cast = (spell, target) => ({ type: 'CAST_SPELL', payload: { spell, target, _meta: {} } });
+const rest = (kind) => ({ type: 'TAKE_REST', payload: kind, meta: { source: 'dm' } });
 
 const CASES = [
     // ── retold: "new" here is a DOUBLE ──
@@ -107,6 +114,29 @@ const CASES = [
     { id: 'two-people-buy', expect: 'new',
         earlier: ['I buy a rope from Jethro.', 'Jethro takes your silver and coils a length of rope into your arms.', buy('Hemp rope', 100, 'Jethro')],
         now: ['Marta sells rope too, I buy another for the climb.', 'Marta Vell sells you a second length of rope from her own stock.', buy('Hemp rope', 100, 'Marta Vell')] },
+    // ── XP, casts, rests (lane 11, 2026-11-08): the player's words no longer decide ──
+    { id: 'xp-recap', expect: 'same',
+        earlier: ['I report the cleared cellar to the reeve.', 'The reeve nods slowly. "The rats are done, then. Good work, and I\'ll say so to the council." It settles into you as the kind of thing you have learned to do.', exp(50)],
+        now: ['I ask the reeve what else needs doing.', '"You did well with those rats," the reeve says again, already peering at his ledger. "I said so and I meant it. Now — the mill."', exp(50)] },
+    { id: 'xp-second-deed', expect: 'new',
+        earlier: ['I talk the drunk guard down before he draws.', 'The guard lowers his hand from the hilt, grumbling. A deft bit of talking, and nobody bleeds.', exp(25)],
+        now: ['I point out to the ferryman the holed hull he hasn\'t noticed, and suggest he owes us a free crossing for the warning.', 'The ferryman pales at the hole, then barks a laugh and waves you aboard without a copper. Sharp eyes and a sharper tongue, twice in one day.', exp(25)] },
+    { id: 'spell-aftermath', expect: 'same',
+        earlier: ['I cast Cure Wounds on Mika.', 'Warmth spreads from your palm; Mika\'s gash closes to a pink seam and she breathes easier.', cast('Cure Wounds', 'Mika')] ,
+        now: ['How is Mika doing now?', 'Mika flexes the shoulder where your Cure Wounds knitted the gash shut an hour ago. "Good as new. Better, maybe."', cast('Cure Wounds', 'Mika')] },
+    { id: 'spell-second-cast', expect: 'new',
+        earlier: ['I cast Cure Wounds on Mika.', 'Warmth spreads from your palm; Mika\'s gash closes to a pink seam and she breathes easier.', cast('Cure Wounds', 'Mika')],
+        now: ['Mika\'s still pale. I lay hands on her and cast Cure Wounds once more.', 'You call the light a second time. It pours into Mika and the last grey leaves her face.', cast('Cure Wounds', 'Mika')] },
+    { id: 'spell-typo-again', expect: 'new',
+        earlier: ['I cast Cure Wounds on Mika.', 'Warmth spreads from your palm; Mika\'s gash closes to a pink seam and she breathes easier.', cast('Cure Wounds', 'Mika')],
+        now: ['cure wonds on mika agian, shes bleeding thru the bandage', 'You press your palm to the seeping bandage and the prayer takes a second time; the bleeding stops.', cast('Cure Wounds', 'Mika')] },
+    { id: 'rest-recap', expect: 'same',
+        earlier: ['We make camp and take a long rest.', 'The night passes without alarm. You wake stiff but whole, the fire down to embers.', rest('long')],
+        now: ['I pack up the camp and check the road.', 'You kick the embers of last night\'s camp apart and shoulder your pack. Well rested, you take the north road.', rest('long')] },
+    { id: 'rest-second-night', expect: 'new',
+        earlier: ['We make camp and take a long rest.', 'The night passes without alarm. You wake stiff but whole, the fire down to embers.', rest('long')],
+        now: ['Another day\'s march done. We camp again and sleep.', 'A second night under the pines. The fire burns down; dawn finds you rested and the road still long.', rest('long')] },
+
     // ── one reply, two names (2026-11-07): the words ask, the judge reads ──
     { id: 'same-reply-one-rope', expect: 'same',
         reply: ['I buy a coil of rope.', 'Jethro takes your silver and hands you a coil of hempen rope.', [found('hempen rope coil'), buy('Hempen rope', 100, 'Jethro')]] },
@@ -120,7 +150,14 @@ function buildCase(spec) {
     let state = {
         ...initialGameState,
         settings: { ...initialGameState.settings, llmProvider: 'gemini', apiKey: GEMINI_KEY, geminiApiKey: GEMINI_KEY },
-        character: { ...initialGameState.character, name: 'Saila', gold: 50, silver: 0, copper: 0 },
+        // A level-5 cleric with slots, so the spell cases can cast (lane 11).
+        character: {
+            ...initialGameState.character, name: 'Saila', race: 'human', class: 'cleric', level: 5, gold: 50, silver: 0, copper: 0,
+            currentHP: 20, maxHP: 30, armorClass: 14, conditions: [],
+            abilityScores: { strength: 10, dexterity: 10, constitution: 12, intelligence: 10, wisdom: 16, charisma: 10 },
+            hitDice: { total: 5, remaining: 5, die: 8 }, spellSlots: buildSpellSlots(5), sustainedSpell: null, classResources: {},
+        },
+        party: [{ id: 'c-mika', name: 'Mika', status: 'healthy', hp: 4, maxHp: 10, ac: 12, weapon: 'Dagger' }],
         npcs: [
             { id: 'npc-tuomas', name: 'Tuomas', rosterTier: 'character', kind: 'character' },
             { id: 'npc-tuomas-2', name: 'Tuomas the furrier', rosterTier: 'character', kind: 'character' },
@@ -137,6 +174,11 @@ function buildCase(spec) {
         state = gameReducer(state, { type: 'ADD_MESSAGE', payload: { id: `u${n}`, role: 'user', content: player } });
         state = gameReducer(state, { type: 'ADD_MESSAGE', payload: { id: `msg-${n}`, role: 'assistant', content: dm } });
         for (const one of Array.isArray(action) ? action : [action]) {
+            if (one.meta) {
+                // TAKE_REST carries its lane on action.meta, not the payload.
+                state = gameReducer(state, { ...one, meta: { ...one.meta, sourceId: `msg-${n}`, playerMessage: player } });
+                continue;
+            }
             const meta = { ...one.payload._meta, sourceId: `msg-${n}`, playerMessage: player };
             state = gameReducer(state, { ...one, payload: { ...one.payload, _meta: meta } });
         }

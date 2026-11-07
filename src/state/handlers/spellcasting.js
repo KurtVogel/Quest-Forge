@@ -17,7 +17,8 @@ import {
     spellTargetLimit,
     summarizeSpellSlots,
 } from '../../engine/spellcasting.js';
-import { findExactSourceReplay, findNearbyReplay, rememberLedgerEntry } from '../../engine/replayLedger.js';
+import { findExactSourceReplay, findNearbyReplayEntry, rememberLedgerEntry } from '../../engine/replayLedger.js';
+import { repeatCard, repeatContext } from './ledger.js';
 import { isPromptRosterNpc, isRecordedDead, namesMatch } from '../../engine/npcRoster.js';
 import {
     appendRollHistory,
@@ -27,9 +28,7 @@ import {
     describeFaces,
     healHero,
     normalizeCompanion,
-    normalizeRefToken,
     RECENT_SPELL_CAST_LIMIT,
-    repeatIntentNearNoun,
     systemMessage,
     withCondition,
 } from './shared.js';
@@ -37,28 +36,6 @@ import {
 // Spell replay window matches the coin-grant one: the observed failure is the DM
 // re-emitting spell_cast on the very next turn while narrating what the spell did.
 const RECENT_SPELL_CAST_MESSAGE_WINDOW = 4;
-
-function playerMessageRecastsSpell(spell, playerMessage) {
-    const text = String(playerMessage || '').toLowerCase();
-    if (!text.trim()) return false;
-    // The spell must be named as an ORDERED phrase ("cure wounds", "Cure-Wounds"):
-    // the compacted-text containment below is ordered and adjacent by
-    // construction. The old every-word rung fired on "These wounds will not
-    // cure themselves; I bind them with cloth" and spent a second slot
-    // (2026-09-04 audit).
-    const compact = normalizeRefToken(text);
-    const tokens = [spell.key, spell.name].map(normalizeRefToken).filter(Boolean);
-    if (tokens.some(token => compact.includes(token))) return true;
-    // "I cast it again", "another casting" — explicit repeat intent without
-    // naming the spell. Proximity required: a stray repeat word plus a stray
-    // pronoun anywhere in the message is not recast intent (2026-08-22).
-    if (repeatIntentNearNoun(text, /(?:cast|casting|spell)/)) return true;
-    // A bare pronoun ("that again") counts only inside a clause that also
-    // casts: "I try that again, the lock is stubborn" is not a recast
-    // (2026-09-04 — the quantifier-attaches-to-noun rule reaching this ledger).
-    return text.split(/[.!?;]+/).some(clause =>
-        /\bcast(?:ing|s)?\b/.test(clause) && repeatIntentNearNoun(clause, /(?:it|that)/));
-}
 
 /**
  * The identity of a cast's RECIPIENTS for the replay ledger (2026-10-20
@@ -184,21 +161,36 @@ export const handlers = {
         }
         // Cross-message replay: the DM re-emitting the same spell on the same
         // recipients on a later turn (narrating the aftermath of a cast it
-        // already declared) must not spend a second slot. A nearby same-cast
-        // only counts as new when the player's own message casts it again by
-        // name (or an explicit "again"-style repeat). Windows measure
-        // conversational distance, not raw index: a dice turn burns ~5 raw
-        // messages and silently expired the raw-index coin windows (proven
-        // live 2026-07-22) — the same hole existed here until 2026-07-30.
+        // already declared) must not spend a second slot. Whether a nearby
+        // same-cast is a NEW cast was the player's phrasing's to say ("again",
+        // the spell by name) until lane 11 (2026-11-08): now the engine
+        // spends nothing and asks the repeat judge on a card, which reads
+        // both turns; "new" casts exactly this spell on the judge lane, which
+        // is never second-guessed here. Windows measure conversational
+        // distance, not raw index: a dice turn burns ~5 raw messages and
+        // silently expired the raw-index coin windows (proven live
+        // 2026-07-22) — the same hole existed here until 2026-07-30.
         const castMessageIndex = currentMessageIndex(state);
-        const nearbyReplay = findNearbyReplay(recentCasts, {
+        const decided = meta.lane === 'judge' || meta.lane === 'player';
+        const nearbyReplay = decided ? null : findNearbyReplayEntry(recentCasts, {
             key: ledgerKey,
             messages: state.messages,
             currentIndex: castMessageIndex,
             window: RECENT_SPELL_CAST_MESSAGE_WINDOW,
         });
-        if (nearbyReplay && !playerMessageRecastsSpell(spell, meta.playerMessage)) {
-            return { ...state, messages: [...state.messages, spellLine(`${spell.name} on ${recipientNames} was NOT cast again — the engine read this as the cast from a few turns ago re-emitted; no slot spent, no effect applied. If the hero truly casts it again, the player's own words must say so ("again", or the spell by name).`)] };
+        if (nearbyReplay) {
+            const line = `${spell.name} on ${recipientNames} was NOT cast again — the engine read this as the cast from a few turns ago re-emitted; no slot spent, no effect applied.`;
+            const requested = payload.slotLevel ?? payload.slot_level;
+            const card = repeatCard(state, repeatContext(meta), { sourceId: nearbyReplay.sourceId }, line, {
+                type: 'CAST_SPELL',
+                payload: {
+                    spell: String(payload.spell || ''),
+                    ...(typeof payload.target === 'string' && payload.target && { target: payload.target }),
+                    ...(Array.isArray(payload.targets) && payload.targets.length > 0 && { targets: payload.targets }),
+                    ...(Number.isFinite(Number(requested)) && requested !== null && requested !== undefined && { slotLevel: Number(requested) }),
+                },
+            }, { earlier: `the hero cast ${spell.name} on ${recipientNames}` });
+            return { ...state, messages: [...state.messages, card || spellLine(line)] };
         }
 
         let spellSlots = character.spellSlots || null;

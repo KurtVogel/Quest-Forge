@@ -6,7 +6,8 @@ import { CLASSES } from '../../data/classes.js';
 import { getModifier, LONG_REST_CLEARS, normalizeConditionName } from '../../engine/rules.js';
 import { rollNotation, rollWithModifier } from '../../engine/dice.ts';
 import { applyArcaneRecovery, buildSpellSlots, isSpellcaster, refillSpellSlots, summarizeSpellSlots } from '../../engine/spellcasting.js';
-import { findExactSourceReplay, findNearbyReplay, rememberLedgerEntry } from '../../engine/replayLedger.js';
+import { findExactSourceReplay, findNearbyReplayEntry, rememberLedgerEntry } from '../../engine/replayLedger.js';
+import { repeatCard, repeatContext } from './ledger.js';
 import { mintInterlude } from '../../engine/interlude.js';
 import {
     appendRollHistory,
@@ -28,20 +29,6 @@ import {
 // moved on. The window is wider than the coin/spell ones because the rest
 // narration lingers in the DM's message window and the echo persists with it.
 const RECENT_REST_MESSAGE_WINDOW = 8;
-
-function playerMessageRequestsRest(playerMessage) {
-    const text = String(playerMessage || '');
-    if (!text.trim()) return false;
-    // "rest of the loot"/"the rest of them" is partitive, not resting. The base
-    // form asks for a rest ("I take a long rest", "we rest here"); "rested" is a
-    // past rest and "resting" one only in a present-tense frame ("I'm resting",
-    // "we start resting") — "…what changed while I was resting" opened this
-    // bypass and posted a SECOND Short Rest on two providers (2026-10-09 class
-    // playtest, cleric-sol 76/79 + cleric-flash 101/104).
-    if (/\brests?\b(?!\s+of\b)/i.test(text)) return true;
-    if (/\b(?:am|'m|are|'re|start|begin|keep|try)\s+(?:\w+\s+)?resting\b/i.test(text)) return true;
-    return /\b(sleep|nap|slumber|make camp|set up camp|camp for|bed down|turn in for)\b/i.test(text);
-}
 
 export const handlers = {
     USE_RESOURCE(state, action) {
@@ -227,31 +214,37 @@ export const handlers = {
         // re-posting the "Long Rest" banner turns after the camp was struck.
         // Character Sheet button rests are deliberate clicks and never guarded,
         // but they DO record into the ledger so a DM echo of a button rest is
-        // still caught. A nearby same-type rest only counts as new when the
-        // player's own message asks to rest again.
+        // still caught. Whether a nearby same-type rest is a NEW rest was the
+        // player's phrasing's to say ("we rest", "make camp") until lane 11
+        // (2026-11-08): now the engine applies nothing and asks the repeat
+        // judge on a card (the drop used to post no line at all); "new" takes
+        // exactly this rest on the judge lane, which this guard never reads.
         if (restMeta.source === 'dm') {
             const restSourceId = String(restMeta.sourceId || '').slice(0, 160);
             const exactReplay = findExactSourceReplay(recentRests, restSourceId);
             // Conversational distance — same dice-turn expiry fix as the coin
             // ledgers (2026-07-22) and the spell ledger (2026-07-30).
-            const nearbyReplay = findNearbyReplay(recentRests, {
+            const nearbyReplay = findNearbyReplayEntry(recentRests, {
                 key: restType,
                 messages: state.messages,
                 currentIndex: restMessageIndex,
                 window: RECENT_REST_MESSAGE_WINDOW,
             });
-            if (exactReplay || (nearbyReplay && !playerMessageRequestsRest(restMeta.playerMessage))) {
+            if (exactReplay || nearbyReplay) {
                 // Re-stamp the ledger at the current index so an echo that
                 // persists past the window keeps being suppressed.
-                return {
-                    ...state,
-                    recentRests: rememberLedgerEntry(recentRests, {
-                        sourceId: restSourceId,
-                        key: restType,
-                        messageIndex: restMessageIndex,
-                        cap: RECENT_REST_LIMIT,
-                    }),
-                };
+                const restamped = rememberLedgerEntry(recentRests, {
+                    sourceId: restSourceId,
+                    key: restType,
+                    messageIndex: restMessageIndex,
+                    cap: RECENT_REST_LIMIT,
+                });
+                // The same narration re-parsed is certain: no line.
+                if (exactReplay) return { ...state, recentRests: restamped };
+                const line = `A ${restType} rest was not applied again — the engine read it as the rest from a few turns ago re-emitted; nothing healed, nothing refilled.`;
+                const card = repeatCard(state, repeatContext(restMeta), { sourceId: nearbyReplay.sourceId }, line,
+                    { type: 'TAKE_REST', payload: { rest: restType } }, { earlier: `the hero took a ${restType} rest` });
+                return { ...state, recentRests: restamped, messages: [...state.messages, card || systemMessage(line, { dmVisible: true })] };
             }
         }
         const charClass = CLASSES[state.character.class];

@@ -1342,9 +1342,14 @@ const ChatMessage = memo(function ChatMessage({ message, onDelete, onResolveReco
                                 {message.recovery.status === 'judging' && <span className="recovery-status">Checking the two turns…</span>}
                             </>
                         ) : message.recovery.status === 'booked' ? (
-                            <button type="button" className="recovery-dismiss" onClick={() => onResolveRecovery?.(message.id, 'undo')}>
-                                Undo — same one
-                            </button>
+                            // An XP award, a cast or a rest the judge booked has no inverse (lane 11, 2026-11-08): no Undo to offer.
+                            Array.isArray(message.recovery.undo) && message.recovery.undo.length > 0 ? (
+                                <button type="button" className="recovery-dismiss" onClick={() => onResolveRecovery?.(message.id, 'undo')}>
+                                    Undo — same one
+                                </button>
+                            ) : (
+                                <span className="recovery-status">Checked — recorded.</span>
+                            )
                         ) : (
                             <span className="recovery-status">
                                 {message.recovery.status === 'accepted'

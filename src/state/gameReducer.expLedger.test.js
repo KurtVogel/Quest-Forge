@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
+import { judgeLatest } from './repeatJudge.testUtils.js';
 import { buildMessageWindow } from '../components/Chat/turnVisibility.js';
 import { foldExperience } from '../engine/progression.js';
 
@@ -66,11 +67,31 @@ describe('recentExpAwards replay ledger — the reported double-award', () => {
         expect(third.character.exp).toBe(150);
     });
 
-    it('honors explicit player repeat intent ("another 150 xp")', () => {
+    // Flipped 2026-11-08 (identity by reference, lane 11): the phrase rule
+    // ("another 150 xp") is gone. A twin from an earlier message is a
+    // "Recorded once" card the repeat judge reads; "new" pays it on the judge
+    // lane, "same" keeps it as one, and the card offers no Undo (XP has no
+    // inverse here).
+    it('a same-value award from an earlier message is the judge\'s question, whatever the player wrote', () => {
         let state = gameReducer(makeState(), dmExp(150, { sourceId: 'msg-10' }));
         state = passTurns(state, 1);
         const repeat = gameReducer(state, dmExp(150, { sourceId: 'msg-11', playerMessage: 'That second haul deserves another 150 xp, DM.' }));
-        expect(repeat.character.exp).toBe(300);
+        expect(repeat.character.exp).toBe(150);
+        const card = repeat.messages.at(-1);
+        expect(card).toMatchObject({ kind: 'recovery', dmVisible: true, recovery: { mode: 'repeat', status: 'judging', replay: { type: 'ADD_EXP', payload: { amount: 150 } }, what: '+150 XP' } });
+        expect(card.content).toContain('Duplicate XP award ignored');
+        expect(card.recovery.judge.earlier).toBe('the hero was awarded 150 XP');
+        expect(card.recovery.judge.twinSourceId).toBe('msg-10');
+        const paid = judgeLatest(repeat, 'new', 'you cleared a second nest');
+        expect(paid.character.exp).toBe(300);
+        expect(paid.messages.find(m => m.kind === 'recovery').recovery).toMatchObject({ status: 'booked', verdict: 'new', undo: [] });
+        expect(paid.recentExpAwards.at(-1)).toMatchObject({ status: 'applied' });
+        const kept = judgeLatest(repeat, 'same');
+        expect(kept.character.exp).toBe(150);
+        expect(kept.messages.find(m => m.kind === 'recovery').recovery.status).toBe('open');
+        // The player's own "Record it again" pays it too.
+        const byHand = gameReducer(repeat, { type: 'RESOLVE_RECOVERY', payload: { messageId: card.id, accept: true } });
+        expect(byHand.character.exp).toBe(300);
     });
 
     it('never honors a repeat from the SAME sourceId even with repeat phrasing (re-parse of one narration)', () => {

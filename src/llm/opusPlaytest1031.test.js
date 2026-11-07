@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sendMessage } from './adapter.js';
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
-import { playerMessageNamesAmount } from '../state/handlers/economy.js';
+import { judgeLatest } from '../state/repeatJudge.testUtils.js';
 import { diffCommitments, snapshotCommitments } from '../engine/commitmentVerifier.js';
 import { buildSpellSlots } from '../engine/spellcasting.js';
 
@@ -54,25 +54,26 @@ describe('a heal on a person outside the party is cast', () => {
     });
 });
 
-describe('a payment the player names is a new payment', () => {
-    it('reads "<amount> <coin>" mentions and refuses a recap', () => {
-        expect(playerMessageNamesAmount('"Hire me a sled." I count out two silver.', 20)).toBe(true);
-        expect(playerMessageNamesAmount('I set 3 gp on the bar.', 300)).toBe(true);
-        expect(playerMessageNamesAmount('I count out two silver.', 30)).toBe(false);
-        expect(playerMessageNamesAmount('I already paid you two silver!', 20)).toBe(false);
-        expect(playerMessageNamesAmount('', 20)).toBe(false);
-    });
-
-    it('the audit charges a named repeat amount to a new payee; without the player\'s words the ledger still guards', () => {
+// Flipped 2026-11-08 (identity by reference, lane 11): the audit's one
+// player-phrase exception ("I count out two silver" names the amount) is gone.
+// An audited payment that twins an earlier charge books nothing and is the
+// repeat judge's question; "new" charges it on the judge lane.
+describe('an audited payment that twins an earlier charge asks the judge', () => {
+    it('the audit charges nothing by itself; the judge\'s "new" charges the repeat to the new payee', () => {
         const base = { ...clericState(), ledger: [], messages: [{ id: 'm1', role: 'user', content: 'x' }, { id: 'm2', role: 'assistant', content: 'y' }] };
         const first = gameReducer(base, { type: 'AUDIT_COIN_PAYMENT', payload: { silver: 2, _meta: { sourceId: 'msg-52:scribe-loot:payment', audit: true } } });
         const purse = state => state.character.gold * 100 + state.character.silver * 10 + state.character.copper;
         expect(purse(base) - purse(first)).toBe(20);
         const later = { ...first, messages: [...first.messages, { id: 'm3', role: 'user', content: 'x' }, { id: 'm4', role: 'assistant', content: 'y' }] };
-        const guarded = gameReducer(later, { type: 'AUDIT_COIN_PAYMENT', payload: { silver: 2, _meta: { sourceId: 'msg-58:scribe-loot:payment', audit: true } } });
+        const guarded = gameReducer(later, { type: 'AUDIT_COIN_PAYMENT', payload: { silver: 2, _meta: { sourceId: 'msg-58:scribe-loot:payment', audit: true, playerMessage: 'I count out two silver for the sled.' } } });
         expect(purse(guarded)).toBe(purse(first));
-        const named = gameReducer(later, { type: 'AUDIT_COIN_PAYMENT', payload: { silver: 2, _meta: { sourceId: 'msg-58:scribe-loot:payment', audit: true, playerMessage: 'I count out two silver for the sled.' } } });
-        expect(purse(first) - purse(named)).toBe(20);
+        const card = guarded.messages.at(-1);
+        expect(card).toMatchObject({ kind: 'recovery', dmVisible: true, recovery: { mode: 'repeat', status: 'judging', replay: { type: 'APPLY_COIN_LOSS', payload: { copper: 20 } } } });
+        expect(card.content).toContain('Duplicate payment ignored');
+        const charged = judgeLatest(guarded, 'new', 'you paid the sled driver too');
+        expect(purse(first) - purse(charged)).toBe(20);
+        expect(charged.ledger.at(-1)).toMatchObject({ lane: 'judge', status: 'applied', cp: -20 });
+        expect(purse(judgeLatest(guarded, 'same'))).toBe(purse(first));
     });
 });
 

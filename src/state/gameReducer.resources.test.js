@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
+import { judgeLatest } from './repeatJudge.testUtils.js';
 
 function makeFighter(overrides = {}) {
     return {
@@ -183,7 +184,10 @@ describe('DM rest replay guard', () => {
         expect(rested.recentRests).toEqual(['msg-1|long|0']);
     });
 
-    it('suppresses a re-emitted DM rest within the window — no banner, no re-heal', () => {
+    // Flipped 2026-11-08 (identity by reference, lane 11): the drop used to post
+    // nothing; now the engine applies nothing and posts a "Recorded once" card
+    // the repeat judge reads — the player's words no longer decide.
+    it('a re-emitted DM rest within the window heals nothing and posts ONE "Recorded once" card for the judge', () => {
         const rested = gameReducer(makeFighter({ currentHP: 10 }), {
             type: 'TAKE_REST',
             payload: 'long',
@@ -202,12 +206,21 @@ describe('DM rest replay guard', () => {
         });
 
         expect(echoed.character.currentHP).toBe(12);
-        expect(echoed.messages).toHaveLength(wounded.messages.length);
+        expect(echoed.messages).toHaveLength(wounded.messages.length + 1);
+        expect(echoed.messages.at(-1)).toMatchObject({ kind: 'recovery', dmVisible: true, recovery: { mode: 'repeat', status: 'judging', replay: { type: 'TAKE_REST', payload: { rest: 'long' } } } });
+        expect(echoed.messages.at(-1).content).toContain('Recorded once');
+        expect(echoed.messages.at(-1).content).toContain('long rest was not applied again');
         // Re-stamped at the echo's index so a persistent echo stays suppressed.
         expect(echoed.recentRests.at(-1)).toBe(`msg-2|long|${wounded.messages.length - 1}`);
+        // The judge's "same" keeps it as one; "new" takes the rest on the judge lane.
+        expect(judgeLatest(echoed, 'same').character.currentHP).toBe(12);
+        const taken = judgeLatest(echoed, 'new');
+        expect(taken.character.currentHP).toBe(20);
+        expect(taken.messages.some(m => (m.content || '').includes('Long Rest'))).toBe(true);
+        expect(taken.messages.find(m => m.kind === 'recovery').recovery).toMatchObject({ status: 'booked', verdict: 'new', undo: [] });
     });
 
-    it('suppresses a DM echo of a Character Sheet button rest', () => {
+    it('a DM echo of a Character Sheet button rest heals nothing and asks the judge', () => {
         const rested = gameReducer(makeFighter({ currentHP: 10 }), {
             type: 'TAKE_REST',
             payload: 'long',
@@ -219,7 +232,9 @@ describe('DM rest replay guard', () => {
             meta: { source: 'dm', sourceId: 'msg-9' },
         });
 
-        expect(echoed.messages).toHaveLength(rested.messages.length);
+        expect(echoed.character).toBe(rested.character);
+        expect(echoed.messages).toHaveLength(rested.messages.length + 1);
+        expect(echoed.messages.at(-1)).toMatchObject({ kind: 'recovery', recovery: { status: 'judging' } });
     });
 
     it('measures the rest window in conversational distance — a dice turn cannot age out the guard (2026-07-30)', () => {
@@ -257,63 +272,31 @@ describe('DM rest replay guard', () => {
         expect(echoed.character.currentHP).toBe(12); // suppressed — no re-heal
     });
 
-    it('honors a nearby DM rest when the player explicitly rests again', () => {
+    // Flipped 2026-11-08 (lane 11; was "honors a nearby DM rest when the player
+    // explicitly rests again" + the partitive and past-tense pins of 2026-10-09):
+    // the player's words decide nothing here any more. Every nearby same-kind
+    // rest is a card; the judge's reading of the two turns takes it or not.
+    it('the player\'s words no longer decide a nearby rest — "rest again", "the rest of the coins" and "while I was resting" all post the card; the judge takes or keeps it', () => {
         const rested = gameReducer(makeFighter({ currentHP: 10 }), {
             type: 'TAKE_REST',
             payload: 'long',
             meta: { source: 'dm', sourceId: 'msg-1' },
         });
         const wounded = { ...rested, character: { ...rested.character, currentHP: 5 } };
-        const again = gameReducer(wounded, {
-            type: 'TAKE_REST',
-            payload: 'long',
-            meta: { source: 'dm', sourceId: 'msg-2', playerMessage: 'We make camp and rest for the night again.' },
-        });
-
-        expect(again.character.currentHP).toBe(20);
-        expect(again.messages.at(-1).content).toContain('Long Rest');
-    });
-
-    it('does not treat partitive "the rest of" as rest intent', () => {
-        const rested = gameReducer(makeFighter({ currentHP: 10 }), {
-            type: 'TAKE_REST',
-            payload: 'long',
-            meta: { source: 'dm', sourceId: 'msg-1' },
-        });
-        const echoed = gameReducer(rested, {
-            type: 'TAKE_REST',
-            payload: 'long',
-            meta: { source: 'dm', sourceId: 'msg-2', playerMessage: 'I grab the rest of the coins and head out.' },
-        });
-
-        expect(echoed.messages).toHaveLength(rested.messages.length);
-    });
-
-    it('a past-tense mention of resting is not a request to rest again (2026-10-09 class playtest: two providers posted a second Short Rest)', () => {
-        const rested = gameReducer(makeFighter({ currentHP: 10 }), {
-            type: 'TAKE_REST',
-            payload: 'short',
-            meta: { source: 'dm', sourceId: 'msg-1', playerMessage: 'I take a short rest and pray.' },
-        });
-        const echoed = gameReducer(rested, {
-            type: 'TAKE_REST',
-            payload: 'short',
-            meta: { source: 'dm', sourceId: 'msg-2', playerMessage: 'I pick up where I left off and look around to see what has changed while I was resting.' },
-        });
-        expect(echoed.messages).toHaveLength(rested.messages.length);
-        const rememberedPast = gameReducer(rested, {
-            type: 'TAKE_REST',
-            payload: 'short',
-            meta: { source: 'dm', sourceId: 'msg-3', playerMessage: 'Having rested, I ask about the road.' },
-        });
-        expect(rememberedPast.messages).toHaveLength(rested.messages.length);
-        // the present-tense frame still asks for one
-        const asksAgain = gameReducer(rested, {
-            type: 'TAKE_REST',
-            payload: 'short',
-            meta: { source: 'dm', sourceId: 'msg-4', playerMessage: "I'm resting here until the storm passes." },
-        });
-        expect(asksAgain.messages.at(-1).content).toContain('Short Rest');
+        for (const playerMessage of ['We make camp and rest for the night again.', 'I grab the rest of the coins and head out.', 'I look around to see what has changed while I was resting.']) {
+            const echoed = gameReducer(wounded, { type: 'TAKE_REST', payload: 'long', meta: { source: 'dm', sourceId: 'msg-2', playerMessage } });
+            expect(echoed.character.currentHP).toBe(5);
+            expect(echoed.messages).toHaveLength(wounded.messages.length + 1);
+            expect(echoed.messages.at(-1)).toMatchObject({ kind: 'recovery', recovery: { status: 'judging', replay: { type: 'TAKE_REST', payload: { rest: 'long' } } } });
+        }
+        const card = gameReducer(wounded, { type: 'TAKE_REST', payload: 'long', meta: { source: 'dm', sourceId: 'msg-2', playerMessage: 'We make camp and rest for the night again.' } });
+        const taken = judgeLatest(card, 'new', 'you camped a second night');
+        expect(taken.character.currentHP).toBe(20);
+        expect(taken.messages.some(m => (m.content || '').includes('Long Rest'))).toBe(true);
+        expect(taken.messages.find(m => m.kind === 'recovery').content).toContain('Checked — a new one');
+        const kept = judgeLatest(card, 'same');
+        expect(kept.character.currentHP).toBe(5);
+        expect(kept.messages.find(m => m.kind === 'recovery').recovery.status).toBe('open');
     });
 
     it('always suppresses an exact same-source replay, even with rest intent', () => {
