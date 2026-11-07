@@ -14,42 +14,26 @@
  * unbounded self-service XP mine (8 click-cycles = a level at any level).
  */
 import { foldExperience, getQuestCompletionXp, isHeroDown, QUEST_INSTANT_XP } from '../../engine/progression.js';
-import { containment, tokenSet } from '../../engine/textMatch.js';
 import { cleanText } from '../../engine/text.js';
 import { conversationalGap } from '../../engine/replayLedger.js';
 import { resolveNpcRef } from '../../engine/npcRoster.js';
 import { gameReducer } from '../gameReducer.js';
 import { normalizeRefToken, systemMessage } from './shared.js';
 
-// Quest-name stopwords: articles/fillers that survive normalizeRefToken but
-// carry no identity ("The Cellar Rats" ≈ "Clear the Cellar Rats").
-const QUEST_NAME_STOP_WORDS = new Set(['the', 'a', 'an', 'of', 'for', 'to', 'and']);
-const questTokens = (name) => tokenSet(String(name || ''), {
-    stopWords: QUEST_NAME_STOP_WORDS,
-    minLength: 2,
-    foldPossessives: true,
-});
-
 /**
- * Fuzzy quest-name identity (rpg-balance-master ruling follow-up, 2026-08-26;
- * the 2026-08-22 Terra playtest P3): a re-phrased completion ("The Relic" for
- * "Find the Relic") used to miss the exact-token match and mint a phantom
- * SECOND completed row via the fallback insert. Same shared textMatch core as
- * the loot audits: symmetric token containment over stopword-stripped names.
+ * A quest's identity is an id the DM echoes, else an exact (normalized) name
+ * — nothing else (identity by reference, lane 3, 2026-11-07; DECISIONS.md
+ * 2026-11-05: no word rule decides whether two LLM strings mean the same
+ * thing). The fuzzy `questNameMatcher` (2026-08-26; symmetric token
+ * containment over stopword-stripped names) that sat under both lanes is
+ * gone: it folded "Deliver letter 2" into "Deliver letter 1" (a one-character
+ * token was not identity), and ACTIVE QUESTS has printed `[id: …]` on every
+ * row since 11-06, so a re-worded name is the DM's to avoid, not the engine's
+ * to guess. The defaults are stated per lane below: a `new` with no exact
+ * match mints a row (a twin is visible and removable, never a silent fold);
+ * a close with no id and no exact name closes nothing and posts one ⚖ line
+ * so the DM can send the id next turn.
  */
-function questNameMatcher(refName) {
-    // The REF side is tokenized ONCE per dispatch (2026-09-27 audit nit): both
-    // `.filter` fallbacks used to re-tokenize it for every row.
-    const setB = questTokens(refName);
-    return (name) => {
-        const setA = questTokens(name);
-        if (setA.size === 0 || setB.size === 0 || containment(setA, setB) < 0.99) return false;
-        // Near-equality, not bare subset: "The Relic of Kel" is "Find the Relic of
-        // Kel" (one dropped verb), but "The Cellar Rats" must NOT swallow "Rats in
-        // the Cellar Shrine" — a name twice as long is a different quest.
-        return Math.min(setA.size, setB.size) / Math.max(setA.size, setB.size) > 0.5;
-    };
-}
 
 // Same caps as the parser boundary (normalizeQuestUpdate): the Quests panel's
 // add form used to dispatch raw input, and a pasted multi-KB name persisted
@@ -251,7 +235,6 @@ export const handlers = {
         };
         const nameToken = normalizeRefToken(payload.name);
         const sameName = quest => !!nameToken && normalizeRefToken(quest.name) === nameToken;
-        const fuzzyMatch = nameToken ? questNameMatcher(payload.name) : () => false;
         // Dedupe matches ACTIVE quests only — deliberate (documented 2026-07-23):
         // a completed/failed quest is table history and stays closed; a new quest
         // reusing its name is a new arc ("Guard the caravan" can recur), never a
@@ -281,13 +264,11 @@ export const handlers = {
                 )],
             };
         }
-        let existing = byId || byName;
-        // Fuzzy fallback, unambiguous only: a re-phrased "updated" must refresh
-        // the tracked arc, not mint a drifted twin beside it.
-        if (!existing && nameToken) {
-            const fuzzy = state.quests.filter(quest => quest.status === 'active' && fuzzyMatch(quest.name));
-            if (fuzzy.length === 1) existing = fuzzy[0];
-        }
+        // No fuzzy rung (lane 3, 2026-11-07): an id or an exact name, else a
+        // new row. A `new` that re-words a live arc mints a visible twin the
+        // player can ✕; an `updated` the DM never opened self-heals into a
+        // row (11-06). Neither is a silent fold into the wrong record.
+        const existing = byId || byName;
         if (existing) {
             // An update APPENDS a stage and never overwrites the agreement
             // (WOW 2026-11-04): the first description is frozen as
@@ -307,11 +288,9 @@ export const handlers = {
                 quests: state.quests.map(quest => quest.id === existing.id
                     ? {
                         ...quest,
-                        // The held text survives a DRIFTED match (2026-10-23
-                        // quests nit): an `updated` carrying the fuzzy short
-                        // form ("The Relic of Kel") used to rename "Find the
-                        // Relic of Kel" to it in the panel and the prompt.
-                        // Only an exact (normalized-equal) name replaces.
+                        // The held text survives an id-matched update whose
+                        // name differs (2026-10-23 quests nit): only an exact
+                        // (normalized-equal) name replaces the spelling.
                         name: (payload.name && sameName(quest)) ? payload.name : quest.name,
                         description: payload.description || quest.description,
                         ...(changed && !quest.agreement && quest.description && { agreement: quest.description }),
@@ -348,7 +327,6 @@ export const handlers = {
         const refName = isObjectRef ? ref.name : ref;
         const nameToken = normalizeRefToken(refName);
         const sameName = (q) => !!nameToken && normalizeRefToken(q.name) === nameToken;
-        const fuzzyMatch = nameToken ? questNameMatcher(refName) : () => false;
         const byId = (q) => !!refId && q.id === refId;
         // Recurring quest names must never rewrite closed-arc history: when a
         // match hits BOTH an active row and a terminal row (arc 2 of a reused
@@ -381,25 +359,22 @@ export const handlers = {
         }
         let targets = isObjectRef && pointedLive ? pointed : named;
         if (targets.length === 0) targets = pointed;
-        let ambiguous = null;
-        if (targets.length === 0 && nameToken) {
-            // Fuzzy fallback before the fallback INSERT: a drifted completion name
-            // ("The Relic" for "Find the Relic") closes the tracked arc instead of
-            // minting a phantom second terminal row. Unambiguous only — active
-            // rows preferred; 2+ candidates are a shared name, and a shared name
-            // is not a quest (the 10-13 `resolveNpcRef` rule): one ⚖ line names
-            // them and nothing is recorded (2026-10-23 quests P2 — the old fall
-            // to the insert minted a THIRD terminal row, no line, no XP).
-            const pool = liveFirst(state.quests.filter(q => fuzzyMatch(q.name)));
-            if (pool.length === 1) targets = pool;
-            else if (pool.length > 1) ambiguous = pool;
-        }
-        if (ambiguous) {
-            const names = ambiguous.map(q => `"${q.name}"`).join(', ');
+        // No fuzzy rung (lane 3, 2026-11-07; was the 2026-08-26 drifted-name
+        // close and the 2026-10-23 ambiguity line): a DM close that names no
+        // tracked id and no exact name closes nothing and mints nothing. The
+        // engine cannot tell a re-worded live quest from a never-tracked one,
+        // or from a finished arc re-closed in new words, without reading
+        // words — and the old fall to a terminal insert was the phantom row
+        // (a twin beside a still-open arc; a second finished copy of a closed
+        // one). One ⚖ line says so; a live quest stays in ACTIVE QUESTS with
+        // its id for the next turn, and a one-reply arc the DM never opened
+        // is recorded by sending `new` beside its close (the instant tier).
+        // The bare-string ✓ (the panel) on a stale id stays a silent no-op.
+        if (targets.length === 0 && isObjectRef && nameToken) {
             return {
                 ...state,
                 messages: [...state.messages, systemMessage(
-                    `⚖ "${cleanText(refName, QUEST_NAME_MAX_LENGTH)}" matches ${ambiguous.length} tracked quests (${names}) — nothing was ${terminalStatus}. Name the one that ended exactly.`,
+                    `⚖ No tracked quest is named "${cleanText(refName, QUEST_NAME_MAX_LENGTH)}" — nothing was ${terminalStatus}. Send the id printed beside it in ACTIVE QUESTS; a job that was never tracked opens with "new" in the same response as its close.`,
                     { dmVisible: true }
                 )],
             };
@@ -519,47 +494,29 @@ export const handlers = {
             }
             return next;
         }
-        // A quest arc opened and resolved in one DM response never existed in
-        // state — record it directly in its finished status as table history
-        // (playtest #14: the premise's letter delivery vanished without a trace).
-        // Only named object refs qualify; a bare id string that matches nothing
-        // (panel buttons, stale ids) stays a no-op.
+        // Nothing matched and the ref carries no name: a bare id string that
+        // matches nothing (panel buttons, stale ids) stays a no-op.
         if (!isObjectRef) return state;
         // An id-only close whose id matches nothing (a stale or invented id)
         // used to return state untouched — the DM closed a quest, the quest
         // stayed in ACTIVE QUESTS, and nothing said it did not land
         // (2026-10-23 quests P2). One line for the DM's window.
-        if (!nameToken) {
-            return {
-                ...state,
-                messages: [...state.messages, systemMessage(
-                    `⚖ No tracked quest has the id "${cleanText(refId, 80)}" — nothing was ${terminalStatus}. Name the quest to close it.`,
-                    { dmVisible: true }
-                )],
-            };
-        }
-        // Never-tracked terminal inserts pay NOTHING (DECISIONS.md 2026-09-04,
-        // revisiting the 2026-08-26 flat instant tier here): this path exists to
-        // record table history (playtest #14 was about the record), and the
-        // terminal row IS the DM-replay guard — a player ✕-ing a finished row and
-        // the DM re-emitting that completion later resurrected it through this
-        // insert and paid again (2026-09-04 audit P2). A DM that opens and closes
-        // an arc in one response still earns the instant tier via ADD_QUEST +
-        // the same-turn gate above. The one row composer refuses a nameless ref.
-        const row = sanitizeQuestRecord({
-            id: ref.id,
-            name: ref.name,
-            description: ref.description,
-            ...resolvePatron(state.npcs, ref.patron),
-            promised: ref.promised,
-            outcome: ref.outcome,
-            status: terminalStatus,
-            openedAtMessage: (state.messages || []).length,
-            closedAtMessage: (state.messages || []).length,
-        });
-        if (!row) return state;
-        if (state.quests.some(quest => quest.id === row.id)) row.id = mintQuestId();
-        return { ...state, quests: [...state.quests, row] };
+        //
+        // The never-tracked terminal INSERT that followed here (2026-08,
+        // playtest #14: an arc opened and resolved in one reply recorded as
+        // table history, paying nothing) is gone with the fuzzy rung (lane 3,
+        // 2026-11-07): the rung was what kept it from minting a finished twin
+        // of an arc re-closed in new words, and with the rung removed every
+        // named miss is the refusal above. A one-reply arc is recorded by
+        // `new` + the close in one response, which the prompt asks for and
+        // the same-turn gate pays at the instant tier.
+        return {
+            ...state,
+            messages: [...state.messages, systemMessage(
+                `⚖ No tracked quest has the id "${cleanText(refId, 80)}" — nothing was ${terminalStatus}. Name the quest to close it.`,
+                { dmVisible: true }
+            )],
+        };
     },
 
     REMOVE_QUEST(state, action) {

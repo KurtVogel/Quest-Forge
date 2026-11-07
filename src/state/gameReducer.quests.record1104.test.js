@@ -176,7 +176,10 @@ describe('the close as a ceremony (slice B)', () => {
         expect(next.session?.chapterCloseSuggested ?? null).toBeNull();
     });
 
-    it('the panel\'s own note and ✓ post no rows and mint no card; a never-tracked close stays silent table history', () => {
+    // The never-tracked close half flipped 2026-11-07 (lane 3): a close that
+    // matches nothing records nothing and says so; the arc is recorded by
+    // `new` beside the close in one response.
+    it('the panel\'s own note and ✓ post no rows and mint no card; a never-tracked close records nothing and posts one ⚖ line', () => {
         let state = gameReducer(withRoster(), { type: 'ADD_QUEST', payload: { name: 'My note', source: 'player' } });
         expect(questRows(state)).toHaveLength(0);
         state = passTurns(state, 4);
@@ -184,8 +187,9 @@ describe('the close as a ceremony (slice B)', () => {
         expect(clicked.messages).toHaveLength(state.messages.length);
         expect((clicked.storyMemory || []).some(c => c.type === 'quest')).toBe(false);
         const untracked = gameReducer(withRoster(), { type: 'COMPLETE_QUEST', payload: { name: 'A One-Reply Errand', description: 'Done in one.', patron: 'Hesper Vane', outcome: 'Paid.' } });
-        expect(untracked.messages).toHaveLength(0);
-        expect(untracked.quests[0]).toMatchObject({ status: 'completed', patron: 'Hesper Vane', patronId: 'npc-hesper', outcome: 'Paid.' });
+        expect(untracked.quests).toHaveLength(0);
+        expect(untracked.messages).toHaveLength(1);
+        expect(untracked.messages[0].content).toContain('No tracked quest is named "A One-Reply Errand"');
         expect((untracked.storyMemory || []).some(c => c.type === 'quest')).toBe(false);
     });
 

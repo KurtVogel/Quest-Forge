@@ -155,15 +155,21 @@ describe('on the close lane an echoed id decides (2026-11-06; was "the id is a h
         expect(next.messages.some(m => /Quest done.*Find the Relic of Kel/.test(m.content || ''))).toBe(true);
     });
 
-    it('an id the record never held falls to the name rungs: an unknown name records its own finished row', () => {
+    // Flipped 2026-11-07 (lane 3): the unknown name no longer records its own
+    // finished row — nothing matched, so nothing is written and one line says so.
+    it('an id the record never held falls to the name rung: an unknown name records nothing and posts ONE ⚖ line', () => {
         const next = gameReducer(twoArcs(), {
             type: 'COMPLETE_QUEST',
             payload: { id: 'q-nope', name: 'Deliver the letter' },
         });
         expect(next.quests.find(q => q.id === 'q-relic').status).toBe('active');
-        expect(next.quests).toHaveLength(3);
-        expect(next.quests.at(-1)).toMatchObject({ name: 'Deliver the letter', status: 'completed' });
+        expect(next.quests.find(q => q.id === 'q-caravan').status).toBe('active');
+        expect(next.quests).toHaveLength(2);
         expect(next.character.exp).toBe(0);
+        const lines = systemLines(next);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toMatchObject({ dmVisible: true });
+        expect(lines[0].content).toContain('No tracked quest is named "Deliver the letter"');
     });
 });
 
@@ -205,7 +211,10 @@ describe('a finished quest never changes its ending (2026-10-23 P2)', () => {
 });
 
 describe('the close lane says what it did not do (2026-10-23 P2)', () => {
-    it('an ambiguous fuzzy close records nothing and posts ONE dmVisible ⚖ line naming the candidates', () => {
+    // Flipped 2026-11-07 (lane 3): there is no fuzzy pool, so no "ambiguous"
+    // case — a name that is not an exact copy of a tracked quest is a miss,
+    // whether it is near two rows or near none. Same outcome, one line.
+    it('a drifted close near two arcs records nothing and posts ONE dmVisible ⚖ line (was the ambiguity line)', () => {
         let state = gameReducer(withHero(), { type: 'ADD_QUEST', payload: { id: 'q-find', name: 'Find the Relic of Kel' } });
         state = gameReducer(state, { type: 'ADD_QUEST', payload: { id: 'q-return', name: 'Return the Relic of Kel' } });
         state = passTurns(state, 3);
@@ -216,20 +225,18 @@ describe('the close lane says what it did not do (2026-10-23 P2)', () => {
         const lines = systemLines(next);
         expect(lines).toHaveLength(1);
         expect(lines[0]).toMatchObject({ dmVisible: true });
-        expect(lines[0].content).toContain('matches 2 tracked quests');
-        expect(lines[0].content).toContain('"Find the Relic of Kel"');
-        expect(lines[0].content).toContain('"Return the Relic of Kel"');
+        expect(lines[0].content).toContain('No tracked quest is named "The Relic of Kel"');
         expect(lines[0].content).toContain('nothing was completed');
     });
 
-    it('a name outside every fuzzy family still records its own table history (the old "ambiguous" pin was never a fuzzy match)', () => {
+    it('a name near no tracked quest records no table history either (was the never-tracked insert)', () => {
         let state = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q-1', name: 'The Cellar Rats' } });
         state = gameReducer(state, { type: 'ADD_QUEST', payload: { id: 'q-2', name: 'Rats in the Cellar Shrine' } });
         const next = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { name: 'Cellar Rats Dealt With', description: 'd' } });
         expect(next.quests.find(q => q.id === 'q-1').status).toBe('active');
         expect(next.quests.find(q => q.id === 'q-2').status).toBe('active');
-        expect(next.quests).toHaveLength(3);
-        expect(systemLines(next)).toHaveLength(0);
+        expect(next.quests).toHaveLength(2);
+        expect(systemLines(next)).toHaveLength(1);
     });
 
     it('an id-only close whose id matches nothing posts ONE dmVisible ⚖ line and changes no row', () => {
@@ -249,16 +256,20 @@ describe('the close lane says what it did not do (2026-10-23 P2)', () => {
 });
 
 describe('the 2026-10-23 nits', () => {
-    it('a fuzzy `updated` keeps the held (longer) name; an exact match still replaces the text', () => {
+    // Flipped 2026-11-07 (lane 3): a drifted `updated` with no id is its own
+    // row now; only an id-matched update with other words keeps the held name.
+    it('an id-matched `updated` keeps the held (longer) name; an exact match still replaces the text; a drifted id-less one is a new row', () => {
         const added = gameReducer(initialGameState, {
             type: 'ADD_QUEST',
             payload: { id: 'q-relic', name: 'Find the Relic of Kel', description: 'Lost long ago.' },
         });
         const drifted = gameReducer(added, { type: 'ADD_QUEST', payload: { name: 'The Relic of Kel', description: 'The trail leads to the vault.' } });
-        expect(drifted.quests).toHaveLength(1);
-        expect(drifted.quests[0]).toMatchObject({ name: 'Find the Relic of Kel', description: 'The trail leads to the vault.' });
+        expect(drifted.quests).toHaveLength(2);
+        expect(drifted.quests[0]).toMatchObject({ name: 'Find the Relic of Kel', description: 'Lost long ago.' });
+        expect(drifted.quests[1]).toMatchObject({ name: 'The Relic of Kel', description: 'The trail leads to the vault.' });
 
         const byGatedId = gameReducer(added, { type: 'ADD_QUEST', payload: { id: 'q-relic', name: 'The Relic of Kel' } });
+        expect(byGatedId.quests).toHaveLength(1);
         expect(byGatedId.quests[0].name).toBe('Find the Relic of Kel');
 
         const exact = gameReducer(added, { type: 'ADD_QUEST', payload: { name: 'Find the relic of Kel!' } });

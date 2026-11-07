@@ -52,27 +52,38 @@ describe('quest identity', () => {
         expect(failed.quests.find(q => q.id === 'quest-rats').status).toBe('active');
     });
 
-    it('records an unmatched named terminal update as finished table history (playtest #14)', () => {
-        // A quest arc the DM opens and resolves in ONE response never existed in
-        // state — the terminal update must record it, not vanish.
+    // Flipped 2026-11-07 (identity by reference, lane 3; was the playtest #14
+    // never-tracked insert): a named close that matches no id and no exact name
+    // records NOTHING and says so. A one-reply arc is recorded by `new` beside
+    // its close in the same response (see "a quest opened and closed in one
+    // response" below); the insert's guess had no way to tell that arc from a
+    // re-worded live quest or a finished one re-closed in new words.
+    it('an unmatched named terminal update records no row and posts ONE dmVisible ⚖ line (was the playtest #14 insert)', () => {
         const completed = gameReducer(initialGameState, {
             type: 'COMPLETE_QUEST',
             payload: { name: "The Ferrywoman's Letter", description: 'Delivered the sealed letter to Aune.' },
         });
-        expect(completed.quests).toHaveLength(1);
-        expect(completed.quests[0]).toMatchObject({
-            name: "The Ferrywoman's Letter",
-            description: 'Delivered the sealed letter to Aune.',
-            status: 'completed',
-        });
+        expect(completed.quests).toHaveLength(0);
+        expect(completed.messages).toHaveLength(1);
+        expect(completed.messages[0]).toMatchObject({ role: 'system', dmVisible: true });
+        expect(completed.messages[0].content).toContain('No tracked quest is named "The Ferrywoman\'s Letter"');
+        expect(completed.messages[0].content).toContain('nothing was completed');
 
         const added = gameReducer(initialGameState, {
             type: 'ADD_QUEST',
             payload: { id: 'quest-debt', name: 'Collect the Debt' },
         });
         const next = gameReducer(added, { type: 'FAIL_QUEST', payload: { name: 'A Quest That Never Was' } });
-        expect(next.quests.find(q => q.id === 'quest-debt').status).toBe('active');
-        expect(next.quests.find(q => q.name === 'A Quest That Never Was')).toMatchObject({ status: 'failed' });
+        expect(next.quests).toHaveLength(1);
+        expect(next.quests[0]).toMatchObject({ id: 'quest-debt', status: 'active' });
+        expect(next.messages.at(-1).content).toContain('nothing was failed');
+    });
+
+    it('a quest opened and closed in one response by exact name is recorded and closed (the one-reply arc\'s route)', () => {
+        let state = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { status: 'new', name: 'Carry the net to the hold' } });
+        state = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { name: 'Carry the net to the hold', outcome: 'Stowed.' } });
+        expect(state.quests).toHaveLength(1);
+        expect(state.quests[0]).toMatchObject({ name: 'Carry the net to the hold', status: 'completed', outcome: 'Stowed.' });
     });
 
     it('keeps unmatched bare-string terminal refs as no-ops (panel buttons, stale ids)', () => {
@@ -161,12 +172,16 @@ describe('REMOVE_QUEST and bare-id completion (2026-08-04 queue P2)', () => {
         expect(added.quests[0].name).toHaveLength(160);
         expect(added.quests[0].description).toHaveLength(800);
 
-        const inserted = gameReducer(initialGameState, {
+        // The never-tracked terminal insert is gone (lane 3, 2026-11-07): a
+        // close that matches nothing writes no row, and the ⚖ line it posts
+        // clamps the name it quotes.
+        const refused = gameReducer(initialGameState, {
             type: 'COMPLETE_QUEST',
             payload: { name: longName, description: 'y'.repeat(5000) },
         });
-        expect(inserted.quests[0].name).toHaveLength(160);
-        expect(inserted.quests[0].description).toHaveLength(800);
+        expect(refused.quests).toHaveLength(0);
+        expect(refused.messages).toHaveLength(1);
+        expect(refused.messages[0].content.length).toBeLessThan(400);
     });
 
     it('completes a quest by MATCHED bare id string (the panel button path)', () => {
@@ -233,14 +248,17 @@ describe('engine-owned quest completion XP (rpg-balance-master ruling 2026-08-22
         expect(later.character.exp).toBe(50);
     });
 
-    it('records a never-tracked fallback insert as table history with NO XP (2026-09-04 revisit of the instant tier)', () => {
+    // Flipped 2026-11-07 (lane 3): the never-tracked fallback insert is gone;
+    // the close that matches nothing pays nothing AND records nothing.
+    it('a never-tracked close records no row and pays NO XP (2026-09-04 revisit of the instant tier; the insert gone 2026-11-07)', () => {
         const next = gameReducer(withHero(), {
             type: 'COMPLETE_QUEST',
             payload: { name: "The Ferrywoman's Letter", description: 'Delivered off-screen.' },
         });
-        expect(next.quests[0].status).toBe('completed');
+        expect(next.quests).toHaveLength(0);
         expect(next.character.exp).toBe(0);
-        expect(next.messages).toHaveLength(0);
+        expect(next.messages).toHaveLength(1);
+        expect(next.messages[0].content).toContain('nothing was completed');
     });
 
     it('panel ✓ (bare id ref) completes as bookkeeping only — the + then ✓ XP mine is closed (2026-09-04 P1)', () => {
@@ -266,9 +284,12 @@ describe('engine-owned quest completion XP (rpg-balance-master ruling 2026-08-22
 
         state = passTurns(state, 3);
         const replay = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { id: 'q-rats', name: 'Clear the Cellar Rats' } });
-        expect(replay.quests).toHaveLength(1);
-        expect(replay.quests[0].status).toBe('completed');
-        expect(replay.character.exp).toBe(75); // resurrected as history, never re-paid
+        // Since lane 3 (2026-11-07) the replay resurrects nothing: the row the
+        // player removed stays gone, one ⚖ line says the close landed on no
+        // tracked quest, and the XP is never re-paid.
+        expect(replay.quests).toHaveLength(0);
+        expect(replay.character.exp).toBe(75);
+        expect(replay.messages.at(-1).content).toContain('No tracked quest is named "Clear the Cellar Rats"');
     });
 
     it('pays NOTHING for a failed quest — matched or never-tracked', () => {
@@ -321,31 +342,72 @@ describe('engine-owned quest completion XP (rpg-balance-master ruling 2026-08-22
     });
 });
 
-describe('fuzzy quest-name identity (Terra playtest P3, ruling follow-up 2026-08-26)', () => {
-    it('a drifted completion name closes the tracked quest instead of minting a phantom second row', () => {
+// Flipped 2026-11-07 (identity by reference, lane 3; DECISIONS.md 2026-11-05):
+// the fuzzy `questNameMatcher` (Terra playtest P3, 2026-08-26) is gone. A quest
+// is the id the DM echoes from ACTIVE QUESTS or an exact (normalized) name;
+// a drifted name closes nothing and says so, and a `new` in new words mints a
+// visible twin rather than folding into the wrong arc.
+describe('a quest is an id or an exact name — no word rule decides (lane 3, 2026-11-07; was fuzzy identity 2026-08-26)', () => {
+    it('a drifted completion name closes nothing, mints nothing, and posts ONE dmVisible ⚖ line', () => {
         const added = gameReducer(initialGameState, {
             type: 'ADD_QUEST',
             payload: { id: 'q-relic', name: 'Find the Relic of Kel' },
         });
         const next = gameReducer(added, { type: 'COMPLETE_QUEST', payload: { name: 'The Relic of Kel' } });
         expect(next.quests).toHaveLength(1);
+        expect(next.quests[0]).toMatchObject({ id: 'q-relic', status: 'active' });
+        const lines = next.messages.filter(m => m.role === 'system' && !/^[◆✦✕] \*\*Quest/.test(m.content));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toMatchObject({ dmVisible: true });
+        expect(lines[0].content).toContain('No tracked quest is named "The Relic of Kel"');
+        expect(lines[0].content).toContain('nothing was completed');
+    });
+
+    it('an exact name still closes, case- and punctuation-folded, with no id at all', () => {
+        const added = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { id: 'q-relic', name: 'Find the Relic of Kel' },
+        });
+        const next = gameReducer(added, { type: 'COMPLETE_QUEST', payload: { name: 'find the relic of kel!' } });
+        expect(next.quests).toHaveLength(1);
         expect(next.quests[0]).toMatchObject({ id: 'q-relic', status: 'completed' });
     });
 
-    // Retitled 2026-10-23 (quests P2): these two rows were never a fuzzy family for
-    // this ref (containment 1.0 but a 2/4 size ratio; 2/4 containment), so the insert
-    // is the NO-match path. A genuinely ambiguous close now posts one ⚖ line and
-    // records nothing — gameReducer.quests.queue1023.test.js.
-    it('a name outside every fuzzy family falls through to the fallback insert as its own table history', () => {
+    it('a name that matches no tracked quest records no table history beside live arcs', () => {
         let state = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { id: 'q-1', name: 'The Cellar Rats' } });
         state = gameReducer(state, { type: 'ADD_QUEST', payload: { id: 'q-2', name: 'Rats in the Cellar Shrine' } });
         const next = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { name: 'Cellar Rats Dealt With', description: 'd' } });
         expect(next.quests.find(q => q.id === 'q-1').status).toBe('active');
         expect(next.quests.find(q => q.id === 'q-2').status).toBe('active');
-        expect(next.quests).toHaveLength(3); // recorded as its own table history
+        expect(next.quests).toHaveLength(2);
+        expect(next.messages.filter(m => m.role === 'system' && !/^[◆✦✕] \*\*Quest/.test(m.content))).toHaveLength(1);
     });
 
-    it('a re-emitted completion with drifted phrasing is a harmless terminal re-write — no second row, no XP', () => {
+    it('"Deliver letter 1" and "Deliver letter 2" are two quests; eight numbered errands in one reply are eight rows (the open queue item)', () => {
+        let state = gameReducer(initialGameState, { type: 'ADD_QUEST', payload: { status: 'new', name: 'Deliver letter 1', description: 'to Bram' } });
+        state = gameReducer(state, { type: 'ADD_QUEST', payload: { status: 'new', name: 'Deliver letter 2', description: 'to Ada' } });
+        expect(state.quests.map(q => [q.name, q.description])).toEqual([['Deliver letter 1', 'to Bram'], ['Deliver letter 2', 'to Ada']]);
+        expect(state.quests[0].stages).toBeUndefined();
+
+        let errands = initialGameState;
+        for (let i = 0; i < 8; i++) errands = gameReducer(errands, { type: 'ADD_QUEST', payload: { status: 'new', name: `Errand ${i}` } });
+        expect(errands.quests).toHaveLength(8);
+    });
+
+    it('a `new` that re-words a live arc mints a visible twin — the price of no word rule, pinned on purpose', () => {
+        const added = gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { status: 'new', name: 'Find the Relic of Kel', description: 'Lost long ago.' },
+        });
+        const next = gameReducer(added, { type: 'ADD_QUEST', payload: { status: 'new', name: 'The Relic of Kel', description: 'The trail leads to the vault.' } });
+        expect(next.quests).toHaveLength(2);
+        expect(next.quests[0]).toMatchObject({ name: 'Find the Relic of Kel', description: 'Lost long ago.', status: 'active' });
+        expect(next.quests[1]).toMatchObject({ name: 'The Relic of Kel', status: 'active' });
+        // Both rows carry ids the DM sees in ACTIVE QUESTS; the player can ✕ one.
+        expect(next.quests[0].id).not.toBe(next.quests[1].id);
+    });
+
+    it('a re-emitted completion with drifted phrasing closes nothing, mints nothing and pays nothing', () => {
         const hero = { name: 'Astra', race: 'human', class: 'fighter', level: 2, exp: 0, maxHP: 20, currentHP: 20, abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 }, features: [], classResources: {}, hitDice: { total: 2, remaining: 2, die: 10 } };
         let state = gameReducer({ ...initialGameState, character: hero }, {
             type: 'ADD_QUEST',
@@ -355,20 +417,31 @@ describe('fuzzy quest-name identity (Terra playtest P3, ruling follow-up 2026-08
         const paidOnce = state.character.exp;
         const replay = gameReducer(state, { type: 'COMPLETE_QUEST', payload: { name: 'The Ferry Debt' } });
         expect(replay.quests).toHaveLength(1);
+        expect(replay.quests[0].status).toBe('completed');
         expect(replay.character.exp).toBe(paidOnce);
+        expect(replay.messages.at(-1).content).toContain('No tracked quest is named "The Ferry Debt"');
     });
 
-    it('ADD_QUEST "updated" with a drifted name refreshes the tracked arc instead of duplicating it', () => {
+    it('ADD_QUEST "updated" with a drifted name and no id self-heals into its own row; the tracked arc is untouched', () => {
         const added = gameReducer(initialGameState, {
             type: 'ADD_QUEST',
             payload: { id: 'q-relic', name: 'Find the Relic of Kel', description: 'It was lost long ago.' },
         });
         const next = gameReducer(added, {
             type: 'ADD_QUEST',
-            payload: { name: 'The Relic of Kel', description: 'The trail leads to the sunken vault.' },
+            payload: { status: 'updated', name: 'The Relic of Kel', description: 'The trail leads to the sunken vault.' },
         });
-        expect(next.quests).toHaveLength(1);
-        expect(next.quests[0].description).toBe('The trail leads to the sunken vault.');
+        expect(next.quests).toHaveLength(2);
+        expect(next.quests[0]).toMatchObject({ id: 'q-relic', description: 'It was lost long ago.' });
+        expect(next.quests[1]).toMatchObject({ name: 'The Relic of Kel', description: 'The trail leads to the sunken vault.', status: 'active' });
+
+        // With the id, the same words land on the arc (11-06) and the held name stays.
+        const byId = gameReducer(added, {
+            type: 'ADD_QUEST',
+            payload: { id: 'q-relic', status: 'updated', name: 'The Relic of Kel', description: 'The trail leads to the sunken vault.' },
+        });
+        expect(byId.quests).toHaveLength(1);
+        expect(byId.quests[0]).toMatchObject({ name: 'Find the Relic of Kel', description: 'The trail leads to the sunken vault.' });
     });
 });
 
@@ -449,11 +522,16 @@ describe('a new quest names no id; an update lands on the id it echoes (2026-11-
         expect(opened).not.toHaveProperty('junk');
         expect(sanitizeQuestRecord(opened)).toEqual(opened);
 
-        const closed = gameReducer(initialGameState, {
+        // The terminal insert is gone (lane 3, 2026-11-07): a closed row is an
+        // opened row the close moved, so the twin check rides `new` + the close.
+        const closed = gameReducer(gameReducer(initialGameState, {
+            type: 'ADD_QUEST',
+            payload: { status: 'new', name: 'Deliver the letter', description: 'To the mill.' },
+        }), {
             type: 'COMPLETE_QUEST',
-            payload: { name: 'Deliver the letter', description: 'To the mill.' },
+            payload: { name: 'Deliver the letter', description: 'To the mill.', outcome: 'Delivered.' },
         }).quests[0];
-        expect(closed).toMatchObject({ name: 'Deliver the letter', status: 'completed' });
+        expect(closed).toMatchObject({ name: 'Deliver the letter', status: 'completed', outcome: 'Delivered.' });
         expect(sanitizeQuestRecord(closed)).toEqual(closed);
         // A nameless terminal ref still records nothing.
         expect(gameReducer(initialGameState, { type: 'COMPLETE_QUEST', payload: { id: 'q-9' } }).quests).toHaveLength(0);
