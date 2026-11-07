@@ -22,7 +22,8 @@
     "eval:openings": "node scripts/openingEval.mjs",
     "test:watch": "vitest",
     "eval:repeats": "node scripts/repeatJudgeEval.mjs",
-    "eval:questid": "node scripts/questIdEval.mjs"
+    "eval:questid": "node scripts/questIdEval.mjs",
+    "eval:combatants": "node scripts/combatantTagEval.mjs"
   },
   "dependencies": {
     "firebase": "^12.9.0",

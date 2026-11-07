@@ -230,33 +230,6 @@ describe('Scribe story memory extraction', () => {
         expect(request.systemPrompt).toContain('A player message is not authoritative evidence about external reality');
         expect(request.systemPrompt).toContain('unless the DM narrative explicitly accepts or establishes them');
     });
-
-    it('filters combat survival claims that contradict authoritative engine state', async () => {
-        sendMessage.mockResolvedValue(JSON.stringify({
-            world_facts: [{ fact: 'The Cave-Worg is dead.', category: 'event' }],
-            npc_updates: [],
-            story_memory: [{ type: 'callback', text: 'Vesa killed the Cave-Worg.', subject: 'Cave-Worg' }],
-            location: null,
-        }));
-        const dispatch = vi.fn();
-
-        await runScribe({
-            playerMessage: 'Combat exchange',
-            dmNarrative: 'The Cave-Worg collapses lifeless.',
-            settings: { apiKey: 'test-key', llmProvider: 'gemini' },
-            dispatch,
-            authoritativeContext: {
-                terminal: 'ongoing',
-                postState: {
-                    enemies: [{ name: 'Cave-Worg', hp: 9, maxHp: 32, status: 'active' }],
-                },
-            },
-        });
-
-        expect(sendMessage.mock.calls[0][0].userMessage).toContain('AUTHORITATIVE ENGINE STATE');
-        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_WORLD_FACTS' }));
-        expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'ADD_STORY_MEMORY_CARDS' }));
-    });
 });
 
 describe('buildKnownAppearances', () => {
@@ -1787,72 +1760,6 @@ describe('Scribe narrated-cast audit (queue P1, Codex 2026-08-09)', () => {
             lootAudit: castAudit(),
         });
         expect(dispatch.mock.calls.map(c => c[0]).find(a => a.type === 'CAST_SPELL')).toBeUndefined();
-    });
-});
-
-describe('authoritative-combat filter across every lane (2026-09-01 scribe P2)', () => {
-    beforeEach(() => sendMessage.mockReset());
-    const settings = { apiKey: 'test-key', llmProvider: 'gemini' };
-    const contextWith = (enemy) => ({ terminal: 'ongoing', postState: { enemies: [enemy] } });
-
-    async function runWith(extraction, enemy) {
-        sendMessage.mockResolvedValue(JSON.stringify({ world_facts: [], npc_updates: [], story_memory: [], location: null, ...extraction }));
-        const dispatch = vi.fn();
-        await runScribe({
-            playerMessage: 'Combat exchange',
-            dmNarrative: 'Steel and blood.',
-            settings, dispatch,
-            authoritativeContext: contextWith(enemy),
-        });
-        return dispatch.mock.calls.map(c => c[0]);
-    }
-
-    it('drops a roster update that kills a foe the engine marked fled, and keeps one that agrees', async () => {
-        const dropped = await runWith(
-            { npc_updates: [{ name: 'Chief Kraul', disposition: 'hostile', lastNotes: 'Killed by the hero in the cavern.' }] },
-            { name: 'Chief Kraul', hp: 5, maxHp: 30, status: 'fled' },
-        );
-        expect(dropped.some(a => a.type === 'UPDATE_NPC')).toBe(false);
-
-        const kept = await runWith(
-            { npc_updates: [{ name: 'Chief Kraul', disposition: 'hostile', lastNotes: 'Fled into the dark tunnels, alive and furious.' }] },
-            { name: 'Chief Kraul', hp: 5, maxHp: 30, status: 'fled' },
-        );
-        expect(kept.some(a => a.type === 'UPDATE_NPC' && a.payload.name === 'Chief Kraul')).toBe(true);
-    });
-
-    it('drops a death claim on a foe still ACTIVE and on a foe that surrendered — in facts, cards, and dossiers', async () => {
-        const onActive = await runWith(
-            {
-                world_facts: [{ fact: 'Chief Kraul was slain.', category: 'event' }],
-                story_memory: [{ type: 'callback', text: 'Chief Kraul died screaming.', subject: 'Kraul' }],
-                npc_updates: [{ name: 'Chief Kraul', secrets: 'Dead — finished off by the hero.' }],
-            },
-            { name: 'Chief Kraul', hp: 9, maxHp: 30, status: 'active' },
-        );
-        expect(onActive.some(a => ['ADD_WORLD_FACTS', 'ADD_STORY_MEMORY_CARDS', 'UPDATE_NPC'].includes(a.type))).toBe(false);
-
-        const onSurrendered = await runWith(
-            { npc_updates: [{ name: 'Chief Kraul', agenda: 'None — he lies dead in the mud.' }] },
-            { name: 'Chief Kraul', hp: 2, maxHp: 30, status: 'surrendered' },
-        );
-        expect(onSurrendered.some(a => a.type === 'UPDATE_NPC')).toBe(false);
-    });
-
-    it('drops a survival claim on a DEFEATED foe in the dossier lane too', async () => {
-        const actions = await runWith(
-            { npc_updates: [{ name: 'Chief Kraul', lastNotes: 'Survives the fight, still active in the hills.' }] },
-            { name: 'Chief Kraul', hp: 0, maxHp: 30, status: 'defeated' },
-        );
-        expect(actions.some(a => a.type === 'UPDATE_NPC')).toBe(false);
-    });
-
-    it('leaves roster updates about people who are not snapshot enemies alone', async () => {
-        const actions = await runWith(
-            { npc_updates: [{ name: 'Mira Tammi', disposition: 'grateful', lastNotes: 'Says the ambusher is dead and she can sleep.' }] },
-            { name: 'Chief Kraul', hp: 5, maxHp: 30, status: 'fled' },
-        );
-        expect(actions.some(a => a.type === 'UPDATE_NPC' && a.payload.name === 'Mira Tammi')).toBe(true);
     });
 });
 

@@ -23,7 +23,7 @@ import { captureReflection, captureScribePass, captureUsage } from '../debug/mem
 import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '../engine/worldTempo.js';
 import { getKnownSpells, isSpellcaster } from '../engine/spellcasting.js';
 import { containment, tokenSet } from '../engine/textMatch.js';
-import { findSubjectsInText, nameTokensPresent, textWordSet } from '../engine/textMatch.js';
+import { findSubjectsInText } from '../engine/textMatch.js';
 import { factMemoryItem, queueMemoryItem } from '../engine/vectorMemory.js';
 import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX, NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
@@ -586,58 +586,56 @@ export function capNovelCards(candidates, pool) {
  * @param {object|null} [options.authoritativeContext] - Engine truth that narration cannot override
  */
 /**
- * Does a claim NAME this enemy? Whole words on the textMatch shelf
- * (2026-11-04 scribe P2): the old `claim.includes(name)` read the living
- * "Rat" inside "Ratcatcher Finn was killed" and dropped a true fact and a
- * dossier update. A name with no identifying token ("Ox", "The Ox") falls
- * back to the whole name as a whole-word phrase.
+ * The contradiction filter reads a TAG, never the claim's words (2026-11-07,
+ * identity by reference, lane 1; revises the 11-04 whole-word matcher and the
+ * 09-01 name + verb lists). The Scribe says which snapshot enemy a fact, card
+ * or dossier update states a fate for, by the id it reads in AUTHORITATIVE
+ * ENGINE STATE, and what the claim says became of them. The engine compares
+ * that fate with the snapshot's status: an exact id, a closed list. A claim
+ * with no tag states no fighter's fate and passes, so a namesake ("Rusk's
+ * brother was killed years ago" with a living Rusk in the fight) can no longer
+ * be dropped; the price, taken on purpose, is that an untagged false death
+ * lands. An unknown id or an unknown fate reads as no tag.
  */
-function claimNamesEnemy(words, claim, name) {
-    const present = nameTokensPresent(words, name);
-    if (present !== null) return present;
-    const phrase = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(' ');
-    if (!phrase) return false;
-    const claimWords = claim.split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(' ');
-    return ` ${claimWords} `.includes(` ${phrase} `);
-}
+const COMBATANT_TAG_CAP = 8;
+const COMBATANT_FATES = new Set(['dead', 'alive', 'fled', 'surrendered']);
+const FATES_A_STATUS_ALLOWS = {
+    active: ['alive'],
+    defeated: ['dead'],
+    fled: ['fled', 'alive'],
+    surrendered: ['surrendered', 'alive'],
+};
 
-function contradictsAuthoritativeCombat(value, authoritativeContext) {
-    const claim = String(value || '').toLowerCase();
-    const enemies = authoritativeContext?.postState?.enemies || [];
-    if (enemies.length === 0 || !claim) return false;
-    const words = textWordSet(claim);
-    const deathClaim = /\b(dead|dies|died|killed|slain|lifeless|destroyed|finished off)\b/i;
-    const activeCombatEndedClaim = /\b(defeated|vanquished)\b/i;
-    const aliveClaim = /\b(alive|survives|survived|fighting|active)\b/i;
-    return enemies.some(enemy => {
-        const name = String(enemy.name || '').toLowerCase();
-        if (!name || !claimNamesEnemy(words, claim, name)) return false;
-        if (enemy.status === 'defeated' || (enemy.hp ?? 0) <= 0) return aliveClaim.test(claim);
-        if (enemy.status === 'active') return deathClaim.test(claim) || activeCombatEndedClaim.test(claim);
-        return deathClaim.test(claim);
+export const COMBATANT_TAG_RULE = `COMBATANT TAGS: when a world_fact, a story_memory card, or an npc_update states what became of a fighter listed under "enemies" above, add "combatants": [{ "id": "<that enemy's exact id>", "fate": "dead|alive|fled|surrendered" }] to it. "fate" is what YOUR claim says happened, read from your own words, never a copy of the status above: the engine compares the two. Omit "combatants" when the claim does not say whether that fighter lived, died, fled, or surrendered, and when it concerns anyone else, even someone with a similar name.`;
+
+function contradictsAuthoritativeCombat(claim, authoritativeContext) {
+    const enemies = authoritativeContext?.postState?.enemies;
+    const raw = claim?.combatants;
+    if (!Array.isArray(enemies) || enemies.length === 0 || !raw || typeof raw !== 'object') return false;
+    const tags = (Array.isArray(raw) ? raw : [raw]).slice(0, COMBATANT_TAG_CAP);
+    return tags.some(tag => {
+        const id = typeof tag?.id === 'string' ? tag.id : '';
+        const fate = typeof tag?.fate === 'string' ? tag.fate.trim().toLowerCase() : '';
+        const enemy = id ? enemies.find(candidate => candidate?.id === id) : null;
+        if (!enemy || !COMBATANT_FATES.has(fate)) return false;
+        const allowed = FATES_A_STATUS_ALLOWS[(enemy.hp ?? 0) <= 0 ? 'defeated' : enemy.status];
+        return !!allowed && !allowed.includes(fate);
     });
 }
 
-/**
- * Roster-update twin of the fact/card filter: a dossier update whose NAME is
- * a snapshot enemy is checked on its narrative fields (the claim is built as
- * "name: fields" so the enemy-name presence test matches the same way).
- */
-const NPC_UPDATE_CLAIM_FIELDS = ['lastNotes', 'disposition', 'secrets', 'agenda', 'notes', 'stanceToPlayer', 'relationshipTension', 'bondMoment', 'openThread'];
-function npcUpdateContradictsAuthoritativeCombat(npc, authoritativeContext) {
-    if (!npc || typeof npc !== 'object' || !npc.name) return false;
-    const enemies = authoritativeContext?.postState?.enemies || [];
-    if (enemies.length === 0) return false;
-    const fields = NPC_UPDATE_CLAIM_FIELDS
-        .map(key => {
-            const value = npc[key];
-            if (typeof value === 'string') return value;
-            // bondMoment is `{ text, kind, salience }` since 2026-09-12.
-            return (value && typeof value === 'object' && typeof value.text === 'string') ? value.text : '';
-        })
-        .filter(Boolean);
-    if (fields.length === 0) return false;
-    return contradictsAuthoritativeCombat(`${npc.name}: ${fields.join(' ')}`, authoritativeContext);
+/** The tag is the filter's alone: it never reaches a reducer. */
+function withoutCombatantTag(claim) {
+    if (!claim || typeof claim !== 'object' || Array.isArray(claim)) return claim;
+    const { combatants: _tag, ...rest } = claim;
+    return rest;
+}
+
+function keepUncontradicted(claims, authoritativeContext, describe) {
+    return claims.filter(claim => {
+        if (!contradictsAuthoritativeCombat(claim, authoritativeContext)) return true;
+        console.warn(`[Scribe] Dropped "${describe(claim)}" — contradicts authoritative combat state.`);
+        return false;
+    }).map(withoutCombatantTag);
 }
 
 /**
@@ -731,7 +729,9 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
                 `DM narrative: ${dmNarrative}`,
                 recallTurn ? RECALL_TURN_RULE : null,
                 authoritativeContext
-                    ? `AUTHORITATIVE ENGINE STATE (prose cannot override this): ${JSON.stringify(authoritativeContext)}`
+                    ? `AUTHORITATIVE ENGINE STATE (prose cannot override this): ${JSON.stringify(authoritativeContext)}
+
+${COMBATANT_TAG_RULE}`
                     : null,
                 knownAppearances
                     ? `KNOWN APPEARANCES (established canonical looks — merge new details into these, never contradict or shorten them):\n${knownAppearances}`
@@ -795,7 +795,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         // the reducer owns; a duplicate costs nothing).
         const hasMemoryContext = !!memoryContext && typeof memoryContext === 'object';
         const candidateFacts = (Array.isArray(extracted.world_facts)
-            ? extracted.world_facts.filter(fact => !contradictsAuthoritativeCombat(fact?.fact, authoritativeContext))
+            ? keepUncontradicted(extracted.world_facts, authoritativeContext, fact => fact?.fact)
             : []).slice(0, SCRIBE_SCAN_CAP);
         const factPlan = hasMemoryContext
             ? planWorldFactAdditions(memoryContext.worldFacts, candidateFacts, {
@@ -826,15 +826,11 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
 
         const rosteredNames = [];
         if (Array.isArray(extracted.npc_updates) && extracted.npc_updates.length > 0) {
-            for (const npc of extracted.npc_updates) {
-                // The authoritative-combat filter covers roster updates too
-                // (2026-09-01 scribe P2): a victory narration "killing" a foe
-                // the engine marked fled wrote the death into that NPC's
-                // dossier, which then rode KNOWN NPCs + RAG every turn.
-                if (npcUpdateContradictsAuthoritativeCombat(npc, authoritativeContext)) {
-                    console.warn(`[Scribe] Dropped roster update for "${npc?.name}" — contradicts authoritative combat state.`);
-                    continue;
-                }
+            // The authoritative-combat filter covers roster updates too
+            // (2026-09-01 scribe P2): a victory narration "killing" a foe the
+            // engine marked fled wrote the death into that NPC's dossier,
+            // which then rode KNOWN NPCs + RAG every turn.
+            for (const npc of keepUncontradicted(extracted.npc_updates, authoritativeContext, update => `roster update for ${update?.name}`)) {
                 // Shared classify→dispatch with the journal's npcs_encountered
                 // loop (2026-08-31 P2 — one helper owns the roster boundary);
                 // the gate reads the roster the caller captured (2026-10-22).
@@ -855,9 +851,11 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
         // The cap counts NOVEL cards (2026-10-22 scribe P2): a re-report the
         // reducer would merge into a card on record rides free.
         const candidateCards = (Array.isArray(extracted.story_memory)
-            ? extracted.story_memory
-                .filter(memory => memory && typeof memory === 'object' && !Array.isArray(memory))
-                .filter(memory => !contradictsAuthoritativeCombat(memory.text, authoritativeContext))
+            ? keepUncontradicted(
+                extracted.story_memory.filter(memory => memory && typeof memory === 'object' && !Array.isArray(memory)),
+                authoritativeContext,
+                memory => memory.text,
+            )
             : []).slice(0, SCRIBE_SCAN_CAP);
         const storyMemory = hasMemoryContext && Array.isArray(memoryContext.storyMemory)
             ? capNovelCards(candidateCards, memoryContext.storyMemory)

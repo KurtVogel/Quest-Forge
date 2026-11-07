@@ -1,6 +1,6 @@
 // Pins for the 2026-11-04 strengthening audit (scribe, Lap 2):
-// the recall turn's contract in code, the contradiction filter's identity
-// test, and the director parse's whole-object fallback.
+// the recall turn's contract in code and the director parse's whole-object
+// fallback. The contradiction filter's pins moved to scribe.combatants1107.test.js.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectRecallExtraction, runScribe } from './scribe.js';
 import { tryParseDirectorJson } from './directorUtils.js';
@@ -84,55 +84,6 @@ describe('the recall turn is gated in code, lane by lane (2026-11-04 scribe P1)'
             ],
         });
         expect(projected).toEqual({ world_facts: [], npc_updates: [{ name: 'Tammo', stanceToPlayer: 'Fond of the hero.' }] });
-    });
-});
-
-describe('the contradiction filter names an enemy by whole words (2026-11-04 scribe P2)', () => {
-    beforeEach(() => sendMessage.mockReset());
-
-    async function runAgainst(enemy, extraction) {
-        sendMessage.mockResolvedValue(JSON.stringify({ world_facts: [], npc_updates: [], story_memory: [], location: null, ...extraction }));
-        const dispatch = vi.fn();
-        await runScribe({
-            playerMessage: 'Combat exchange',
-            dmNarrative: 'Steel and blood at the docks.',
-            settings, dispatch,
-            authoritativeContext: { terminal: 'ongoing', postState: { enemies: [enemy] } },
-        });
-        return dispatch.mock.calls.map(c => c[0]);
-    }
-
-    it('a living "Rat" never drops a true fact or dossier about Ratcatcher Finn', async () => {
-        const actions = await runAgainst(
-            { name: 'Rat', hp: 5, maxHp: 5, status: 'active' },
-            {
-                world_facts: [{ fact: 'Ratcatcher Finn was killed by the mob at the docks.', category: 'event' }],
-                npc_updates: [{ name: 'Ratcatcher Finn', lastNotes: 'Killed by the mob.' }],
-            },
-        );
-        expect(actions.some(a => a.type === 'ADD_WORLD_FACTS')).toBe(true);
-        expect(actions.some(a => (a.type === 'UPDATE_NPC' || a.type === 'ADD_NPC') && a.payload.name === 'Ratcatcher Finn')).toBe(true);
-    });
-
-    it('still drops a death claim that names the living rat itself', async () => {
-        const actions = await runAgainst(
-            { name: 'Rat', hp: 5, maxHp: 5, status: 'active' },
-            { world_facts: [{ fact: 'The rat was killed with one blow.', category: 'event' }] },
-        );
-        expect(actions.some(a => a.type === 'ADD_WORLD_FACTS')).toBe(false);
-    });
-
-    it('a short name with no identifying token ("Ox") matches as a whole word only', async () => {
-        const named = await runAgainst(
-            { name: 'Ox', hp: 9, maxHp: 9, status: 'active' },
-            { world_facts: [{ fact: 'The ox is dead in the yard.', category: 'event' }] },
-        );
-        expect(named.some(a => a.type === 'ADD_WORLD_FACTS')).toBe(false);
-        const other = await runAgainst(
-            { name: 'Ox', hp: 9, maxHp: 9, status: 'active' },
-            { world_facts: [{ fact: 'Oxley the drover died of fever last winter.', category: 'event' }] },
-        );
-        expect(other.some(a => a.type === 'ADD_WORLD_FACTS')).toBe(true);
     });
 });
 
