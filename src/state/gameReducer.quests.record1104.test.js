@@ -25,7 +25,8 @@ const withRoster = () => ({
     character: { ...hero },
     currentLocation: 'Saltmere',
     npcs: [
-        { id: 'npc-hesper', name: 'Hesper Vane', rosterTier: 'character', kind: 'character', disposition: 'neutral' },
+        // "Hesper" is an alias the record was taught (lane 6): the patron is an exact name or alias, else text.
+        { id: 'npc-hesper', name: 'Hesper Vane', rosterTier: 'character', kind: 'character', disposition: 'neutral', aliases: ['Hesper'] },
         { id: 'npc-maren-t', name: 'Maren Tull', rosterTier: 'character', kind: 'character', disposition: 'neutral' },
         { id: 'npc-maren-a', name: 'Maren Ashford', rosterTier: 'character', kind: 'character', disposition: 'neutral' },
     ],

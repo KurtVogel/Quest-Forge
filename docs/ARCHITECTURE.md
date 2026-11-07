@@ -212,7 +212,7 @@ order and runs the reflection), `journalEntry.js`, `storyMemory.js` (`curateStor
 per category, a campaign-keyed IndexedDB embedding cache), `textMatch.js` (the shared fuzzy
 tokenizer and presence tokenizer), `retraction.js` (what a deleted message takes with it),
 `recallDossier.js` (the zero-LLM record a "remember when…" question is answered from),
-`commitmentVerifier.js`, `npcRoster.js` (dossier merges, `resolveNpcRef`, impressions, bond
+`commitmentVerifier.js`, `npcRoster.js` (dossier merges, `findNpcByRef` — id / exact name / exact alias, lane 6 — impressions, bond
 moments; `upsertNpc` itself lives in `state/handlers/shared.js`), `relationshipArc.js`
 (`deriveRelationshipStage` / `deriveRelationshipArc`: where the bond stands and how it got there,
 derived from the bond moments on every read, never stored), `heroTells.js`. See `docs/flows/memory-system.md`.

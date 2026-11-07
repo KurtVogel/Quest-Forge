@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { rollHeroTellBeat } from './handlers/heroTells.js';
-import { appendBondMoments, mergeNpcCoreText, resolveNpcRef } from '../engine/npcRoster.js';
+import { appendBondMoments, mergeNpcCoreText } from '../engine/npcRoster.js';
 import { createCharacter } from '../engine/characterUtils.js';
 
 const SCORES = { strength: 16, dexterity: 12, constitution: 14, intelligence: 10, wisdom: 10, charisma: 8 };
@@ -92,12 +92,6 @@ describe('the scene clock is conversational through the reducer (2026-10-19 P2)'
         expect(later.impressions).toEqual([]);
     });
 
-    it('resolveNpcRef: "seen inside the scene window" is judged on the transcript', () => {
-        const tull = { id: 'npc-tull', name: 'Maren Tull', rosterTier: 'character', kind: 'character', lastSeenMessage: 10 };
-        const ashford = { id: 'npc-ashford', name: 'Maren Ashford', rosterTier: 'character', kind: 'character' };
-        expect(resolveNpcRef([tull, ashford], { name: 'Maren' }, { messageCount: 44 }).npc).toBeNull();
-        expect(resolveNpcRef([tull, ashford], { name: 'Maren' }, { messageCount: 44, messages: sparse(44) }).npc).toBe(tull);
-    });
 });
 
 describe('the beat windows are clamped at LOAD_GAME and in the live tick (2026-10-19 P2)', () => {

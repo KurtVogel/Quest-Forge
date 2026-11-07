@@ -432,17 +432,13 @@ describe('companion roster relationship records (one system owns all bonds, 2026
         expect(next.npcs[0].lastNotes).toBe('Argued with the hero over the toll ledger.');
     });
 
-    it('matches existing records by core name so a leading-title variant is not duplicated', () => {
-        const state = makeState({
-            npcs: [{
-                id: 'npc-1', name: 'Captain Kaarina', disposition: 'friendly', rosterTier: 'character', kind: 'character',
-                stanceToPlayer: 'Fond of the hero.',
-            }],
-        });
-        const next = gameReducer(state, {
-            type: 'ADD_COMPANION',
-            payload: { name: 'Kaarina' },
-        });
+    // Flipped 2026-11-08 (lane 6): a leading-title variant is another name
+    // until the record answers to it as an alias; the core-name fold is gone.
+    it('a leading-title variant is matched through an alias, never a core-name fold', () => {
+        const record = { id: 'npc-1', name: 'Captain Kaarina', disposition: 'friendly', rosterTier: 'character', kind: 'character', stanceToPlayer: 'Fond of the hero.' };
+        const forked = gameReducer(makeState({ npcs: [record] }), { type: 'ADD_COMPANION', payload: { name: 'Kaarina' } });
+        expect(forked.npcs.map(n => n.name)).toEqual(['Captain Kaarina', 'Kaarina']);
+        const next = gameReducer(makeState({ npcs: [{ ...record, aliases: ['Kaarina'] }] }), { type: 'ADD_COMPANION', payload: { name: 'Kaarina' } });
         expect(next.npcs).toHaveLength(1);
     });
 

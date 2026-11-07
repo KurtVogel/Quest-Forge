@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-    appendCallbackHooks, curateNpcsForPrompt, findNamedPeople, findNameTypoTwin, isLabelTension, isNameNamedIn,
+    appendCallbackHooks, curateNpcsForPrompt, findNamedPeople, isLabelTension, isNameNamedIn,
     migrateLegacyNpc, properWordSet,
 } from './npcRoster.js';
 import { applyStoryMemoryDormancy, selectSettleCandidates } from './storyMemory.js';
@@ -135,16 +135,21 @@ describe('NPC fields carry meaning', () => {
         expect(hooks).toEqual(["The toast shared over Riven's dark liquor", 'the ledger he still wants']);
     });
 
-    it('a one-letter slip of a bonded person\'s name is that person', () => {
-        const npcs = [{ name: 'Ketta Mor', stanceToPlayer: 'Lover.' }, { name: 'Jon Hale' }];
-        expect(findNameTypoTwin(npcs, 'Ketta Nor')).toBe(0);
-        expect(findNameTypoTwin(npcs, 'Ketta Morrow')).toBe(-1);
-        expect(findNameTypoTwin(npcs, 'Jon Hall')).toBe(-1); // no bond with the hero: no guess
-        expect(findNameTypoTwin(npcs, 'Ketta')).toBe(-1);
+    // Flipped 2026-11-08 (identity by reference, lane 6): the one-letter typo
+    // twin (2026-10-31) is gone — no word rule decides who a name means. On
+    // the DM lane the slip is HELD for the Scribe to link; on the Scribe lane
+    // (shown every id) it is a new record; a linked slip becomes an alias.
+    it('a one-letter slip of a bonded person\'s name is held for the Scribe (DM lane) or a new record (Scribe lane) — never guessed', () => {
         const state = { ...initialGameState, npcs: [{ id: 'k', name: 'Ketta Mor', rosterTier: 'character', kind: 'character', stanceToPlayer: 'Lover.' }] };
-        const next = gameReducer(state, { type: 'UPDATE_NPC', payload: { name: 'Ketta Nor', lastNotes: 'Took the second watch.' } });
-        expect(next.npcs).toHaveLength(1);
-        expect(next.npcs[0]).toMatchObject({ name: 'Ketta Mor', lastNotes: 'Took the second watch.' });
+        const heldState = gameReducer(state, { type: 'UPDATE_NPC', payload: { name: 'Ketta Nor', lastNotes: 'Took the second watch.' }, meta: { lane: 'dm' } });
+        expect(heldState.npcs).toHaveLength(1);
+        expect(heldState.npcs[0].lastNotes).toBeUndefined();
+        expect(heldState.session.heldNpcUpdates[0]).toMatchObject({ said: 'Ketta Nor' });
+        const linked = gameReducer(heldState, { type: 'LINK_HELD_NPCS', payload: { links: [{ said: 'Ketta Nor', id: 'k' }] } });
+        expect(linked.npcs).toHaveLength(1);
+        expect(linked.npcs[0]).toMatchObject({ name: 'Ketta Mor', lastNotes: 'Took the second watch.', aliases: ['Ketta Nor'] });
+        const scribe = gameReducer(state, { type: 'UPDATE_NPC', payload: { name: 'Ketta Nor', kind: 'character', rosterEligible: true, lastNotes: 'x' }, meta: { lane: 'scribe' } });
+        expect(scribe.npcs.map(n => n.name)).toEqual(['Ketta Mor', 'Ketta Nor']);
     });
 
     it('a witness present twice is named once', () => {

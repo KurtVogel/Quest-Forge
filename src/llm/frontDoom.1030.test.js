@@ -32,9 +32,9 @@ describe('sanitizeFrontDoom: developments', () => {
                 ],
             },
         }, { npcs });
-        expect(out.developments.map(dev => dev.name)).toEqual(['Tammo Reik', 'Saima']);
+        // "Saima" is a short form of "Saima Aallotar": nobody, since lane 6 (an exact name or alias only).
+        expect(out.developments.map(dev => dev.name)).toEqual(['Tammo Reik']);
         expect(out.developments[0]).toMatchObject({ agenda: 'Keep his head down', lastNotes: '' });
-        expect(out.developments[1]).toMatchObject({ agenda: '', lastNotes: 'Sells to the Choir now' });
         expect(out.fact).toBe('The Grey Choir holds the mill.');
     });
 

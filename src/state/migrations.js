@@ -63,6 +63,9 @@ import { applyEarlyDefeat, isLowLevelSolo, stackIdentity, systemMessage } from '
 import { strictFlag } from '../engine/text.js';
 import { listFrontsLeftBehind } from '../engine/regionProfile.js';
 import { applyStoryMemoryDormancy } from '../engine/storyMemory.js';
+import { migrateLegacyNpc, normalizeNpcAliases } from '../engine/npcRoster.js';
+import { heroNameForms } from '../engine/textMatch.js';
+import { legacyFoldForkedNpcs, legacyNamesMatch, legacyPeopleNamesInSave } from './legacyNpcIdentity.js';
 
 /**
  * Save-format version stamped into every persisted payload (persistence.js
@@ -71,8 +74,12 @@ import { applyStoryMemoryDormancy } from '../engine/storyMemory.js';
  *   1–2: pre-pipeline stamps, read by nothing.
  *   3:   versioned-migration pipeline introduced (2026-07-31); the Fighter
  *        level-bonus retirement notice became version-gated.
+ *   4:   identity by reference, lane 6 (2026-11-08): the roster's forks are
+ *        folded ONCE with the frozen fuzzy matcher and every people-name the
+ *        save holds outside the roster is seeded as an alias of the record
+ *        it resolved to; the live roster compares exactly from then on.
  */
-export const CURRENT_SAVE_VERSION = 3;
+export const CURRENT_SAVE_VERSION = 4;
 
 /** Stamped version of a save payload; pre-versioned or junk stamps read as 0. */
 export function getSaveVersion(save) {
@@ -689,6 +696,41 @@ function noticeFighterLevelBonusRetired(save) {
  * fully healed character; each must still be idempotent in its own right
  * (pre-v3 stamps re-enter the gate on every load until re-saved).
  */
+/**
+ * Save version 4 (identity by reference, lane 6, 2026-11-08; DECISIONS.md
+ * decision 4): the one and only run of the fuzzy name identity over an old
+ * save. (1) Forked records fold as LOAD_GAME used to fold them on every load
+ * (`legacyFoldForkedNpcs`, the frozen `dedupeNpcRoster`), the folded name
+ * kept as an alias. (2) Every people-name the save holds outside the roster
+ * (quest patrons, card links, tell witnesses and voices, ledger
+ * counterparties, ties, private-fact knowers) that today's matcher resolved
+ * to exactly ONE record — and no record answers to exactly — becomes that
+ * record's alias, so the exact lookups that replace the matcher still find
+ * it. The hero's own name forms are never aliases. Idempotent: a second run
+ * finds every name already answered to.
+ */
+function seedNpcAliasesAndFoldForks(save) {
+    if (!Array.isArray(save?.npcs) || save.npcs.length === 0) return save;
+    // Typed before and after the fold, so a second run finds nothing to change.
+    const folded = legacyFoldForkedNpcs(save.npcs.filter(npc => npc && typeof npc === 'object').map(npc => migrateLegacyNpc(npc))).map(npc => migrateLegacyNpc(npc));
+    const hero = heroNameForms(save.character?.name || '');
+    const answersTo = (npc, folded) => (typeof npc?.name === 'string' && npc.name.trim().toLowerCase() === folded)
+        || (Array.isArray(npc?.aliases) && npc.aliases.some(alias => typeof alias === 'string' && alias.trim().toLowerCase() === folded));
+    let npcs = folded;
+    for (const said of legacyPeopleNamesInSave({ ...save, npcs })) {
+        const key = said.toLowerCase();
+        if (hero.has(key)) continue;
+        if (npcs.some(npc => answersTo(npc, key))) continue;
+        const candidates = npcs.filter(npc => typeof npc?.name === 'string' && legacyNamesMatch(npc.name, said));
+        if (candidates.length !== 1) continue;
+        const target = candidates[0];
+        npcs = npcs.map(npc => (npc === target
+            ? { ...npc, aliases: normalizeNpcAliases([...(Array.isArray(npc.aliases) ? npc.aliases : []), said], npc.name) }
+            : npc));
+    }
+    return { ...save, npcs };
+}
+
 export const MIGRATIONS = [
     {
         toVersion: 3,
@@ -697,6 +739,14 @@ export const MIGRATIONS = [
             + 'never had the bonus and must not see a false "retired" notice; the '
             + 'levelBonusRetired flag keeps it one-time for older saves.',
         migrate: noticeFighterLevelBonusRetired,
+    },
+    {
+        toVersion: 4,
+        description: 'Identity by reference, lane 6 (DECISIONS.md 2026-11-08): forked roster records '
+            + 'folded once with the frozen fuzzy matcher, and every people-name the save holds outside '
+            + 'the roster seeded as an alias of the one record it resolved to. The live roster compares '
+            + 'ids, exact names and exact aliases from this version on.',
+        migrate: seedNpcAliasesAndFoldForks,
     },
 ];
 

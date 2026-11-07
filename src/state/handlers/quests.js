@@ -16,7 +16,7 @@
 import { foldExperience, getQuestCompletionXp, isHeroDown, QUEST_INSTANT_XP } from '../../engine/progression.js';
 import { cleanText } from '../../engine/text.js';
 import { conversationalGap } from '../../engine/replayLedger.js';
-import { resolveNpcRef } from '../../engine/npcRoster.js';
+import { findNpcByRef } from '../../engine/npcRoster.js';
 import { gameReducer } from '../gameReducer.js';
 import { normalizeRefToken, systemMessage } from './shared.js';
 
@@ -134,16 +134,16 @@ function sanitizeQuestStages(list, stamp) {
 }
 
 /**
- * The patron is a PERSON on the roster when the name resolves (exact, the
- * roster's own short / long fold, or the one namesMatch candidate — the
- * 10-13 `resolveNpcRef` shape; an ambiguous name is kept as text, never a
- * guess). The record keeps the roster's full name and the id, so the Journal
+ * The patron is a PERSON on the roster when the name is a record's exact name
+ * or alias (identity by reference, lane 6, 2026-11-08; the `namesMatch` rung
+ * is gone — "Mira" beside two Miras, or a second Mira met this turn, stays
+ * text). The record keeps the roster's full name and the id, so the Journal
  * and the prompt can tie the job to the person who gave it.
  */
 function resolvePatron(npcs, name) {
     const patron = cleanText(name, QUEST_PATRON_MAX_LENGTH);
     if (!patron) return {};
-    const resolved = resolveNpcRef(npcs, { name: patron });
+    const resolved = findNpcByRef(npcs, { name: patron });
     if (resolved.npc && typeof resolved.npc.name === 'string' && resolved.npc.name.trim()) {
         return { patron: resolved.npc.name.trim().slice(0, QUEST_PATRON_MAX_LENGTH), patronId: String(resolved.npc.id || '') };
     }

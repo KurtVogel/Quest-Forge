@@ -30,7 +30,7 @@
  */
 import { conversationalDistance, describeTurnsAgo } from './replayLedger.js';
 import { itemIdentityMatches } from './textMatch.js';
-import { resolveNpcRef } from './npcRoster.js';
+import { findNpcByRef } from './npcRoster.js';
 import { formatCurrency } from './currency.js';
 import { normalizeItemKey } from '../data/items.js';
 
@@ -168,7 +168,7 @@ export function resolvePartyId(state, party) {
     const known = new Set(npcs.map(npc => String(npc?.name || '').trim().toLowerCase()));
     const companions = (Array.isArray(state?.party) ? state.party : [])
         .filter(member => member?.name && !known.has(String(member.name).trim().toLowerCase()));
-    const { npc } = resolveNpcRef([...npcs, ...companions], { name });
+    const { npc } = findNpcByRef([...npcs, ...companions], { name });
     return npc?.id ? String(npc.id).slice(0, 80) : '';
 }
 

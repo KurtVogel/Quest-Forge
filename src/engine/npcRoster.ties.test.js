@@ -14,7 +14,8 @@ import { gameReducer, initialGameState } from '../state/gameReducer.js';
 
 const person = (id, name, extra = {}) => ({ id, name, rosterTier: 'character', kind: 'character', disposition: 'neutral', ...extra });
 const roster = () => [
-    person('npc-hesper', 'Hesper Vane', { stanceToPlayer: 'Wary respect for the hero.' }),
+    // "Hesper" is an alias the record was taught (lane 6): a tie names people exactly, by name or alias.
+    person('npc-hesper', 'Hesper Vane', { stanceToPlayer: 'Wary respect for the hero.', aliases: ['Hesper'] }),
     person('npc-jethro', 'Jethro Pike'),
     person('npc-maren-t', 'Maren Tull'),
     person('npc-maren-a', 'Maren Ashford'),

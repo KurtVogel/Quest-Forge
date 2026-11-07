@@ -324,7 +324,7 @@ describe('INSTALL_DOOM_AFTERMATH — the landing, bounded like absence drift', (
                     developments: [
                         { name: 'Miller Ansa', agenda: 'Hide the seed grain from the Brood.' },
                         { name: 'Nobody Known', lastNotes: 'Should not appear.' },
-                        { name: 'Tam', lastNotes: 'A shared name resolves to nobody.' },
+                        { name: 'Reed', lastNotes: 'A short form of a name resolves to nobody (lane 6).' },
                     ],
                     places: [{ name: 'The Mill', lastState: 'Held by the Brood; the wheel turns for them.' }, { name: 'Nowhere', lastState: 'x' }],
                     successors: [successor],
@@ -336,6 +336,7 @@ describe('INSTALL_DOOM_AFTERMATH — the landing, bounded like absence drift', (
         expect(next.npcs).toHaveLength(3);
         expect(next.npcs.find(n => n.id === 'npc-ansa')).toMatchObject({ agenda: 'Hide the seed grain from the Brood.', lastNotes: 'At the mill.' });
         expect(next.npcs.find(n => n.id === 'npc-tam').lastNotes).toBeUndefined();
+        expect(next.npcs.find(n => n.id === 'npc-tam2').lastNotes).toBeUndefined();
         expect(next.locations.find(l => l.id === 'loc-mill').lastState).toBe('Held by the Brood; the wheel turns for them.');
         expect(next.locations).toHaveLength(2);
         const born = next.fronts.find(f => f.title === 'The Brood Tithe');

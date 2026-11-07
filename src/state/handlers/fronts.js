@@ -29,7 +29,7 @@ import { foldExperience, getFrontResolutionMilestoneXp, isHeroDown } from '../..
 import { findLocationRecord, isSameRegion, normalizeLocationRecord, upsertLocation } from '../../engine/locationRegistry.js';
 import { findRegionProfile, listFrontsLeftBehind, recordRegionFaceAttempt, rememberRegionProfile } from '../../engine/regionProfile.js';
 import { detectFrontTurning, INTERLUDE_CONCLUSION_DELAY, mintInterlude, openRegionInterlude } from '../../engine/interlude.js';
-import { namesMatch } from '../../engine/npcRoster.js';
+import { findNpcByRef } from '../../engine/npcRoster.js';
 import { rollDie } from '../../engine/dice.ts';
 import { isRecord } from '../../engine/text.js';
 import { gameReducer } from '../gameReducer.js';
@@ -544,12 +544,13 @@ export const handlers = {
             const agenda = text(dev?.agenda, 300);
             const lastNotes = text(dev?.lastNotes, 400);
             if (!name || !(agenda || lastNotes)) continue;
-            // Exactly ONE roster record, or nobody (the shared-name rule).
-            const matches = npcs.filter(npc => namesMatch(npc.name, name));
-            if (matches.length !== 1) continue;
+            // The record whose exact name or alias the director copied, or
+            // nobody (lane 6: the doom prompt lists the cast by name).
+            const match = findNpcByRef(npcs, { name }).npc;
+            if (!match) continue;
             npcs = upsertNpc(npcs, {
-                ...(matches[0].id && { id: matches[0].id }),
-                name: matches[0].name,
+                ...(match.id && { id: match.id }),
+                name: match.name,
                 ...(agenda && { agenda }),
                 ...(lastNotes && { lastNotes }),
                 _seen: false,

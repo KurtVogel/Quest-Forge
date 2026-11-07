@@ -133,7 +133,8 @@ function factLaneMeta(opts) {
  */
 function npcLaneMeta(opts) {
     const text = opts?.presenceText;
-    return typeof text === 'string' && text.trim() ? { meta: { presenceText: text } } : {};
+    // The DM lane says so (lane 6): a name the record does not know is held for the Scribe, never minted.
+    return { meta: { lane: 'dm', ...(typeof text === 'string' && text.trim() && { presenceText: text }) } };
 }
 
 function applyFightOpeningChannels(events, dispatch, getState, opts) {

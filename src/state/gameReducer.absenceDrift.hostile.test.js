@@ -27,23 +27,28 @@ const pendingState = () => ({
 });
 
 describe('INSTALL_ABSENCE_DRIFT resolves a development to the LOCAL matched record (P2)', () => {
-    it('a bare shared first name rewrites the local NPC, never the first roster match elsewhere', () => {
+    // Flipped 2026-11-08 (lane 6): the director's prompt lists the cast by
+    // name, so a development names a person exactly (name or alias) or nobody.
+    it('the exact local name rewrites the local NPC; a bare shared first name is nobody and installs nothing', () => {
         const state = pendingState();
-        const next = gameReducer(state, {
+        const install = (name) => gameReducer(state, {
             type: 'INSTALL_ABSENCE_DRIFT',
             payload: {
                 sessionId: 'campaign-1',
                 key: 'loc-millhaven|50',
-                drift: { developments: [{ name: 'Maren', lastNotes: 'Married the miller', visible: 'A ring' }], worldFact: '', frontSymptom: '' },
+                drift: { developments: [{ name, lastNotes: 'Married the miller', visible: 'A ring' }], worldFact: '', frontSymptom: '' },
             },
         });
-        const reeds = next.npcs.find(npc => npc.id === 'npc-reeds');
-        const tallow = next.npcs.find(npc => npc.id === 'npc-tallow');
-        expect(reeds.lastNotes).toBe('fen witch');
-        expect(tallow.lastNotes).toContain('Married the miller');
-        expect(next.npcs).toHaveLength(2);
-        // The stored development carries the resolved full name for the away block.
-        expect(next.session.absenceDrift.developments[0].name).toBe('Maren Tallow');
+        const exact = install('Maren Tallow');
+        expect(exact.npcs.find(npc => npc.id === 'npc-reeds').lastNotes).toBe('fen witch');
+        expect(exact.npcs.find(npc => npc.id === 'npc-tallow').lastNotes).toContain('Married the miller');
+        expect(exact.npcs).toHaveLength(2);
+        expect(exact.session.absenceDrift.developments[0].name).toBe('Maren Tallow');
+        const bare = install('Maren');
+        expect(bare.npcs.find(npc => npc.id === 'npc-tallow').lastNotes).toBe('chandler');
+        expect(bare.npcs.find(npc => npc.id === 'npc-reeds').lastNotes).toBe('fen witch');
+        expect(bare.npcs).toHaveLength(2);
+        expect(bare.session.absenceDrift?.developments || []).toEqual([]);
     });
 
     it('a string pending marker never passes the key guard, so nothing installs', () => {

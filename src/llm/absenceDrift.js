@@ -31,7 +31,13 @@ import {
     isAbsenceDriftLocalNpc,
     turnsAway,
 } from '../engine/worldTempo.js';
-import { namesMatch } from '../engine/npcRoster.js';
+import { findNpcByRef } from '../engine/npcRoster.js';
+
+/** The local roster record a director's name copies exactly (lane 6), or null. */
+function localRecordNamed(npcs, name, locationName) {
+    const npc = findNpcByRef(npcs, { name }).npc;
+    return npc && isAbsenceDriftLocalNpc(npc, locationName) ? npc : null;
+}
 
 export { ABSENCE_DRIFT_MIN_AWAY, ABSENCE_DRIFT_WINDOW_MESSAGES, MAX_DRIFT_DEVELOPMENTS };
 
@@ -125,8 +131,7 @@ export function sanitizeAbsenceDrift(raw, { npcs = [], locationName = '' } = {})
             lastNotes: cleanText(dev?.lastNotes || dev?.last_notes, 400),
             visible: cleanText(dev?.visible, 240),
         }))
-        .filter(dev => dev.name && (dev.agenda || dev.lastNotes)
-            && npcs.some(npc => isAbsenceDriftLocalNpc(npc, locationName) && namesMatch(npc.name, dev.name)))
+        .filter(dev => dev.name && (dev.agenda || dev.lastNotes) && !!localRecordNamed(npcs, dev.name, locationName))
         .slice(0, MAX_DRIFT_DEVELOPMENTS);
     return {
         developments,
@@ -178,7 +183,7 @@ export function buildWhileYouWereAwayBlock(absenceDrift, { currentLocation, loca
     const developments = (Array.isArray(absenceDrift.developments) ? absenceDrift.developments : [])
         .map(dev => ({ name: cleanText(dev?.name, 100), detail: cleanText(dev?.visible || dev?.lastNotes, 300) }))
         .filter(dev => dev.name && dev.detail
-            && (!roster || roster.some(npc => namesMatch(npc?.name, dev.name))))
+            && (!roster || !!findNpcByRef(roster, { name: dev.name }).npc))
         .slice(0, MAX_DRIFT_DEVELOPMENTS);
     const fact = cleanText(absenceDrift.fact, 300);
     // Front LIVENESS is judged at render, not at install (2026-09-08 P2): a

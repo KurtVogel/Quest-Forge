@@ -15,7 +15,7 @@ import { campaignStamp } from '../state/handlers/shared.js';
 import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { conversationalGap } from '../engine/replayLedger.js';
-import { BOND_SCENE_WINDOW_MESSAGES, bondKindLabel, curateNpcsForPrompt, dispatchClassifiedNpcUpdate, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
+import { BOND_SCENE_WINDOW_MESSAGES, bondKindLabel, curateNpcsForPrompt, dispatchClassifiedNpcUpdate, isPromptRosterNpc, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
 import { collectKnownRegions, isLocationEvidencedInText, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
 import { regionOfPlace } from '../engine/regionProfile.js';
 import { tryParseDirectorJson } from './directorUtils.js';
@@ -51,6 +51,7 @@ Output ONLY valid JSON:
   ],
   "npc_updates": [
     {
+      "id": "when this person is listed under KNOWN NPCS: that line's exact id, copied — the engine files the update under it. Omit for a person not on that list (a new record)",
       "name": "NPC name",
       "kind": "character|creature|ephemeral",
       "rosterEligible": true,
@@ -92,6 +93,9 @@ Output ONLY valid JSON:
       "source": "scribe"
     }
   ],
+  "name_links": [
+    { "said": "a name exactly as HELD NAMES lists it", "id": "the id of the listed person this name means — or "new" when it is nobody on record" }
+  ],
   "hero_tells": [
     { "id": "ONLY when this is another sighting of a pattern listed under KNOWN HERO TELLS — that tell's exact id; omit for a new one", "text": "a VISIBLE habit, manner, or way of the HERO that a character present could notice, stated as the observable pattern, in plain words WITHOUT a pronoun for the hero ('digs out the pipe and walks off when a conversation turns on the hero'; never 'his pipe' / 'her pipe' — the record must not guess or misstate the hero's gender; 'jokes the moment things get serious'; 'pays double without being asked'; 'never draws first')", "kind": "manner|habit|principle|intimate", "witnesses": ["exact names of the characters who SAW it this turn"], "public": "true ONLY when this sighting happened before uninvolved bystanders (a tavern, a market, a road with travelers) — omit otherwise; never for an intimate tell", "voiced": "true ONLY when a character SAID this pattern about the hero aloud this turn (a tease, a guess, a serious question) — then also give voicedBy; omit otherwise", "voicedBy": "exact name of the character who said it — only with voiced", "sighted": "with voiced: true ONLY if the hero ALSO visibly did the thing this turn (a remark alone is not a sighting)" }
   ],
@@ -117,6 +121,8 @@ Rules:
 - When AUTHORITATIVE ENGINE STATE is provided, it overrides the prose. Never record a combatant dead, alive, fled, surrendered, victorious, or defeated contrary to that state.
 - Keep story_memory compact; do not duplicate ordinary world_facts unless the memory has callback value.
 - When KNOWN STORY CARDS lists a beat and this turn continues, deepens, or restates it, emit it with that card's exact "id" and the COMPLETE updated text so the record is updated in place — never mint a second card for a beat already on record. A card listed as resolved is PAID OFF: never re-report it under any wording (the engine keeps it resolved regardless).
+- A person listed under KNOWN NPCS is named by that line's exact "id" on their npc_updates entry (copy it; the engine files the update under that record whatever spelling the narrative used). A person NOT on that list is new: no id. Never re-word a listed person into a second record.
+- HELD NAMES are names the DM used this turn that match no record exactly; answer EVERY one in name_links with the id of the listed person it means, or "new" when the narrative shows it is nobody on record.
 - Only include npc_updates for NPCs that appeared in this specific exchange
 - ties record one person's regard of ANOTHER recorded person, only when THIS exchange SHOWED it — a warning given about someone, a grudge named, a fondness or deference shown, two people sizing each other up in the room. Never the hero (that is stanceToPlayer), never someone not yet on record, never inferred from roles alone; at most 2 per NPC per turn, and never restate a tie already listed under KNOWN PLAYER-RELATIONSHIP STANCES unless it changed
 - The hero's PARTY COMPANIONS are NPCs for record-keeping: emit npc_updates for them (stanceToPlayer, bondMoment, appearance, personality, goals) exactly like any other character — never skip someone because they travel with the hero. The party is the game's most sustained relationship, so companion stance shifts and bond moments matter MORE than a stranger's, not less.
@@ -396,6 +402,49 @@ export function buildKnownStances({ npcs = [], messages = null } = {}, ...texts)
  * per pass. Compact and capped; established ones first so the Scribe
  * re-reports a sighting by id instead of re-wording it into a twin.
  */
+/**
+ * The people on record the Scribe may name by id (identity by reference,
+ * lane 6, 2026-11-08): every roster person whose name or alias the turn's
+ * texts name, plus every candidate of a held name — one line each,
+ * `id | Full Name (also: alias, alias)`. The Scribe copies the id onto its
+ * npc_updates; a name not here is a new person. Capped; a presence filter
+ * only chooses what is shown (decision 2).
+ */
+export const KNOWN_NPC_ID_CAP = 12;
+export function buildKnownNpcIds({ npcs = [], session = null } = {}, ...texts) {
+    const roster = (Array.isArray(npcs) ? npcs : [])
+        .filter(npc => npc && typeof npc.id === 'string' && npc.id && typeof npc.name === 'string' && npc.name.trim() && isPromptRosterNpc(npc));
+    if (roster.length === 0) return null;
+    const aliasesOf = (npc) => (Array.isArray(npc.aliases) ? npc.aliases.filter(alias => typeof alias === 'string' && alias.trim()) : []);
+    const isPresent = namePresenceIn(roster.flatMap(npc => [npc.name, ...aliasesOf(npc)]), ...texts);
+    const heldIds = new Set((Array.isArray(session?.heldNpcUpdates) ? session.heldNpcUpdates : []).flatMap(entry => (Array.isArray(entry?.candidates) ? entry.candidates : [])));
+    const shown = roster
+        .filter(npc => heldIds.has(npc.id) || isPresent(npc.name) || aliasesOf(npc).some(isPresent))
+        .slice(0, KNOWN_NPC_ID_CAP);
+    if (shown.length === 0) return null;
+    return shown.map(npc => {
+        const aliases = aliasesOf(npc);
+        return `${npc.id} | ${npc.name.trim().slice(0, 80)}${aliases.length > 0 ? ` (also: ${aliases.slice(0, 4).join(', ')})` : ''}`;
+    }).join('\n');
+}
+
+/** The DM names the record did not know this turn, each with its shortlist, for the Scribe to link (rung 3, lane 6). */
+export function buildHeldNames({ session = null, npcs = [] } = {}) {
+    const held = Array.isArray(session?.heldNpcUpdates) ? session.heldNpcUpdates : [];
+    if (held.length === 0) return null;
+    const roster = Array.isArray(npcs) ? npcs : [];
+    return held
+        .filter(entry => entry && typeof entry.said === 'string' && entry.said.trim())
+        .map(entry => {
+            const names = (Array.isArray(entry.candidates) ? entry.candidates : [])
+                .map(id => roster.find(npc => npc?.id === id))
+                .filter(npc => npc && typeof npc.name === 'string')
+                .map(npc => `${npc.id} ${npc.name.trim().slice(0, 80)}`);
+            return `"${entry.said.trim().slice(0, 80)}" — ${names.length > 0 ? `${names.join('; ')}; or "new"` : 'nobody on the roster is a likely match: "new", unless KNOWN NPCS lists the person'}`;
+        })
+        .join('\n');
+}
+
 const KNOWN_HERO_TELL_CAP = 12;
 export function buildKnownHeroTells({ heroTells = [] } = {}) {
     const tells = (Array.isArray(heroTells) ? heroTells : [])
@@ -515,6 +564,8 @@ export function buildScribeContext(state, ...texts) {
         knownOpenPlans: buildKnownOpenPlans(state),
         knownFacts: buildKnownFacts(state, ...texts),
         knownHeroTells: buildKnownHeroTells(state),
+        knownNpcIds: buildKnownNpcIds(state, ...texts),
+        heldNames: buildHeldNames(state),
         knownLocations: buildKnownLocations(state),
         knownLands: buildKnownLands(state),
         // The record the Scribe's facts are judged against before they embed
@@ -668,6 +719,7 @@ export function projectRecallExtraction(extracted) {
 export const SCRIBE_ANCHORS = [
     'world_facts', 'npc_updates', 'story_memory', 'player_appearance', 'location',
     'location_profile', 'travel', 'narrated_loot', 'narrated_payment', 'narrated_losses', 'missing_gear_handoffs', 'narrated_casts', 'hero_tells',
+    'name_links',
 ];
 /** The reflection schema's keys — a quiet cadence honestly answers with the tempo directive alone. */
 export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'settled_cards', 'story_memory', 'tempo_directive', 'front_proposals'];
@@ -680,7 +732,7 @@ export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'settled_car
  */
 export const RECALL_TURN_RULE = 'RECALL TURN: the player asked about the PAST and the DM answered from the engine\'s own record of this campaign. Extract NOTHING new from the answer — no world_facts, no story cards, no location change, no loot, no payment, no appearance — everything it recounts is already on record. The ONE exception: if the remembering itself visibly moved someone (warmth, grief, a grudge surfacing), report that as an npc_updates bondMoment or stanceToPlayer for that person. Emit "world_facts": [] and leave every other field empty.';
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch: commit, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownFacts = null, knownHeroTells = null, knownLocations = null, knownLands = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch: commit, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownFacts = null, knownHeroTells = null, knownLocations = null, knownLands = null, knownNpcIds = null, heldNames = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null }) {
     // Campaign-stamped writes (2026-10-26, the cadence's rule): when the
     // context names the campaign this pass read, every dispatch below carries
     // it and the dispatcher drops the lot once another campaign is live. A
@@ -696,7 +748,7 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
     // a short name the roster holds twice resolves to the person these name
     // in full, or to nobody.
     const laneMeta = typeof sourceMessageId === 'string' && sourceMessageId ? { sourceMessage: sourceMessageId } : null;
-    const npcLaneMeta = { ...(laneMeta || {}), presenceText: `${playerMessage || ''} ${dmNarrative || ''}` };
+    const npcLaneMeta = { ...(laneMeta || {}), lane: 'scribe', presenceText: `${playerMessage || ''} ${dmNarrative || ''}` };
     const background = getBackgroundConfig(settings);
     if (!background.apiKey || !dmNarrative) return;
 
@@ -740,6 +792,12 @@ ${COMBATANT_TAG_RULE}`
                     : null,
                 knownStances
                     ? `KNOWN PLAYER-RELATIONSHIP STANCES (each NPC's established personal stance toward the hero — stanceToPlayer updates must merge with these, never shrink them to this turn's fragment; when two records share a first name, write the FULL name on every update — a bare shared name is recorded for nobody):\n${knownStances}`
+                    : null,
+                knownNpcIds
+                    ? `KNOWN NPCS (people already on record and the id the engine files each under — an npc_updates entry about one of them carries that exact "id"; a name not on this list is a new person with no id):\n${knownNpcIds}`
+                    : null,
+                heldNames
+                    ? `HELD NAMES (the DM used these names this turn and no record answers to them exactly — answer each in name_links with the id of the person it means, or "new"):\n${heldNames}`
                     : null,
                 knownStoryCards
                     ? `KNOWN STORY CARDS (beats already on record for the people and threads in this exchange — update one by its exact "id" instead of minting a duplicate; a resolved card is paid off and must NOT be re-reported):\n${knownStoryCards}`
@@ -789,6 +847,19 @@ ${COMBATANT_TAG_RULE}`
         // Weirs ferry" minted a fact, a card, an appearance merge, and a full
         // SET_LOCATION to the remembered place (the arrival tail with it).
         const extracted = recallTurn ? projectRecallExtraction(parsed) : parsed;
+
+        // Rung 3 answers (identity by reference, lane 6): every held name gets
+        // its verdict, or a pass counted toward its drop. Read from the raw
+        // reply — a recall turn still answers for the names it was shown.
+        if (heldNames) {
+            const links = (Array.isArray(parsed?.name_links) ? parsed.name_links : [])
+                .filter(link => link && typeof link === 'object' && !Array.isArray(link) && typeof link.said === 'string' && typeof link.id === 'string')
+                .map(link => ({ said: link.said.trim().slice(0, 80), id: link.id.trim().slice(0, 80) }))
+                .filter(link => link.said && link.id)
+                .slice(0, 8);
+            dispatch({ type: 'LINK_HELD_NPCS', payload: { links }, ...(laneMeta && { meta: laneMeta }) });
+            if (links.length > 0) console.log(`[Scribe] Linked ${links.length} held name(s): ${links.map(link => `"${link.said}" → ${link.id}`).join(', ')}`);
+        }
 
         // Engine-owned budget backstop: the prompt caps extraction at 2-3 per turn,
         // but a chatty model must not be able to flood the fact/card stores anyway.

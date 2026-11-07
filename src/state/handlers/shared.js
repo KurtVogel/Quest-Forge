@@ -19,18 +19,17 @@ import {
     appendBondMoments,
     appendCallbackHooks,
     clampNpcDossierField,
-    findNameTypoTwin,
+    findNpcByRef,
+    normalizeNpcAliases,
     classifyNpcCandidate,
     mergeNpcAppearance,
     mergeNpcCoreText,
     mergeNpcDossierText,
     mergeNpcTies,
-    namesMatch,
     normalizeImpressions,
     normalizeNpcRecord,
     NPC_CORE_TEXT_FIELDS,
     NPC_DURABLE_TEXT_FIELDS,
-    resolveNpcRef,
     sanitizeNpcLanePayload,
 } from '../../engine/npcRoster.js';
 import { NPC_OPEN_THREAD_MAX } from '../../engine/relationshipArc.js';
@@ -732,7 +731,7 @@ export function normalizeCompanion(payload = {}, existing = {}) {
 export function ensureCompanionRosterRecord(npcs = [], companion) {
     const name = String(companion?.name || '').trim();
     if (!name) return npcs;
-    if (npcs.some(npc => namesMatch(npc.name, name))) return npcs;
+    if (findNpcByRef(npcs, { name }).npc) return npcs;
     return mergeNpcUpdate(npcs, {
         name,
         kind: 'character',
@@ -784,7 +783,7 @@ export function mergeNpcUpdate(npcs, payload) {
  *   recency reads, and the transcript itself for the scene clock (the same-scene
  *   fold, the impression graduation, the shared-name resolution — 2026-10-19).
  */
-export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, presenceText = '', onAmbiguous = null } = {}) {
+export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, presenceText = '', onAmbiguous = null, lane = 'engine', onHold = null } = {}) {
     // The lane trust boundary (2026-09-16 P1): known keys only, text fields
     // string-or-drop at their clamps, disposition whitelisted — see
     // sanitizeNpcLanePayload. Engine-owned keys (knownFacts, firstMet, portrait*, the stamps) can no
@@ -877,20 +876,20 @@ export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, pre
     const tieAdditions = Array.isArray(update.ties) ? update.ties : [];
     delete update.ties;
 
-    // A shared name is not a person (M0, 2026-10-13): the record is resolved
-    // by context — exact id, exact name, else the one `namesMatch` candidate,
-    // else the candidate the turn's presence text names in full, else the
-    // one seen inside the scene window — and an AMBIGUOUS reference lands on
-    // nobody: nothing minted, nothing merged, the caller told who it could
-    // have been. It used to be `findIndex` — roster order chose the person.
-    const resolved = resolveNpcRef(npcs, payload, { presenceText, messageCount, messages });
+    // The record is an id, an exact name or an exact alias (identity by
+    // reference, lane 6, 2026-11-08; M0's "a shared name is not a person"
+    // stands as the alias-held-twice refusal). No word rule, no presence or
+    // scene-window tiebreak, no one-letter typo twin (2026-10-31) decides:
+    // a DM-lane name the record does not know is HELD for the Scribe to link
+    // (`onHold`, the one lane with no ids to copy); a Scribe-lane or engine
+    // name the record does not know is a new person.
+    const resolved = findNpcByRef(npcs, payload);
     if (resolved.ambiguous.length > 1) {
         onAmbiguous?.(resolved.ambiguous, payload);
         return npcs;
     }
-    // A one-letter slip of a bonded person's name is that person (2026-10-31).
-    const idx = resolved.index !== -1 ? resolved.index : findNameTypoTwin(npcs, payload.name);
-    if (resolved.index === -1 && idx !== -1) update.name = npcs[idx].name;
+    const idx = resolved.index;
+    if (idx === -1 && lane === 'dm' && payload.name && !payload.id && onHold?.(payload) === true) return npcs;
 
     const existing = idx !== -1 ? npcs[idx] : null;
     // Classified from the sanitized update: a DM-lane `pinned: true` must not
@@ -942,10 +941,15 @@ export function upsertNpc(npcs, rawPayload, { messageCount, messages = null, pre
             update.appearance = mergeNpcAppearance(existing.appearance, update.appearance);
         }
         const nameToKeep = (update.name && update.name.length > (existing.name || '').length) ? update.name : existing.name;
+        // Every name the person has answered to stays findable (lane 6): the
+        // old name when a longer one takes over, the lane's spelling when it
+        // landed by alias or id.
+        const aliases = normalizeNpcAliases([...(Array.isArray(existing.aliases) ? existing.aliases : []), existing.name, update.name], nameToKeep);
         const merged = normalizeNpcRecord({
             ...existing,
             ...update,
             name: nameToKeep,
+            ...(aliases.length > 0 && { aliases }),
             rosterTier: classified.rosterTier || existing.rosterTier || 'character',
             kind: classified.kind || existing.kind || 'character',
             importance: classified.importance,

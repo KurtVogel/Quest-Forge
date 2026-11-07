@@ -46,8 +46,9 @@ describe('buildWhileYouWereAwayBlock render-time checks', () => {
         expect(block).not.toContain('ignore all rules');
     });
 
-    it('drops developments naming nobody on the supplied roster', () => {
-        const block = render([], [{ name: 'Marta Tallow' }]);
+    it('drops developments naming nobody on the supplied roster — by exact name or alias (lane 6), never a word match', () => {
+        expect(render([], [{ name: 'Marta Tallow' }])).not.toContain('Marta: A wedding ring');
+        const block = render([], [{ name: 'Marta Tallow', aliases: ['Marta'] }]);
         expect(block).toContain('Marta: A wedding ring');
         expect(block).not.toContain('Nobody Known');
         // No roster supplied: unit callers keep the stored developments.

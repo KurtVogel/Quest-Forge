@@ -1100,7 +1100,7 @@ describe('applyEvents dispatch coverage', () => {
 
     it('dispatches npc updates', () => {
         const dispatch = run({ npc_updates: [{ name: 'Captain Voss', disposition: 'hostile' }] });
-        expect(dispatch).toHaveBeenCalledWith({ type: 'UPDATE_NPC', payload: { name: 'Captain Voss', disposition: 'hostile' } });
+        expect(dispatch).toHaveBeenCalledWith({ type: 'UPDATE_NPC', payload: { name: 'Captain Voss', disposition: 'hostile' }, meta: { lane: 'dm' } });
     });
 
     it('a player_death for a leveled party character marks the hero dead and records the death — no narrative continuation (the last chapter, 2026-09-30)', () => {

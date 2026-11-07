@@ -9,7 +9,6 @@ import {
     classifyNpcCandidate,
     clampNpcDossierField,
     curateNpcsForPrompt,
-    dedupeNpcRoster,
     formatNpcEmbeddingText,
     hasNpcNarrativeWeight,
     healPromotedStoryMemoryTwins,
@@ -40,6 +39,7 @@ import {
     isAppearanceFragment,
     mergeNpcAppearance,
 } from './npcRoster.js';
+import { legacyFoldForkedNpcs } from '../state/legacyNpcIdentity.js';
 import { mergeNpcUpdate } from '../state/gameReducer.js';
 
 describe('formatNpcEmbeddingText', () => {
@@ -685,7 +685,10 @@ describe('normalizeCallbackHook — truncation fragments vs healthy hooks (2026-
         expect(healed[2]).toBe('The harbor sergeant remembers her name');
     });
 });
-describe('namesMatch containment + dedupeNpcRoster (fork guard, 2026-07-23 romance playtest)', () => {
+// namesMatch stays as the Scribe's SHORTLIST (lane 6, decision 2); the fold it
+// drove on every load is frozen in state/legacyNpcIdentity.js for the one-time
+// save-version-4 migration (decision 4). The live roster compares exactly.
+describe('namesMatch containment (the shortlist) + the frozen fold (fork guard, 2026-07-23 romance playtest; frozen 2026-11-08)', () => {
     it('folds a bare first name into the full name and keeps distinct people apart', () => {
         expect(namesMatch('Saima', 'Saima Aallotar')).toBe(true);
         expect(namesMatch('Saima Aallotar', 'Saima')).toBe(true);
@@ -700,8 +703,8 @@ describe('namesMatch containment + dedupeNpcRoster (fork guard, 2026-07-23 roman
         expect(namesMatch('a bandit', 'Bandit King Ruho')).toBe(false);
     });
 
-    it('dedupeNpcRoster folds forked records: longer name, merged dossier, unioned moments', () => {
-        const folded = dedupeNpcRoster([
+    it('the frozen fold folds forked records: longer name, merged dossier, unioned moments, the short name kept as an alias', () => {
+        const folded = legacyFoldForkedNpcs([
             {
                 id: 'npc-1', name: 'Saima Aallotar', rosterTier: 'character', kind: 'character',
                 disposition: 'friendly', lastSeen: 100, firstMet: 10,
@@ -731,10 +734,11 @@ describe('namesMatch containment + dedupeNpcRoster (fork guard, 2026-07-23 roman
         expect(saima.stanceToPlayer).toContain('Amused by his wit');
         expect(saima.stanceToPlayer).toContain('Deeply intrigued');
         expect(saima.bondMoments).toHaveLength(2);
+        expect(saima.aliases).toEqual(['Saima']);
     });
 
-    it('dedupeNpcRoster leaves genuinely distinct records untouched', () => {
-        const roster = dedupeNpcRoster([
+    it('the frozen fold leaves genuinely distinct records untouched', () => {
+        const roster = legacyFoldForkedNpcs([
             { id: 'npc-1', name: 'Saima Aallotar', rosterTier: 'character', kind: 'character', disposition: 'friendly' },
             { id: 'npc-2', name: 'Risto', rosterTier: 'character', kind: 'character', disposition: 'neutral' },
             { id: 'npc-3', name: 'The Innkeeper', rosterTier: 'character', kind: 'character', disposition: 'friendly' },
@@ -742,11 +746,15 @@ describe('namesMatch containment + dedupeNpcRoster (fork guard, 2026-07-23 roman
         expect(roster).toHaveLength(3);
     });
 
-    it('upsertNpc routes a bare-first-name update into the full-name record instead of forking', () => {
-        const npcs = mergeNpcUpdate(
-            [{ id: 'npc-1', name: 'Saima Aallotar', rosterTier: 'character', kind: 'character', disposition: 'friendly', stanceToPlayer: 'Guarded but amused.' }],
-            { name: 'Saima', kind: 'character', rosterEligible: true, bondMoment: 'She shared his mug and held his gaze.' }
-        );
+    // Flipped 2026-11-08 (lane 6): the bare first name lands only through an
+    // alias the record was taught (by the Scribe's link or the migration);
+    // without one the engine lane mints, never guesses.
+    it('upsertNpc routes a bare-first-name update into the full-name record ONLY through an alias', () => {
+        const record = { id: 'npc-1', name: 'Saima Aallotar', rosterTier: 'character', kind: 'character', disposition: 'friendly', stanceToPlayer: 'Guarded but amused.' };
+        const update = { name: 'Saima', kind: 'character', rosterEligible: true, bondMoment: 'She shared his mug and held his gaze.' };
+        const forked = mergeNpcUpdate([record], update);
+        expect(forked.map(n => n.name)).toEqual(['Saima Aallotar', 'Saima']);
+        const npcs = mergeNpcUpdate([{ ...record, aliases: ['Saima'] }], update);
         expect(npcs).toHaveLength(1);
         expect(npcs[0].name).toBe('Saima Aallotar');
         expect(npcs[0].bondMoments.map(m => m.text)).toContain('She shared his mug and held his gaze.');

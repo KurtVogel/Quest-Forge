@@ -43,7 +43,7 @@ sequenceDiagram
     Note over Scribe: context = KNOWN appearances, stances, story cards, facts, open plans, hero tells, lands
     Scribe-->>Runner: facts ≤ cap, npc_updates, cards ≤ cap, hero_tells, appearance, audits
     Scribe->>Red: ADD_WORLD_FACTS (meta.sourceMessage) → planWorldFactAdditions again
-    Scribe->>Red: UPDATE_NPC → sanitizeNpcLanePayload → resolveNpcRef → upsertNpc (clause merges, impressions)
+    Scribe->>Red: UPDATE_NPC → sanitizeNpcLanePayload → findNpcByRef (id / exact name / alias; a DM-lane miss is HELD for the Scribe to link) → upsertNpc (clause merges, impressions)
     Scribe->>Red: ADD_STORY_MEMORY_CARDS → findStoryMemoryMatch (merge or mint)
     Scribe->>Red: ADD_HERO_TELLS → recordHeroTells, MERGE_CHARACTER_APPEARANCE, SET_LOCATION
     Scribe->>Vec: queueMemoryItem(factMemoryItem, { carry }) for its accepted facts

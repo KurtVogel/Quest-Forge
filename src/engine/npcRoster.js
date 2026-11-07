@@ -27,6 +27,8 @@ export const NPC_KINDS = new Set(['character', 'creature', 'ephemeral']);
  */
 export const NPC_DISPOSITIONS = new Set(['friendly', 'neutral', 'hostile', 'wary', 'unknown']);
 export const NPC_NAME_MAX = 80;
+/** Other names a person has gone by, kept beside the record (identity by reference, lane 6, 2026-11-08). */
+export const MAX_NPC_ALIASES = 8;
 /**
  * People have ties to each other (WOW 2026-10-07 slice B, built 2026-11-04):
  * one person's regard of ANOTHER recorded person — `{ name, regard, npcId }`,
@@ -68,6 +70,9 @@ export const NPC_RECORD_KEYS = new Set([
     'id', 'kind', 'rosterTier', 'pinned', 'importance', 'disposition', 'trust',
     'bondMoments', 'recentImpressions', 'openThread', 'openThreadMessage', 'openThreadResolvedMessage', 'callbackHooks',
     'ties',
+    // Engine-written only (lane 6): a lane never sends aliases; the record
+    // gains one when the Scribe links a held name, or when a fold renames it.
+    'aliases',
     'knownFacts', 'firstMet', 'lastSeen', 'lastSeenMessage',
     // Joining and leaving are moments (WOW 2026-10-13): the reducer stamps
     // when a companion joined / left the party; never lane-writable.
@@ -905,7 +910,7 @@ export function normalizeNpcTies(list) {
             ...(npcId && { npcId }),
             ...(Number.isFinite(atMessage) && atMessage >= 0 && { atMessage: Math.trunc(atMessage) }),
         };
-        const same = rows.findIndex(held => (npcId && held.npcId === npcId) || namesMatch(held.name, name));
+        const same = rows.findIndex(held => (npcId && held.npcId === npcId) || held.name.toLowerCase() === name.toLowerCase());
         if (same !== -1) rows[same] = row;
         else rows.push(row);
     }
@@ -914,9 +919,9 @@ export function normalizeNpcTies(list) {
 
 /**
  * Merge a lane's `ties` onto a record. Each addition's name must resolve to a
- * ROSTER record (`resolveNpcRef`: exact, the short / long fold, the one
- * namesMatch candidate — an ambiguous name lands on nobody) that is not this
- * person; the record's full name and id are kept, never the lane's spelling.
+ * ROSTER record (`findNpcByRef`: an exact name or alias — lane 6, 2026-11-08;
+ * an alias two records share lands on nobody) that is not this person; the
+ * record's full name and id are kept, never the lane's spelling.
  * A tie to someone the roster does not hold is dropped: a tie never mints a
  * person, and the hero is never on the roster, so "the hero" never qualifies
  * (that is stanceToPlayer).
@@ -928,10 +933,10 @@ export function mergeNpcTies(existing = [], additions = [], { npcs = [], self = 
         const name = cleanText(raw.name, NPC_NAME_MAX);
         const regard = cleanText(raw.regard, NPC_TIE_REGARD_MAX);
         if (!name || !regard) continue;
-        const resolved = resolveNpcRef(npcs, { name });
+        const resolved = findNpcByRef(npcs, { name });
         const person = resolved.npc;
         if (!person || typeof person.name !== 'string' || !person.name.trim()) continue;
-        if (self && ((self.id && person.id === self.id) || namesMatch(self.name, person.name))) continue;
+        if (self && ((self.id && person.id === self.id) || (typeof self.name === 'string' && self.name.trim().toLowerCase() === person.name.trim().toLowerCase()))) continue;
         if (!isPromptRosterNpc(person)) continue;
         incoming.push({
             name: person.name.trim().slice(0, NPC_NAME_MAX),
@@ -1300,9 +1305,9 @@ export function classifyNpcCandidate(payload = {}, existing = null) {
  *
  * @returns {boolean} true when the update was dispatched.
  */
-export function dispatchClassifiedNpcUpdate(dispatch, candidate, meta = null, { npcs = null, messageCount } = {}) {
+export function dispatchClassifiedNpcUpdate(dispatch, candidate, meta = null, { npcs = null } = {}) {
     if (!candidate || typeof candidate !== 'object') return false;
-    const existing = existingRosterRecord(npcs, candidate, meta, messageCount);
+    const existing = existingRosterRecord(npcs, candidate);
     const classified = classifyNpcCandidate(candidate, existing);
     if (!classified.allowRoster) return false;
     const kind = existing?.rosterTier === 'character' ? (existing.kind || 'character') : classified.kind;
@@ -1310,12 +1315,9 @@ export function dispatchClassifiedNpcUpdate(dispatch, candidate, meta = null, { 
     return true;
 }
 
-function existingRosterRecord(npcs, candidate, meta, messageCount) {
+function existingRosterRecord(npcs, candidate) {
     if (!Array.isArray(npcs) || npcs.length === 0) return null;
-    const resolved = resolveNpcRef(npcs, candidate, {
-        presenceText: typeof meta?.presenceText === 'string' ? meta.presenceText : '',
-        messageCount,
-    });
+    const resolved = findNpcByRef(npcs, candidate);
     return resolved.ambiguous.length > 1 ? null : resolved.npc;
 }
 
@@ -1468,17 +1470,48 @@ export function migrateLegacyNpc(npc = {}) {
 
 export function normalizeNpcRecord(npc = {}, { legacy = false } = {}) {
     if (legacy || !npc.rosterTier) {
-        return migrateLegacyNpc(npc);
+        return withNpcAliases(migrateLegacyNpc(npc));
     }
     const rosterTier = NPC_ROSTER_TIERS.has(npc.rosterTier) ? npc.rosterTier : 'character';
     const kind = NPC_KINDS.has(npc.kind) ? npc.kind : (rosterTier === 'archived_creature' ? 'creature' : 'character');
-    return {
+    return withNpcAliases({
         ...migrateLegacyNpc(npc),
         rosterTier,
         kind,
         pinned: !!npc.pinned,
         importance: computeNpcImportance({ ...npc, rosterTier, kind }),
-    };
+    });
+}
+
+/**
+ * The other names a person has gone by (identity by reference, lane 6,
+ * 2026-11-08): strings only, clamped, case-folded unique, never the record's
+ * own name, at most MAX_NPC_ALIASES. A record with none carries no key.
+ */
+export function normalizeNpcAliases(list, name = '') {
+    const own = typeof name === 'string' ? name.trim().toLowerCase() : '';
+    const seen = new Set();
+    const out = [];
+    for (const raw of Array.isArray(list) ? list : []) {
+        if (typeof raw !== 'string') continue;
+        const alias = cleanText(raw, NPC_NAME_MAX);
+        if (!alias) continue;
+        const key = alias.toLowerCase();
+        if (key === own || seen.has(key)) continue;
+        seen.add(key);
+        out.push(alias);
+    }
+    return out.slice(-MAX_NPC_ALIASES);
+}
+
+function withNpcAliases(record) {
+    const aliases = normalizeNpcAliases(record.aliases, record.name);
+    if (aliases.length === 0) {
+        if (!('aliases' in record)) return record;
+        const { aliases: _none, ...rest } = record;
+        return rest;
+    }
+    return { ...record, aliases };
 }
 
 /**
@@ -1545,49 +1578,6 @@ export function findNamedPeople(npcs = [], { playerText = '', sceneText = '', lo
         if (found.length >= cap) break;
     }
     return found;
-}
-
-function withinOneEdit(a, b) {
-    if (a === b) return true;
-    if (Math.abs(a.length - b.length) > 1) return false;
-    let i = 0;
-    let j = 0;
-    let edits = 0;
-    while (i < a.length && j < b.length) {
-        if (a[i] === b[j]) { i += 1; j += 1; continue; }
-        edits += 1;
-        if (edits > 1) return false;
-        if (a.length > b.length) i += 1;
-        else if (b.length > a.length) j += 1;
-        else { i += 1; j += 1; }
-    }
-    return edits + (a.length - i) + (b.length - j) <= 1;
-}
-
-/**
- * A one-letter slip of a known person's name (2026-10-31): the Scribe wrote
- * "Ketta Nor" once for the companion Ketta Mor and minted a second person
- * who carried her own contract thread in KNOWN NPCs. A NEW name whose tokens
- * equal a bonded record's (a stance or a moment with the hero) in every place
- * but one non-first token, and that token within one edit (both 3+ letters),
- * is that record. Exactly one such record, or none. Index or -1.
- */
-export function findNameTypoTwin(npcs = [], name) {
-    const tokens = String(typeof name === 'string' ? name : '').toLowerCase().split(/\s+/).filter(Boolean);
-    if (tokens.length < 2) return -1;
-    const matches = [];
-    (Array.isArray(npcs) ? npcs : []).forEach((npc, index) => {
-        const bonded = cleanText(npc?.stanceToPlayer) || (Array.isArray(npc?.bondMoments) && npc.bondMoments.length > 0);
-        if (!bonded || typeof npc?.name !== 'string') return;
-        const held = npc.name.toLowerCase().split(/\s+/).filter(Boolean);
-        if (held.length !== tokens.length || held[0] !== tokens[0]) return;
-        const differing = held.map((token, i) => i).filter(i => held[i] !== tokens[i]);
-        if (differing.length !== 1) return;
-        const a = held[differing[0]];
-        const b = tokens[differing[0]];
-        if (a.length >= 3 && b.length >= 3 && withinOneEdit(a, b)) matches.push(index);
-    });
-    return matches.length === 1 ? matches[0] : -1;
 }
 
 export function isPromptRosterNpc(npc = {}) {
@@ -1992,121 +1982,77 @@ export function namesMatch(name1, name2) {
 }
 
 /**
- * Fold same-person roster records that forked before the namesMatch containment
- * rule existed (LOAD_GAME heal, the dedupeLocationRecords pattern). The record
- * with the LONGER name keeps its identity; dossier prose merges through the
- * normal fragment/restatement policy, bond moments and hooks union with their
- * own dedupe, and current-state fields come from whichever record was seen last.
+ * THE record a lane payload refers to (identity by reference, lane 6,
+ * 2026-11-08; DECISIONS.md 2026-11-05: no word rule decides whether two
+ * LLM-written names mean the same person): the exact id, else the exact
+ * (case-folded) name, else the exact alias — nothing else. An alias two
+ * records share lands on NOBODY (`{ npc: null, ambiguous: [...] }`), as a
+ * shared short name did under the M0 rule of 2026-10-13. The `namesMatch`
+ * containment, the presence-text tiebreak and the scene-window tiebreak that
+ * used to follow are gone from the lookup: a name the record does not know is
+ * the Scribe's to link (the DM lane holds it, `heldNpcUpdates`) or a new
+ * person (the Scribe lane, which was shown every id). `matchedBy` says which
+ * rung answered.
+ * @returns {{ npc: object|null, index: number, ambiguous: object[], matchedBy: 'id'|'name'|'alias'|null }}
  */
-/**
- * A shared name is not a person (memory-research M0, 2026-10-13 — "Stale,
- * Misattributed, or Late": misattribution survives every validity filter;
- * resolve by CONTEXT, abstain when context cannot). THE record a lane payload
- * refers to: the exact id, else the exact (case-folded) name, else the
- * `namesMatch` candidates — ONE is the person; two or more resolve to the one
- * whose FULL name is in the turn's presence text, else to the one seen inside
- * the scene window (`lastSeenMessage` within BOND_SCENE_WINDOW_MESSAGES) if
- * exactly one, else to NOBODY (`{ npc: null, ambiguous: [...] }`). `upsertNpc`
- * and the UPDATE_NPC handler read it: an ambiguous payload mints and merges
- * nothing. It used to be `findIndex` over `namesMatch` — on a roster
- * [Maren Tull, Maren Ashford] a `{ name: 'Maren', bondMoment }` credited the
- * moment to the smith by ROSTER ORDER.
- * @returns {{ npc: object|null, index: number, ambiguous: object[] }}
- */
-export function resolveNpcRef(npcs, payload = {}, { presenceText = '', messageCount, messages = null } = {}) {
+export function findNpcByRef(npcs, payload = {}) {
     const roster = Array.isArray(npcs) ? npcs : [];
-    const none = { npc: null, index: -1, ambiguous: [] };
-    const id = typeof payload?.id === 'string' ? payload.id : '';
+    const none = { npc: null, index: -1, ambiguous: [], matchedBy: null };
+    const id = typeof payload?.id === 'string' ? payload.id.trim() : '';
     const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
     if (id) {
         const index = roster.findIndex(n => n?.id === id);
-        if (index !== -1) return { npc: roster[index], index, ambiguous: [] };
+        if (index !== -1) return { npc: roster[index], index, ambiguous: [], matchedBy: 'id' };
     }
     if (!name) return none;
     const folded = name.toLowerCase();
     const exact = roster.findIndex(n => typeof n?.name === 'string' && n.name.trim().toLowerCase() === folded);
-    if (exact !== -1) return { npc: roster[exact], index: exact, ambiguous: [] };
-    const candidates = roster.map((n, index) => ({ n, index })).filter(({ n }) => namesMatch(n?.name, name));
-    if (candidates.length === 0) return none;
-    if (candidates.length === 1) return { npc: candidates[0].n, index: candidates[0].index, ambiguous: [] };
-    // The FULL name, every identifying token whole-word present — the
-    // any-token rule the presence tagger uses would find "Maren" for both.
-    // When two are fully named ("Old Tam" has the one identifying token
-    // "tam", so "Tam Reed" in the scene names both), the MORE specific full
-    // name — more identifying tokens all present — is the person.
+    if (exact !== -1) return { npc: roster[exact], index: exact, ambiguous: [], matchedBy: 'name' };
+    const byAlias = roster
+        .map((n, index) => ({ n, index }))
+        .filter(({ n }) => Array.isArray(n?.aliases) && n.aliases.some(alias => typeof alias === 'string' && alias.trim().toLowerCase() === folded));
+    if (byAlias.length === 1) return { npc: byAlias[0].n, index: byAlias[0].index, ambiguous: [], matchedBy: 'alias' };
+    if (byAlias.length > 1) return { npc: null, index: -1, ambiguous: byAlias.map(({ n }) => n), matchedBy: null };
+    return none;
+}
+
+/**
+ * Teach a record another name (lane 6): the Scribe linked a held name to this
+ * id. Refused when another record already answers to it (as a name or an
+ * alias) — one name, one person — or when it is this record's own name.
+ */
+export function addNpcAlias(npcs, id, alias) {
+    const roster = Array.isArray(npcs) ? npcs : [];
+    const clean = cleanText(alias, NPC_NAME_MAX);
+    const index = roster.findIndex(n => n?.id === id);
+    if (index === -1 || !clean) return roster;
+    const holder = findNpcByRef(roster, { name: clean });
+    if (holder.npc && holder.npc.id !== id) return roster;
+    if (holder.ambiguous.length > 0) return roster;
+    const record = roster[index];
+    if (typeof record.name === 'string' && record.name.trim().toLowerCase() === clean.toLowerCase()) return roster;
+    const aliases = normalizeNpcAliases([...(Array.isArray(record.aliases) ? record.aliases : []), clean], record.name);
+    return roster.map((n, i) => (i === index ? { ...n, aliases } : n));
+}
+
+/**
+ * The SHORTLIST a held name is shown with (lane 6; decision 2: a matcher may
+ * choose what an LLM is shown, never decide): the roster people whose names
+ * contain or are contained in the said name (`namesMatch`, the one reader it
+ * has left for people), plus everyone the turn's own text names in full — so
+ * "the widow" can be linked to Maren, which no matcher could do. Ids, capped.
+ */
+export const NPC_SHORTLIST_CAP = 6;
+export function shortlistNpcCandidates(npcs, name, { presenceText = '' } = {}) {
+    const roster = (Array.isArray(npcs) ? npcs : []).filter(n => n && typeof n.id === 'string' && typeof n.name === 'string' && n.name.trim() && isPromptRosterNpc(n));
+    const said = typeof name === 'string' ? name.trim() : '';
     const words = cleanText(presenceText) ? textWordSet(presenceText) : null;
-    const namedTokens = (name) => {
-        const tokens = identifyingNameTokens(name);
-        return tokens.length > 0 && tokens.every(token => words.has(token)) ? tokens.length : 0;
+    const fullyNamed = (n) => {
+        if (!words) return false;
+        const tokens = identifyingNameTokens(n.name);
+        return tokens.length > 0 && tokens.every(token => words.has(token));
     };
-    const present = words
-        ? candidates.map(c => ({ ...c, named: namedTokens(c.n.name) })).filter(c => c.named > 0)
-        : [];
-    if (present.length > 0) {
-        const best = Math.max(...present.map(c => c.named));
-        const top = present.filter(c => c.named === best);
-        if (top.length === 1) return { npc: top[0].n, index: top[0].index, ambiguous: [] };
-    }
-    if (Number.isFinite(messageCount)) {
-        const recent = candidates.filter(({ n }) => Number.isFinite(n?.lastSeenMessage)
-            && conversationalGap(n.lastSeenMessage, messageCount, { messages }) <= BOND_SCENE_WINDOW_MESSAGES);
-        if (recent.length === 1) return { npc: recent[0].n, index: recent[0].index, ambiguous: [] };
-    }
-    return { npc: null, index: -1, ambiguous: candidates.map(({ n }) => n) };
-}
-
-export function dedupeNpcRoster(npcs = []) {
-    const kept = [];
-    for (const raw of npcs) {
-        const npc = raw || {};
-        // Forks of ONE person fold (2026-07-23): `namesMatch` folds a short
-        // form into its long form (the shorter token set must be contained in
-        // the longer). Two records that both carry a DISTINCT full name —
-        // "Maren Tull", "Maren Ashford" — never match under that rule, so two
-        // Marens stay two people at load (M0, 2026-10-13; pinned).
-        const matchIdx = kept.findIndex(existing => namesMatch(existing.name, npc.name));
-        if (matchIdx === -1) {
-            kept.push(npc);
-            continue;
-        }
-        const other = kept[matchIdx];
-        // `newer` drives current-state fields; `base` is the other record.
-        const [base, newer] = (npc.lastSeen || 0) >= (other.lastSeen || 0) ? [other, npc] : [npc, other];
-        const longerName = (String(npc.name || '').length > String(other.name || '').length ? npc.name : other.name);
-        const merged = {
-            ...base,
-            ...pruneRecordBlanks(newer),
-            name: longerName,
-            id: other.id || npc.id,
-            firstMet: Math.min(base.firstMet || Infinity, newer.firstMet || Infinity) === Infinity
-                ? undefined
-                : Math.min(base.firstMet || Infinity, newer.firstMet || Infinity),
-            lastSeen: Math.max(base.lastSeen || 0, newer.lastSeen || 0) || undefined,
-            lastSeenMessage: Math.max(base.lastSeenMessage || 0, newer.lastSeenMessage || 0) || undefined,
-            pinned: !!(base.pinned || newer.pinned),
-            trust: Number.isFinite(newer.trust) ? newer.trust : base.trust,
-            kind: base.kind === 'character' || newer.kind === 'character' ? 'character' : (newer.kind || base.kind),
-            rosterTier: base.rosterTier === 'character' || newer.rosterTier === 'character'
-                ? 'character'
-                : (newer.rosterTier || base.rosterTier),
-            bondMoments: appendBondMoments(base.bondMoments, newer.bondMoments),
-            recentImpressions: normalizeImpressions([...(base.recentImpressions || []), ...(newer.recentImpressions || [])]),
-            callbackHooks: appendCallbackHooks(base.callbackHooks, newer.callbackHooks),
-            knownFacts: [...new Set([...(base.knownFacts || []), ...(newer.knownFacts || [])])],
-        };
-        for (const field of NPC_DURABLE_TEXT_FIELDS) {
-            merged[field] = mergeNpcDossierText(base[field], newer[field]);
-        }
-        kept[matchIdx] = normalizeNpcRecord(merged);
-    }
-    return kept;
-}
-
-function pruneRecordBlanks(record) {
-    const out = {};
-    for (const [key, value] of Object.entries(record)) {
-        if (value === '' || value === null || value === undefined) continue;
-        out[key] = value;
-    }
-    return out;
+    const byWords = said ? roster.filter(n => namesMatch(n.name, said)) : [];
+    const inScene = roster.filter(n => fullyNamed(n) && !byWords.includes(n));
+    return [...byWords, ...inScene].slice(0, NPC_SHORTLIST_CAP);
 }

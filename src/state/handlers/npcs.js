@@ -2,7 +2,7 @@
  * NPC roster and locations: upsert/pin/archive/portrait/migration plus the
  * canonical location registry writes.
  */
-import { buildStoryMemoryPromotion, gradeBondMoments, namesMatch, normalizeNpcRecord, resolveNpcRef, selectKeyBondMoments } from '../../engine/npcRoster.js';
+import { addNpcAlias, buildStoryMemoryPromotion, findNpcByRef, gradeBondMoments, normalizeNpcRecord, selectKeyBondMoments, shortlistNpcCandidates } from '../../engine/npcRoster.js';
 import { heroNameForms } from '../../engine/textMatch.js';
 import { TURN_BEAT_TIMING_DIE_SIDES, beatTargets, deriveRelationshipStage, detectBondTurn, isRelationshipBeatExpired, mintTurnBeat, sanitizeRelationshipBeat } from '../../engine/relationshipArc.js';
 import { rollDie } from '../../engine/dice.ts';
@@ -96,9 +96,36 @@ export function archiveNpcBulk(npcs = [], ids = []) {
     ));
 }
 
-/** The record an UPDATE_NPC payload landed on — the same resolution `upsertNpc` made (M0, 2026-10-13). */
-function findTouchedNpc(after = [], payload = {}, context = {}) {
-    return resolveNpcRef(after, payload, context).npc;
+/** The record an UPDATE_NPC payload landed on — the same resolution `upsertNpc` made (M0, 2026-10-13; exact since lane 6). */
+function findTouchedNpc(after = [], payload = {}) {
+    return findNpcByRef(after, payload).npc;
+}
+
+/** A DM-lane name the record does not know waits at most this many Scribe passes for a link. */
+export const HELD_NPC_UPDATE_PASSES = 2;
+/** At most this many held names ride the session at once; the oldest falls off. */
+export const MAX_HELD_NPC_UPDATES = 6;
+
+/**
+ * Rung 3 (identity by reference, lane 6, 2026-11-08): the DM named a person
+ * under a name no record answers to. The DM is shown no ids, so it cannot
+ * say who it meant; the engine HOLDS the payload on the session with a
+ * shortlist (`shortlistNpcCandidates`: the word matches and the cast the
+ * turn names in full) and prints it to the Scribe as HELD NAMES. The Scribe's
+ * `name_links` answers: an id adds the said name as that record's alias and
+ * applies the held payload there (so next time rung 2 catches it and nobody
+ * is asked), "new" mints the person. Unanswered twice, it is dropped with a
+ * console line. A hold never survives a load.
+ */
+function holdNpcUpdate(state, payload, { presenceText = '', messageCount } = {}) {
+    const said = String(payload?.name || '').trim();
+    if (!said) return state;
+    const candidates = shortlistNpcCandidates(state.npcs, said, { presenceText }).map(npc => npc.id);
+    const held = (Array.isArray(state.session?.heldNpcUpdates) ? state.session.heldNpcUpdates : [])
+        .filter(entry => entry && typeof entry.said === 'string' && entry.said.toLowerCase() !== said.toLowerCase());
+    const entry = { said, payload, candidates, passes: 0, atMessage: Number.isFinite(messageCount) ? messageCount : 0 };
+    console.info(`[NPC] Held "${said}" for the Scribe to link${candidates.length > 0 ? ` (${candidates.join(', ')})` : ' (no candidate on the roster)'}.`);
+    return { ...state, session: { ...state.session, heldNpcUpdates: [...held, entry].slice(-MAX_HELD_NPC_UPDATES) } };
 }
 
 /** The presence text a lane threaded on the action's meta (the turn's own texts), or ''. */
@@ -239,6 +266,49 @@ export const handlers = {
     // means the per-turn Scribe and the DM's inline npc_updates can introduce a
     // brand-new NPC the instant it appears, instead of being silently dropped
     // until the next journal pass.
+    /**
+     * The Scribe's answers to HELD NAMES (rung 3, lane 6). Payload
+     * `{ links: [{ said, id }] }`: `id` is a roster id or "new". A linked id
+     * teaches the record the said name and applies the held payload there;
+     * "new" mints the person from the held payload; a held name with no
+     * answer counts a pass and is dropped after HELD_NPC_UPDATE_PASSES.
+     */
+    LINK_HELD_NPCS(state, action) {
+        if (isStaleCampaignAction(state, action)) return state;
+        const held = Array.isArray(state.session?.heldNpcUpdates) ? state.session.heldNpcUpdates : [];
+        if (held.length === 0) return state;
+        const links = (Array.isArray(action.payload?.links) ? action.payload.links : [])
+            .filter(link => link && typeof link.said === 'string' && typeof link.id === 'string')
+            .map(link => ({ said: link.said.trim().toLowerCase(), id: link.id.trim() }));
+        const messageCount = (state.messages || []).length;
+        let npcs = state.npcs || [];
+        const remaining = [];
+        for (const entry of held) {
+            if (!entry || typeof entry.said !== 'string') continue;
+            const link = links.find(l => l.said === entry.said.trim().toLowerCase());
+            const payload = entry.payload && typeof entry.payload === 'object' ? entry.payload : null;
+            if (link && payload && link.id.toLowerCase() === 'new') {
+                npcs = upsertNpc(npcs, { ...payload, name: entry.said }, { messageCount, messages: state.messages, lane: 'engine' });
+                console.info(`[NPC] "${entry.said}" linked as a new person.`);
+                continue;
+            }
+            const target = link && link.id.toLowerCase() !== 'new' ? findNpcByRef(npcs, { id: link.id }).npc : null;
+            if (link && target && payload) {
+                npcs = addNpcAlias(npcs, target.id, entry.said);
+                npcs = upsertNpc(npcs, { ...payload, id: target.id, name: target.name }, { messageCount, messages: state.messages, lane: 'engine' });
+                console.info(`[NPC] "${entry.said}" linked to ${target.id} ${target.name}.`);
+                continue;
+            }
+            const passes = (Number.isFinite(entry.passes) ? entry.passes : 0) + 1;
+            if (passes >= HELD_NPC_UPDATE_PASSES) {
+                console.info(`[NPC] Dropped the held update for "${entry.said}" — the Scribe did not link it in ${passes} passes.`);
+                continue;
+            }
+            remaining.push({ ...entry, passes });
+        }
+        return { ...state, npcs, session: { ...state.session, heldNpcUpdates: remaining } };
+    },
+
     UPDATE_NPC(state, action) {
         // Deepen memory resolves minutes later; a stamp from another campaign
         // or load never writes here (2026-09-13 audit P1 — the chronicle guard).
@@ -257,15 +327,23 @@ export const handlers = {
         }
         const messageCount = (state.messages || []).length;
         const presenceText = presenceTextOf(action);
+        // The lane (lane 6): the DM's payloads carry no ids and are held on a
+        // miss; the Scribe's were shown every id, so a miss is a new person;
+        // the engine's own (companions, directors) mint as before.
+        const lane = action.meta?.lane === 'dm' || action.meta?.lane === 'scribe' ? action.meta.lane : 'engine';
         // An ambiguous reference lands on nobody, said once (M0, 2026-10-13):
         // an infrastructure line (never narrative-eligible) names who it could
-        // have been — "'Maren' could be Maren Tull or Maren Ashford".
+        // have been — "'Maren' could be Maren Tull or Maren Ashford". Since
+        // lane 6 that is an alias two records share.
         let ambiguous = null;
+        let held = null;
         let nextNpcs = upsertNpc(state.npcs, action.payload, {
             messageCount,
             messages: state.messages,
             presenceText,
+            lane,
             onAmbiguous: (candidates) => { ambiguous = candidates; },
+            onHold: (payload) => { held = payload; return true; },
         });
         if (ambiguous) {
             const who = ambiguous.map(n => n.name).filter(Boolean);
@@ -275,8 +353,9 @@ export const handlers = {
                 messages: [...state.messages, systemMessage(`"${String(action.payload?.name || '').trim()}" could be ${who.join(' or ')} — not recorded. The full name settles it.`, { kind: 'error' })],
             };
         }
+        if (held) return holdNpcUpdate(state, held, { presenceText, messageCount });
         if (nextNpcs === state.npcs) return state;
-        let touched = findTouchedNpc(nextNpcs, action.payload, { presenceText, messageCount });
+        let touched = findTouchedNpc(nextNpcs, action.payload);
         // Deepen memory's regrade of the record's EXISTING bond moments
         // (2026-09-12 follow-up) rides the same action so the autosave flush's
         // single-action replay persists it: kind + salience land on ungraded
@@ -692,7 +771,7 @@ export const handlers = {
             // the fen witch "Maren of the Reeds". Resolve to the local record.
             .map(dev => {
                 if (!dev.name || !(dev.agenda || dev.lastNotes)) return null;
-                const local = localNpcs.find(npc => namesMatch(npc.name, dev.name));
+                const local = findNpcByRef(localNpcs, { name: dev.name }).npc;
                 return local ? { ...dev, name: local.name || dev.name, npcId: local.id || null } : null;
             })
             .filter(Boolean)

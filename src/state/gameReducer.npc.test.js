@@ -121,7 +121,13 @@ describe('gameReducer NPC roster gating', () => {
         expect(state1.npcs).toHaveLength(1);
         expect(state1.npcs[0].name).toBe('Lannis');
 
-        const state2 = gameReducer(state1, {
+        // Lane 6 (2026-11-08): the title variant lands on the record only through
+        // an alias (the Scribe's link teaches it); the core-name fold is gone. The
+        // longer name then takes over and the old one stays as an alias.
+        const forked = gameReducer(state1, { type: 'UPDATE_NPC', payload: { name: 'Confessor Lannis', disposition: 'friendly', lastNotes: 'Met Lannis at the solar.' } });
+        expect(forked.npcs.map(n => n.name)).toEqual(['Lannis', 'Confessor Lannis']);
+        const taught = { ...state1, npcs: state1.npcs.map(n => ({ ...n, aliases: ['Confessor Lannis'] })) };
+        const state2 = gameReducer(taught, {
             type: 'UPDATE_NPC',
             payload: {
                 name: 'Confessor Lannis',
@@ -131,6 +137,7 @@ describe('gameReducer NPC roster gating', () => {
         });
         expect(state2.npcs).toHaveLength(1);
         expect(state2.npcs[0].name).toBe('Confessor Lannis');
+        expect(state2.npcs[0].aliases).toEqual(['Lannis']);
         expect(state2.npcs[0].lastNotes).toBe('Met Lannis at the solar.');
 
         // Test case 2: Start with "Confessor Lannis" and update with "Lannis"
@@ -145,7 +152,11 @@ describe('gameReducer NPC roster gating', () => {
         expect(state3.npcs).toHaveLength(1);
         expect(state3.npcs[0].name).toBe('Confessor Lannis');
 
-        const state4 = gameReducer(state3, {
+        // The short form forks on the engine lane without an alias, and lands through one.
+        const forked2 = gameReducer(state3, { type: 'UPDATE_NPC', payload: { name: 'Lannis', disposition: 'friendly', lastNotes: 'Met Lannis at the solar.' } });
+        expect(forked2.npcs.map(n => n.name)).toEqual(['Confessor Lannis', 'Lannis']);
+        const taught3 = { ...state3, npcs: state3.npcs.map(n => ({ ...n, aliases: ['Lannis'] })) };
+        const state4 = gameReducer(taught3, {
             type: 'UPDATE_NPC',
             payload: {
                 name: 'Lannis',
@@ -833,16 +844,21 @@ describe('UPDATE_NPC story-memory promotion (reducer-level pins, 2026-08-30)', (
 
 describe('UPDATE_NPC payload-trust boundary (2026-09-06 scribe P2 + appearance belt P1)', () => {
     const messages = n => Array.from({ length: n }, (_, i) => ({ id: `m${i}`, role: i % 2 ? 'assistant' : 'user', content: `line ${i}` }));
-    const withSaima = () => gameReducer({ ...initialGameState, messages: messages(4) }, {
-        type: 'UPDATE_NPC',
-        payload: {
-            name: 'Saima Aallotar',
-            kind: 'character',
-            disposition: 'friendly',
-            appearance: 'A tall woman with white hair to her waist, grey eyes, a broken nose, and a heavy build; wears a green wool cloak.',
-            trust: 40,
-        },
-    });
+    // The record answers to "Saima" by alias (lane 6, 2026-11-08): these pins are
+    // about the payload-trust boundary, not about how a short name finds its person.
+    const withSaima = () => {
+        const state = gameReducer({ ...initialGameState, messages: messages(4) }, {
+            type: 'UPDATE_NPC',
+            payload: {
+                name: 'Saima Aallotar',
+                kind: 'character',
+                disposition: 'friendly',
+                appearance: 'A tall woman with white hair to her waist, grey eyes, a broken nose, and a heavy build; wears a green wool cloak.',
+                trust: 40,
+            },
+        });
+        return { ...state, npcs: state.npcs.map(npc => ({ ...npc, aliases: ['Saima'] })) };
+    };
 
     it('never lets a name-matched update overwrite the engine-minted id, and never lets a payload id seed a new record', () => {
         const state = withSaima();

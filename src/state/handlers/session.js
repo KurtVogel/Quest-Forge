@@ -26,7 +26,7 @@ import { normalizeCombatExchange } from '../../engine/combatWire.js';
 import { sanitizeFightTally } from '../../engine/fightTally.js';
 import { DEATH_SAVE_OUTCOMES, PLAYER_SNAPSHOT_STATUSES } from '../../engine/deathSaves.js';
 import { normalizeDeathSaves } from '../../engine/rules.js';
-import { archiveDescriptiveLabels, dedupeNpcRoster, healPromotedStoryMemoryTwins, migrateLegacyNpc } from '../../engine/npcRoster.js';
+import { archiveDescriptiveLabels, healPromotedStoryMemoryTwins, migrateLegacyNpc } from '../../engine/npcRoster.js';
 import {
     COMPANION_STATUSES,
     ensureCompanionRosterRecord,
@@ -738,7 +738,8 @@ export const handlers = {
             // unjournaled, a later save re-summarized and duplicated entries.
             // Bumps the LIVE session's nonce (not the save's embedded copy) so
             // re-loading the very save that stamped it still changes the key.
-            session: { ...save.session, loadNonce: (state.session?.loadNonce || 0) + 1 },
+            // A held DM name (lane 6) waits for the Scribe pass of its own turn; a load has no such pass.
+            session: { ...save.session, loadNonce: (state.session?.loadNonce || 0) + 1, heldNpcUpdates: [] },
             user: state.user,
             settings: {
                 ...initialGameState.settings,
@@ -746,16 +747,18 @@ export const handlers = {
             },
             // Companion relationship records ride the NPC roster; mint any that
             // pre-parity saves are missing so every current companion has one.
-            // dedupeNpcRoster first folds records that forked before the
-            // namesMatch containment rule ("Saima" vs "Saima Aallotar").
-            // save.npcs comes through validateSaveState, so the entry-shape
-            // guard (null entries, non-string names) is never bypassed here.
+            // The per-load fuzzy fold (dedupeNpcRoster, 2026-07-23) is gone
+            // (lane 6, 2026-11-08): the save-version-4 migration folded forks
+            // ONCE with the frozen matcher and wrote aliases; the live roster
+            // compares exactly. save.npcs comes through validateSaveState, so
+            // the entry-shape guard (null entries, non-string names) is never
+            // bypassed here.
             // archiveDescriptiveLabels retires pre-2026-09-21 records minted
             // under a description ("A guard sharpening a spear") that carry
             // no bond data — out of the prompt and the recall lane, never deleted.
             npcs: (save.party || []).reduce(
                 (npcs, companion) => ensureCompanionRosterRecord(npcs, companion),
-                archiveDescriptiveLabels(dedupeNpcRoster(save.npcs.map(npc => migrateLegacyNpc(npc))))
+                archiveDescriptiveLabels(save.npcs.map(npc => migrateLegacyNpc(npc)))
             ),
             ui: { ...initialGameState.ui },
         };
