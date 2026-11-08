@@ -22,7 +22,9 @@ Vesa: "Lane 8, story cards". Built in the plan's order (DECISIONS.md 2026-11-08,
 
 **For Vesa's own save:** nothing to do. Existing cards keep their ids; their vector rows gain the id stamp at the next mount's seed.
 
-**Next:** lane 9 (places — stop and review the design first), lane 10 (facts — on evidence: the after arm's four turn-40 misses are all fact retrieval).
+**Lane 9 design review (afternoon the 8th, docs only):** measured on the megacampaign export — the registry sits at the 60-record cap with 91 aliases; of 1,043 stored place strings 362 resolve exactly, 35 only through the fuzzy rung (a third of those wrongly: a tavern to its town, a quarry to its counting shed, "en route to" to the destination), 639 to nothing (dungeon furniture). The damage is in the records: `Cabin` holds two cabins a sea apart, `tunnel` carries Eir-Vael's Crown Way, and the kinship rule chains 90 pairs through such records. The design (`docs/IDENTITY_BY_REFERENCE.md`, lane 9) mirrors lane 6 — exact id / name / alias, the Scribe and the DM copy from KNOWN PLACES, `within` + `place_links` from the Scribe, `same_place` in the reflection, a save-6 migration — and names the hard part: a DM rephrasing must not count as an arrival, so a provisional record holds its arrival tail one pass. Four decisions wait on Vesa.
+
+**Next:** Vesa's four lane 9 answers, then 9A; lane 10 (facts — on evidence: the after arm's four turn-40 misses are all fact retrieval).
 
 ## 2026-11-08 (late night) — identity by reference lane 7: the later reads of people — pushed AND deployed
 

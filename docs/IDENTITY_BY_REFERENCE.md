@@ -221,6 +221,103 @@ both have to hold, and the `[storyMemory] id re-report rewrote card` log counts 
 
 ## Lane 9. Places
 
+### Design review, 2026-11-08 (afternoon) — measured on the megacampaign export, awaiting Vesa's four answers
+
+**What the registry actually holds** (`test-results/my-campaign-healed.json`, the healed megacampaign; the
+measuring script is the session scratchpad's `measure_places.mjs`): 60 records — the `MAX_LOCATIONS` cap, so
+the least-visited non-theater record is already being evicted — 91 aliases on 34 of them, 38 typed, 11 with a
+region, three lands. Of 1,043 stored place strings (641 on cards, 245 on journal entries, 97 `npc.lastLocation`,
+59 `npc.basedIn`, 1 current), **362 resolve exactly** (name or alias), **35 only through the fuzzy rung**, 7 are
+bare land names, and **639 resolve to nothing** under any rule — dungeon furniture ("Deep Rooms" ×25,
+"cavernous hall", "antechamber", "The Vault", "Symmetrical, mirrored halls") that the mint gate rightly refuses.
+So the rung decides 3 % of the stored strings; the records and their aliases carry the world. A second, young
+campaign (`opus-play/opus-flash-5`, 6 records) reads the same: 25 exact, 5 fuzzy, 8 none.
+
+**What the rung decided, read one by one.** Of the 35: about two thirds are right in the way the rung was built
+for ("back alcove of the Drowned Rat" → Drowned Rat; "Salt Queen (at the helm)" → The Salt Queen; "Copper
+Kettle, upstairs room" → Copper Kettle). About a third are wrong or dubious the way lanes 6–8 found their rungs
+wrong: "The Drowned Rat, Oxtooth Gorge" → **Oxtooth** (the tavern lost to its town); "Dunmire quarry" → **Dunmire
+quarry yard counting shed**; "River Ghyll" → **River Ghyll ford**; "Haul road" → **Haul Road Wayside Camp**;
+"Mountain ridges, en route to Oxtooth" → **Oxtooth** (en route is not at); "Ferry crossing near Greywater
+Bridge" → **Greywater Bridge** (near is not at).
+
+**The damage is in the records more than in the lookups.** The registry carries generic records the rungs
+built and then fed: `Cabin` holds "old surveyor's cabin" AND "Stern cabin, Salt Queen" as aliases — two places
+a sea apart folded into one record; `Tavern` holds the Split Keel's rooms; `tunnel` (region Jewelglade) holds
+"The Crown Way Tunnel, Eir-Vael" (the 10-31 finding, still on record); `fissure`, `colonnade`, `chokepoint`,
+`The basin`, `Armory` likewise. The kinship rule (`areRelatedPlaces`) relates 90 of 1,770 record pairs, and
+the chains run through those generic records: `tunnel` ~ seven Eir-Vael places, `Tavern` ~ The Split Keel,
+`Drowned Rat` ~ Tavern, `Cabin` ~ The Salt Queen — this is what hands a far port the home land and chains a
+"known way" across the sea. And the settlement no-fold minted twins where the Scribe typed an inn
+"settlement": `Copper Kettle` (S) beside `The Copper Kettle, Bramblecross`; `Harl Demb's forge` (S) beside
+`Harl Demb's forge, Bramblecross`; `Gatehouse Inn` (S) beside `Gatehouse Inn, Bramblecross`; `The Split
+Wedge` (S) beside `Split Wedge, Dunmire` — four pairs, each eating a slot of the 60.
+
+**The design, mirroring lane 6 (a place is an id, an exact name or an exact alias):**
+
+1. **`findLocationRecord` is the exact id, else the exact case-folded name, else the exact alias.** `isSameLocation`
+   becomes that same equality (its two readers, the fillOnly same-place check and `isStillAtPlace`'s first rung,
+   want "the same record", which the lookup now answers). `namesPlaceWithinSettlement`, `settlementEvidencedRegion`,
+   `areRelatedPlaces` and `dedupeLocationRecords` pass 2 (the containment fold) go. `isSameRegion`,
+   `isRegionNameOnly`, `findPlaceRecordByName` and `resolvePlaceNamedRegion` compare exactly against the names
+   KNOWN LANDS / KNOWN PLACES show. `mergePlaceSignature` is plain length, as with cards. `MAX_ALIASES` 6 → 12
+   (the cap already drops aliases on the busiest records).
+2. **The Scribe copies.** `location`, `location_profile.name` and both ends of `travel` are an exact copy from
+   KNOWN PLACES, or the new place's proper name; a card's / fact's / sighting's `location` is an exact copy or
+   omitted (641 card strings are furniture today — the field earns nothing as free text). `location_profile`
+   gains `"within": "<exact known place>" | null` — the containing place, stated once at mint — and
+   `place_links: [{ "name": "<a place the DM or an earlier pass wrote>", "is": "<exact known place>" }]`, the
+   mirror of lane 6's `name_links`: a provisional record folds INTO the known one by exact names (id and
+   history kept, the provisional name becomes an alias, links re-aimed). A cluster is then one root in the
+   `within` chain; hearsay, drift, region inheritance and the one-cluster hop rule read the chain, never tokens.
+3. **The DM copies too.** A KNOWN PLACES line in the dynamic half — the eight most recently visited names,
+   about 150 bytes — beside the place card; the `location` rule says "the exact name from KNOWN PLACES, or the
+   new place's proper name". A miss mints a provisional record exactly as an unknown name mints one today.
+4. **The reflection gains `same_place: [[keep, drop]]`** from `possibleSamePlacePairs` — names containing one
+   another, or an alias equal to the other's name (today's rung, demoted to a shortlist, decision 2) — folded by
+   id (`MERGE_LOCATION_RECORDS`). This is also how the four settlement twins above heal, by judgment.
+5. **Save version 6: the frozen matcher runs once more** (`legacyPlaceIdentity.js`, the twin of
+   `legacyNpcIdentity.js`): every stored place string that resolves only through the old rung becomes an alias
+   on that record (the 35 above); `within` is seeded from the settlement-comma shape only ("X, Bramblecross" is
+   within Bramblecross — the sane subset of the kinship rule); the generic records are left as they are (a merge
+   cannot be un-folded, and a split is not an operation we have).
+
+**The hard part the plan flagged — the DM's `location` drives arrivals synchronously.** Today a rephrasing of the
+current place ("the back room of the chandlery") is folded by the rung and is NOT an arrival; with exact names it
+mints a provisional record, and `SET_LOCATION`'s "a different record is an arrival" would fire hearsay, drift, the
+visit count and a travel link for a place the hero never left — the forged-stamps class of 2026-08. Two ways out:
+(a) a provisional arrival HOLDS its arrival tail (hearsay selection, drift marker, region seed, link, visit count)
+until the same turn's Scribe pass either links the name to a known place (no arrival; the alias lands) or confirms
+a new one (the tail runs then, one pass late — the hearsay offer and the "while you were away" block appear a turn
+later than today); (b) keep the tail synchronous and accept false arrivals on every rephrasing the DM does not copy.
+I recommend (a): a late offer is invisible to the player, a false arrival rewrites history.
+
+**Proof.** `eval:placeid` (new, Flash, the real `runScribe` + reducer, hand-built turns): a known place under a
+colloquial phrase → exact copy, no mint; a new shop inside a known town → a new record with `within`; a bare land →
+no record; a DM miss → provisional record, then the Scribe's `place_links` folds it; a far port sharing a trade word
+with a home cellar → two records, two lands. Then the live proof: the lands playtest harness
+(`docs/LANDS_PLAYTEST_2026-10-27.md`, two lands and home again) on Flash, counting records minted, twins, and
+wrong folds against the same run on the build before.
+
+**The price.** More records per campaign until the links fold them (the 60-cap bites sooner; raise it to 80 with
+eviction preferring unvisited, childless records); a provisional place shows in the Places tab until the Scribe
+links it (visible, and the fold removes it); a DM short name costs one Scribe pass before the arrival tail runs
+(under (a)); the generic records of old saves stay as they are.
+
+**Slices, if built:** 9A the exact lookups + KNOWN PLACES for the DM + the Scribe's copies and `place_links` + the
+migration's aliases (the `isStillAtPlace` readers keep working through aliases); 9B `within` + the kinship and
+settlement rules retired + regions exact + the held arrival tail; 9C `same_place` in the reflection + the dedupe
+fold retired + the cap and eviction. The eval after 9A and 9B; the live proof after 9B.
+
+**Decisions I need from Vesa before building:** (1) exactness — case-folded exact only, as lane 6 (recommended;
+"The Copper Kettle" and "Copper Kettle" are two names until an alias says otherwise), or also strip a leading
+article; (2) the DM sees a KNOWN PLACES line (recommended) or copies nothing and every DM phrasing goes through the
+Scribe's link; (3) the arrival tail is held one pass for a provisional record (recommended) or stays synchronous;
+(4) the migration seeds `within` from the settlement-comma shape (recommended) or leaves the chain empty for the
+Scribe to fill.
+
+**The proposal as first written (2026-11-06), kept for the site list:**
+
 The largest lane and the one I'd design again after the people lanes have taught us something. Most of its
 sites go through one function, so the fix is concentrated, but the DM's `location` is synchronous and drives
 arrivals.
@@ -307,7 +404,7 @@ Ordered by: the id is already shown to the LLM, a defect closes, nothing else de
 | ~~6~~ | ~~People~~ | **Done 2026-11-08** in three slices (aliases, `findNpcByRef`, `name_links`, the migration; `same_person`, ties by id, `npc.dead`) | 1 queue item closed | |
 | ~~7~~ | ~~People reads~~ | **Done 2026-11-08** | `namesMatch` left decisions; it is `shortlistNamesMatch` now | |
 | ~~8~~ | ~~Story cards~~ | **Done 2026-11-09** (merge lane + nearest cards first; the 40-turn Flash before/after held at turns 20 and 40) | | |
-| 9 | Places | Needs what 6 teaches. **Stop and review the design before building** | `findLocationRecord` fuzzy rung | Large |
+| 9 | Places | Design reviewed 2026-11-08 on the megacampaign export (the rung decides 3 % of stored strings, a third of those wrongly; the records carry the damage); four decisions wait on Vesa | `findLocationRecord` fuzzy rung | Large, three slices |
 | 10 | Facts, evidence, verifier | Low harm; on evidence or your say-so | | Medium |
 
 Each lane ships alone: pins, `npm test`, `npm run lint`, commit on master, build, deploy, a DECISIONS line.
