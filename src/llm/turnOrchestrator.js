@@ -39,7 +39,7 @@ import { isEpilogueRequest } from './tableTalk.js';
 import { factMemoryItem, flushMemoryQueue, journalMemoryItem, queueMemoryItem, retrieveRelevant, sceneMemoryItem } from '../engine/vectorMemory.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
 import { describeMemoryUnavailable, dmCallConfig, getMachineryGeminiKey, PRE_COMMIT_TIMEOUT_MS } from './machinery.js';
-import { curateStoryMemory, detectCallbackPayoff } from '../engine/storyMemory.js';
+import { curateStoryMemory } from '../engine/storyMemory.js';
 import { findNamedPeople } from '../engine/npcRoster.js';
 import { markTurn, turnFlags } from './turnFlags.js';
 import { captureCallbackPayoff, captureInjection, captureProviderNote, captureUsage } from '../debug/memoryInspectorStore.js';
@@ -803,16 +803,19 @@ export function createTurnRunner({
         }
 
         if (commits && !hideSetup && dramaticMemories.length > 0) {
-            // The engine judges the payoff (WOW 2026-10-14): a curated card
-            // whose meaning the reply carries LANDED, marked or not — the DM's
-            // own `used` ids are stamped by applyEvents above and skipped here.
-            const declared = new Set((events?.memoryUpdates || []).filter(u => u?.used && typeof u.id === 'string').map(u => u.id));
-            const landed = detectCallbackPayoff(dramaticMemories, narrative, callbackScene || {});
-            const unmarked = landed.filter(card => !declared.has(card.id));
-            if (unmarked.length > 0) {
-                record({ type: 'MARK_CALLBACK_PAYOFF', payload: { messageId: msgId, cardIds: unmarked.map(card => card.id) } });
+            // A callback landed when the DM SAID so (identity by reference,
+            // lane 8, 2026-11-08): `memory_updates { id, used }` with the id
+            // printed on the card's line. applyEvents stamped those cards above;
+            // this puts the ↺ chip on the DM row for them. The word detector
+            // that read a card's tokens in the reply (WOW 2026-10-14) is gone —
+            // a callback the DM wove in without marking rests only when it is
+            // marked, so it may be offered again.
+            const offered = new Set(dramaticMemories.map(card => card.id));
+            const declared = [...new Set((events?.memoryUpdates || []).filter(u => u?.used && typeof u.id === 'string' && offered.has(u.id)).map(u => u.id))];
+            if (declared.length > 0) {
+                record({ type: 'MARK_CALLBACK_PAYOFF', payload: { messageId: msgId, cardIds: declared } });
             }
-            captureCallbackPayoff({ landed: [...new Set([...landed.map(card => card.id), ...declared])] });
+            captureCallbackPayoff({ landed: declared });
         }
 
         // Missing-events nudge (IDEAS 2026-07-11): a no-JSON response at a contract
@@ -850,7 +853,8 @@ export function createTurnRunner({
         // embed below reads the record's rows from it.
         const stateAfter = turnActions.reduce(gameReducer, promptState);
         if (commits) {
-            lastCommittedTurn = { id: msgId, content: narrative, events, hidden: hideSetup, recall: !!recallDossier, combatWasActive, location: landedLocation, stateAfter };
+            // `memoryQuery` (lane 8): the retrieval query this turn embedded, so the Scribe's nearest-card read reuses its memoized vector.
+            lastCommittedTurn = { id: msgId, content: narrative, events, hidden: hideSetup, recall: !!recallDossier, combatWasActive, location: landedLocation, stateAfter, memoryQuery: wantsMemories && machineryKey ? curationQuery : null };
         }
 
         // RAG: embed any new world facts the DM emitted this turn (per response).
@@ -1048,6 +1052,9 @@ export function createTurnRunner({
             // 2026-09-30): removing it retracts them.
             sourceMessageId: typeof finalNarration.id === 'string' ? finalNarration.id : null,
             ...buildScribeContext(latest, playerMessage, finalNarration.content),
+            // The turn's own retrieval query (memoized vector): the Scribe
+            // reads the cards nearest in meaning off it (lane 8).
+            memoryQuery: typeof finalNarration.memoryQuery === 'string' ? finalNarration.memoryQuery : null,
             // The DM's own location event (already applied) outranks the async
             // Scribe for this turn: the Scribe's location downgrades to
             // confirm-or-fill so it can never relocate the hero backwards.

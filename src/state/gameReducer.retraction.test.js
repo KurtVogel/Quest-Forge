@@ -146,7 +146,8 @@ describe('a restatement is a witness; ✕ retracts only what nothing later said'
             { id: 'a2', role: 'assistant', content: 'Rarg is dead now, the reeve repeats. The ledger, Orsa reminds you.' },
         ] };
         s = gameReducer(s, { type: 'ADD_WORLD_FACTS', payload: [{ fact: 'Rarg is dead now.' }], ...META_A2 });
-        s = gameReducer(s, { type: 'ADD_STORY_MEMORY_CARDS', payload: [{ ...PROMISE, text: 'The hero swore to Orsa to bring the ledger back to her.' }], ...META_A2 });
+        // The restatement echoes the card's id (lane 8, 2026-11-08: the Scribe is shown it under KNOWN STORY CARDS; no word rule folds).
+        s = gameReducer(s, { type: 'ADD_STORY_MEMORY_CARDS', payload: [{ ...PROMISE, id: s.storyMemory[0].id, text: 'The hero swore to Orsa to bring the ledger back to her.' }], ...META_A2 });
         return s;
     }
 

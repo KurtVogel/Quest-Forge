@@ -27,7 +27,8 @@
     "eval:itemlinks": "node scripts/itemLinkEval.mjs",
     "eval:tellid": "node scripts/tellIdEval.mjs",
     "eval:arbiter": "node scripts/arbiterEval.mjs",
-    "eval:npcid": "node scripts/npcIdEval.mjs"
+    "eval:npcid": "node scripts/npcIdEval.mjs",
+    "eval:cardid": "node scripts/cardIdEval.mjs"
   },
   "dependencies": {
     "firebase": "^12.9.0",

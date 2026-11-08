@@ -8,20 +8,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-    CALLBACK_PAYOFF_CONTAINMENT,
-    CALLBACK_PAYOFF_MIN_HITS,
     curateStoryMemory,
-    detectCallbackPayoff,
     findStoryMemoryMatch,
     ID_REPORT_CONTAINMENT,
     idReportAgrees,
     idReportDrifted,
-    isNameSubject,
     normalizeKnownBy,
     normalizeStoryMemoryCard,
     normalizeStoryMemoryUpdate,
-    SAME_SUBJECT_CONTAINMENT,
-    SAME_SUBJECT_MIN_SHARED,
     scoreStoryMemory,
     STORY_MEMORY_UPDATE_FIELDS,
 } from './storyMemory.js';
@@ -30,69 +24,26 @@ import { upsertLocation } from './locationRegistry.js';
 
 const card = over => normalizeStoryMemoryCard({ id: 'c', type: 'relationship', subject: 'Tammo', text: 'x', ...over });
 
-describe('P1 — a person-named subject is not a card\'s identity', () => {
+// Revised 2026-11-08 (identity by reference, lane 8; was "a person-named
+// subject is not a card's identity" + "the payoff judge scores what the scene
+// did not supply"): NO subject or word rung is left — the trust and the slap
+// are two cards because nothing but an echoed id or the exact text folds, and
+// the payoff detector is gone (the DM's own `used` is the one landing).
+describe('P1 — two beats about one person are two cards, and so is a restatement without the id', () => {
     const trust = card({ id: 'c-trust', text: 'Tammo trusted the hero with the key to the mill loft.', salience: 3 });
 
-    it('two same-type beats about one named person are two cards; a restatement of one is still one', () => {
-        const slap = { type: 'relationship', subject: 'Tammo', text: 'Tammo struck the hero across the face at the harvest feast.', salience: 4 };
-        expect(findStoryMemoryMatch([trust], slap)).toBe(-1);
-        const restated = { type: 'relationship', subject: 'Tammo', text: 'Tammo let the hero keep the loft key in trust.' };
-        expect(findStoryMemoryMatch([trust], restated)).toBe(0);
+    it('the slap is a new card; so is the restated trust unless it echoes the id', () => {
+        expect(findStoryMemoryMatch([trust], { type: 'relationship', subject: 'Tammo', text: 'Tammo struck the hero across the face at the harvest feast.', salience: 4 })).toBe(-1);
+        expect(findStoryMemoryMatch([trust], { type: 'relationship', subject: 'Tammo', text: 'Tammo let the hero keep the loft key in trust.' })).toBe(-1);
+        expect(findStoryMemoryMatch([trust], { id: 'c-trust', type: 'relationship', subject: 'Tammo', text: 'Tammo let the hero keep the loft key in trust.' })).toBe(0);
     });
 
-    it('the gate: the name set aside, at least two shared meaning tokens and 0.4 containment — "hero" alone never clears it', () => {
-        expect(SAME_SUBJECT_MIN_SHARED).toBe(2);
-        expect(SAME_SUBJECT_CONTAINMENT).toBe(0.4);
-        // {hero} is the only shared token: one hit, under the floor — and the
-        // fuzzy rung behind it sets the name aside too (a four-token text used
-        // to reach its 0.5 on the name + "hero").
-        expect(findStoryMemoryMatch([trust], { type: 'relationship', subject: 'Tammo', text: 'Tammo asked the hero for silver.' })).toBe(-1);
-        expect(findStoryMemoryMatch([trust], { type: 'relationship', subject: 'Tammo Reed', text: 'Tammo asked the hero for silver.' })).toBe(-1);
-    });
-
-    it('a beat-named subject keeps the plain exact-subject rule; npcAgenda is one card per person', () => {
+    it('a beat-named subject and an npcAgenda subject are not identity either; the reflection\'s merge_cards is the fold', () => {
         const debt = card({ id: 'c-debt', type: 'promise', subject: 'blacksmith debt', text: 'Owes a debt to the blacksmith.' });
-        expect(findStoryMemoryMatch([debt], { type: 'promise', subject: 'blacksmith debt', text: 'Debt is growing larger.' })).toBe(0);
+        expect(findStoryMemoryMatch([debt], { type: 'promise', subject: 'blacksmith debt', text: 'Debt is growing larger.' })).toBe(-1);
         const agenda = card({ id: 'c-agenda', type: 'npcAgenda', subject: 'Odo Grells', text: 'Odo plans to corner the eel market before winter.' });
-        expect(findStoryMemoryMatch([agenda], { type: 'npcAgenda', subject: 'Odo Grells', text: 'Odo intends to leave town before the magistrate arrives.' })).toBe(0);
-    });
-
-    it('isNameSubject reads capitalized content tokens, four at most', () => {
-        expect(isNameSubject('Tammo')).toBe(true);
-        expect(isNameSubject('Odo Grells')).toBe(true);
-        expect(isNameSubject('The Lady of the Mill')).toBe(true);
-        expect(isNameSubject('Sundial, Oren, Jack')).toBe(true);
-        expect(isNameSubject('blacksmith debt')).toBe(false);
-        expect(isNameSubject('Mira ribbon')).toBe(false);
-        expect(isNameSubject('')).toBe(false);
-        expect(isNameSubject('Ab Bc Cd De Ef')).toBe(false);
-    });
-});
-
-describe('P1 — the payoff judge scores what the scene did not supply', () => {
-    const debt = card({ id: 'c-debt', type: 'promise', subject: 'Tammo', text: 'Tammo owes the hero a debt from the night at the Rimehollow well.', linkedNpcNames: ['Tammo'], location: 'Rimehollow' });
-    const scene = { query: 'I look at Tammo.', location: 'Rimehollow', npcs: [{ name: 'Tammo' }], heroName: 'Astra', presenceText: 'You reach the Rimehollow well as night falls.' };
-    const sceneReply = 'Tammo leans on the Rimehollow well and squints at the hero. \'Night\'s coming,\' he says, and spits. The chapel bells ring.';
-
-    it('the auditor\'s scene-nouns reply does NOT land; a reply that says the debt DOES', () => {
-        expect(detectCallbackPayoff([debt], sceneReply, scene)).toEqual([]);
-        // Without the scene the old judge read 4 of 6 tokens and landed it.
-        expect(detectCallbackPayoff([debt], sceneReply).map(c => c.id)).toEqual(['c-debt']);
-        const said = 'Tammo spits. \'He owes me a debt from that night,\' he says, to nobody in particular.';
-        expect(detectCallbackPayoff([debt], said, scene).map(c => c.id)).toEqual(['c-debt']);
-    });
-
-    it('the floor is two distinctive hits at a third of the distinctive tokens; a card that is nothing but the scene never lands', () => {
-        expect(CALLBACK_PAYOFF_MIN_HITS).toBe(2);
-        expect(CALLBACK_PAYOFF_CONTAINMENT).toBe(0.3);
-        const ribbon = card({ id: 'c-ribbon', type: 'promise', subject: 'Mira ribbon', text: 'Mira promised to leave a blue ribbon on the well road if it became unsafe.' });
-        const ribbonScene = { query: 'the well road', npcs: ['Mira'] };
-        // blue + ribbon of {promised, leave, blue, ribbon, became, unsafe}: a spoken callback carries the nouns.
-        expect(detectCallbackPayoff([ribbon], 'Mira glances at the well road. \'No blue ribbon on the post — the road is still safe,\' she says.', ribbonScene).map(c => c.id)).toEqual(['c-ribbon']);
-        // One distinctive noun is not a landing.
-        expect(detectCallbackPayoff([ribbon], 'Mira glances at the well road and tugs the blue shawl tighter.', ribbonScene)).toEqual([]);
-        const sceneOnly = card({ id: 'c-scene', text: 'Tammo at the Rimehollow well with the hero.' });
-        expect(detectCallbackPayoff([sceneOnly], 'Tammo at the Rimehollow well with the hero, again.', { location: 'Rimehollow', npcs: ['Tammo'] })).toEqual([]);
+        expect(findStoryMemoryMatch([agenda], { type: 'npcAgenda', subject: 'Odo Grells', text: 'Odo intends to leave town before the magistrate arrives.' })).toBe(-1);
+        expect(findStoryMemoryMatch([agenda], { id: 'c-agenda', type: 'npcAgenda', subject: 'Odo', text: 'Odo intends to leave town before the magistrate arrives.' })).toBe(0);
     });
 });
 

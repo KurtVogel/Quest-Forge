@@ -351,6 +351,7 @@ function typeCachedRow(entry) {
         ...(subjects && { subjects }),
         ...(typeof entry.sourceMessage === 'string' && entry.sourceMessage && { sourceMessage: entry.sourceMessage.slice(0, 80) }),
         ...(atMessage !== null && { atMessage }),
+        ...(typeof entry.cardId === 'string' && entry.cardId && { cardId: entry.cardId.slice(0, 80) }),
     };
 }
 
@@ -482,6 +483,7 @@ export async function addMemories(apiKey, items) {
         const entry = storeMemoryEntry({
             text: item.text, vector: vectors[i], category: item.category || 'general',
             location: item.location, subjects: item.subjects, sourceMessage: item.sourceMessage, atMessage: item.atMessage,
+            cardId: item.cardId,
             generation,
         });
         if (entry) stored.push(entry);
@@ -543,6 +545,7 @@ export function queueMemoryItem(apiKey, item, { carry = false } = {}) {
         subjects: item.subjects ?? null,
         sourceMessage: item.sourceMessage ?? null,
         atMessage: memoryStamp(item.atMessage),
+        ...(typeof item.cardId === 'string' && item.cardId && { cardId: item.cardId }),
     });
     return pendingBatch.promise;
 }
@@ -572,7 +575,7 @@ function discardMemoryQueue() {
  * persists, alone or in a batch). Returns the stored entry, or null when the
  * text was already in the store. Shared by addMemory, addMemories, and the seed.
  */
-function storeMemoryEntry({ text, vector, category = 'general', location = null, subjects = null, sourceMessage = null, atMessage = null, generation = seedGeneration }) {
+function storeMemoryEntry({ text, vector, category = 'general', location = null, subjects = null, sourceMessage = null, atMessage = null, cardId = null, generation = seedGeneration }) {
     // A row from a stale generation (2026-10-23 P2) belongs to a campaign the
     // store no longer holds: refused, never stamped with the live session.
     if (generation !== seedGeneration) return null;
@@ -603,6 +606,12 @@ function storeMemoryEntry({ text, vector, category = 'general', location = null,
         // prompt block says "N turns ago" from it. Optional; legacy rows have
         // none and print no age.
         ...(stamp !== null && { atMessage: stamp }),
+        // The story card this row IS (identity by reference, lane 8,
+        // 2026-11-08): a `story_*` row names its card by id, so the nearest
+        // rows to a turn can be shown to the Scribe AS cards (KNOWN STORY
+        // CARDS) with the id it is asked to echo — an exact lookup, never a
+        // text-to-card guess. Optional; only the card composer sets it.
+        ...(typeof cardId === 'string' && cardId.trim() && { cardId: cardId.trim().slice(0, 80) }),
         schema: GEMINI_EMBED_SCHEMA,
         timestamp: Date.now(),
     };
@@ -795,7 +804,7 @@ async function seedMemoriesInner(apiKey, items, sessionId, { onIncomplete = null
         if (superseded()) return;
         newItems.forEach((item, i) => {
             if (vectors?.[i]) {
-                const entry = storeMemoryEntry({ text: item.text, vector: vectors[i], category: item.category || 'general', location: item.location, subjects: item.subjects, atMessage: item.atMessage, generation });
+                const entry = storeMemoryEntry({ text: item.text, vector: vectors[i], category: item.category || 'general', location: item.location, subjects: item.subjects, atMessage: item.atMessage, cardId: item.cardId, generation });
                 if (entry) toPersist.push(entry);
             } else {
                 missing += 1;
@@ -1121,5 +1130,40 @@ export function storyCardMemoryItem(card) {
         subjects: Array.isArray(card?.linkedNpcNames) && card.linkedNpcNames.length > 0 ? card.linkedNpcNames : null,
         sourceMessage: null,
         atMessage: memoryStamp(card?.firstSeenMessage),
+        // The card's id rides the row (lane 8) so a nearest-row read names the card exactly.
+        ...(typeof card?.id === 'string' && card.id && { cardId: card.id }),
     };
+}
+
+/**
+ * The story cards nearest in meaning to a query (identity by reference, lane
+ * 8, 2026-11-08): the `story_*` rows that carry a card id, by plain cosine
+ * against the query's vector, one row per card, the best `topN`. No gate and
+ * no presence penalty: this is a SHORTLIST for the Scribe's KNOWN STORY
+ * CARDS — the card the Scribe should cite by id has to be on the list, and a
+ * near miss costs one line of context, never a wrong merge. The query vector
+ * is the turn's own (the orchestrator memoizes `sceneContext`), so the
+ * ordinary turn pays no second embed; a cold query embeds once and a failed
+ * embed returns nothing. `cardId` rows only — a legacy row from before the
+ * stamp is skipped (the next mount re-seeds it with its id).
+ * @returns {Promise<Array<{ cardId: string, text: string, score: number }>>}
+ */
+export async function nearestStoryCards(apiKey, query, topN = 5) {
+    if (!apiKey || typeof query !== 'string' || !query.trim() || topN <= 0) return [];
+    if (seedInFlight) await seedInFlight.promise.catch(() => {});
+    const rows = memoryStore.filter(row => typeof row?.cardId === 'string' && row.cardId && typeof row.category === 'string' && row.category.startsWith('story_'));
+    if (rows.length === 0) return [];
+    let queryVector = queryVectorMemo.get(query) || null;
+    if (!queryVector) {
+        queryVector = await embedText(apiKey, query, { inputType: 'query', onError: () => {} });
+        if (queryVector) rememberQueryVector(query, queryVector);
+    }
+    if (!queryVector) return [];
+    const best = new Map();
+    for (const row of rows) {
+        const score = cosineSimilarity(queryVector, row.vector);
+        const held = best.get(row.cardId);
+        if (!held || score > held.score) best.set(row.cardId, { cardId: row.cardId, text: row.text, score });
+    }
+    return [...best.values()].sort((a, b) => b.score - a.score).slice(0, topN);
 }

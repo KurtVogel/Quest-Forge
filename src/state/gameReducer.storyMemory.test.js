@@ -24,7 +24,10 @@ describe('ADD_STORY_MEMORY_CARD', () => {
         expect(next).toBe(initialGameState);
     });
 
-    it('merges a reworded restatement of the same beat instead of duplicating (2026-07-14 eval)', () => {
+    // Flipped 2026-11-08 (identity by reference, lane 8): a reworded restatement
+    // is a NEW card at the reducer; the cadence reflection, shown the pair,
+    // folds them by id (MERGE_STORY_CARDS). The id the Scribe echoes merges.
+    it('a reworded restatement of the same beat is a second card, folded by the reflection\'s answer (was: merged by words, 2026-07-14 eval)', () => {
         const first = gameReducer(initialGameState, {
             type: 'ADD_STORY_MEMORY_CARD',
             payload: {
@@ -43,12 +46,18 @@ describe('ADD_STORY_MEMORY_CARD', () => {
                 salience: 4,
             },
         });
-        expect(second.storyMemory).toHaveLength(1);
-        expect(second.storyMemory[0].text).toMatch(/broken promise/);
-        expect(second.storyMemory[0].salience).toBe(4);
+        expect(second.storyMemory).toHaveLength(2);
+        const [keepId, dropId] = second.storyMemory.map(card => card.id);
+        const folded = gameReducer(second, { type: 'MERGE_STORY_CARDS', payload: { keepId, dropId } });
+        expect(folded.storyMemory).toHaveLength(1);
+        expect(folded.storyMemory[0]).toMatchObject({ id: keepId, salience: 4 });
+        expect(folded.storyMemory[0].text).toMatch(/broken promise/);
+        // Unknown ids and a stale campaign stamp change nothing.
+        expect(gameReducer(second, { type: 'MERGE_STORY_CARDS', payload: { keepId, dropId: 'nope' } })).toBe(second);
+        expect(gameReducer(second, { type: 'MERGE_STORY_CARDS', payload: { keepId, dropId }, meta: { sessionId: 'other', loadNonce: 0 } })).toBe(second);
     });
 
-    it('keeps the richer text when a near-duplicate fragment arrives', () => {
+    it('an id echo keeps the LONGER text (plain length, lane 8)', () => {
         const first = gameReducer(initialGameState, {
             type: 'ADD_STORY_MEMORY_CARD',
             payload: {
@@ -57,26 +66,32 @@ describe('ADD_STORY_MEMORY_CARD', () => {
                 text: 'The Greenhouse Raider intends to finish the job his crew started hours ago and secure the conservatory.',
             },
         });
+        const { id } = first.storyMemory[0];
         const second = gameReducer(first, {
             type: 'ADD_STORY_MEMORY_CARD',
-            payload: {
-                type: 'npcAgenda',
-                subject: 'Greenhouse Raider',
-                text: 'Raider intends to finish the job his crew started.',
-            },
+            payload: { id, type: 'npcAgenda', subject: 'Greenhouse Raider', text: 'Raider intends to finish the job his crew started.' },
         });
         expect(second.storyMemory).toHaveLength(1);
         expect(second.storyMemory[0].text).toMatch(/secure the conservatory/);
+        const third = gameReducer(first, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { id, type: 'npcAgenda', subject: 'Greenhouse Raider', text: 'The Greenhouse Raider intends to finish the job his crew started hours ago, secure the conservatory and torch it at dawn.' },
+        });
+        expect(third.storyMemory[0].text).toMatch(/torch it at dawn/);
     });
 
-    it('merges into an existing card with the same subject and type instead of duplicating', () => {
+    it('the same subject and type is not identity; the echoed id is (lane 8)', () => {
         const first = gameReducer(initialGameState, {
             type: 'ADD_STORY_MEMORY_CARD',
             payload: { text: 'Owes a debt to the blacksmith.', subject: 'blacksmith debt', type: 'promise', tags: ['debt'] },
         });
-        const second = gameReducer(first, {
+        expect(gameReducer(first, {
             type: 'ADD_STORY_MEMORY_CARD',
             payload: { text: 'Debt is growing larger.', subject: 'blacksmith debt', type: 'promise', tags: ['money'] },
+        }).storyMemory).toHaveLength(2);
+        const second = gameReducer(first, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { id: first.storyMemory[0].id, text: 'Debt to the blacksmith is growing larger.', subject: 'blacksmith debt', type: 'promise', tags: ['money'] },
         });
         expect(second.storyMemory).toHaveLength(1);
         expect(second.storyMemory[0].text).toMatch(/growing larger/);

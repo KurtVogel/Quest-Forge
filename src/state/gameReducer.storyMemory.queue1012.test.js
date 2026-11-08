@@ -60,13 +60,15 @@ describe('P1 — the callbacks block prints the id memory_updates addresses', ()
 describe('P2 — a Scribe re-report keeps the stored card\'s source and id', () => {
     const wound = { type: 'wound', subject: 'The ambush at Kettle Ford', text: 'Astra took a spear through the shoulder at Kettle Ford; Garrick went down beside her.', salience: 4, source: 'engine', tags: ['fight-cost'] };
 
+    // The re-report carries the id since lane 8 (2026-11-08): the Scribe is
+    // shown it under KNOWN STORY CARDS; in other words without it, a new card.
     it('an engine wound stays engine and goes dormant after its six untouched cadences', () => {
         let state = gameReducer(withMessages(10), { type: 'ADD_STORY_MEMORY_CARD', payload: wound });
         const { id } = state.storyMemory[0];
         state = { ...state, messages: talk(14) };
         state = gameReducer(state, {
             type: 'ADD_STORY_MEMORY_CARD',
-            payload: { type: 'wound', subject: 'The ambush at Kettle Ford', text: 'The spear wound from Kettle Ford still aches.', salience: 3 },
+            payload: { id, type: 'wound', subject: 'The ambush at Kettle Ford', text: 'The spear wound from Kettle Ford still aches.', salience: 3 },
         });
         expect(state.storyMemory).toHaveLength(1);
         expect(state.storyMemory[0].source).toBe('engine');
@@ -77,19 +79,24 @@ describe('P2 — a Scribe re-report keeps the stored card\'s source and id', () 
         expect(applyStoryMemoryDormancy(state.storyMemory, journal)[0].status).toBe('dormant');
     });
 
-    it('an id-less re-report of a Scribe card keeps the card id', () => {
+    it('an id-less re-report with the exact text keeps the card id; in other words it is a new card (lane 8)', () => {
         let state = gameReducer(withMessages(2), {
             type: 'ADD_STORY_MEMORY_CARD',
             payload: { type: 'promise', subject: 'Mara', text: 'The hero promised Mara a ride to the coast.' },
         });
         const { id } = state.storyMemory[0];
+        const same = gameReducer(state, {
+            type: 'ADD_STORY_MEMORY_CARD',
+            payload: { type: 'promise', subject: 'Mara the ferry girl', text: 'The hero promised Mara a ride to the coast.' },
+        });
+        expect(same.storyMemory).toHaveLength(1);
+        expect(same.storyMemory[0].id).toBe(id);
+        expect(same.storyMemory[0].source).toBe('scribe');
         state = gameReducer(state, {
             type: 'ADD_STORY_MEMORY_CARD',
             payload: { type: 'promise', subject: 'Mara', text: 'The hero promised Mara a ride to the coast before the thaw.' },
         });
-        expect(state.storyMemory).toHaveLength(1);
-        expect(state.storyMemory[0].id).toBe(id);
-        expect(state.storyMemory[0].source).toBe('scribe');
+        expect(state.storyMemory).toHaveLength(2);
     });
 });
 

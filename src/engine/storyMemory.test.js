@@ -3,10 +3,11 @@ import {
     buildStoryMemoryPromptBlock,
     curateStoryMemory,
     findStoryMemoryMatch,
-    isNearDuplicateStoryCard,
+    mergeStoryCards,
     normalizeStoryMemoryCard,
     normalizeStoryMemoryUpdate,
     pickMergedCardText,
+    possibleSameCardPairs,
     scoreStoryMemory,
 } from './storyMemory.js';
 
@@ -36,16 +37,24 @@ describe('story memory normalization', () => {
         });
     });
 
-    it('dedupes by exact text or same subject/type', () => {
+    // Flipped 2026-11-08 (identity by reference, lane 8): the exact text under
+    // the SAME type is the one text rung; a shared subject is not identity,
+    // and the same words under another type are another card.
+    it('dedupes by the exact text under the same type; a same subject or another type is a new card', () => {
         const existing = [
             normalizeStoryMemoryCard({ type: 'wound', subject: 'black arrow scar', text: 'The black arrow left a scar.' }),
         ];
-        expect(findStoryMemoryMatch(existing, { type: 'wound', subject: 'black arrow scar', text: 'Different wording.' })).toBe(0);
-        expect(findStoryMemoryMatch(existing, { type: 'callback', subject: 'other', text: 'The black arrow left a scar.' })).toBe(0);
+        expect(findStoryMemoryMatch(existing, { type: 'wound', subject: 'black arrow scar', text: 'Different wording.' })).toBe(-1);
+        expect(findStoryMemoryMatch(existing, { type: 'callback', subject: 'other', text: 'The black arrow left a scar.' })).toBe(-1);
+        expect(findStoryMemoryMatch(existing, { type: 'wound', subject: 'other', text: 'the black arrow left a scar.' })).toBe(0);
+        expect(findStoryMemoryMatch(existing, { id: existing[0].id, type: 'wound', subject: 'x', text: 'Different wording.' })).toBe(0);
     });
 });
 
-describe('near-duplicate restatement detection (2026-07-14 eval flooding)', () => {
+// Flipped 2026-11-08 (lane 8): a restatement in other words is a NEW card at
+// the reducer; the pair is offered to the cadence reflection (possibleSameCardPairs),
+// whose merge_cards answer folds them by id (mergeStoryCards).
+describe('a restatement in other words is a new card; the reflection is offered the pair (was: near-duplicate detection, 2026-07-14)', () => {
     // Real duplicate quartet from the 30-turn memory playtest: one promise,
     // four cards, every subject and text worded differently.
     const sundialA = {
@@ -64,43 +73,50 @@ describe('near-duplicate restatement detection (2026-07-14 eval flooding)', () =
         text: "Jack's broken promise to Oren to mend the cracked sundial, now amidst the valley's collapse.",
     };
 
-    it('recognizes the same promise restated with fresh framing', () => {
-        expect(isNearDuplicateStoryCard(sundialA, sundialB)).toBe(true);
-        expect(isNearDuplicateStoryCard(sundialB, sundialC)).toBe(true);
-        expect(findStoryMemoryMatch([normalizeStoryMemoryCard(sundialA)], sundialB)).toBe(0);
+    it('the same promise restated with fresh framing is a new card at the reducer', () => {
+        const held = normalizeStoryMemoryCard({ ...sundialA, id: 'c-a', firstSeenMessage: 4 });
+        expect(findStoryMemoryMatch([held], sundialB)).toBe(-1);
+        expect(findStoryMemoryMatch([held], { ...sundialB, id: 'c-a' })).toBe(0); // the id the Scribe echoes decides
     });
 
-    it('recognizes a text-containment restatement with unrelated subjects', () => {
-        const verbose = {
-            type: 'npcAgenda',
-            subject: 'barricade',
-            text: 'The Rusted Raider explicitly stated he needs the player character alive to drop the barricade.',
-        };
-        const terse = {
-            type: 'npcAgenda',
-            subject: "raider's agenda",
-            text: 'The raider needs the hero alive to drop the barricade.',
-        };
-        expect(isNearDuplicateStoryCard(verbose, terse)).toBe(true);
+    it('the reflection is offered the pair (same type, shared meaning), never a cross-type or an unrelated pair', () => {
+        const a = normalizeStoryMemoryCard({ ...sundialA, id: 'c-a', firstSeenMessage: 4, lastSeenMessage: 4 });
+        const b = normalizeStoryMemoryCard({ ...sundialB, id: 'c-b', firstSeenMessage: 30, lastSeenMessage: 30 });
+        const c = normalizeStoryMemoryCard({ ...sundialC, id: 'c-c', type: 'playerCanon', firstSeenMessage: 40 });
+        const bite = normalizeStoryMemoryCard({ id: 'c-bite', type: 'promise', subject: "player's arm", text: 'The player suffered a brutal bite to the arm from the Scarred Hound.', firstSeenMessage: 50 });
+        expect(possibleSameCardPairs([a, b, c, bite])).toEqual([{ ids: ['c-a', 'c-b'], type: 'promise', texts: [a.text, b.text] }]);
+        // Resolved, engine and roster-snapshot cards are never offered.
+        expect(possibleSameCardPairs([{ ...a, status: 'resolved' }, b])).toEqual([]);
+        expect(possibleSameCardPairs([{ ...a, source: 'engine' }, b])).toEqual([]);
+        expect(possibleSameCardPairs([{ ...a, source: 'npc_roster' }, b])).toEqual([]);
     });
 
-    it('never merges across card types or genuinely different beats', () => {
-        expect(isNearDuplicateStoryCard(sundialA, { ...sundialA, type: 'playerCanon' })).toBe(false);
-        expect(isNearDuplicateStoryCard(
-            { type: 'wound', subject: "hero's shoulder wound", text: 'The hero suffered a vicious axe wound to the shoulder, bleeding heavily.' },
-            { type: 'wound', subject: "player's arm", text: 'The player suffered a brutal bite to the arm from the Scarred Hound.' },
-        )).toBe(false);
-        expect(isNearDuplicateStoryCard(
-            { type: 'mystery', subject: 'Oren', text: 'The unseen archivist believes Oren is likely dead.' },
-            { type: 'mystery', subject: 'orchard incident', text: 'Oren called out Jack’s name in disbelief just before hounds began baying.' },
-        )).toBe(false);
+    it('mergeStoryCards folds the reflection\'s answer by id: the longer text, the higher scores, the unions, the spanned stamps', () => {
+        const a = normalizeStoryMemoryCard({ ...sundialA, id: 'c-a', salience: 3, emotionalCharge: 1, tags: ['promise'], linkedNpcNames: ['Oren'], firstSeenMessage: 4, lastSeenMessage: 4, sourceMessage: 'm4' });
+        const b = normalizeStoryMemoryCard({ ...sundialB, id: 'c-b', salience: 4, emotionalCharge: 2, tags: ['sundial'], linkedNpcNames: ['Jack'], firstSeenMessage: 30, lastSeenMessage: 30, sourceMessage: 'm30' });
+        const other = normalizeStoryMemoryCard({ id: 'c-x', type: 'mystery', text: 'Who rang the chapel bell?' });
+        const merged = mergeStoryCards([a, b, other], 'c-a', 'c-b');
+        expect(merged.map(card => card.id)).toEqual(['c-a', 'c-x']);
+        expect(merged[0]).toMatchObject({ id: 'c-a', text: sundialB.text, salience: 4, emotionalCharge: 2, firstSeenMessage: 4, lastSeenMessage: 30, sourceMessage: 'm4', witnesses: ['m30'] });
+        expect(merged[0].tags).toEqual(expect.arrayContaining(['promise', 'sundial']));
+        expect(merged[0].linkedNpcNames).toEqual(['Oren', 'Jack']);
+        // A resolved half resolves the beat; a public half makes it public.
+        expect(mergeStoryCards([a, { ...b, status: 'resolved' }], 'c-a', 'c-b')[0].status).toBe('resolved');
+        expect(mergeStoryCards([{ ...a, knownBy: ['Oren'] }, b], 'c-a', 'c-b')[0].knownBy).toBeUndefined();
+        expect(mergeStoryCards([{ ...a, knownBy: ['Oren'] }, { ...b, knownBy: ['Jack'] }], 'c-a', 'c-b')[0].knownBy).toEqual(['Oren', 'Jack']);
+        // Unknown or equal ids leave the pool alone.
+        const pool = [a, b];
+        expect(mergeStoryCards(pool, 'c-a', 'nope')).toBe(pool);
+        expect(mergeStoryCards(pool, 'c-a', 'c-a')).toBe(pool);
     });
 
-    it('keeps the richer text when a fragment restates an existing card', () => {
+    it('a re-report keeps the LONGER text — plain length, no fragment guard reading the words (lane 8)', () => {
         const rich = 'The Greenhouse Raider intends to finish the job his crew started hours ago and secure the conservatory.';
         expect(pickMergedCardText(rich, 'Hooks: finish the job his crew started hours ago')).toBe(rich);
-        expect(pickMergedCardText(rich, 'The raider now plans to torch the conservatory at dawn instead.'))
-            .toBe('The raider now plans to torch the conservatory at dawn instead.');
+        // A shorter text in other words no longer replaces (the old guard let it).
+        expect(pickMergedCardText(rich, 'The raider now plans to torch the conservatory at dawn instead.')).toBe(rich);
+        const longer = 'The Greenhouse Raider intends to finish the job his crew started hours ago, secure the conservatory and torch it at dawn.';
+        expect(pickMergedCardText(rich, longer)).toBe(longer);
         expect(pickMergedCardText('', 'anything')).toBe('anything');
         expect(pickMergedCardText(rich, '')).toBe(rich);
     });

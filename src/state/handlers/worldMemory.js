@@ -10,6 +10,7 @@ import {
     bornStoryMemoryCard,
     findStoryMemoryMatch,
     idReportDrifted,
+    mergeStoryCards,
     normalizeStoryMemoryCard,
     normalizeStoryMemoryUpdate,
     pickMergedCardText,
@@ -144,6 +145,10 @@ export const handlers = {
         const card = normalizeStoryMemoryCard(stripStoryMemoryEngineStamps(lanePayload));
         if (!card) return state;
         const pool = state.storyMemory || [];
+        // The id the Scribe echoed, else the same text under the same type,
+        // else a NEW card (identity by reference, lane 8, 2026-11-08): no
+        // word rule decides here any more. Two cards that turn out to be one
+        // beat are folded by the reflection's merge_cards (MERGE_STORY_CARDS).
         const idx = findStoryMemoryMatch(pool, card);
         const messageCount = (state.messages || []).length;
         if (idx === -1) {
@@ -194,6 +199,8 @@ export const handlers = {
                     // 2026-09-30: the Scribe rewrote END_COMBAT's wound card into
                     // its own words and the fight's particular was gone); a
                     // re-report may revive or relink it, never reword it.
+                    // A lane re-report keeps the LONGER text (lane 8: plain
+                    // length, no fragment guard reading the two texts' words).
                     text: resolved || existing.source === 'engine' ? existing.text : pickMergedCardText(existing.text, card.text),
                     firstSeenAt: existing.firstSeenAt,
                     lastSeenAt: Date.now(),
@@ -275,11 +282,16 @@ export const handlers = {
     },
 
     /**
-     * The engine judged that the DM's reply paid off curated callbacks (WOW
-     * 2026-10-14, `detectCallbackPayoff`): the cards rest (`lastUsedMessage`)
-     * and count (`usedCount`) exactly as a DM-marked `used` does, and the DM
-     * row carries a `↺` chip per landed card (the bondMarks pattern) so the
-     * player sees the callback land. Zero calls.
+     * A curated callback LANDED in the DM's reply (WOW 2026-10-14): the card
+     * rests (`lastUsedMessage`) and counts (`usedCount`) exactly as the DM's
+     * own `used` does, and the DM row carries a `↺` chip per landed card (the
+     * bondMarks pattern) so the player sees the callback land. Since lane 8
+     * (identity by reference, 2026-11-08) the one judge of a landing is the
+     * DM's `memory_updates { id, used }` — the word detector that read the
+     * card's tokens in the reply is gone — so the orchestrator dispatches this
+     * for the ids the DM declared, after applyEvents stamped them: a card
+     * already stamped at this message count is not stamped twice and only
+     * gets its chip. Zero calls.
      */
     MARK_CALLBACK_PAYOFF(state, action) {
         const ids = new Set((Array.isArray(action.payload?.cardIds) ? action.payload.cardIds : []).filter(id => typeof id === 'string' && id));
@@ -291,6 +303,7 @@ export const handlers = {
         const storyMemory = (state.storyMemory || []).map(card => {
             if (!card || !ids.has(card.id)) return card;
             landed.push(card);
+            if (card.lastUsedMessage === messageCount) return card; // the DM's own `used` stamped it this message
             // ONE clock for a landing, whichever lane judged it (2026-10-24 P2):
             // the DM's `used` stamps `lastSeenMessage` too (the card is on the
             // page now — it scores 0 for the window and its age restarts); the
@@ -320,6 +333,24 @@ export const handlers = {
             return { ...m, bondMarks: merged.slice(-6) };
         });
         return { ...state, storyMemory, messages };
+    },
+
+    /**
+     * The cadence reflection read two cards as one beat (identity by
+     * reference, lane 8, 2026-11-08): `merge_cards` names a pair the engine
+     * OFFERED (`possibleSameCardPairs`, the reflection's `possibleSameCard`),
+     * and the pool folds the second into the first by id (`mergeStoryCards`).
+     * The reflection alone decides; the shortlist only chose what it saw.
+     * Stale-campaign actions are refused like every reflection write.
+     */
+    MERGE_STORY_CARDS(state, action) {
+        if (isStaleCampaignAction(state, action)) return state;
+        const keepId = typeof action.payload?.keepId === 'string' ? action.payload.keepId.trim() : '';
+        const dropId = typeof action.payload?.dropId === 'string' ? action.payload.dropId.trim() : '';
+        const storyMemory = mergeStoryCards(state.storyMemory || [], keepId, dropId);
+        if (storyMemory === (state.storyMemory || [])) return state;
+        console.info(`[storyMemory] Merged card ${dropId} into ${keepId} — the reflection read them as one beat.`);
+        return { ...state, storyMemory };
     },
 
     // Mark a batch of messages as summarized (excluded from future LLM history)

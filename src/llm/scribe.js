@@ -24,13 +24,13 @@ import { computeRecentHeat, normalizePaceDial, TEMPO_TIMING_DIE_SIDES } from '..
 import { getKnownSpells, isSpellcaster } from '../engine/spellcasting.js';
 import { containment, tokenSet } from '../engine/textMatch.js';
 import { findSubjectsInText } from '../engine/textMatch.js';
-import { factMemoryItem, queueMemoryItem } from '../engine/vectorMemory.js';
+import { factMemoryItem, nearestStoryCards, queueMemoryItem, storyCardMemoryItem } from '../engine/vectorMemory.js';
 import { rollDie } from '../engine/dice.ts';
 import { CHARACTER_APPEARANCE_MAX, NPC_DOSSIER_FIELD_MAX } from '../config/contentLimits.js';
 import { HERO_TELL_REPORT_CAP, isHeroTellEstablished } from '../engine/heroTells.js';
 import { liveWorldFacts, planWorldFactAdditions, sanitizeWorldFactPayload } from '../engine/worldFacts.js';
 import { cleanText } from '../engine/text.js';
-import { compareCardRecency, findStoryMemoryMatch, normalizeStoryMemoryCard, selectSettleCandidates, stripStoryMemoryEngineStamps } from '../engine/storyMemory.js';
+import { compareCardRecency, findStoryMemoryMatch, normalizeStoryMemoryCard, pickMergedCardText, possibleSameCardPairs, SAME_CARD_PAIRS_CAP, selectSettleCandidates, stripStoryMemoryEngineStamps } from '../engine/storyMemory.js';
 import {
     CAST_AUDIT_RULES,
     describeAppliedLoot,
@@ -468,14 +468,31 @@ export function buildKnownHeroTells({ heroTells = [] } = {}) {
  * subject + a short text stub), most recently seen first, capped.
  */
 const KNOWN_STORY_CARD_CAP = 10;
+/** How many cards nearest in MEANING to the turn join the list (lane 8), beyond the ones its people and subjects pick. */
+export const NEAR_STORY_CARD_CAP = 5;
+const describeKnownCard = (card) => {
+    const subject = String(card.subject || '').trim();
+    return `- id: ${card.id} | type: ${card.type || 'callback'} | status: ${card.status || 'active'}${subject ? ` | subject: ${subject.slice(0, 80)}` : ''} | "${card.text.trim().slice(0, 100)}"`;
+};
+/**
+ * @param {object} state - `storyMemory` is the pool
+ * @param {...string} texts - the turn's texts; the last argument may instead be
+ *   `{ near: string[] }`, the ids of the cards nearest in meaning to the turn
+ *   (`nearestStoryCards`, identity by reference, lane 8, 2026-11-08) — they
+ *   join the list after the presence picks, so the card the Scribe should
+ *   echo by id is on the list even when its people are not named this turn.
+ *   Both selectors only choose what the Scribe is SHOWN; the Scribe's id
+ *   echo is what the reducer reads.
+ */
 export function buildKnownStoryCards({ storyMemory = [] } = {}, ...texts) {
-    const haystack = texts.filter(Boolean).join('\n');
+    const options = texts.length > 0 && texts[texts.length - 1] && typeof texts[texts.length - 1] === 'object' ? texts.pop() : {};
+    const nearIds = Array.isArray(options.near) ? options.near.filter(id => typeof id === 'string' && id) : [];
+    const haystack = texts.filter(part => typeof part === 'string' && part).join('\n');
     const haystackTokens = tokenSet(haystack, { minLength: 4 });
-    if (haystackTokens.size === 0) return null;
     const cards = (Array.isArray(storyMemory) ? storyMemory : [])
         .filter(card => card && typeof card.id === 'string' && card.id && typeof card.text === 'string' && card.text.trim());
     const isPresent = namePresenceIn(cards.flatMap(card => (Array.isArray(card.linkedNpcNames) ? card.linkedNpcNames : [])), haystack);
-    const entries = [...cards]
+    const picked = haystackTokens.size === 0 ? [] : [...cards]
         .filter(card => {
             const names = Array.isArray(card.linkedNpcNames) ? card.linkedNpcNames : [];
             if (names.some(name => isPresent(name))) return true;
@@ -483,11 +500,13 @@ export function buildKnownStoryCards({ storyMemory = [] } = {}, ...texts) {
             return subjectTokens.size > 0 && containment(subjectTokens, haystackTokens) >= 0.5;
         })
         .sort(compareCardRecency)
-        .slice(0, KNOWN_STORY_CARD_CAP)
-        .map(card => {
-            const subject = String(card.subject || '').trim();
-            return `- id: ${card.id} | type: ${card.type || 'callback'} | status: ${card.status || 'active'}${subject ? ` | subject: ${subject.slice(0, 80)}` : ''} | "${card.text.trim().slice(0, 100)}"`;
-        });
+        .slice(0, KNOWN_STORY_CARD_CAP);
+    const listed = new Set(picked.map(card => card.id));
+    const near = nearIds
+        .map(id => cards.find(card => card.id === id))
+        .filter(card => card && !listed.has(card.id))
+        .slice(0, NEAR_STORY_CARD_CAP);
+    const entries = [...picked, ...near].map(describeKnownCard);
     return entries.length > 0 ? entries.join('\n') : null;
 }
 
@@ -613,9 +632,9 @@ export function capAcceptedFacts(candidates, plan) {
 
 /**
  * The card candidates the pass dispatches (2026-10-22 scribe P2): every
- * re-report the reducer would merge into a card on record (by id, subject +
- * type, text, or near-duplicate — `findStoryMemoryMatch`, the reducer's own
- * matcher), plus the first SCRIBE_CARD_CAP genuinely new ones.
+ * re-report the reducer would merge into a card on record (by echoed id or
+ * exact text — `findStoryMemoryMatch`, the reducer's own matcher, exact since
+ * lane 8), plus the first SCRIBE_CARD_CAP genuinely new ones.
  */
 export function capNovelCards(candidates, pool) {
     let novel = 0;
@@ -724,7 +743,7 @@ export const SCRIBE_ANCHORS = [
     'name_links',
 ];
 /** The reflection schema's keys — a quiet cadence honestly answers with the tempo directive alone. */
-export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'settled_cards', 'story_memory', 'tempo_directive', 'front_proposals', 'same_person'];
+export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'settled_cards', 'story_memory', 'tempo_directive', 'front_proposals', 'same_person', 'merge_cards'];
 
 /**
  * The Scribe's contract on a "remember when…" turn (2026-09-18): the DM's
@@ -734,7 +753,7 @@ export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'settled_car
  */
 export const RECALL_TURN_RULE = 'RECALL TURN: the player asked about the PAST and the DM answered from the engine\'s own record of this campaign. Extract NOTHING new from the answer — no world_facts, no story cards, no location change, no loot, no payment, no appearance — everything it recounts is already on record. The ONE exception: if the remembering itself visibly moved someone (warmth, grief, a grudge surfacing), report that as an npc_updates bondMoment or stanceToPlayer for that person. Emit "world_facts": [] and leave every other field empty.';
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch: commit, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownFacts = null, knownHeroTells = null, knownLocations = null, knownLands = null, knownNpcIds = null, heldNames = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch: commit, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownFacts = null, knownHeroTells = null, knownLocations = null, knownLands = null, knownNpcIds = null, heldNames = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null, memoryQuery = null }) {
     // Campaign-stamped writes (2026-10-26, the cadence's rule): when the
     // context names the campaign this pass read, every dispatch below carries
     // it and the dispatcher drops the lot once another campaign is live. A
@@ -752,6 +771,18 @@ export async function runScribe({ playerMessage, dmNarrative, settings, dispatch
     const laneMeta = typeof sourceMessageId === 'string' && sourceMessageId ? { sourceMessage: sourceMessageId } : null;
     const npcLaneMeta = { ...(laneMeta || {}), lane: 'scribe', presenceText: `${playerMessage || ''} ${dmNarrative || ''}` };
     const background = getBackgroundConfig(settings);
+    // KNOWN STORY CARDS by nearest MEANING too (identity by reference, lane 8,
+    // 2026-11-08): the pool's cards the turn's retrieval query lands nearest
+    // to, read off the vector store by card id, join the presence picks — so
+    // the card the Scribe should echo by id is on the list even when none of
+    // its people are named this turn. The orchestrator passes its own
+    // `sceneContext` (memoized: no second embed); the combat beat passes none.
+    if (typeof memoryQuery === 'string' && memoryQuery.trim() && background.apiKey && memoryContext && Array.isArray(memoryContext.storyMemory)) {
+        const near = await nearestStoryCards(background.apiKey, memoryQuery, NEAR_STORY_CARD_CAP).catch(() => []);
+        if (near.length > 0) {
+            knownStoryCards = buildKnownStoryCards(memoryContext, playerMessage, dmNarrative, { near: near.map(row => row.cardId) });
+        }
+    }
     if (!background.apiKey || !dmNarrative) return;
 
     const auditState = (lootAudit && typeof lootAudit.getState === 'function') ? lootAudit.getState() : null;
@@ -802,7 +833,7 @@ ${COMBATANT_TAG_RULE}`
                     ? `HELD NAMES (the DM used these names this turn and no record answers to them exactly — answer each in name_links with the id of the person it means, or "new"):\n${heldNames}`
                     : null,
                 knownStoryCards
-                    ? `KNOWN STORY CARDS (beats already on record for the people and threads in this exchange — update one by its exact "id" instead of minting a duplicate; a resolved card is paid off and must NOT be re-reported):\n${knownStoryCards}`
+                    ? `KNOWN STORY CARDS (beats already on record for the people and threads in this exchange, and the recorded beats nearest in meaning to it — when this turn's beat IS one of these, update it by its exact "id" with the complete text instead of minting a duplicate; a beat on none of these lines is new; a resolved card is paid off and must NOT be re-reported):\n${knownStoryCards}`
                     : null,
                 knownFacts
                     ? `KNOWN FACTS (world facts already on record — never restate one, in any wording; write a world_fact only for something genuinely NEW, or for a CHANGE to one of these, stated as the new truth with "supersedes": the old line's exact id):\n${knownFacts}`
@@ -939,8 +970,34 @@ ${COMBATANT_TAG_RULE}`
             ? capNovelCards(candidateCards, memoryContext.storyMemory)
             : candidateCards.slice(0, SCRIBE_CARD_CAP);
         if (storyMemory.length > 0) {
+            // The cards' rows embed LIVE, by card id (lane 8): a card used to
+            // reach the vector store only at the next mount, so the nearest-
+            // meaning read above could not see a card minted this session.
+            // A novel card is given its id HERE, before the dispatch (the
+            // reducer keeps a fresh, non-colliding id); an id echo on a card
+            // on record embeds the text the merge will keep (the longer).
+            // Carried onto the next batch like the facts; the mount seed
+            // re-embeds the final text anyway.
+            const rows = [];
+            if (hasMemoryContext && Array.isArray(memoryContext.storyMemory)) {
+                const pool = memoryContext.storyMemory;
+                for (const candidate of storyMemory) {
+                    const normalized = normalizeStoryMemoryCard(stripStoryMemoryEngineStamps(candidate));
+                    if (!normalized) continue;
+                    const held = typeof candidate.id === 'string' && candidate.id ? pool.find(card => card?.id === candidate.id && card.type === normalized.type) : null;
+                    if (held) {
+                        if (held.source === 'engine' || held.status === 'resolved') continue;
+                        rows.push(storyCardMemoryItem({ ...held, ...normalized, id: held.id, text: pickMergedCardText(held.text, normalized.text), linkedNpcNames: [...new Set([...(held.linkedNpcNames || []), ...normalized.linkedNpcNames])] }));
+                    } else {
+                        if (pool.some(card => card?.id === normalized.id)) continue; // an id of another type's card: the reducer drops it and mints; the mount seed names that row
+                        candidate.id = normalized.id;
+                        rows.push(storyCardMemoryItem({ ...normalized, firstSeenMessage: memoryContext.messageCount }));
+                    }
+                }
+            }
             dispatch({ type: 'ADD_STORY_MEMORY_CARDS', payload: storyMemory, ...(laneMeta && { meta: laneMeta }) });
             console.log(`[Scribe] Added ${storyMemory.length} story memory card(s)`);
+            for (const row of rows) queueMemoryItem(background.apiKey, row, { carry: true }).catch(() => {});
         }
 
         // Hero tells (2026-09-23): the world notices the hero's manner. Cap
@@ -1112,6 +1169,9 @@ Output ONLY valid JSON:
   "same_person": [
     ["the id of the record to KEEP (the fuller name)", "the id of the record that is the SAME person and folds into it"]
   ],
+  "merge_cards": [
+    ["the id of the story card to KEEP (the fuller text)", "the id of the card that records the SAME beat and folds into it"]
+  ],
   "story_memory": [
     {
       "type": "callback|promise|wound|relationship|mystery|playerCanon|foreshadow|npcAgenda",
@@ -1140,6 +1200,7 @@ Rules:
 - If RECENT HEAT in the context is high, strongly prefer a quiet directive with a restorative quiet_hook — the table needs air after violence.
 - The inverse binds too: when RECENT HEAT sits BELOW the campaign pace's appetite (calm on a standard campaign, calm OR lively on breakneck) and the scenes since the last fight have already given the table its air, LEAN toward granting a window at whatever intensity the arc supports. On breakneck, consecutive quiet directives need an explicit arc reason in the rationale — the player chose that dial to be pushed.
 - FRONT PROPOSALS: only when the PLAYER has repeatedly and deliberately engaged a concrete recurring threat that existing fronts do not cover and it has proven durable across scenes (a raided den that keeps mattering, a rival who keeps returning). At most one, complete or omitted entirely. This is rare — most reflections propose nothing.
+- MERGE CARDS: possibleSameCard lists pairs of story cards that MAY record one beat — the same promise, debt, wound or secret written twice in different words. Confirm a pair in merge_cards ONLY when both texts plainly state the same commitment or event between the same people; keep the fuller text's id first. Two beats about one person (a trust and a slap, a promise and a different promise) are two cards. Leave merge_cards empty when unsure: two cards are cheaper than one wrong merge.
 - SAME PERSON: possibleSamePerson lists pairs of records that MAY be one person (a short form beside a full name, a title variant). Confirm a pair in same_person ONLY when the facts, the journal and both records show one person — the same place, the same role, the same history with the hero. Two people who merely share a first name are two. Leave same_person empty when unsure: two records are cheaper than one wrong merge, and a merge cannot be undone.
 - Potential companions may be seeded as hooks, but never add them to the party.
 - Intriguing NPCs should emerge from agenda, competence, danger, secrets, attraction, rivalry, vulnerability, or leverage, not default sexualization.
@@ -1302,6 +1363,8 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
 
     const heat = computeRecentHeat(state);
     const samePersonPairs = possibleSamePersonPairs(state.npcs || []);
+    // Cards that may record one beat (lane 8): the shortlist the reflection confirms or leaves; the engine folds only a pair it offered.
+    const sameCardPairs = possibleSameCardPairs(state.storyMemory || []);
     const recentJournal = (state.journal || []).slice(-3).map(projectJournalForReflection).filter(Boolean);
     // The cards this cadence may settle (2026-10-31): touched by the cadence's
     // own text first, then the longest silent.
@@ -1326,6 +1389,7 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
         // Records that may be one person (lane 6C): the shortlist the
         // reflection confirms or leaves; the engine merges only a pair it offered.
         ...(samePersonPairs.length > 0 && { possibleSamePerson: samePersonPairs }),
+        ...(sameCardPairs.length > 0 && { possibleSameCard: sameCardPairs }),
         knownLocations: (state.locations || []).slice(-12).map(record => ({
             name: record.name,
             type: record.type,
@@ -1412,6 +1476,16 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
             if (!offered || keepId === dropId) continue;
             dispatch({ type: 'MERGE_NPC_RECORDS', payload: { keepId, dropId } });
             console.log(`[Reflection] Merged ${dropId} into ${keepId} — read as one person.`);
+        }
+        // merge_cards (lane 8): only a pair the reflection was SHOWN folds, in
+        // either order; the first id is kept. Anything else is ignored.
+        for (const pair of (Array.isArray(reflected.merge_cards) ? reflected.merge_cards : []).slice(0, SAME_CARD_PAIRS_CAP)) {
+            if (!Array.isArray(pair) || pair.length !== 2 || pair.some(id => typeof id !== 'string' || !id.trim())) continue;
+            const [keepId, dropId] = pair.map(id => id.trim());
+            const offered = sameCardPairs.some(({ ids }) => (ids[0] === keepId && ids[1] === dropId) || (ids[0] === dropId && ids[1] === keepId));
+            if (!offered || keepId === dropId) continue;
+            dispatch({ type: 'MERGE_STORY_CARDS', payload: { keepId, dropId } });
+            console.log(`[Reflection] Merged card ${dropId} into ${keepId} — read as one beat.`);
         }
         if (reflectedCards.length > 0) {
             // No `meta.sourceMessage` by design: the reflection reads a journal

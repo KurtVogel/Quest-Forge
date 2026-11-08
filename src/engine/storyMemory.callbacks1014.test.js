@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-    buildStoryMemoryPromptBlock, CALLBACK_MIN_AGE, curateStoryMemory, detectCallbackPayoff,
+    buildStoryMemoryPromptBlock, CALLBACK_MIN_AGE, curateStoryMemory,
     normalizeStoryMemoryCard, scoreStoryMemory, STORY_MEMORY_ENGINE_STAMPS,
 } from './storyMemory.js';
 import { MESSAGE_WINDOW } from '../llm/turnOrchestrator.js';
@@ -50,13 +50,22 @@ describe('a callback is what the window forgot', () => {
     });
 });
 
-describe('the engine judges the payoff', () => {
-    it('detectCallbackPayoff: half the card\'s meaning tokens in the reply is a landing; fewer is not', () => {
-        const landed = detectCallbackPayoff([ribbon], 'Mira glances at the well road. "No blue ribbon on the post — the road is still safe," she says.');
-        expect(landed.map(c => c.id)).toEqual(['card-ribbon']);
-        expect(detectCallbackPayoff([ribbon], 'The tavern is loud tonight and the stew is thin.')).toEqual([]);
-        expect(detectCallbackPayoff([ribbon], '')).toEqual([]);
-        expect(detectCallbackPayoff([{ id: 'x', text: 'short one' }], 'short one indeed')).toEqual([]); // under 3 meaning tokens never lands
+// Flipped 2026-11-08 (identity by reference, lane 8): the word detector that
+// read a card's tokens in the reply is gone — the DM's own memory_updates
+// `used` (the id printed on the card's line) is the one landing. The engine
+// action now only puts the chip on the row for those ids, and a card the
+// DM's `used` already stamped this message is not stamped twice.
+describe('the DM says when a callback landed; the engine shows it', () => {
+    it('MARK_CALLBACK_PAYOFF after the DM\'s own used at the same message adds the chip and stamps nothing twice', () => {
+        const state = {
+            ...initialGameState,
+            storyMemory: [ribbon],
+            messages: [...transcript(40), { id: 'dm-41', role: 'assistant', content: 'Mira: "No blue ribbon on the well road."' }],
+        };
+        const dm = gameReducer(state, { type: 'UPDATE_STORY_MEMORY', payload: { id: 'card-ribbon', used: true } });
+        const marked = gameReducer(dm, { type: 'MARK_CALLBACK_PAYOFF', payload: { messageId: 'dm-41', cardIds: ['card-ribbon'] } });
+        expect(marked.storyMemory[0]).toMatchObject({ usedCount: 1, lastUsedMessage: 41 });
+        expect(marked.messages.at(-1).bondMarks).toEqual([expect.objectContaining({ kind: 'callback', name: 'Mira ribbon' })]);
     });
 
     it('MARK_CALLBACK_PAYOFF rests and counts the card and puts a ↺ chip on the DM row', () => {
@@ -72,8 +81,10 @@ describe('the engine judges the payoff', () => {
         expect(next.messages.at(-1).bondMarks).toEqual([{ name: 'Mira ribbon', kind: 'callback', label: expect.stringContaining('callback landed: Mira promised') }]);
         // The rested card is out of curation for the cooldown.
         expect(scoreStoryMemory(card, { query: 'ribbon', messages: next.messages })).toBe(0);
-        // Twice lands twice; an unknown id or an empty list is a no-op.
-        expect(gameReducer(next, { type: 'MARK_CALLBACK_PAYOFF', payload: { messageId: 'dm-41', cardIds: ['card-ribbon'] } }).storyMemory[0].usedCount).toBe(2);
+        // A second mark at the SAME message is the chip only (lane 8); a later message lands again. An unknown id or an empty list is a no-op.
+        expect(gameReducer(next, { type: 'MARK_CALLBACK_PAYOFF', payload: { messageId: 'dm-41', cardIds: ['card-ribbon'] } }).storyMemory[0].usedCount).toBe(1);
+        const later = { ...next, messages: [...next.messages, { id: 'u-42', role: 'user', content: 'x' }, { id: 'dm-43', role: 'assistant', content: 'y' }] };
+        expect(gameReducer(later, { type: 'MARK_CALLBACK_PAYOFF', payload: { messageId: 'dm-43', cardIds: ['card-ribbon'] } }).storyMemory[0].usedCount).toBe(2);
         expect(gameReducer(next, { type: 'MARK_CALLBACK_PAYOFF', payload: { messageId: 'dm-41', cardIds: ['nope'] } })).toBe(next);
     });
 
@@ -88,10 +99,13 @@ describe('the engine judges the payoff', () => {
 });
 
 describe('playtest 2026-09-30: an engine card keeps its text through a Scribe re-report', () => {
+    // The re-report reaches the engine card by its id since lane 8 (the Scribe
+    // is shown the id under KNOWN STORY CARDS); in other words without the id it is a new card.
     it('END_COMBAT\'s wound card is never reworded by the Scribe', () => {
         const wound = normalizeStoryMemoryCard({ id: 'wound-1', type: 'wound', subject: 'the Cutter fight', text: 'The Cutter opened Astra\'s shoulder to the bone at the weir; she went down to 3 HP.', salience: 4, source: 'engine', tags: ['fight-cost'] });
         const state = { ...initialGameState, storyMemory: [wound], messages: transcript(30) };
-        const next = gameReducer(state, { type: 'ADD_STORY_MEMORY_CARD', payload: { type: 'wound', subject: 'the Cutter fight', text: 'Astra was wounded by the Cutter at the weir and nearly died.', salience: 4, tags: ['scar'] } });
+        expect(gameReducer(state, { type: 'ADD_STORY_MEMORY_CARD', payload: { type: 'wound', subject: 'the Cutter fight', text: 'Astra was wounded by the Cutter at the weir and nearly died.', salience: 4, tags: ['scar'] } }).storyMemory).toHaveLength(2);
+        const next = gameReducer(state, { type: 'ADD_STORY_MEMORY_CARD', payload: { id: 'wound-1', type: 'wound', subject: 'the Cutter fight', text: 'Astra was wounded by the Cutter at the weir and nearly died.', salience: 4, tags: ['scar'] } });
         expect(next.storyMemory).toHaveLength(1);
         expect(next.storyMemory[0].text).toBe(wound.text);
         expect(next.storyMemory[0].source).toBe('engine');

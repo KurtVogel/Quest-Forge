@@ -207,7 +207,7 @@ and `outOfCombatRollPolicy.js` (the check proposal and its arbiter), `progressio
 intent aspects, `liveWorldFacts` for every present-tense reader), `worldJournal.js`
 (`maybeAutoSummarize`: the cadence that summarizes pruned chat, keeps a tail, commits in
 order and runs the reflection), `journalEntry.js`, `storyMemory.js` (`curateStoryMemory`,
-`findStoryMemoryMatch`, `detectCallbackPayoff`, dormancy), `vectorMemory.js` (the RAG store:
+`findStoryMemoryMatch` — the echoed id or the exact text, `possibleSameCardPairs` / `mergeStoryCards` for the reflection's `merge_cards`, dormancy), `vectorMemory.js` (the RAG store:
 `seedMemories`, `retrieveRelevant`, `queueMemoryItem` / `flushMemoryQueue`, one row composer
 per category, a campaign-keyed IndexedDB embedding cache), `textMatch.js` (the shared fuzzy
 tokenizer and presence tokenizer), `retraction.js` (what a deleted message takes with it),

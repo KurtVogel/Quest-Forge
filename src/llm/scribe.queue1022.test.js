@@ -115,8 +115,10 @@ describe('the caps count ACCEPTED rows (P2)', () => {
         const kept = capNovelCards([{ id: 'card-1', type: 'promise', subject: 'the blue ribbon', text: 'Mira promised the ribbon again.' }, fresh(1), fresh(2), fresh(3)], pool);
         expect(kept).toHaveLength(4);
         expect(capNovelCards([fresh(1), fresh(2), fresh(3), fresh(4)], pool).map(c => c.subject)).toEqual(['riddle 1', 'riddle 2', 'riddle 3']);
-        // A subject + type match is a merge too (the reducer's own matcher).
-        expect(capNovelCards([{ type: 'promise', subject: 'the blue ribbon', text: 'Another wording.' }, fresh(1), fresh(2), fresh(3)], pool)).toHaveLength(4);
+        // A subject + type match is NOT a merge since lane 8 (2026-11-08): without the id it is a fourth novel card, and the cap keeps three.
+        expect(capNovelCards([{ type: 'promise', subject: 'the blue ribbon', text: 'Another wording.' }, fresh(1), fresh(2), fresh(3)], pool)).toHaveLength(3);
+        // The exact text under the same type rides free.
+        expect(capNovelCards([{ type: 'promise', subject: 'x', text: 'Mira promised a blue ribbon on the well road if it turned unsafe.' }, fresh(1), fresh(2), fresh(3)], pool)).toHaveLength(4);
     });
 });
 

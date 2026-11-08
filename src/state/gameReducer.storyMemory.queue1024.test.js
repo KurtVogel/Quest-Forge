@@ -22,8 +22,9 @@ describe('P1 — two beats about one person are two cards', () => {
             'Tammo trusted the hero with the key to the mill loft.',
             'Tammo struck the hero across the face at the harvest feast.',
         ]);
-        // A restatement of the slap still folds into it.
-        const restated = add({ ...state, messages: talk(56) }, { type: 'relationship', subject: 'Tammo', text: 'Tammo struck the hero in the face before the whole harvest feast.' });
+        // A restatement of the slap folds into it by the id the Scribe echoes (lane 8); without the id it is a third card.
+        expect(add({ ...state, messages: talk(56) }, { type: 'relationship', subject: 'Tammo', text: 'Tammo struck the hero in the face before the whole harvest feast.' }).storyMemory).toHaveLength(3);
+        const restated = add({ ...state, messages: talk(56) }, { id: state.storyMemory[1].id, type: 'relationship', subject: 'Tammo', text: 'Tammo struck the hero in the face before the whole harvest feast.' });
         expect(restated.storyMemory).toHaveLength(2);
     });
 });

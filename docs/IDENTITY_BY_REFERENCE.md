@@ -1,6 +1,6 @@
 # Identity by reference: inventory and proposed order
 
-**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11, 6 and 7 are built and deployed 2026-11-08. Open: 8 (needs a merge lane + a 40-turn before/after), 9 (review the design first), 10 (on evidence).** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
+**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11, 6, 7 and 8 are built and deployed (8 in the small hours of 2026-11-09; its 40-turn Sol before/after is still owed). Open: 9 (review the design first), 10 (on evidence).** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
 2026-11-07 for the live proof. Line numbers hold at `667295b`, which changed no app code. Rule behind it: DECISIONS.md 2026-11-05 (first entry), with 2026-11-03 evening
 (`recorded_as`), 2026-11-02 (the repeat judge) and 2026-11-06 night (the id decides) as the lanes already moved.
 
@@ -29,7 +29,7 @@ of four lanes below. Lane numbers are unchanged because STATUS.md and DECISIONS.
 |---|---|---|
 | 2 Hero tells | The id decides, `richer` gone, kind flip gone; both deferred items closed | ~~`isSameTell` for a report with no id~~ done 2026-11-08 |
 | 3 Quests | `id` in the format example; the id decides on open and close; an exact name clash refuses with a line | ~~`questNameMatcher` with no id~~ done 2026-11-07 |
-| 8 Story cards | An echoed id of the same type decides, read first; the 0.3 floor is now a log line | The subject, commitment and near-duplicate rungs |
+| 8 Story cards | An echoed id of the same type decides, read first; the 0.3 floor is now a log line | ~~The subject, commitment and near-duplicate rungs~~ done 2026-11-09 |
 | 10 Facts | `supersedes` is read before the word judge | The word judge when no ref is given |
 
 **The live proof (2026-11-07, `npm run eval:questid`, Sol and Flash, 2 runs each):** every quest move that was
@@ -198,7 +198,9 @@ the roster into functions that don't have it today.
 
 After this lane `namesMatch` has one production reader left: the shortlist. Rename it to say so.
 
-## Lane 8. Story cards: what's left
+## Lane 8. Story cards: what's left (done 2026-11-09, small hours)
+
+**Built as below** (DECISIONS.md 2026-11-08, small hours of the 9th), in the order asked: the two replacements first — KNOWN STORY CARDS by nearest meaning (`cardId` on the `story_*` rows, `nearestStoryCards`, live card embeds) and the reflection's `merge_cards` from a `possibleSameCard` shortlist — then the rungs: `findStoryMemoryMatch` is the echoed id or the exact text under the same type, `pickMergedCardText` is plain length, `detectCallbackPayoff` is gone and the DM's `used` is the landing. Evaled on Flash with `eval:cardid`. **The 40-turn Sol before/after is owed:** the BEFORE build of `4dbc4e9` is kept at the session scratchpad `dist-baseline`. The table below is the design as proposed.
 
 This is the lane I'm most wary of. These rungs are what hold the card count down.
 
@@ -304,7 +306,7 @@ Ordered by: the id is already shown to the LLM, a defect closes, nothing else de
 | ~~11~~ | ~~Phrase rules~~ | **Done 2026-11-08** in two slices; `isRecordedDead` deferred to lane 6 | | |
 | ~~6~~ | ~~People~~ | **Done 2026-11-08** in three slices (aliases, `findNpcByRef`, `name_links`, the migration; `same_person`, ties by id, `npc.dead`) | 1 queue item closed | |
 | ~~7~~ | ~~People reads~~ | **Done 2026-11-08** | `namesMatch` left decisions; it is `shortlistNamesMatch` now | |
-| 8 | Story cards | Needs a merge lane first; needs a before and after | | Large |
+| ~~8~~ | ~~Story cards~~ | **Done 2026-11-09** (merge lane + nearest cards first; the 40-turn before/after still owed) | | |
 | 9 | Places | Needs what 6 teaches. **Stop and review the design before building** | `findLocationRecord` fuzzy rung | Large |
 | 10 | Facts, evidence, verifier | Low harm; on evidence or your say-so | | Medium |
 

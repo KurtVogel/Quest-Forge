@@ -345,9 +345,10 @@ describe('epistemics capture in the reducer', () => {
         expect(state.storyMemory[0].witnessed).toBe(true);
 
         state = { ...state, messages: [...state.messages, { role: 'assistant', content: 'later' }] };
+        // The re-report carries the id the Scribe is shown (lane 8, 2026-11-08); in other words without it, a new card.
         state = gameReducer(state, {
             type: 'ADD_STORY_MEMORY_CARD',
-            payload: { text: 'Accused the magistrate before the crowd, loudly', type: 'callback' },
+            payload: { id: state.storyMemory[0].id, text: 'Accused the magistrate before the crowd, loudly', type: 'callback' },
         });
         expect(state.storyMemory).toHaveLength(1);
         expect(state.storyMemory[0].firstSeenMessage).toBe(7);

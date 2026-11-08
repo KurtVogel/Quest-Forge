@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { foeFamilyKey } from './worldTempo.js';
 import { buildKnownLands } from '../llm/scribe.js';
 import { WOUND_CARD_TEXT_MAX, fitSentences } from './fightTally.js';
-import { COMMITMENT_CONTAINMENT, COMMITMENT_MIN_SHARED, findStoryMemoryMatch } from './storyMemory.js';
+import { findStoryMemoryMatch, possibleSameCardPairs } from './storyMemory.js';
 import { gameReducer, initialGameState } from '../state/gameReducer.js';
 
 // The 2026-10-30 Opus-played run (opus-flash-2, Gemini 3.8 Flash DM): what the
@@ -53,19 +53,24 @@ describe('the wound card ends on a sentence', () => {
     });
 });
 
-describe('a promise re-minted in new words about the same person is the same promise', () => {
+// Flipped 2026-11-08 (identity by reference, lane 8): the commitment rung is
+// gone. The reworded contract is a new card at the reducer, the Scribe is
+// asked to echo the held card's id (KNOWN STORY CARDS lists it by its person
+// and by nearest meaning), and the pair is offered to the reflection to fold.
+describe('a promise re-minted in new words about the same person is a new card the reflection may fold', () => {
     const held = {
-        id: 'mem-1', type: 'promise', status: 'active', subject: 'Maro\'s guide agreement in the Basin', linkedNpcNames: ['Maro'],
+        id: 'mem-1', type: 'promise', status: 'active', subject: 'Maro\'s guide agreement in the Basin', linkedNpcNames: ['Maro'], firstSeenMessage: 10, lastSeenMessage: 10,
         text: 'Maro agreed to serve as Sanni\'s guide between the lime-wharves and cooperage alleys in the Basin for one silver per day, explicitly refusing to bleed for family business.',
     };
-    it('matches the run\'s reworded guide contract on the shared person and the shared meaning', () => {
+    it('the reworded guide contract is a new card without the id, the held card with it; the pair is offered to the reflection', () => {
         const reworded = {
             type: 'promise', subject: 'Maro\'s guidance contract', linkedNpcNames: ['Maro'],
             text: 'Maro agreed to guide Sanni through the Saffron Basin for one silver per day, explicitly refusing to engage syndicate enforcers on her behalf.',
         };
-        expect(findStoryMemoryMatch([held], reworded)).toBe(0);
-        expect(COMMITMENT_MIN_SHARED).toBe(3);
-        expect(COMMITMENT_CONTAINMENT).toBe(0.5);
+        expect(findStoryMemoryMatch([held], reworded)).toBe(-1);
+        expect(findStoryMemoryMatch([held], { ...reworded, id: 'mem-1' })).toBe(0);
+        const minted = { ...reworded, id: 'mem-2', status: 'active', firstSeenMessage: 40, lastSeenMessage: 40 };
+        expect(possibleSameCardPairs([held, minted]).map(pair => pair.ids)).toEqual([['mem-1', 'mem-2']]);
     });
     it('a DIFFERENT promise to the same person, or the same words under another type, is not a match', () => {
         const passage = {
@@ -73,11 +78,8 @@ describe('a promise re-minted in new words about the same person is the same pro
             text: 'Sanni gave her word as a Koskela to pay Maro fifty silver pieces for ship passage once Eero is freed from the High Wash.',
         };
         expect(findStoryMemoryMatch([held], passage)).toBe(-1);
-        // The same commitment reworded under another TYPE is not this rung's (the exact-text rung is type-agnostic by design).
-        expect(findStoryMemoryMatch([held], {
-            type: 'relationship', subject: 'Maro and Sanni', linkedNpcNames: ['Maro'],
-            text: 'Maro agreed to guide Sanni through the Saffron Basin for one silver per day, explicitly refusing to engage syndicate enforcers on her behalf.',
-        })).toBe(-1);
+        // The exact text under another TYPE is another card (the text rung is type-gated since lane 8).
+        expect(findStoryMemoryMatch([held], { type: 'relationship', subject: 'Maro and Sanni', linkedNpcNames: ['Maro'], text: held.text })).toBe(-1);
         expect(findStoryMemoryMatch([held], { type: 'promise', subject: 'A guide for silver', linkedNpcNames: ['Tuuri'], text: held.text })).toBe(0); // the exact text rung still wins
     });
 });

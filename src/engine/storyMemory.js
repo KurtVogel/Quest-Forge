@@ -62,21 +62,6 @@ function landOfPlace(locations, place) {
     return typeof region === 'string' && region.trim() ? region : null;
 }
 /**
- * The landed-callback judge (2026-10-24 story-memory P1): the card's
- * DISTINCTIVE tokens — what the scene it was curated for did not already
- * supply — in the DM's reply, at least CALLBACK_PAYOFF_MIN_HITS of them and
- * this share. The old judge read half the card's tokens against the whole
- * reply, and curation had picked the card BECAUSE its tokens overlap the
- * scene: a reply at the Rimehollow well with Tammo present landed "Tammo
- * owes the hero a debt from the night at the Rimehollow well" on tammo /
- * rimehollow / well / night alone. A spoken callback carries the card's
- * NOUNS (the ribbon, the key, the loft), rarely its verbs, so a third of the
- * distinctive tokens is the share; two is the floor so a lone noun never
- * lands a card.
- */
-export const CALLBACK_PAYOFF_CONTAINMENT = 0.3;
-export const CALLBACK_PAYOFF_MIN_HITS = 2;
-/**
  * A DIAGNOSTIC since 2026-11-06 (night), no longer a judge. From 2026-10-24
  * an id re-report stood only when its text touched the held wording at this
  * containment — a word rule overruling the id the Scribe was shown and told
@@ -87,25 +72,6 @@ export const CALLBACK_PAYOFF_MIN_HITS = 2;
  * often the Scribe echoes the wrong id.
  */
 export const ID_REPORT_CONTAINMENT = 0.3;
-/**
- * A PERSON-named subject is not a card's identity (2026-10-24 story-memory
- * P1): the schema names a person first for `subject`, so "Tammo trusted the
- * hero with the key" and "Tammo struck the hero at the feast" (both
- * `relationship`, subject `Tammo`) used to collapse into ONE card and the
- * trust beat was gone from the pool, the callbacks, the dossier and the RAG.
- * Two same-type beats about one named person merge only when their texts —
- * the name itself set aside, since it is on both by construction — share at
- * least SAME_SUBJECT_MIN_SHARED meaning tokens AND this containment. "hero"
- * is on nearly every card and alone cannot reach it on a text of three or
- * more meaning tokens; a reworded restatement keeps its object nouns and
- * clears it. The fuzzy rung's 0.5 text bar is the ceiling (an exact subject
- * is stronger evidence than a 0.8 fuzzy one). A BEAT-named subject
- * ("blacksmith debt") keeps the plain exact-subject rule — its tokens ARE
- * the meaning — and so does `npcAgenda`, a current-state card by the roster
- * `agenda` field's own rule: one person, one agenda.
- */
-export const SAME_SUBJECT_CONTAINMENT = 0.4;
-export const SAME_SUBJECT_MIN_SHARED = 2;
 const LEGACY_CALLBACK_COOLDOWN_MS = 1000 * 60 * 8;
 const LEGACY_RECENCY_DECAY_HOURS = 24;
 /**
@@ -199,42 +165,18 @@ const tokenContainment = containment;
  * Same-type cards whose text token sets largely contain each other — or whose
  * subjects name the same entities with substantial text overlap — are the same
  * card being restated, not new material. */
-export function isNearDuplicateStoryCard(a = {}, b = {}) {
-    if (!a || !b || a.type !== b.type) return false;
-    const textA = meaningTokens(a.text);
-    const textB = meaningTokens(b.text);
-    const textScore = tokenContainment(textA, textB);
-    if (Math.min(textA.size, textB.size) >= 3 && textScore >= 0.75) return true;
-    const subjectA = meaningTokens(a.subject);
-    const subjectB = meaningTokens(b.subject);
-    if (!subjectA.size || !subjectB.size) return false;
-    if (tokenContainment(subjectA, subjectB) < 0.8) return false;
-    // A NAMED subject is on both texts by construction (2026-10-24 P1): the
-    // name and "hero" alone put a four-token text at 0.5, so two unrelated
-    // beats about one person read as one. The name's tokens are set aside
-    // before the text score; a beat-named subject's tokens ARE the meaning
-    // and stay.
-    if (isNameSubject(a.subject) || isNameSubject(b.subject)) {
-        const names = new Set([...subjectA, ...subjectB]);
-        const strip = tokens => new Set([...tokens].filter(token => !names.has(token)));
-        const strippedA = strip(textA);
-        const strippedB = strip(textB);
-        if (!strippedA.size || !strippedB.size) return false;
-        return tokenContainment(strippedA, strippedB) >= 0.5;
-    }
-    return textScore >= 0.5;
-}
-
-/** On a near-duplicate merge the newest framing usually wins, but a bare
- * fragment must never clobber a strictly richer record of the same beat. */
+/**
+ * The text a re-report leaves on the card it landed on (identity by
+ * reference, lane 8, 2026-11-08): plain length — a shorter text never
+ * replaces a longer one, a longer or equal one does. The old fragment guard
+ * read the two texts' tokens against each other to decide; the Scribe is
+ * asked for the COMPLETE updated text on an id echo, so the longer text is
+ * the fuller record and no word rule is needed to say so.
+ */
 export function pickMergedCardText(existingText = '', incomingText = '') {
     if (!existingText) return incomingText;
     if (!incomingText) return existingText;
-    const existing = meaningTokens(existingText);
-    const incoming = meaningTokens(incomingText);
-    const fragment = incoming.size < existing.size
-        && overlapScore(incoming, existing) / (incoming.size || 1) >= 0.8;
-    return fragment ? existingText : incomingText;
+    return incomingText.length < existingText.length ? existingText : incomingText;
 }
 
 /** "public"/"everyone" in a knowers list means the info is NOT secret. */
@@ -454,90 +396,122 @@ export function idReportDrifted(held, card) {
     return tokenContainment(meaningTokens(held.text), meaningTokens(card.text)) < ID_REPORT_CONTAINMENT;
 }
 
-const SUBJECT_FILLER_WORDS = new Set(['the', 'of', 'and', 'a', 'an', 'at', 'in', 'on']);
-
 /**
- * A subject that NAMES someone or something — every content token capitalized
- * ("Tammo", "Odo Grells", "The Lady", "Sundial, Oren, Jack"), four at most —
- * as against a BEAT-named subject ("blacksmith debt", "mysterious letter",
- * "Mira ribbon"). The Scribe capitalizes names reliably; a lowercase name
- * falls to the plain rule (no worse than before), a capitalized beat gets the
- * text gate (the fuzzy rung still catches its restatements).
+ * The stored card an incoming card is a report OF, or -1 (identity by
+ * reference, lane 8, 2026-11-08). Two rungs, both exact: an echoed id of the
+ * same type (`idReportAgrees`, read first over the whole pool — 2026-11-06,
+ * night), else the same text under the same type, character for character
+ * after the clamp. Nothing else: the exact-subject rung, the promise rung
+ * (2026-10-30) and the near-duplicate rung (2026-07-14) each read the two
+ * texts' tokens to decide whether two LLM-written cards meant one beat, and
+ * each had its measured miss — the trust and the slap folded into one card
+ * (2026-10-24), the ferry promise that survived under four wordings. The
+ * Scribe is shown KNOWN STORY CARDS (by the people in the exchange and by
+ * nearest meaning) and asked to echo the id; a report that echoes none is a
+ * new card, and two cards that turn out to be one beat are folded by the
+ * cadence reflection's `merge_cards` answer to a shortlist it is shown
+ * (`possibleSameCardPairs`, `mergeStoryCards`), never by a word rule here.
+ * The text rung carries the type gate its siblings always had (closes the
+ * 2026-11-06 queue item: an engine wound and a Scribe callback with one text
+ * used to fold, and the merge took the callback's type).
  */
-export function isNameSubject(subject) {
-    const tokens = cleanText(subject).split(/[\s,;/&]+/).filter(token => token && !SUBJECT_FILLER_WORDS.has(token.toLowerCase()));
-    if (tokens.length === 0 || tokens.length > 4) return false;
-    return tokens.every(token => /^\p{Lu}/u.test(token));
-}
-
-/** Two same-type cards on one exact subject: the same beat, or two beats about one person? */
-function sameSubjectAgrees(held, card) {
-    if (card.type === 'npcAgenda' || !isNameSubject(card.subject)) return true;
-    if (held.source === 'npc_roster' && card.source === 'npc_roster') return true;
-    const nameTokens = meaningTokens(card.subject);
-    const strip = tokens => new Set([...tokens].filter(token => !nameTokens.has(token)));
-    const a = strip(meaningTokens(held.text));
-    const b = strip(meaningTokens(card.text));
-    if (a.size === 0 || b.size === 0) return false;
-    return overlapScore(a, b) >= SAME_SUBJECT_MIN_SHARED && tokenContainment(a, b) >= SAME_SUBJECT_CONTAINMENT;
-}
-
-/**
- * The stored card an incoming card is a report OF, or -1 (`findStoryMemoryMatch`,
- * below). An echoed id of the same type decides, read first over the whole
- * pool (2026-11-06, night). A report with no id, or one whose id does not
- * hold, is judged by the text rungs — each a CLAIM the content must bear out
- * (2026-10-24, SAME_SUBJECT_CONTAINMENT); a rung that fails falls through.
- */
-/**
- * A PROMISE re-minted in new words about the same person (2026-10-30 Opus
- * playtest: Maro's "one silver a day" guide contract landed as four cards under
- * four subjects — "Maro's guide agreement in the Basin", "Maro's guidance
- * contract", … — because the subject rung needs 0.8 subject containment and
- * the near-duplicate rung is gated on the subject too). Same type, a shared
- * linked person, and the texts — the people's names set aside — sharing at
- * least COMMITMENT_MIN_SHARED meaning tokens at COMMITMENT_CONTAINMENT: one
- * commitment, whatever the subject says. Only `promise` (`npcAgenda` is one
- * card per person already; a wound or a beat may legitimately recur).
- */
-export const COMMITMENT_MIN_SHARED = 3;
-export const COMMITMENT_CONTAINMENT = 0.5;
-const COMMITMENT_TYPES = new Set(['promise']);
-
-function linkedNames(card) {
-    return new Set((Array.isArray(card?.linkedNpcNames) ? card.linkedNpcNames : [])
-        .map(name => cleanText(name).toLowerCase()).filter(Boolean));
-}
-
-function sameCommitmentReworded(held, card) {
-    if (!held || !card || held.type !== card.type || !COMMITMENT_TYPES.has(card.type)) return false;
-    const people = linkedNames(held);
-    const shared = [...linkedNames(card)].filter(name => people.has(name));
-    if (shared.length === 0) return false;
-    const names = new Set([...people, ...linkedNames(card)].flatMap(name => [...meaningTokens(name)]));
-    const strip = tokens => new Set([...tokens].filter(token => !names.has(token)));
-    const a = strip(meaningTokens(held.text));
-    const b = strip(meaningTokens(card.text));
-    if (!a.size || !b.size) return false;
-    return overlapScore(a, b) >= COMMITMENT_MIN_SHARED && tokenContainment(a, b) >= COMMITMENT_CONTAINMENT;
-}
-
 export function findStoryMemoryMatch(memories = [], card = {}) {
-    const subject = cleanText(card.subject).toLowerCase();
     const text = cleanText(card.text).toLowerCase();
-    // The id is read FIRST, over the whole pool (2026-11-06, night): one
-    // `findIndex` over every rung let an EARLIER card that merely resembled
-    // the report win over the later card whose id it carried.
     if (card.id) {
         const byId = memories.findIndex(m => m && m.id === card.id);
         if (byId !== -1 && idReportAgrees(memories[byId], card)) return byId;
     }
-    return memories.findIndex(m => {
-        if (subject && m.subject?.toLowerCase() === subject && m.type === card.type && sameSubjectAgrees(m, card)) return true;
-        if (text && m.text?.toLowerCase() === text) return true;
-        if (sameCommitmentReworded(m, card)) return true;
-        return isNearDuplicateStoryCard(m, card);
+    if (!text) return -1;
+    return memories.findIndex(m => m && m.type === card.type && m.text?.toLowerCase() === text);
+}
+
+/**
+ * The shortlist the cadence reflection is asked about (lane 8, decision 2 of
+ * docs/IDENTITY_BY_REFERENCE.md: a matcher may shortlist for an LLM and never
+ * decide). Pairs of ACTIVE lane cards of one type whose texts — the linked
+ * people's names set aside — share at least SAME_CARD_MIN_SHARED meaning
+ * tokens at SAME_CARD_CONTAINMENT. This is the old near-duplicate rung
+ * loosened a little and demoted: it chooses what the reflection is SHOWN
+ * (`possibleSameCard`), and the reflection's `merge_cards` answer, by id,
+ * is what folds (`mergeStoryCards`). Engine cards and roster snapshots are
+ * never offered (their text is the engine's). Newest pairs first, capped.
+ */
+export const SAME_CARD_PAIRS_CAP = 4;
+export const SAME_CARD_MIN_SHARED = 2;
+export const SAME_CARD_CONTAINMENT = 0.4;
+const SHORTLIST_SOURCES_EXCLUDED = new Set(['engine', 'npc_roster']);
+
+export function possibleSameCardPairs(cards = [], { cap = SAME_CARD_PAIRS_CAP } = {}) {
+    const pool = (Array.isArray(cards) ? cards : []).filter(card => card && typeof card.id === 'string' && card.id
+        && typeof card.text === 'string' && card.text.trim()
+        && (card.status || 'active') === 'active'
+        && !SHORTLIST_SOURCES_EXCLUDED.has(card.source));
+    const prepared = pool.map(card => {
+        const names = new Set((Array.isArray(card.linkedNpcNames) ? card.linkedNpcNames : []).flatMap(name => [...meaningTokens(name)]));
+        return { card, tokens: new Set([...meaningTokens(card.text)].filter(token => !names.has(token))), seen: Math.max(card.lastSeenMessage || 0, card.firstSeenMessage || 0) };
     });
+    const pairs = [];
+    for (let i = 0; i < prepared.length; i++) {
+        for (let j = i + 1; j < prepared.length; j++) {
+            const a = prepared[i];
+            const b = prepared[j];
+            if (a.card.type !== b.card.type || !a.tokens.size || !b.tokens.size) continue;
+            if (overlapScore(a.tokens, b.tokens) < SAME_CARD_MIN_SHARED || tokenContainment(a.tokens, b.tokens) < SAME_CARD_CONTAINMENT) continue;
+            // The older card is offered first: the reflection is told to keep the fuller, and the older is the one the record has leaned on.
+            const [first, second] = (a.card.firstSeenMessage || 0) <= (b.card.firstSeenMessage || 0) ? [a, b] : [b, a];
+            pairs.push({ ids: [first.card.id, second.card.id], type: first.card.type, texts: [cleanText(first.card.text).slice(0, 160), cleanText(second.card.text).slice(0, 160)], seen: Math.max(a.seen, b.seen) });
+        }
+    }
+    return pairs.sort((x, y) => y.seen - x.seen).slice(0, Math.max(0, cap)).map(({ ids, type, texts }) => ({ ids, type, texts }));
+}
+
+/**
+ * Fold the card `dropId` into `keepId` (lane 8): the reflection said the two
+ * are one beat. The kept card keeps its id, source and provenance; the text
+ * is the longer of the two (the merge rule); salience and charge are the
+ * higher; tags, linked people and witnesses union (the dropped card's own
+ * source message joins the witnesses, so a retraction follows both); knowers
+ * union unless either card was public; the stamps span both; a resolved
+ * half resolves the beat. Returns the pool unchanged when either id is
+ * missing or the ids are one.
+ */
+export function mergeStoryCards(cards, keepId, dropId) {
+    const pool = Array.isArray(cards) ? cards : [];
+    if (!keepId || !dropId || keepId === dropId) return pool;
+    const keep = pool.find(card => card?.id === keepId);
+    const drop = pool.find(card => card?.id === dropId);
+    if (!keep || !drop) return pool;
+    const stamps = (key, pick) => {
+        const values = [keep[key], drop[key]].filter(Number.isFinite);
+        return values.length ? pick(...values) : undefined;
+    };
+    const union = (key) => [...new Set([...(Array.isArray(keep[key]) ? keep[key] : []), ...(Array.isArray(drop[key]) ? drop[key] : [])])];
+    const publicBeat = !(Array.isArray(keep.knownBy) && keep.knownBy.length) || !(Array.isArray(drop.knownBy) && drop.knownBy.length);
+    const witnesses = [...new Set([...union('witnesses'), ...(typeof drop.sourceMessage === 'string' && drop.sourceMessage ? [drop.sourceMessage] : [])])]
+        .filter(id => id !== keep.sourceMessage);
+    const merged = normalizeStoryMemoryCard({
+        ...keep,
+        text: pickMergedCardText(keep.text, drop.text),
+        subject: keep.subject || drop.subject,
+        location: keep.location || drop.location,
+        salience: Math.max(keep.salience || 1, drop.salience || 1),
+        emotionalCharge: Math.max(keep.emotionalCharge || 0, drop.emotionalCharge || 0),
+        tags: union('tags'),
+        linkedNpcNames: union('linkedNpcNames'),
+        knownBy: publicBeat ? [] : union('knownBy'),
+        witnesses,
+        status: keep.status === 'resolved' || drop.status === 'resolved' ? 'resolved' : keep.status,
+        firstSeenMessage: stamps('firstSeenMessage', Math.min),
+        lastSeenMessage: stamps('lastSeenMessage', Math.max),
+        lastUsedMessage: stamps('lastUsedMessage', Math.max),
+        usedCount: (keep.usedCount || 0) + (drop.usedCount || 0),
+        firstSeenAt: Math.min(keep.firstSeenAt || Date.now(), drop.firstSeenAt || Date.now()),
+        lastSeenAt: Math.max(keep.lastSeenAt || 0, drop.lastSeenAt || 0) || Date.now(),
+        id: keep.id,
+        source: keep.source,
+    }, keep);
+    if (!merged) return pool;
+    return pool.filter(card => card?.id !== dropId).map(card => (card?.id === keepId ? merged : card));
 }
 
 /**
@@ -828,44 +802,6 @@ export function curateStoryMemory({ memories = [], query = '', location = '', np
                 speakers,
             };
         });
-}
-
-/**
- * Did the DM's reply pay off a curated card? (WOW 2026-10-14) The engine judges
- * the landing beside the DM's own `memory_updates`, so a callback the DM wove
- * in without marking still rests and still shows. A detector that follows a
- * selector scores on what the selector did NOT use (2026-10-24 P1): the
- * card's tokens MINUS the scene's — the player's line, the location, the
- * present people's names, the hero's name and "hero", and the scene's recent
- * text — must appear in the reply at CALLBACK_PAYOFF_MIN_HITS and
- * CALLBACK_PAYOFF_CONTAINMENT. A card that is nothing but the scene can never
- * land; a card under 3 meaning tokens never did.
- *
- * @param {object[]} curated - the cards `curateStoryMemory` offered this turn
- * @param {string} narrative - the DM's reply
- * @param {object} [scene] - what the card was curated FOR
- * @param {string} [scene.query] - the curation query (the player's line + context)
- * @param {string} [scene.location] - the hero's current location
- * @param {Array<object|string>} [scene.npcs] - the present NPCs (records or names)
- * @param {string} [scene.heroName]
- * @param {string} [scene.presenceText] - the scene's recent narrative text
- */
-export function detectCallbackPayoff(curated = [], narrative = '', { query = '', location = '', npcs = [], heroName = '', presenceText = '' } = {}) {
-    const reply = meaningTokens(typeof narrative === 'string' ? narrative : '');
-    if (reply.size === 0) return [];
-    const sceneTokens = meaningTokens([
-        'hero', query, location, heroName, presenceText,
-        ...(Array.isArray(npcs) ? npcs : []).map(n => (typeof n === 'string' ? n : n?.name)),
-    ].filter(part => typeof part === 'string' && part).join(' '));
-    return (Array.isArray(curated) ? curated : []).filter(card => {
-        if (!card || typeof card.id !== 'string') return false;
-        const tokens = meaningTokens(card.text);
-        if (tokens.size < 3) return false;
-        const distinctive = [...tokens].filter(token => !sceneTokens.has(token));
-        if (distinctive.length < CALLBACK_PAYOFF_MIN_HITS) return false;
-        const found = distinctive.filter(token => reply.has(token)).length;
-        return found >= CALLBACK_PAYOFF_MIN_HITS && found / distinctive.length >= CALLBACK_PAYOFF_CONTAINMENT;
-    });
 }
 
 const describeAge = (ageTurns) => (Number.isFinite(ageTurns) ? (ageTurns <= 0 ? 'just now' : `${ageTurns} turn${ageTurns === 1 ? '' : 's'} ago`) : 'long ago');

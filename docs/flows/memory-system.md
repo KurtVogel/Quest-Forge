@@ -36,15 +36,16 @@ sequenceDiagram
     Note over Runner: the DM's own events landed in applyEvents, and stateAfter is replayed
     Runner->>Red: ADD_WORLD_FACTS (DM lane, meta.sourceMessage)
     Red->>Facts: planWorldFactAdditions → added / duplicate (re-stamp, witness) / flip (supersedes)
-    Runner->>Cards: detectCallbackPayoff(curated, narrative, scene) → MARK_CALLBACK_PAYOFF
+    Runner->>Red: MARK_CALLBACK_PAYOFF for the ids the DM's memory_updates marked used (the ↺ chip)
     Runner->>Vec: queueMemoryItem(factMemoryItem) for this message's accepted facts
 
     Runner->>Scribe: runScribe({ ...buildScribeContext(stateAfter, texts), sourceMessageId })
-    Note over Scribe: context = KNOWN appearances, stances, story cards, facts, open plans, hero tells, lands
+    Note over Scribe: context = KNOWN appearances, stances, story cards (by people + nearest meaning via nearestStoryCards), facts, open plans, hero tells, lands
     Scribe-->>Runner: facts ≤ cap, npc_updates, cards ≤ cap, hero_tells, appearance, audits
     Scribe->>Red: ADD_WORLD_FACTS (meta.sourceMessage) → planWorldFactAdditions again
     Scribe->>Red: UPDATE_NPC → sanitizeNpcLanePayload → findNpcByRef (id / exact name / alias; a DM-lane miss is HELD for the Scribe to link) → upsertNpc (clause merges, impressions)
-    Scribe->>Red: ADD_STORY_MEMORY_CARDS → findStoryMemoryMatch (merge or mint)
+    Scribe->>Red: ADD_STORY_MEMORY_CARDS → findStoryMemoryMatch (the echoed id or the exact text merges; else mint)
+    Scribe->>Vec: queueMemoryItem(storyCardMemoryItem, { carry }) for its cards, by card id
     Scribe->>Red: ADD_HERO_TELLS → recordHeroTells, MERGE_CHARACTER_APPEARANCE, SET_LOCATION
     Scribe->>Vec: queueMemoryItem(factMemoryItem, { carry }) for its accepted facts
 
@@ -131,7 +132,9 @@ in flight when the player loads another save lands nothing.
 - **Cards:** low-salience cards go dormant after a few untouched cadences, engine wound cards
   after more, promises and salience-3/4 cards after twelve (the player's canon and salience 5
   never); the cadence reflection SETTLES the open cards it is offered (`settled_cards`, offered
-  ids only); `resolved` never revives except by an explicit DM status update.
+  ids only) and FOLDS pairs it is offered as one beat (`merge_cards` from `possibleSameCardPairs`,
+  → MERGE_STORY_CARDS, by id — no word rule folds cards at the reducer since lane 8);
+  `resolved` never revives except by an explicit DM status update.
 - **NPCs:** impressions expire; bond moments evict lowest-salience first; descriptive labels
   and fodder are archived, never deleted.
 - **Vectors:** the campaign cap evicts only `player` / `narrative` rows (durable canon never);
