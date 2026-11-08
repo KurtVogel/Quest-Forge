@@ -327,8 +327,10 @@ function attachCapture(page) {
     });
     page.on('console', (msg) => {
         const text = msg.text();
-        if (msg.type() === 'error' || msg.type() === 'warning'
-            || /\[LLM timing\]|\[ResponseParser\]|\[Scribe\]|\[Journal\]|\[Memory\]|\[Gemini embed\]/.test(text)) {
+        // Puppeteer types console.warn as 'warn' (not 'warning'); the lane 8 runs of 2026-11-08 recorded no
+        // warning for that reason, so the [storyMemory] wrong-id line was never counted. Both spellings now.
+        if (msg.type() === 'error' || msg.type() === 'warning' || msg.type() === 'warn'
+            || /\[LLM timing\]|\[ResponseParser\]|\[Scribe\]|\[Journal\]|\[Memory\]|\[Gemini embed\]|\[storyMemory\]/.test(text)) {
             consoleLines.push({ t: Date.now(), type: msg.type(), text: text.slice(0, 300) });
             if (msg.type() === 'error') note('console', `error: ${text.slice(0, 260)}`);
         }
@@ -1199,7 +1201,7 @@ function writeReport({ startedAt, finishedAt, buildInfo }) {
     const partnerRows = dmCalls.reduce((a, c) => a + (c.sys.match(/\n {2}↳ (?:the player had said|the DM answered):/g) || []).length, 0);
     const retrievedRequests = dmCalls.filter(c => c.sys.includes('## RETRIEVED MEMORIES')).length;
     lines.push(`- Retrieved block on ${retrievedRequests} of ${dmCalls.length} DM requests; partner lines printed across the run: ${partnerRows}${PARTNER_ROWS ? '' : ' (flag off)'}.`);
-    lines.push(`- Console errors: ${consoleLines.filter(c => c.type === 'error').length}; warnings: ${consoleLines.filter(c => c.type === 'warning').length}.`);
+    lines.push(`- Console errors: ${consoleLines.filter(c => c.type === 'error').length}; warnings: ${consoleLines.filter(c => c.type === 'warning' || c.type === 'warn').length}.`);
     lines.push('');
     lines.push('## Caveats');
     lines.push('');
