@@ -2624,7 +2624,7 @@ async function landsSnap(page) {
             lastInterludeMessage: s.session?.lastInterludeMessage ?? null,
             pendingRegionalFronts: s.session?.pendingRegionalFronts || null,
             seededRegions: s.session?.seededRegions || [],
-            places: (s.locations || []).map(r => ({ name: r.name, region: r.region || null, type: r.type || null, archetype: r.archetype || null, motifs: r.motifs || [], lastVisitedMessage: r.lastVisitedMessage ?? null })),
+            places: (s.locations || []).map(r => ({ name: r.name, id: r.id, aliases: r.aliases || [], within: r.within || null, provisional: r.provisional === true, visitCount: r.visitCount || 0, region: r.region || null, type: r.type || null, archetype: r.archetype || null, motifs: r.motifs || [], lastVisitedMessage: r.lastVisitedMessage ?? null })),
             frontTitles: (s.fronts || []).map(f => f.title).filter(Boolean),
             encounters: (s.recentEncounters || []).map(e => ({ enemies: e.enemies, foeFamilies: e.foeFamilies || [], location: e.location })),
             combat: s.combat?.active ? { enemies: (s.combat.enemies || []).map(e => e.name) } : null,

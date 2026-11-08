@@ -136,6 +136,18 @@ describe('SET_LOCATION and LINK_PLACES — the DM mints provisionally, the Scrib
         expect(gameReducer(state, { type: 'LINK_PLACES', payload: 'junk' })).toBe(state);
     });
 
+    it('the Scribe echoing the provisional name itself is "new": confirmed, its held arrival run, and KNOWN PLACES never listed it (the 2026-11-08 lands playtest)', () => {
+        let state = start();
+        state = gameReducer(atMessages(state, 4), { type: 'SET_LOCATION', payload: { name: 'Gullmark Quays', dm: true } });
+        expect(state.session.pendingArrival).toMatchObject({ atMessage: 4 });
+        expect(listKnownPlaceNames(state.locations)).toEqual(['The Copper Kettle']); // the provisional record is the question, not an answer
+        expect(buildScribeContext({ ...initialGameState, ...state }).knownLocations).toBe('The Copper Kettle');
+        state = gameReducer(state, { type: 'LINK_PLACES', payload: { links: [{ name: 'Gullmark Quays', is: 'Gullmark Quays' }] } });
+        expect(state.session.pendingArrival).toBeNull();
+        expect(state.locations.find(r => r.name === 'Gullmark Quays')).toMatchObject({ provisional: false, visitCount: 1, lastVisitedMessage: 4 });
+        expect(listKnownPlaceNames(state.locations)).toContain('Gullmark Quays');
+    });
+
     it('a current place no record answers to (furniture under the mint gate) becomes an alias of the place it is', () => {
         let state = start();
         state = gameReducer(atMessages(state, 4), { type: 'SET_LOCATION', payload: { name: 'the back alcove', dm: true } });

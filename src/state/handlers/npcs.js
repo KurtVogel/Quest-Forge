@@ -1009,7 +1009,15 @@ export const handlers = {
                     return settlePendingArrival({ ...state, locations }, { knownRecordId: keep.id });
                 }
             } else if (locations[saidIdx].provisional === true) {
+                // The Scribe answered the provisional name with itself (the
+                // 2026-11-08 lands playtest did, every pass): that is "new" —
+                // confirm it and run its held arrival.
+                const confirmedId = locations[saidIdx].id;
                 locations = locations.map((record, i) => (i === saidIdx ? { ...record, provisional: false } : record));
+                console.info(`[Location] "${locations[saidIdx].name}" confirmed as a new place (named as itself).`);
+                if (state.session?.pendingArrival?.recordId === confirmedId) {
+                    return settlePendingArrival({ ...state, locations });
+                }
             }
         }
         return locations === before ? state : { ...state, locations };

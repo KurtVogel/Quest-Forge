@@ -766,9 +766,13 @@ export function samePlace(locations, a, b) {
 export function listKnownPlaceNames(locations = [], { limit = 12, exclude = null } = {}) {
     const list = Array.isArray(locations) ? locations : [];
     const skip = exclude ? findLocationRecord(list, exclude) : -1;
+    // A PROVISIONAL record is the question the Scribe is being asked (PLACE
+    // NAMED WITHOUT A RECORD), never one of the answers: listed, it was echoed
+    // back as its own place_links answer on every pass of the 2026-11-08 lands
+    // playtest ("Gullmark Quays" is "Gullmark Quays").
     return list
         .map((record, index) => ({ record, index }))
-        .filter(({ record, index }) => record?.name && index !== skip)
+        .filter(({ record, index }) => record?.name && index !== skip && record.provisional !== true)
         .sort((a, b) => (b.record.lastVisitedAt || b.record.firstSeenAt || 0) - (a.record.lastVisitedAt || a.record.firstSeenAt || 0))
         .slice(0, limit)
         .map(({ record }) => record.name);
