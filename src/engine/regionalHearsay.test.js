@@ -342,7 +342,7 @@ describe('buildRegionalHearsayBlock', () => {
 describe('cluster-aware ledger (playtest #8: one fight cued at nine nested spellings)', () => {
     const at = HEARSAY_MIN_TRAVEL_DISTANCE + 8;
     const street = { id: 'loc-street', name: 'Tallow Lane', aliases: ['Outside the shop, Tallow Lane'] };
-    const shop = { id: 'loc-shop', name: 'E. Duskwell, Tallow & Tapers', aliases: ['Tallow Lane chandlery'] };
+    const shop = { id: 'loc-shop', name: 'E. Duskwell, Tallow & Tapers', aliases: ['Tallow Lane chandlery'], within: 'loc-street' }; // on the lane by the Scribe's word (lane 9B)
     const farTown = { id: 'loc-far', name: 'The Weirs', aliases: [] };
 
     it('does not re-offer a deed at a place related to one it was already offered at', () => {

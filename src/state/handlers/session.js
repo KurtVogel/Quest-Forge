@@ -739,7 +739,7 @@ export const handlers = {
             // Bumps the LIVE session's nonce (not the save's embedded copy) so
             // re-loading the very save that stamped it still changes the key.
             // A held DM name (lane 6) waits for the Scribe pass of its own turn; a load has no such pass.
-            session: { ...save.session, loadNonce: (state.session?.loadNonce || 0) + 1, heldNpcUpdates: [] },
+            session: { ...save.session, loadNonce: (state.session?.loadNonce || 0) + 1, heldNpcUpdates: [], pendingArrival: null },
             user: state.user,
             settings: {
                 ...initialGameState.settings,

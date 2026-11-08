@@ -222,9 +222,9 @@ describe('the combined call after the 2026-10-27 audit', () => {
         expect(sendMessageMock).not.toHaveBeenCalled();
     });
 
-    it('the contrast list folds the region by isSameRegion, not by case alone', () => {
+    it('the contrast list folds the region by isSameRegion — the exact name, case aside (lane 9B)', () => {
         const state = baseState();
-        state.regions = { Harchwold: { ...profile, atMessage: 5 }, 'The Riverlands': { ...profile, atMessage: 2 } };
+        state.regions = { 'the harchwold': { ...profile, atMessage: 5 }, 'The Riverlands': { ...profile, atMessage: 2 } };
         expect(buildRegionalFrontsContext(state).knownRegions.map(land => land.name)).toEqual(['The Riverlands']);
     });
 });

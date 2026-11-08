@@ -60,7 +60,7 @@ describe('buildScribeContext (scribe P2, 2026-10-10)', () => {
             knownLocations: buildKnownLocations(state),
             provisionalPlace: buildProvisionalPlace(state),
             knownLands: buildKnownLands(state),
-            memoryContext: { worldFacts: state.worldFacts, messageCount: 0, location: null, npcs: state.npcs, storyMemory: state.storyMemory, campaign: { sessionId: null, loadNonce: 0 } },
+            memoryContext: { worldFacts: state.worldFacts, messageCount: 0, location: null, locations: state.locations || [], npcs: state.npcs, storyMemory: state.storyMemory, campaign: { sessionId: null, loadNonce: 0 } },
         });
         // No land on record and no premise: the lands line is absent.
         expect(context.knownLands).toBeNull();

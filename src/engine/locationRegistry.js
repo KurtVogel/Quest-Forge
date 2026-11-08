@@ -20,7 +20,7 @@
  * high-clock story event, never texture.
  */
 
-import { containment, coverage, tokenSet } from './textMatch.js';
+import { coverage, tokenSet } from './textMatch.js';
 import { conversationalDistance } from './replayLedger.js';
 import { cleanText as typedText } from './text.js';
 import { normalizeMotifKey, normalizeMotifList } from './worldMotifs.js';
@@ -149,10 +149,17 @@ export function sanitizeExtractedLocation(value) {
  * an update self-heals on the next turn that names the place, while a wrong
  * relocation corrupts visit stamps permanently.
  */
-export function isLocationEvidencedInText(name, turnText) {
+export function isLocationEvidencedInText(name, turnText, { anyToken = false } = {}) {
     const tokens = locationTokens(name);
     if (tokens.size === 0) return false;
-    return coverage(tokens, tokenSet(turnText, { minLength: 3 })) > 0.5;
+    const covered = coverage(tokens, tokenSet(turnText, { minLength: 3 }));
+    // A name copied from KNOWN PLACES (lane 9B, 2026-11-08) is not a guess:
+    // the Scribe picked it from the list because the narrative stands there
+    // under some phrasing ("the Kettle's back room" for The Copper Kettle),
+    // so one word of it in the turn is the whole evidence asked. The gate
+    // still exists for the stale-context relocation it was built against —
+    // a copied name NO word of which the turn uses.
+    return anyToken ? covered > 0 : covered > 0.5;
 }
 
 export function isRegistrableLocationName(name) {
@@ -398,6 +405,15 @@ export function normalizeLocationRecord(rawRecord = {}, existing = null) {
         // Scribe's `place_links` either folds it into the place it IS or
         // confirms it new; `true` until then. An explicit `false` clears it.
         provisional: record.provisional === true || (record.provisional !== false && existing?.provisional === true),
+        // The record this place lies INSIDE (lane 9B, 2026-11-08): the id the
+        // Scribe's `location_profile.within` named from KNOWN PLACES, or the
+        // save-7 migration's "<place>, <town>" seed. First stated wins; the
+        // cluster rule (`sameCluster`) is the root of this chain, and nothing
+        // else — the shared-word kinship it replaces chained a far port to
+        // home through the word "salt".
+        within: typeof record.within === 'string' && record.within.trim()
+            ? cleanText(record.within, 60)
+            : (typeof existing?.within === 'string' && existing.within ? existing.within : null),
     };
 }
 
@@ -414,7 +430,7 @@ export function linkLocations(locations = [], fromId, toId, details = {}) {
     if (!fromId || !toId || fromId === toId) return list;
     const from = list.find(record => record?.id === fromId);
     const to = list.find(record => record?.id === toId);
-    if (!from || !to || areRelatedPlaces(from, to)) return list;
+    if (!from || !to || sameCluster(list, from, to)) return list;
     const direction = normalizeTravelDirection(details?.direction);
     const shared = {
         travelTime: details?.travelTime,
@@ -609,73 +625,29 @@ export function isRegionEvidenced(region, { turnText = '', premise = '', worldFa
 }
 
 /** "the Icebound Coast" and "Icebound Coast, the frozen north" are one region. */
+/**
+ * Two land names are one land only as the same name (lane 9B, 2026-11-08:
+ * the exact key, as places). KNOWN LANDS shows the Scribe the names on record
+ * and asks for a verbatim copy; "the Rimefell Marches" and "Rimefell Marches"
+ * are two names until the Scribe copies the listed one.
+ */
 export function isSameRegion(a, b) {
-    if (!a || !b) return false;
-    return containment(locationTokens(a), locationTokens(b)) >= 0.99;
+    const keyA = placeKey(a);
+    return !!keyA && keyA === placeKey(b);
 }
 
 /**
- * The registry record whose canonical name (or a stored alias) IS this string —
- * token-set EQUALITY, never containment: "Veyrmoor" must not claim a record
- * named "the Veyrmoor Fen". Used to recognize a place name posing as something
- * else (a region value naming a town).
+ * The registry record whose canonical name or alias IS this string, exactly.
+ * Used to recognize a place name posing as something else (a region value
+ * naming a town). The token-set-equality rung went with lane 9B.
  */
 export function findPlaceRecordByName(locations = [], name) {
-    const target = cleanText(name, 120);
-    if (!target) return null;
-    const lower = target.toLowerCase();
-    const targetTokens = locationTokens(target);
-    for (const record of locations || []) {
-        if (!record?.name) continue;
-        if (record.name.toLowerCase() === lower) return record;
-        if ((record.aliases || []).some(alias => alias.toLowerCase() === lower)) return record;
-        const recordTokens = locationTokens(record.name);
-        if (targetTokens.size > 0 && recordTokens.size === targetTokens.size
-            && containment(targetTokens, recordTokens) >= 0.99) return record;
-    }
-    return null;
+    const idx = findLocationRecord(locations, name);
+    return idx === -1 ? null : locations[idx];
 }
 
 /** Record types that are confidently PLACES, never candidate region names. */
 const PLACE_SCALE_TYPES = new Set(['settlement', 'haven', 'hostile_site']);
-
-// Urban tokens that, as the ONLY extra words around a name inside a record
-// ("The Stonebridge market square"), prove the name is a settlement. Strictly
-// urban on purpose: "Marrowdal valley" proves Marrowdal is a LAND, not a town,
-// so geographic heads (valley, hills, river) must never count as evidence.
-const SETTLEMENT_EVIDENCE_TOKENS = new Set([...URBAN_LOCALITY_HEAD_TOKENS, 'town', 'city', 'village']);
-
-/**
- * Sub-place settlement evidence (live playtest #10, 2026-08-22): the Scribe
- * profiled a Stonebridge inn with region "Stonebridge" — and no record named
- * "Stonebridge" existed for the place-translation to match, because the DM only
- * ever SET_LOCATIONed sub-places ("Odo Fell's stall", "The Stonebridge market
- * square"). The town then became the campaign's HOME region and the real land
- * looked foreign. But those sub-place records themselves prove the name is a
- * town: a record whose name is the target plus only urban-locality words is a
- * district OF it. Returns { evidenced, region } — region is the first sanitized
- * region such a sub-place record carries (a district's land is the town's land).
- */
-export function settlementEvidencedRegion(locations = [], name, { excludeId = null } = {}) {
-    const targetTokens = locationTokens(name);
-    if (targetTokens.size === 0) return { evidenced: false, region: null };
-    let evidenced = false;
-    let region = null;
-    for (const record of locations || []) {
-        if (!record?.name || (excludeId && record.id === excludeId)) continue;
-        const recordTokens = locationTokens(record.name);
-        if (recordTokens.size <= targetTokens.size) continue;
-        if (containment(targetTokens, recordTokens) < 0.99) continue;
-        const remainder = [...recordTokens].filter(token => !targetTokens.has(token));
-        if (remainder.length === 0 || !remainder.every(token => SETTLEMENT_EVIDENCE_TOKENS.has(token))) continue;
-        evidenced = true;
-        if (!region) {
-            const own = sanitizeRegionName(record.region, record.name);
-            if (own) region = own;
-        }
-    }
-    return { evidenced, region };
-}
 
 /**
  * Region-as-place translation (live playtest 2026-08-20): the Scribe reported
@@ -698,18 +670,11 @@ export function resolvePlaceNamedRegion(locations = [], region, { excludeId = nu
         if (visited.has(key)) return null;
         visited.add(key);
         const record = findPlaceRecordByName(locations, current);
-        if (!record || (excludeId && record.id === excludeId)) {
-            // No record IS this name — but sub-place records may still prove it
-            // is a settlement (2026-08-22): inherit a district's own land when
-            // one is known, otherwise drop the proposal entirely.
-            const evidence = settlementEvidencedRegion(locations, current, { excludeId });
-            if (!evidence.evidenced) return current;
-            if (evidence.region && !isSameRegion(evidence.region, current)) {
-                current = evidence.region;
-                continue;
-            }
-            return null;
-        }
+        // No record IS this name: the proposal stands. (The 2026-08-22 rung
+        // that read "<town> market square" records as proof the town was a
+        // settlement went with lane 9B — a word rule; with `within` a
+        // district's town is a record the Scribe named, or nothing.)
+        if (!record || (excludeId && record.id === excludeId)) return current;
         const ownRegion = sanitizeRegionName(record.region, record.name);
         if (ownRegion) {
             if (isSameRegion(ownRegion, current)) return ownRegion;
@@ -730,13 +695,9 @@ export function resolvePlaceNamedRegion(locations = [], region, { excludeId = nu
  * canonical folding and could swallow real places via containment).
  */
 export function isRegionNameOnly(locations, name) {
-    const nameTokens = locationTokens(name);
-    if (nameTokens.size === 0) return false;
-    return collectKnownRegions(locations).some(region => {
-        const regionTokens = locationTokens(region);
-        return regionTokens.size === nameTokens.size
-            && containment(nameTokens, regionTokens) >= 0.99;
-    });
+    const key = placeKey(name);
+    if (!key) return false;
+    return collectKnownRegions(locations).some(region => placeKey(region) === key);
 }
 
 /**
@@ -881,16 +842,16 @@ export function mergeLocationRecords(locations = [], keepId, dropId) {
         motifs: drop.motifs,
         visitCount: (toVisitCount(keep.visitCount) || 0) + (toVisitCount(drop.visitCount) || 0),
         provisional: false,
+        within: keep.within || (drop.within && drop.within !== keepId ? drop.within : null),
     }, keep);
     const retarget = (record) => {
         const links = Array.isArray(record.links) ? record.links : [];
-        if (!links.some(link => link?.id === dropId)) return record;
-        return {
-            ...record,
-            links: normalizeTravelLinks(links
-                .map(link => (link?.id === dropId ? { ...link, id: keepId } : link))
-                .filter(link => link && link.id !== record.id)),
-        };
+        const within = record.within === dropId ? keepId : record.within;
+        const relinked = !links.some(link => link?.id === dropId) ? links : normalizeTravelLinks(links
+            .map(link => (link?.id === dropId ? { ...link, id: keepId } : link))
+            .filter(link => link && link.id !== record.id));
+        if (within === record.within && relinked === links) return record;
+        return { ...record, links: relinked, within: within === record.id ? null : within };
     };
     return list.filter(record => record !== drop).map(record => retarget(record === keep ? merged : record));
 }
@@ -911,7 +872,7 @@ export function mergeLocationRecords(locations = [], keepId, dropId) {
  * sites asked it under three rules). True for the same name, the same
  * canonical record (an alias or a drifted spelling), or two records of one
  * CLUSTER — the town square and its own tavern are one audience and one orbit
- * (`areRelatedPlaces`). Record-aware by construction: a caller that holds the
+ * (`sameCluster`, the `within` chain since lane 9B). Record-aware by construction: a caller that holds the
  * registry passes it, so "The Gilded Eel" is still Stonebridge with no town
  * token in its name. Read by the hearsay block, the away block, the arrival's
  * offer-survival rule, and the combat re-open.
@@ -923,34 +884,46 @@ export function isStillAtPlace(locations, place, here) {
     const placeIdx = findLocationRecord(list, place);
     const hereIdx = findLocationRecord(list, here);
     if (placeIdx === -1 || hereIdx === -1) return false;
-    return placeIdx === hereIdx || areRelatedPlaces(list[placeIdx], list[hereIdx]);
+    return placeIdx === hereIdx || sameCluster(list, list[placeIdx], list[hereIdx]);
 }
 
-export function areRelatedPlaces(a, b) {
-    // Kinship is a shared SEGMENT (2026-10-30 Opus playtest, measured): the old
-    // rule related two records on ANY one shared token, so "Puerto Azafrán, the
-    // Salt Wharves" — a far port — was kin to home's "The Salt-Cellars, Harrow
-    // Sound" through the word "salt", and the cluster rule handed the port the
-    // HOME land (the Region line, the names and the late establishing shot all
-    // followed). Two records are related when a comma segment of one (or its
-    // whole name, or an alias) token-equals, or fits whole inside, a segment or
-    // name of the other: "The Quays, Harrow Sound" / "Harrow Sound", "Kiln
-    // Throat" / "Kiln Throat (upper flues)", "The Stonebridge market square" /
-    // "Stonebridge". A shop sign that merely repeats its street's trade word is
-    // not kinship any more (the live-playtest-#7 pin, revisited).
-    const segments = (record) => {
-        const list = [];
-        for (const text of [record?.name, ...(record?.aliases || [])]) {
-            if (typeof text !== 'string' || !text.trim()) continue;
-            list.push(locationTokens(text));
-            for (const part of text.split(/[,;]|\s[—–]\s/)) list.push(locationTokens(part));
-        }
-        return list.filter(tokens => tokens.size > 0);
-    };
-    const segmentsA = segments(a);
-    const segmentsB = segments(b);
-    if (segmentsA.length === 0 || segmentsB.length === 0) return false;
-    return segmentsA.some(x => segmentsB.some(y => containment(x, y) >= 0.99));
+/**
+ * The root of a record's `within` chain (lane 9B): the town a shop's street
+ * lies in, the keep a cell's corridor lies in. At most six hops, a cycle or a
+ * dangling id ending the walk where it stands.
+ */
+export function placeChainIds(locations, record) {
+    const list = Array.isArray(locations) ? locations : [];
+    const chain = [];
+    let current = record;
+    for (let hop = 0; hop < 6 && current && typeof current.id === 'string' && current.id && !chain.includes(current.id); hop += 1) {
+        chain.push(current.id);
+        if (typeof current.within !== 'string' || !current.within) break;
+        current = list.find(other => other?.id === current.within) || null;
+    }
+    return chain;
+}
+
+export function placeRootId(locations, record) {
+    const chain = placeChainIds(locations, record);
+    return chain.length ? chain[chain.length - 1] : null;
+}
+
+/**
+ * Do two records belong to one place CLUSTER — the town square and its own
+ * tavern, one audience and one orbit? Since lane 9B: the same root of the
+ * `within` chain, and nothing else. The shared-segment kinship this replaces
+ * (any comma segment of one name fitting whole inside the other's) chained
+ * "tunnel" to seven places and handed a far port the home land.
+ */
+export function sameCluster(locations, a, b) {
+    if (!a || !b) return false;
+    if (a === b || (a.id && a.id === b.id)) return true;
+    const chainA = placeChainIds(locations, a);
+    const chainB = placeChainIds(locations, b);
+    if (chainA.length === 0 || chainB.length === 0) return false;
+    // One chain contains the other's record (a cycle included), or both end at one root.
+    return chainA.includes(b.id) || chainB.includes(a.id) || chainA[chainA.length - 1] === chainB[chainB.length - 1];
 }
 
 /**
@@ -1172,7 +1145,8 @@ export function dedupeLocationRecords(locations = []) {
 
     // Pass 4 — travel-link heal (2026-09-14): re-aim links at folded records'
     // keepers (chains resolve), then drop self-links, duplicates, and links
-    // to ids no surviving record carries.
+    // to ids no surviving record carries. The `within` id (lane 9B) heals
+    // the same way: re-aimed at the keeper, dropped when it names nothing.
     const survivingIds = new Set(regionHealed.map(record => record.id));
     const resolveId = (id) => {
         let current = id;
@@ -1181,12 +1155,14 @@ export function dedupeLocationRecords(locations = []) {
     };
     return regionHealed.map(record => {
         const links = Array.isArray(record.links) ? record.links : [];
-        if (links.length === 0) return record;
-        const healed = normalizeTravelLinks(links
+        const within = typeof record.within === 'string' && record.within ? resolveId(record.within) : null;
+        const healedWithin = within && within !== record.id && survivingIds.has(within) ? within : null;
+        const healed = links.length === 0 ? links : normalizeTravelLinks(links
             .map(link => (link?.id ? { ...link, id: resolveId(link.id) } : null))
             .filter(link => link && link.id !== record.id && survivingIds.has(link.id)));
-        return healed.length === links.length && healed.every((link, i) => link.id === links[i].id)
+        const linksSame = healed.length === links.length && healed.every((link, i) => link.id === links[i].id);
+        return linksSame && healedWithin === (record.within || null)
             ? record
-            : { ...record, links: healed };
+            : { ...record, links: healed, within: healedWithin };
     });
 }

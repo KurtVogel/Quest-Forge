@@ -147,9 +147,16 @@ describe('a pending absence drift is cancelled when the hero leaves the return p
         expect(left.session.pendingAbsenceDrift).toBeNull();
     });
 
-    it('moving inside the same settlement keeps it', () => {
+    it('moving inside the same settlement keeps it (lane 9B: the tavern is WITHIN the town, said by the Scribe, never by a shared word)', () => {
         const home = homecoming();
-        const inside = gameReducer(atMessages(home, 50), { type: 'SET_LOCATION', payload: 'The Gilded Eel, Aldermill' });
+        // The DM names the tavern: a provisional place, its arrival held.
+        let inside = gameReducer(atMessages(home, 50), { type: 'SET_LOCATION', payload: { name: 'The Gilded Eel, Aldermill', dm: true } });
+        expect(inside.session.pendingArrival).toMatchObject({ atMessage: 50 });
+        expect(inside.session.pendingAbsenceDrift).toMatchObject({ locationName: 'Aldermill' });
+        // The Scribe places it within Aldermill and confirms it new: the tail runs with the cluster known.
+        inside = gameReducer(inside, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'The Gilded Eel, Aldermill', profile: { type: 'haven', within: 'Aldermill' } } });
+        inside = gameReducer(inside, { type: 'LINK_PLACES', payload: { links: [{ name: 'The Gilded Eel, Aldermill', is: 'new' }] } });
+        expect(inside.session.pendingArrival).toBeNull();
         expect(inside.session.pendingAbsenceDrift).toMatchObject({ locationName: 'Aldermill' });
     });
 

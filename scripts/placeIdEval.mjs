@@ -25,6 +25,9 @@
  *             known name · "omit" no location · "FREE-TEXT" another string
  *   travel    a journey between two known places: "copy" both ends exact ·
  *             "PHRASING" an end in other words · "none" no travel
+ *   within    a new place first established inside a known one: did the
+ *             profile's within copy a KNOWN PLACES name? "within" · "FREE-TEXT"
+ *             another string · "none" no within (lane 9B)
  *
  *   npm.cmd run eval:placeid
  *   $env:QF_EVAL_RUNS="1"; npm.cmd run eval:placeid
@@ -77,6 +80,9 @@ const CASES = [
     { id: 'card-kettle', kind: 'card', from: 'The Copper Kettle',
         player: 'I promise Idra I will bring the candle-money by the tide-bell tomorrow.',
         narrative: 'Idra holds your eye a moment across the Copper Kettle\'s bar, then nods once. "Tide-bell. I\'ll hold the good wax till then — not a bell later." She writes a mark in the chalk ledger behind her and the matter is settled, for now.' },
+    { id: 'within-forge', kind: 'within', from: 'Bramblecross market',
+        player: 'I follow the hammering to the smithy on the corner.',
+        narrative: 'The hammering leads you off the Bramblecross market square to a soot-black doorway under a painted horseshoe: Harl Demb\'s forge, the only smithy in Bramblecross. Harl himself, broad as the door, looks up from the anvil. "If it\'s a blade, come back tomorrow. If it\'s coin, come in."' },
     { id: 'travel-ford', kind: 'travel', fromPlace: 'Bramblecross', toPlace: 'Larkspur Ford', from: 'Bramblecross',
         player: 'We take the haul road south and keep walking till the ford.',
         narrative: 'Two days on the Southern Haul Road, south out of Bramblecross with the quarry carts, and on the second evening the river shows ahead and the stockade gates of Larkspur Ford with it. The gate-warden waves the carts through and eyes you as you come in behind them.' },
@@ -105,11 +111,13 @@ async function runCase(testCase, run) {
         console.log = realLog; console.warn = realWarn; console.info = realInfo;
     }
     const setLocation = actions.filter(a => a.type === 'SET_LOCATION').map(a => (typeof a.payload === 'string' ? a.payload : a.payload?.name)).filter(Boolean);
-    const profile = actions.find(a => a.type === 'UPDATE_LOCATION_PROFILE')?.payload?.name || null;
+    const profileAction = actions.find(a => a.type === 'UPDATE_LOCATION_PROFILE')?.payload || null;
+    const profile = profileAction?.name || null;
+    const within = typeof profileAction?.profile?.within === 'string' ? profileAction.profile.within : null;
     const links = actions.filter(a => a.type === 'LINK_PLACES').flatMap(a => a.payload?.links || []);
     const travel = actions.find(a => a.type === 'ADD_TRAVEL_LINK')?.payload || null;
     const cards = actions.filter(a => a.type === 'ADD_STORY_MEMORY_CARDS').flatMap(a => a.payload || []).map(c => ({ type: String(c?.type || ''), location: c?.location ?? null, text: String(c?.text || '').slice(0, 100) }));
-    const wire = { setLocation, profile, links, travel: travel ? { from: travel.from, to: travel.to } : null, cards };
+    const wire = { setLocation, profile, within, links, travel: travel ? { from: travel.from, to: travel.to } : null, cards };
     let outcome;
     const location = setLocation[0] || null;
     if (error) outcome = 'ERROR';
@@ -142,13 +150,17 @@ async function runCase(testCase, run) {
         if (!travel) outcome = 'none';
         else if (travel.from === testCase.fromPlace && travel.to === testCase.toPlace) outcome = 'copy';
         else outcome = 'PHRASING';
+    } else if (testCase.kind === 'within') {
+        if (!within) outcome = 'none';
+        else if (exactKnown(within)) outcome = 'within';
+        else outcome = 'FREE-TEXT';
     }
     return { outcome, wire, error };
 }
 
 async function main() {
     const results = [];
-    const good = new Set(['copy', 'new', 'link', 'omit']);
+    const good = new Set(['copy', 'new', 'link', 'omit', 'within']);
     for (const testCase of CASES) {
         for (let run = 1; run <= RUNS; run += 1) {
             const row = await runCase(testCase, run);
@@ -174,6 +186,7 @@ async function main() {
         `- link-new (the DM's unrecorded name is genuinely new: "new", "WRONG-LINK", "none"): ${tally('link-new')}`,
         `- card (a card's location: "copy" a known name, "omit", "FREE-TEXT"): ${tally('card')}`,
         `- travel (both ends exact known names: "copy", "PHRASING", "none"): ${tally('travel')}`,
+        `- within (a new place inside a known one: "within" a known name, "FREE-TEXT", "none"): ${tally('within')}`,
         '',
     ];
     for (const r of results) report.push(`- ${r.id} #${r.run}: **${r.outcome}** ${JSON.stringify(r.wire)}${r.error ? ' ERROR ' + r.error : ''}`);
@@ -181,7 +194,7 @@ async function main() {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'report.md'), report.join('\n'));
     fs.writeFileSync(path.join(dir, 'results.json'), JSON.stringify(results, null, 2));
-    console.log(report.slice(0, 11).join('\n'));
+    console.log(report.slice(0, 12).join('\n'));
     for (const r of results.filter(x => !good.has(x.outcome))) console.log(`${r.id} #${r.run} ${r.outcome} ${JSON.stringify(r.wire)}`);
     console.log(`Report: ${dir}`);
 }

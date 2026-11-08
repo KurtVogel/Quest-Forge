@@ -20,7 +20,7 @@ import {
     STORY_MEMORY_UPDATE_FIELDS,
 } from './storyMemory.js';
 import { SCRIBE_SYSTEM_PROMPT } from '../llm/scribe.js';
-import { upsertLocation } from './locationRegistry.js';
+import { normalizeLocationRecord } from './locationRegistry.js';
 
 const card = over => normalizeStoryMemoryCard({ id: 'c', type: 'relationship', subject: 'Tammo', text: 'x', ...over });
 
@@ -113,8 +113,8 @@ describe('P2 nits — the knownBy placeholder and the place bonus', () => {
         expect(echoed.witnessed).toBe(true);
     });
 
-    it('the place bonus reads the registry\'s fold: "Rimehollow" against the folded market square scores the +4', () => {
-        const locations = upsertLocation(upsertLocation([], 'Rimehollow'), 'The Rimehollow market square');
+    it('the place bonus reads the registry\'s aliases: "Rimehollow" against the market square on record as its alias scores the +4 (lane 9A: an alias, never a fold)', () => {
+        const locations = [normalizeLocationRecord({ name: 'Rimehollow', aliases: ['The Rimehollow market square'] })];
         const memory = card({ id: 'c-well', text: 'Tammo owes the hero a debt from the night at the well.', location: 'The Rimehollow market square', lastSeenMessage: 0 });
         const messages = Array.from({ length: 60 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: 'm' }));
         // The query names Rimehollow on both sides so the overlap term is equal and only the place bonus differs.

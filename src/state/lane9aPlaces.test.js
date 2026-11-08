@@ -149,7 +149,7 @@ describe('SET_LOCATION and LINK_PLACES — the DM mints provisionally, the Scrib
 
 describe('save version 6 — the one run of the frozen place rung, as aliases', () => {
     it('is version 6, and the pipeline seeds an alias where the old rung resolved a stored string, folding nothing', () => {
-        expect(CURRENT_SAVE_VERSION).toBe(6);
+        expect(CURRENT_SAVE_VERSION).toBe(7);
         expect(MIGRATIONS.find(m => m.toVersion === 6).description).toContain('lane 9A');
         const tower = { ...rec('Clockwork Tower', { type: 'frontier' }), id: 'tower' };
         const town = { ...rec('Weatherby', { type: 'settlement' }), id: 'town' };
@@ -164,7 +164,7 @@ describe('save version 6 — the one run of the frozen place rung, as aliases', 
             journal: [{ id: 'j1', summary: 's', location: 'weatherby' }],
         };
         const migrated = migrateLoadedSave(save);
-        expect(migrated.saveVersion).toBe(6);
+        expect(migrated.saveVersion).toBe(7);
         const migratedTower = migrated.locations.find(r => r.id === 'tower');
         const migratedTown = migrated.locations.find(r => r.id === 'town');
         expect(migrated.locations).toHaveLength(2); // nothing folded

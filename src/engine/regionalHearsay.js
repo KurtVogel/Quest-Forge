@@ -23,7 +23,7 @@
  * the same place twice.
  */
 
-import { areRelatedPlaces, findLocationRecord, isSameLocation, isStillAtPlace } from './locationRegistry.js';
+import { findLocationRecord, isSameLocation, isStillAtPlace, sameCluster } from './locationRegistry.js';
 import { distanceSince } from './worldTempo.js';
 import { listPublicTells } from './heroTells.js';
 import { cleanText as typedText } from './text.js';
@@ -92,7 +92,7 @@ function ledgerHas(recentHearsay, deedKey, locKey, locations) {
         // RELATED place must not be re-offered under every nested spelling (one
         // fight was cued at nine "places" inside the same few streets).
         const entryRecord = keyToRecord(locations, entryKey);
-        if (entryRecord && hereRecord) return areRelatedPlaces(entryRecord, hereRecord);
+        if (entryRecord && hereRecord) return sameCluster(locations, entryRecord, hereRecord);
         return isSameLocation(entryRecord ? entryRecord.name : entryKey, hereRecord ? hereRecord.name : locKey);
     });
 }

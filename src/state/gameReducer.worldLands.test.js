@@ -390,7 +390,8 @@ describe('the region family after the 2026-10-27 audit', () => {
         // the walk visits each record before its pass.
         for (const name of ['Aldermill', 'Aldermill Market Square', 'Aldermill Tannery']) {
             state = gameReducer(state, { type: 'SET_LOCATION', payload: name });
-            state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name, profile: { type: 'settlement', motifs: ['timber palisade'] } } });
+            // The Scribe places each within the town (lane 9B): one settlement, one count.
+            state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name, profile: { type: 'settlement', motifs: ['timber palisade'], ...(name === 'Aldermill' ? {} : { within: 'Aldermill' }) } } });
         }
         expect(state.worldMotifs['timber palisade']).toEqual({ count: 1, lastMessage: 20 });
         // Another town of the same land still counts: a land's monotony is the point.

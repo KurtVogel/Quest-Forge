@@ -50,7 +50,7 @@ export function stampLastDmMessage(messages, marks) {
 }
 import { bornStoryMemoryCard, findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
-import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isDirectionEvidencedInText, isLocationEvidencedInText, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, linkLocations, mergeLocationRecords, normalizeLocationRecord, normalizeTravelDirection, placeKey, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
+import { collectKnownRegions, findLocationRecord, isBackstoryRegion, isDirectionEvidencedInText, isLocationEvidencedInText, isMintableLocationName, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, linkLocations, mergeLocationRecords, normalizeLocationRecord, normalizeTravelDirection, placeKey, placeRootId, resolvePlaceNamedRegion, sameCluster, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { findRegionProfile, mayAskRegionFace } from '../../engine/regionProfile.js';
 import { recordWorldMotifs } from '../../engine/worldMotifs.js';
@@ -241,17 +241,226 @@ function countPlaceMotifs(state, before, after) {
     // P2, measured): the registry keeps a town's market square, tannery and
     // harbor as records of their own, and one palisade tagged on four of them
     // read "timber palisade ×4 … NONE of these" while the hero stood in that
-    // town. A key a related record (same cluster, `areRelatedPlaces`) already
+    // town. A key a related record (same cluster, `sameCluster`) already
     // holds is not a new sighting. Across towns of one land it still counts:
     // a land's monotony is exactly what the line is for.
     const cluster = (state.locations || []).filter(record => record && record !== after
-        && record.id !== after.id && areRelatedPlaces(record, after));
+        && record.id !== after.id && sameCluster(state.locations, record, after));
     const held = new Set([before, ...cluster]
         .flatMap(record => [record?.archetype, ...(Array.isArray(record?.motifs) ? record.motifs : [])])
         .filter(Boolean));
     const added = [after.archetype, ...(after.motifs || [])].filter(key => key && !held.has(key));
     if (added.length === 0) return state;
     return { ...state, worldMotifs: recordWorldMotifs(state.worldMotifs, added, { atMessage: (state.messages || []).length }) };
+}
+
+/**
+ * The arrival: what SET_LOCATION did on every location event until lane 9B
+ * (2026-11-08), as a helper so a HELD arrival (a provisional DM place the
+ * Scribe later confirms new, or links to a different known place) can run it
+ * at the message it happened. Living-world arrival detection (DECISIONS.md
+ * 2026-08-05): only a move to a DIFFERENT canonical record is an arrival —
+ * the Scribe re-stating the current place (an alias on record) must not
+ * re-trigger anything. `fromRecordId` / `targetRecordId` name the records
+ * when the caller holds them (the settle), else the names resolve.
+ */
+function arriveAt(state, { name, messageIndex, profile = null, fromRecordId = null, targetRecordId = null, confirm = false }) {
+    const priorLocations = state.locations || [];
+    const prevRecord = fromRecordId
+        ? (priorLocations.find(record => record?.id === fromRecordId) || null)
+        : (() => { const idx = findLocationRecord(priorLocations, state.currentLocation); return idx === -1 ? null : priorLocations[idx]; })();
+    const targetIdx = targetRecordId
+        ? priorLocations.findIndex(record => record?.id === targetRecordId)
+        : findLocationRecord(priorLocations, name);
+    const targetRecord = targetIdx === -1 ? null : priorLocations[targetIdx];
+
+    const arrived = !prevRecord || !targetRecord || targetRecord.id !== prevRecord.id;
+
+    // Absence runs from the moment the hero LEFT the place (its departure
+    // stamp) to this return, in conversational messages. Legacy records
+    // without a stamp read null and simply start accruing from now.
+    const awayDistance = arrived && targetRecord && Number.isFinite(targetRecord.lastVisitedMessage)
+        ? distanceSince(state.messages, targetRecord.lastVisitedMessage, messageIndex)
+        : null;
+
+    // Departure stamp on the place being left, arrival stamp on the new one.
+    const departed = arrived && prevRecord
+        ? priorLocations.map(record => (record.id === prevRecord.id
+            ? { ...record, lastVisitedMessage: messageIndex }
+            : record))
+        : priorLocations;
+    // A bare region name ("the Rimefell Marches") is a whereabouts, not a
+    // place — minting it as a location record distorts canonical folding
+    // and eviction (live playtest #3 registry noise). currentLocation still
+    // updates and hearsay still runs; the record waits for a real place
+    // name ("Ghyll, Rimefell Marches" mints normally — the exact key decides).
+    const regionOnly = targetIdx === -1 && isRegionNameOnly(priorLocations, name);
+    let locations = regionOnly
+        ? departed
+        : upsertLocation(departed, targetRecord ? targetRecord.name : name, {
+            ...(profile || {}),
+            ...(confirm ? { provisional: false } : {}),
+            lastVisitedMessage: messageIndex,
+            // The place card (2026-09-16): a genuine arrival counts a visit;
+            // an alias re-statement of the current place keeps the count.
+            ...(arrived ? { visitCount: (Number.isFinite(targetRecord?.visitCount) ? targetRecord.visitCount : 0) + 1 } : {}),
+        });
+
+    // Pseudo-place guard (live playtest #8): a destination that neither
+    // resolves to nor mints a canonical record ("the threshold of the hidden
+    // staircase") is scene furniture, not a place with a gossiping audience.
+    // Every such string used to count as an arrival at a brand-new "place",
+    // re-offering the same deeds under raw-text ledger keys — one fight was
+    // cued at nine spellings inside the same few streets. Keep the live
+    // hearsay window untouched (the render guard hides it if the hero truly
+    // moved on) and skip selection entirely.
+    const destinationIdx = targetRecord ? locations.findIndex(record => record?.id === targetRecord.id) : findLocationRecord(locations, name);
+
+    // Geography as canon (2026-09-14): an arrival at a different record IS
+    // a bare travel edge from the place just left — detail (direction, time,
+    // route) arrives later from the Scribe's `travel` report. linkLocations
+    // skips one-cluster hops (the square → its tavern is not a road).
+    if (arrived && prevRecord && destinationIdx !== -1) {
+        locations = linkLocations(locations, prevRecord.id, locations[destinationIdx].id, { atMessage: messageIndex });
+    }
+
+    let next = { ...state, currentLocation: name, locations };
+    if (!arrived) return next;
+    if (destinationIdx === -1) return next;
+
+    // A region met while the front web was full is seeded on the hero's
+    // next arrival in that land once a slot has freed (2026-10-15).
+    const arrivalRegion = locations[destinationIdx].region;
+    // A front left behind in THIS land wakes on the hero's return (2026-10-30).
+    if (arrivalRegion) next = { ...next, fronts: wakeFrontsReturnedTo(next.fronts, locations, arrivalRegion) };
+    const deferred = (state.session?.deferredRegions || []).find(region => isSameRegion(region, arrivalRegion));
+    if (deferred && seedMayReplace(state.session?.pendingRegionalFronts)
+        && !(state.session?.seededRegions || []).some(known => isSameRegion(known, deferred))
+        && !regionalSeedHasRoom(next.fronts)) {
+        // A front left behind in another land makes room first (2026-10-28).
+        const slept = sleepFrontLeftBehind(next.fronts, locations, deferred);
+        if (regionalSeedHasRoom(slept)) next = { ...next, fronts: slept };
+    }
+    if (deferred && seedMayReplace(state.session?.pendingRegionalFronts)
+        && !(state.session?.seededRegions || []).some(known => isSameRegion(known, deferred))
+        && regionalSeedHasRoom(next.fronts)) {
+        next.session = {
+            ...next.session,
+            deferredRegions: (state.session?.deferredRegions || []).filter(region => !isSameRegion(region, deferred)),
+            pendingRegionalFronts: mintRegionalSeed(deferred, locations[destinationIdx].name, state.messages),
+        };
+    }
+    // Crossing into a land not yet given its establishing shot (2026-10-26).
+    next = openRegionInterlude(next, arrivalRegion, { recordId: locations[destinationIdx].id });
+
+    // Traveling rumor: deterministically pick which of the hero's deeds
+    // could plausibly be talk of THIS place, once per (deed, place).
+    const selection = selectRegionalHearsay({
+        fronts: state.fronts,
+        recentEncounters: state.recentEncounters,
+        recentHearsay: state.recentHearsay,
+        storyMemory: state.storyMemory,
+        heroTells: state.heroTells,
+        locations,
+        locationName: name,
+        messages: state.messages,
+        messageIndex,
+    });
+    if (selection.items.length > 0) {
+        next.recentHearsay = appendHearsayLedger(state.recentHearsay, selection.ledgerEntries);
+        next.session = {
+            ...next.session,
+            regionalHearsay: { locationName: name, arrivedAtMessage: messageIndex, items: selection.items },
+        };
+    } else if (!hearsayOfferSurvivesArrival(state.session?.regionalHearsay, locations, name)) {
+        // Only an UNRELATED arrival drops a live offer. Intra-settlement
+        // movement (2026-08-31 P1 r3) keeps it untouched: the cluster rule
+        // guarantees an empty selection at a related place while the deeds
+        // are already ledger-burned for the whole audience. The render
+        // guard judges with the same record-aware predicate
+        // (isStillAtPlace), so the offer keeps its own place name and
+        // arrival stamp — the writer no longer re-stamps it onto each new
+        // spelling to compensate for a guard that could not see records.
+        next.session = { ...next.session, regionalHearsay: null };
+    }
+
+    // Absence drift: a long-enough return raises the one-shot marker the
+    // background director (llm/absenceDrift.js) fires from. Cooldown: one
+    // drift per homecoming, not one per stale record the return stroll
+    // re-touches (2026-08-05 live playtest fired two within a few turns).
+    // The ATTEMPT is what cools (2026-10-15 living-world P2, measured):
+    // `absenceDrift.arrivedAtMessage` is written only when something
+    // installed, so a QUIET homecoming (or the give-up's empty install)
+    // fired a second drift — a second DM-model call — at the next stale
+    // record in town two messages later. `lastAbsenceDriftMessage` is
+    // stamped on every install; the installed block's stamp is the
+    // legacy fallback.
+    const lastDriftAt = Number.isFinite(state.session?.lastAbsenceDriftMessage)
+        ? state.session.lastAbsenceDriftMessage
+        : state.session?.absenceDrift?.arrivedAtMessage;
+    const driftCoolingDown = Number.isFinite(lastDriftAt)
+        && distanceSince(state.messages, lastDriftAt, messageIndex) < ABSENCE_DRIFT_COOLDOWN_MESSAGES;
+    // Nested-place guard (live playtest #7): the shop, its street, and the
+    // town fragment into separate records, so a "return" to the street's
+    // stale record fired drift while the hero had spent the whole absence
+    // inside the shop ON that street. If any record of the same CLUSTER
+    // (`sameCluster`, the `within` chain since lane 9B) was visited more
+    // recently than the drift threshold, the hero never really left this
+    // place's orbit — no drift.
+    const lingeredNearby = (departed || []).some(record =>
+        record.id !== targetRecord?.id
+        && Number.isFinite(record.lastVisitedMessage)
+        && distanceSince(state.messages, record.lastVisitedMessage, messageIndex) < ABSENCE_DRIFT_MIN_AWAY
+        && sameCluster(departed, record, targetRecord));
+    // A drift still pending for a place the hero has LEFT is cancelled
+    // (2026-09-20 audit P2): the call would still fire and install
+    // agenda/lastNotes + a world fact under a stale awayDistance while the
+    // away block (location-gated) never renders — canon without payoff.
+    // The hearsay rule decides "left": only an UNRELATED arrival drops it.
+    const pendingDrift = state.session?.pendingAbsenceDrift;
+    const pendingDriftStale = !!pendingDrift
+        && !hearsayOfferSurvivesArrival({ locationName: pendingDrift.locationName }, locations, name);
+    if (pendingDriftStale) next.session = { ...next.session, pendingAbsenceDrift: null };
+    if (awayDistance !== null && awayDistance >= ABSENCE_DRIFT_MIN_AWAY
+        && (!pendingDrift || pendingDriftStale) && !driftCoolingDown && !lingeredNearby) {
+        next.session = {
+            ...next.session,
+            pendingAbsenceDrift: {
+                key: `${targetRecord.id}|${messageIndex}`,
+                locationName: targetRecord.name,
+                awayDistance,
+                returnMessage: messageIndex,
+            },
+        };
+    }
+    return next;
+}
+
+/**
+ * The held arrival resolves (lane 9B): with no `knownRecordId` the
+ * provisional place was NEW — its tail runs at the message it happened and
+ * the record is confirmed; with one, the Scribe said the provisional name IS
+ * that known place (the fold already happened) — an arrival at it unless it
+ * is the very place the hero was in, in which case nothing happened at all.
+ */
+function settlePendingArrival(state, { knownRecordId = null } = {}) {
+    const pending = state.session?.pendingArrival;
+    if (!pending || typeof pending !== 'object') return state;
+    const cleared = { ...state, session: { ...state.session, pendingArrival: null } };
+    const locations = cleared.locations || [];
+    const targetId = knownRecordId || pending.recordId;
+    const target = locations.find(record => record?.id === targetId);
+    if (!target) return cleared;
+    if (knownRecordId && pending.fromRecordId && knownRecordId === pending.fromRecordId) {
+        console.info(`[Location] "${cleared.currentLocation}" is "${target.name}" — no arrival.`);
+        return cleared;
+    }
+    const messageIndex = Number.isFinite(pending.atMessage) ? pending.atMessage : (cleared.messages || []).length;
+    // The name the hero's place is written under stays the DM's string when it
+    // now resolves to the known record (an alias); a confirmed new place is
+    // its own name.
+    const name = knownRecordId && findLocationRecord(locations, cleared.currentLocation) !== -1 ? cleared.currentLocation : target.name;
+    return arriveAt(cleared, { name, messageIndex, fromRecordId: pending.fromRecordId, targetRecordId: targetId, confirm: !knownRecordId });
 }
 
 /** The deferred-region ledger (2026-10-15): lands met while the web was full, newest last, cap DEFERRED_REGIONS_CAP. */
@@ -575,10 +784,6 @@ export const handlers = {
         const name = cleanTextField(typeof rawPayload === 'string' ? rawPayload : rawPayload?.name, LOCATION_NAME_MAX);
         if (!name) return state;
         const profile = rawPayload && typeof rawPayload === 'object' ? rawPayload.profile : null;
-
-        // Living-world arrival detection (DECISIONS.md 2026-08-05): only a move
-        // to a DIFFERENT canonical record is an arrival — the Scribe re-stating
-        // the current place (alias drift) must not re-trigger anything.
         const messageIndex = (state.messages || []).length;
         const priorLocations = state.locations || [];
         const prevIdx = findLocationRecord(priorLocations, state.currentLocation);
@@ -594,176 +799,49 @@ export const handlers = {
         // the Scribe dragged the hero back to a merely-mentioned fen place the
         // DM's own location event had just walked her out of).
         const fillOnly = rawPayload && typeof rawPayload === 'object' && rawPayload.fillOnly === true;
-        // The DM's own location event (lane 9A): a name no record answers to
-        // mints a PROVISIONAL record the Scribe's `place_links` resolves —
-        // the place it IS under another phrasing, or a new one.
-        const dmLane = rawPayload && typeof rawPayload === 'object' && rawPayload.dm === true;
         if (fillOnly && state.currentLocation) {
             const samePlace = (prevRecord && targetRecord && targetRecord.id === prevRecord.id)
                 || isSameLocation(state.currentLocation, name);
             if (!samePlace) return state;
         }
 
-        const arrived = !prevRecord || !targetRecord || targetRecord.id !== prevRecord.id;
+        // A held arrival the Scribe never resolved (lane 9B): the hero moves on
+        // from the provisional place, so it was a new place after all — its
+        // tail runs now, at the message it happened, before this move lands.
+        const pending = state.session?.pendingArrival;
+        const base = pending && (!targetRecord || targetRecord.id !== pending.recordId)
+            ? settlePendingArrival(state)
+            : state;
 
-        // Absence runs from the moment the hero LEFT the place (its departure
-        // stamp) to this return, in conversational messages. Legacy records
-        // without a stamp read null and simply start accruing from now.
-        const awayDistance = arrived && targetRecord && Number.isFinite(targetRecord.lastVisitedMessage)
-            ? distanceSince(state.messages, targetRecord.lastVisitedMessage, messageIndex)
-            : null;
-
-        // Departure stamp on the place being left, arrival stamp on the new one.
-        const departed = arrived && prevRecord
-            ? priorLocations.map(record => (record.id === prevRecord.id
-                ? { ...record, lastVisitedMessage: messageIndex }
-                : record))
-            : priorLocations;
-        // A bare region name ("the Rimefell Marches") is a whereabouts, not a
-        // place — minting it as a location record distorts canonical folding
-        // and eviction (live playtest #3 registry noise). currentLocation still
-        // updates and hearsay still runs; the record waits for a real place
-        // name ("Ghyll, Rimefell Marches" mints normally — token EQUALITY, not
-        // containment, decides).
-        const regionOnly = targetIdx === -1 && isRegionNameOnly(priorLocations, name);
-        let locations = regionOnly
-            ? departed
-            : upsertLocation(departed, name, {
-                ...(profile || {}),
-                ...(dmLane && targetIdx === -1 ? { provisional: true } : {}),
-                lastVisitedMessage: messageIndex,
-                // The place card (2026-09-16): a genuine arrival counts a visit;
-                // an alias re-statement of the current place keeps the count.
-                ...(arrived ? { visitCount: (Number.isFinite(targetRecord?.visitCount) ? targetRecord.visitCount : 0) + 1 } : {}),
-            });
-
-        // Pseudo-place guard (live playtest #8): a destination that neither
-        // resolves to nor mints a canonical record ("the threshold of the hidden
-        // staircase") is scene furniture, not a place with a gossiping audience.
-        // Every such string used to count as an arrival at a brand-new "place",
-        // re-offering the same deeds under raw-text ledger keys — one fight was
-        // cued at nine spellings inside the same few streets. Keep the live
-        // hearsay window untouched (the render guard hides it if the hero truly
-        // moved on) and skip selection entirely.
-        const destinationIdx = findLocationRecord(locations, name);
-
-        // Geography as canon (2026-09-14): an arrival at a different record IS
-        // a bare travel edge from the place just left — detail (direction, time,
-        // route) arrives later from the Scribe's `travel` report. linkLocations
-        // skips one-cluster hops (the square → its tavern is not a road).
-        if (arrived && prevRecord && destinationIdx !== -1) {
-            locations = linkLocations(locations, prevRecord.id, locations[destinationIdx].id, { atMessage: messageIndex });
+        // The DM's own location event at a name no record answers to (lane 9A
+        // + 9B): the record is minted PROVISIONAL and its arrival tail — the
+        // departure stamp, the visit, the travel link, the region's wake and
+        // seed, hearsay, drift — is HELD until the Scribe's `place_links` says
+        // whether this is a known place under another phrasing (no arrival; an
+        // alias) or a new one (the tail runs then, one pass late). A rephrasing
+        // of the place the hero never left used to be folded by a word rule;
+        // now it is simply not an arrival until someone who read the turn says
+        // so. A bare land name and scene furniture take the ordinary path (no
+        // record either way).
+        const dmLane = rawPayload && typeof rawPayload === 'object' && rawPayload.dm === true;
+        if (dmLane && targetIdx === -1 && !isRegionNameOnly(priorLocations, name) && isMintableLocationName(name)) {
+            const locations = upsertLocation(base.locations || [], name, { ...(profile || {}), provisional: true });
+            const idx = findLocationRecord(locations, name);
+            if (idx !== -1) {
+                const fromIdx = findLocationRecord(base.locations || [], base.currentLocation);
+                console.info(`[Location] "${name}" held as a provisional place for the Scribe to link.`);
+                return {
+                    ...base,
+                    currentLocation: name,
+                    locations,
+                    session: {
+                        ...base.session,
+                        pendingArrival: { recordId: locations[idx].id, fromRecordId: fromIdx === -1 ? null : (base.locations || [])[fromIdx].id, atMessage: messageIndex },
+                    },
+                };
+            }
         }
-
-        let next = { ...state, currentLocation: name, locations };
-        if (!arrived) return next;
-        if (destinationIdx === -1) return next;
-
-        // A region met while the front web was full is seeded on the hero's
-        // next arrival in that land once a slot has freed (2026-10-15).
-        const arrivalRegion = locations[destinationIdx].region;
-        // A front left behind in THIS land wakes on the hero's return (2026-10-30).
-        if (arrivalRegion) next = { ...next, fronts: wakeFrontsReturnedTo(next.fronts, locations, arrivalRegion) };
-        const deferred = (state.session?.deferredRegions || []).find(region => isSameRegion(region, arrivalRegion));
-        if (deferred && seedMayReplace(state.session?.pendingRegionalFronts)
-            && !(state.session?.seededRegions || []).some(known => isSameRegion(known, deferred))
-            && !regionalSeedHasRoom(next.fronts)) {
-            // A front left behind in another land makes room first (2026-10-28).
-            const slept = sleepFrontLeftBehind(next.fronts, locations, deferred);
-            if (regionalSeedHasRoom(slept)) next = { ...next, fronts: slept };
-        }
-        if (deferred && seedMayReplace(state.session?.pendingRegionalFronts)
-            && !(state.session?.seededRegions || []).some(known => isSameRegion(known, deferred))
-            && regionalSeedHasRoom(next.fronts)) {
-            next.session = {
-                ...next.session,
-                deferredRegions: (state.session?.deferredRegions || []).filter(region => !isSameRegion(region, deferred)),
-                pendingRegionalFronts: mintRegionalSeed(deferred, locations[destinationIdx].name, state.messages),
-            };
-        }
-        // Crossing into a land not yet given its establishing shot (2026-10-26).
-        next = openRegionInterlude(next, arrivalRegion, { recordId: locations[destinationIdx].id });
-
-        // Traveling rumor: deterministically pick which of the hero's deeds
-        // could plausibly be talk of THIS place, once per (deed, place).
-        const selection = selectRegionalHearsay({
-            fronts: state.fronts,
-            recentEncounters: state.recentEncounters,
-            recentHearsay: state.recentHearsay,
-            storyMemory: state.storyMemory,
-            heroTells: state.heroTells,
-            locations,
-            locationName: name,
-            messages: state.messages,
-            messageIndex,
-        });
-        if (selection.items.length > 0) {
-            next.recentHearsay = appendHearsayLedger(state.recentHearsay, selection.ledgerEntries);
-            next.session = {
-                ...next.session,
-                regionalHearsay: { locationName: name, arrivedAtMessage: messageIndex, items: selection.items },
-            };
-        } else if (!hearsayOfferSurvivesArrival(state.session?.regionalHearsay, locations, name)) {
-            // Only an UNRELATED arrival drops a live offer. Intra-settlement
-            // movement (2026-08-31 P1 r3) keeps it untouched: the cluster rule
-            // guarantees an empty selection at a related place while the deeds
-            // are already ledger-burned for the whole audience. The render
-            // guard judges with the same record-aware predicate
-            // (isStillAtPlace), so the offer keeps its own place name and
-            // arrival stamp — the writer no longer re-stamps it onto each new
-            // spelling to compensate for a guard that could not see records.
-            next.session = { ...next.session, regionalHearsay: null };
-        }
-
-        // Absence drift: a long-enough return raises the one-shot marker the
-        // background director (llm/absenceDrift.js) fires from. Cooldown: one
-        // drift per homecoming, not one per stale record the return stroll
-        // re-touches (2026-08-05 live playtest fired two within a few turns).
-        // The ATTEMPT is what cools (2026-10-15 living-world P2, measured):
-        // `absenceDrift.arrivedAtMessage` is written only when something
-        // installed, so a QUIET homecoming (or the give-up's empty install)
-        // fired a second drift — a second DM-model call — at the next stale
-        // record in town two messages later. `lastAbsenceDriftMessage` is
-        // stamped on every install; the installed block's stamp is the
-        // legacy fallback.
-        const lastDriftAt = Number.isFinite(state.session?.lastAbsenceDriftMessage)
-            ? state.session.lastAbsenceDriftMessage
-            : state.session?.absenceDrift?.arrivedAtMessage;
-        const driftCoolingDown = Number.isFinite(lastDriftAt)
-            && distanceSince(state.messages, lastDriftAt, messageIndex) < ABSENCE_DRIFT_COOLDOWN_MESSAGES;
-        // Nested-place guard (live playtest #7): the shop, its street, and the
-        // town fragment into separate records, so a "return" to the street's
-        // stale record fired drift while the hero had spent the whole absence
-        // inside the shop ON that street. If any RELATED record (shared
-        // name/alias token) was visited more recently than the drift threshold,
-        // the hero never really left this place's orbit — no drift.
-        const lingeredNearby = (departed || []).some(record =>
-            record.id !== targetRecord?.id
-            && Number.isFinite(record.lastVisitedMessage)
-            && distanceSince(state.messages, record.lastVisitedMessage, messageIndex) < ABSENCE_DRIFT_MIN_AWAY
-            && areRelatedPlaces(record, targetRecord));
-        // A drift still pending for a place the hero has LEFT is cancelled
-        // (2026-09-20 audit P2): the call would still fire and install
-        // agenda/lastNotes + a world fact under a stale awayDistance while the
-        // away block (location-gated) never renders — canon without payoff.
-        // The hearsay rule decides "left": only an UNRELATED arrival drops it.
-        const pendingDrift = state.session?.pendingAbsenceDrift;
-        const pendingDriftStale = !!pendingDrift
-            && !hearsayOfferSurvivesArrival({ locationName: pendingDrift.locationName }, locations, name);
-        if (pendingDriftStale) next.session = { ...next.session, pendingAbsenceDrift: null };
-        if (awayDistance !== null && awayDistance >= ABSENCE_DRIFT_MIN_AWAY
-            && (!pendingDrift || pendingDriftStale) && !driftCoolingDown && !lingeredNearby) {
-            next.session = {
-                ...next.session,
-                pendingAbsenceDrift: {
-                    key: `${targetRecord.id}|${messageIndex}`,
-                    locationName: targetRecord.name,
-                    awayDistance,
-                    returnMessage: messageIndex,
-                },
-            };
-        }
-        return next;
+        return arriveAt(base, { name, messageIndex, profile });
     },
 
     /**
@@ -900,8 +978,13 @@ export const handlers = {
             }
             if (is.toLowerCase() === 'new') {
                 if (saidIdx !== -1) {
+                    const confirmedId = locations[saidIdx].id;
                     locations = locations.map((record, i) => (i === saidIdx ? { ...record, provisional: false } : record));
                     console.info(`[Location] "${locations[saidIdx].name}" confirmed as a new place.`);
+                    // Its held arrival (lane 9B) runs now, at the message it happened.
+                    if (state.session?.pendingArrival?.recordId === confirmedId) {
+                        return settlePendingArrival({ ...state, locations });
+                    }
                 }
                 continue;
             }
@@ -920,6 +1003,11 @@ export const handlers = {
                 const drop = locations[saidIdx];
                 locations = mergeLocationRecords(locations, keep.id, drop.id);
                 console.info(`[Location] Folded "${drop.name}" into "${keep.name}" — the Scribe linked them.`);
+                // The held arrival (lane 9B): an arrival at the known place, or
+                // nothing when it is the place the hero was in all along.
+                if (state.session?.pendingArrival?.recordId === drop.id) {
+                    return settlePendingArrival({ ...state, locations }, { knownRecordId: keep.id });
+                }
             } else if (locations[saidIdx].provisional === true) {
                 locations = locations.map((record, i) => (i === saidIdx ? { ...record, provisional: false } : record));
             }
@@ -947,10 +1035,12 @@ export const handlers = {
         const toIdx = findLocationRecord(locations, to);
         if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return state;
         const evidence = typeof payload.evidenceText === 'string' ? payload.evidenceText : '';
-        if (!isLocationEvidencedInText(to, evidence)) return state;
+        // Both ends are records (the Scribe copied KNOWN PLACES names), so one
+        // word of each in the turn is the evidence asked (lane 9B).
+        if (!isLocationEvidencedInText(to, evidence, { anyToken: true })) return state;
         // The origin is usually the place the hero just left, which the turn
         // may not name again — a visit stamp is the alternative proof.
-        if (!isLocationEvidencedInText(from, evidence) && !Number.isFinite(locations[fromIdx].lastVisitedMessage)) return state;
+        if (!isLocationEvidencedInText(from, evidence, { anyToken: true }) && !Number.isFinite(locations[fromIdx].lastVisitedMessage)) return state;
 
         const direction = normalizeTravelDirection(payload.direction);
         const directionEvidenced = direction && isDirectionEvidencedInText(direction, evidence);
@@ -1024,9 +1114,24 @@ export const handlers = {
         if (region) {
             region = resolvePlaceNamedRegion(locationsBefore, region, { excludeId: targetRecord.id });
         }
+        // `within` (lane 9B): the exact KNOWN PLACES name of the place this one
+        // lies inside, stated once at mint — first stated wins, never itself,
+        // never a cycle, never a name no record answers to. The id is stored,
+        // and read by the cluster rule below in the same pass (a profile that
+        // states both the container and a land inherits the container's land).
+        let within = null;
+        if (!targetRecord.within && typeof rawProfile.within === 'string' && rawProfile.within.trim()) {
+            const parentIdx = findLocationRecord(locationsBefore, rawProfile.within);
+            const parent = parentIdx === -1 ? null : locationsBefore[parentIdx];
+            if (parent && parent.id !== targetRecord.id && placeRootId(locationsBefore, parent) !== targetRecord.id) within = parent.id;
+        }
+        const clusterBase = within
+            ? locationsBefore.map(record => (record === targetRecord ? { ...record, within } : record))
+            : locationsBefore;
+        const clusterTarget = within ? { ...targetRecord, within } : targetRecord;
         if (region && !targetRecord.region) {
-            const clusterRegion = locationsBefore.find(record => record !== targetRecord
-                && record?.region && areRelatedPlaces(record, targetRecord))?.region || null;
+            const clusterRegion = clusterBase.find(record => record !== targetRecord && record.id !== targetRecord.id
+                && record?.region && sameCluster(clusterBase, record, clusterTarget))?.region || null;
             if (clusterRegion) {
                 region = isSameRegion(clusterRegion, region) ? region : clusterRegion;
             } else if (!priorRegions.some(known => isSameRegion(known, region))
@@ -1038,7 +1143,7 @@ export const handlers = {
                 region = null;
             }
         }
-        const profile = { ...rawProfile, region };
+        const profile = { ...rawProfile, region, within: within || undefined };
         const locations = upsertLocation(locationsBefore, name, profile);
         let next = { ...state, locations };
         // The tally's per-place feed (2026-10-26): the archetype / motifs the

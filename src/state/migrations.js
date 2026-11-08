@@ -67,7 +67,7 @@ import { migrateLegacyNpc, normalizeNpcAliases } from '../engine/npcRoster.js';
 import { heroNameForms } from '../engine/textMatch.js';
 import { legacyFoldForkedNpcs, legacyNamesMatch, legacyPeopleNamesInSave, legacyRecordedDead } from './legacyNpcIdentity.js';
 import { legacyFindLocationRecord, legacyPlaceNamesInSave } from './legacyPlaceIdentity.js';
-import { findLocationRecord, normalizeLocationRecord } from '../engine/locationRegistry.js';
+import { findLocationRecord, normalizeLocationRecord, placeRootId } from '../engine/locationRegistry.js';
 
 /**
  * Save-format version stamped into every persisted payload (persistence.js
@@ -84,7 +84,7 @@ import { findLocationRecord, normalizeLocationRecord } from '../engine/locationR
  *        flag; the old reading of `lastNotes` runs once more, frozen, to
  *        seed it.
  */
-export const CURRENT_SAVE_VERSION = 6;
+export const CURRENT_SAVE_VERSION = 7;
 
 /** Stamped version of a save payload; pre-versioned or junk stamps read as 0. */
 export function getSaveVersion(save) {
@@ -781,6 +781,33 @@ function seedPlaceAliases(save) {
     return changed ? { ...save, locations } : save;
 }
 
+/**
+ * Save version 7 (identity by reference, lane 9B, 2026-11-08; Vesa's answer
+ * 4 to the lane 9 review): `within` is seeded from the one shape the old
+ * kinship rule read right — "<place>, <town>" where the town IS a record by
+ * exact name or alias — and from nothing else; the Scribe states the rest at
+ * mint. Never itself, never a cycle, never over a value already held.
+ * Idempotent.
+ */
+function seedPlaceWithin(save) {
+    if (!Array.isArray(save?.locations) || save.locations.length === 0) return save;
+    let locations = save.locations.filter(record => record && typeof record === 'object');
+    let changed = false;
+    for (const record of [...locations]) {
+        if (typeof record.name !== 'string' || record.within) continue;
+        const comma = record.name.lastIndexOf(',');
+        if (comma <= 0) continue;
+        const tail = record.name.slice(comma + 1).trim();
+        const parentIdx = findLocationRecord(locations, tail);
+        if (parentIdx === -1) continue;
+        const parent = locations[parentIdx];
+        if (parent.id === record.id || placeRootId(locations, parent) === record.id) continue;
+        locations = locations.map(entry => (entry === record ? { ...entry, within: parent.id } : entry));
+        changed = true;
+    }
+    return changed ? { ...save, locations } : save;
+}
+
 export const MIGRATIONS = [
     {
         toVersion: 3,
@@ -810,6 +837,12 @@ export const MIGRATIONS = [
             + 'alias; every stored place string the frozen containment rung resolved to a record is seeded as that '
             + 'record\'s alias, once. Nothing is folded.',
         migrate: seedPlaceAliases,
+    },
+    {
+        toVersion: 7,
+        description: 'Identity by reference, lane 9B (DECISIONS.md 2026-11-08): a place\'s `within` is seeded once from the '
+            + '"<place>, <town>" shape where the town is a record; the cluster rule reads the within chain from this version on.',
+        migrate: seedPlaceWithin,
     },
 ];
 

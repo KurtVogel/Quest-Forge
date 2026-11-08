@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-    areRelatedPlaces,
     dedupeLocationRecords,
     describeTravelLink,
     findLocationRecord,
@@ -24,7 +23,9 @@ import {
     normalizeTravelDirection,
     normalizeTravelLink,
     placeKey,
+    placeRootId,
     resolvePlaceNamedRegion,
+    sameCluster,
     sanitizeRegionName,
     seedTravelLinksFromTrail,
     upsertLocation,
@@ -77,17 +78,14 @@ describe('place-named regions (2026-08-20 playtest §5c: districts tagged region
         expect(resolvePlaceNamedRegion([town], 'Ashford', { excludeId: town.id })).toBe('Ashford');
     });
 
-    it('sub-place records prove a name is a settlement even with no record of its own (playtest #10)', () => {
-        // Live 2026-08-22: the Scribe tagged an inn with region "Stonebridge"
-        // while the town had no record — only "The Stonebridge market square"
-        // existed. The sub-place is the evidence: the region proposal dies.
+    it('a proposal no record answers to stands — the sub-place evidence rung went with lane 9B (it read "<town> market square" as proof of a town, a word rule)', () => {
         const square = normalizeLocationRecord({ name: 'The Stonebridge market square' });
-        expect(resolvePlaceNamedRegion([square], 'Stonebridge')).toBeNull();
-    });
-
-    it('a sub-place with its own region hands the settlement its land (district → town → land)', () => {
-        const square = { ...normalizeLocationRecord({ name: 'The Stonebridge market square' }), region: 'Marrowdal' };
-        expect(resolvePlaceNamedRegion([square], 'Stonebridge')).toBe('Marrowdal');
+        expect(resolvePlaceNamedRegion([square], 'Stonebridge')).toBe('Stonebridge');
+        const regioned = { ...square, region: 'Marrowdal' };
+        expect(resolvePlaceNamedRegion([regioned], 'Stonebridge')).toBe('Stonebridge');
+        // With a record that IS the town, the translation still runs.
+        const town = { ...normalizeLocationRecord({ name: 'Stonebridge', type: 'settlement' }), region: 'Marrowdal' };
+        expect(resolvePlaceNamedRegion([town, regioned], 'Stonebridge')).toBe('Marrowdal');
     });
 
     it('geographic remainders are NOT settlement evidence — "Marrowdal valley" proves a land', () => {
@@ -156,10 +154,12 @@ describe('isRegionNameOnly (2026-08-06 registry-noise guard)', () => {
         { name: 'Saltmere', region: 'Vale of Reeds' },
     ];
 
-    it('matches the bare region name, with or without the article', () => {
+    it('matches the bare region name exactly — case aside, the article part of the name (lane 9B)', () => {
         expect(isRegionNameOnly(locations, 'the Rimefell Marches')).toBe(true);
-        expect(isRegionNameOnly(locations, 'Rimefell Marches')).toBe(true);
-        expect(isRegionNameOnly(locations, 'the Vale of Reeds')).toBe(true);
+        expect(isRegionNameOnly(locations, 'The Rimefell Marches.')).toBe(true);
+        expect(isRegionNameOnly(locations, 'Rimefell Marches')).toBe(false);
+        expect(isRegionNameOnly(locations, 'the Vale of Reeds')).toBe(false);
+        expect(isRegionNameOnly(locations, 'vale of reeds')).toBe(true);
     });
 
     it('does NOT match a place merely inside a region (token equality, not containment)', () => {
@@ -325,8 +325,10 @@ describe('lookup', () => {
         expect(locations.some(r => r.name === 'Guild Quarter, Weatherby')).toBe(true);
         // The bare town name still resolves to the town record.
         expect(locations[findLocationRecord(locations, 'Weatherby')].name).toBe('Weatherby');
-        // The cluster stays kin for drift/hearsay purposes.
-        expect(areRelatedPlaces(locations[0], locations[1])).toBe(true);
+        // The cluster is the Scribe's `within` (lane 9B), never the comma or the shared word.
+        expect(sameCluster(locations, locations[0], locations[1])).toBe(false);
+        const placed = locations.map(record => (record.name === 'Guild Quarter, Weatherby' ? { ...record, within: locations[0].id } : record));
+        expect(sameCluster(placed, placed[0], placed[1])).toBe(true);
         // An UNCLASSIFIED town folds nothing either (lane 9A): the no-fold is
         // not a settlement's privilege any more, it is the rule.
         let untyped = upsertLocation([], 'Millhaven');
@@ -451,36 +453,49 @@ describe('dedupeLocationRecords', () => {
     });
 });
 
-describe('areRelatedPlaces (live playtest #7 nested-place kinship)', () => {
-    it('relates a street to a shop that NAMES it — a shared segment, never a shared trade word (2026-10-30)', () => {
-        const street = normalizeLocationRecord({ name: 'Tallow Lane' });
-        // The sign alone repeats the street's word: not kinship (the Opus playtest's far port,
-        // 'Puerto Azafrán, the Salt Wharves', was kin to home's 'The Salt-Cellars, Harrow Sound'
-        // through 'salt' and inherited the HOME land).
-        expect(areRelatedPlaces(street, normalizeLocationRecord({ name: 'E. Duskwell, Tallow & Tapers' }))).toBe(false);
-        expect(areRelatedPlaces(street, normalizeLocationRecord({ name: 'E. Duskwell, Tallow & Tapers, Tallow Lane' }))).toBe(true);
-        expect(areRelatedPlaces(
-            normalizeLocationRecord({ name: 'Puerto Azafrán, the Salt Wharves' }),
-            normalizeLocationRecord({ name: 'The Salt-Cellars, Harrow Sound' }),
-        )).toBe(false);
-        expect(areRelatedPlaces(normalizeLocationRecord({ name: 'The Quays, Harrow Sound' }), normalizeLocationRecord({ name: 'Harrow Sound' }))).toBe(true);
-        expect(areRelatedPlaces(normalizeLocationRecord({ name: 'Kiln Throat' }), normalizeLocationRecord({ name: 'Kiln Throat (upper flues)' }))).toBe(true);
+describe('sameCluster / placeRootId (lane 9B: the within chain is the cluster, shared words are nothing)', () => {
+    it('two records are one cluster when their within chains share a root; words, aliases and commas decide nothing', () => {
+        const town = { ...normalizeLocationRecord({ name: 'Weatherby', type: 'settlement' }), id: 'town' };
+        const lane = { ...normalizeLocationRecord({ name: 'Tallow Lane', within: 'town' }), id: 'lane' };
+        const shop = { ...normalizeLocationRecord({ name: 'E. Duskwell, Tallow & Tapers', within: 'lane' }), id: 'shop' };
+        const port = { ...normalizeLocationRecord({ name: 'Puerto Azafrán, the Salt Wharves' }), id: 'port' };
+        const cellars = { ...normalizeLocationRecord({ name: 'The Salt-Cellars, Harrow Sound', aliases: ['The Salt-Cellars, Harrow Sound, Weatherby'] }), id: 'cellars' };
+        const list = [town, lane, shop, port, cellars];
+        expect(placeRootId(list, shop)).toBe('town');
+        expect(placeRootId(list, town)).toBe('town');
+        expect(sameCluster(list, shop, town)).toBe(true);
+        expect(sameCluster(list, shop, lane)).toBe(true);
+        expect(sameCluster(list, port, cellars)).toBe(false); // the word "salt" is nothing
+        expect(sameCluster(list, cellars, town)).toBe(false); // an alias naming the town is nothing
+        expect(sameCluster(list, shop, port)).toBe(false);
+        expect(sameCluster(list, shop, shop)).toBe(true);
+        expect(sameCluster(list, null, shop)).toBe(false);
     });
 
-    it('relates through aliases, not just canonical names', () => {
-        const town = normalizeLocationRecord({
-            name: 'Weatherby',
-            aliases: ['E. Duskwell — Tallow & Tapers, Tallow Lane, Weatherby'],
-        });
-        const street = normalizeLocationRecord({ name: 'Tallow Lane' });
-        expect(areRelatedPlaces(town, street)).toBe(true);
+    it('a cycle or a dangling within ends the walk where it stands; a record of its own is its own root', () => {
+        const a = { id: 'a', name: 'A', within: 'b' };
+        const b = { id: 'b', name: 'B', within: 'a' };
+        const c = { id: 'c', name: 'C', within: 'gone' };
+        expect(['a', 'b']).toContain(placeRootId([a, b, c], a)); // the walk ends where the cycle closes
+        expect(placeRootId([a, b, c], c)).toBe('c'); // a dangling within is no parent
+        expect(sameCluster([a, b, c], a, b)).toBe(true); // one chain holds the other's record
+        expect(sameCluster([a, b, c], a, c)).toBe(false);
+        expect(placeRootId([], { id: 'x', name: 'X' })).toBe('x');
+        expect(placeRootId([], null)).toBeNull();
     });
 
-    it('keeps genuinely distinct places unrelated', () => {
-        const street = normalizeLocationRecord({ name: 'Tallow Lane' });
-        const fen = normalizeLocationRecord({ name: 'The Weirs', aliases: ['The Weirs, Sallow Fen'] });
-        expect(areRelatedPlaces(street, fen)).toBe(false);
-        expect(areRelatedPlaces(street, null)).toBe(false);
+    it('normalizeLocationRecord types within, a merge carries and re-aims it, the load heal drops a dangling one', () => {
+        expect(normalizeLocationRecord({ name: 'X', within: '  town  ' }).within).toBe('town');
+        expect(normalizeLocationRecord({ name: 'X', within: 7 }).within).toBeNull();
+        expect(normalizeLocationRecord({ type: 'haven' }, { name: 'X', within: 'town' }).within).toBe('town');
+        const town = { ...normalizeLocationRecord({ name: 'Weatherby' }), id: 'town' };
+        const twin = { ...normalizeLocationRecord({ name: 'Weatherby market', within: 'town' }), id: 'twin' };
+        const shop = { ...normalizeLocationRecord({ name: 'The Chandlery', within: 'twin' }), id: 'shop' };
+        const merged = mergeLocationRecords([town, twin, shop], 'town', 'twin');
+        expect(merged.find(r => r.id === 'shop').within).toBe('town'); // re-aimed at the keeper
+        expect(merged.find(r => r.id === 'town').within).toBeNull(); // never itself
+        const healed = dedupeLocationRecords([{ ...town, aliases: [] }, { ...shop, within: 'nobody' }]);
+        expect(healed.find(r => r.id === 'shop').within).toBeNull();
     });
 });
 
@@ -572,14 +587,15 @@ describe('listVisitedPlaces / groupPlacesByRegion (player-facing Places tab, 202
         expect(place.aliases).toEqual(['Library landing, Clockwork Tower']);
     });
 
-    it('groups by region with fuzzy region identity, unregioned places trailing', () => {
+    it('groups by region by the exact name, case aside (lane 9B), unregioned places trailing', () => {
         const a = { name: 'Ashford', region: 'the Veyrmoor', isCurrent: false, lastVisitedAt: 3 };
-        const b = { name: 'Ghyll', region: 'Veyrmoor', isCurrent: false, lastVisitedAt: 2 };
+        const b = { name: 'Ghyll', region: 'The Veyrmoor', isCurrent: false, lastVisitedAt: 2 };
         const c = { name: 'The Copper Kettle', region: null, isCurrent: false, lastVisitedAt: 9 };
-        const d = { name: 'Rimehollow', region: 'Rimefell Marches', isCurrent: false, lastVisitedAt: 1 };
+        const d = { name: 'Rimehollow', region: 'Veyrmoor', isCurrent: false, lastVisitedAt: 1 };
         const groups = groupPlacesByRegion([c, a, b, d]);
-        expect(groups.map(g => g.region)).toEqual(['the Veyrmoor', 'Rimefell Marches', null]);
+        expect(groups.map(g => g.region)).toEqual(['the Veyrmoor', 'Veyrmoor', null]);
         expect(groups[0].places.map(p => p.name)).toEqual(['Ashford', 'Ghyll']);
+        expect(groups[1].places.map(p => p.name)).toEqual(['Rimehollow']); // the article is part of the land's name
         expect(groups[2].places.map(p => p.name)).toEqual(['The Copper Kettle']);
     });
 
@@ -683,12 +699,13 @@ describe('travel links — geography as canon (2026-09-14)', () => {
 
     it('linkLocations no-ops on an unknown id, a self-link, or one place cluster', () => {
         const town = rec('Harrowmere');
-        const tavern = rec('The Gilded Eel', { aliases: ['Gilded Eel tavern, Harrowmere'] });
+        const tavern = rec('The Gilded Eel', { aliases: ['Gilded Eel tavern, Harrowmere'], within: town.id });
         const fen = rec('Deep Fen');
         const list = [town, tavern, fen];
         expect(linkLocations(list, town.id, 'nope')).toBe(list);
         expect(linkLocations(list, town.id, town.id)).toBe(list);
-        expect(linkLocations(list, town.id, tavern.id, { direction: 'north' })).toBe(list); // shares a name token via alias
+        expect(linkLocations(list, town.id, tavern.id, { direction: 'north' })).toBe(list); // within the town (lane 9B): one cluster, no road
+        expect(linkLocations([town, { ...tavern, within: null }, fen], town.id, tavern.id)[0].links).toHaveLength(1); // the alias's words decide nothing
         expect(linkLocations(undefined, town.id, fen.id)).toEqual([]);
     });
 

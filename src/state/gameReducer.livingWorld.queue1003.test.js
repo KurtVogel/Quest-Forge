@@ -106,13 +106,15 @@ describe('the one-shot markers are written with exactly the keys that have a rea
 describe('"is the hero still at that place" is ONE predicate', () => {
     const locations = [
         { id: 'loc-town', name: 'Stonebridge', aliases: [], type: 'settlement', settlementScale: true },
-        { id: 'loc-eel', name: 'The Gilded Eel', aliases: ['The Gilded Eel, Stonebridge'], type: 'haven' },
+        // Within the town (lane 9B): the cluster is the `within` chain, never the alias's words.
+        { id: 'loc-eel', name: 'The Gilded Eel', aliases: ['The Gilded Eel, Stonebridge'], type: 'haven', within: 'loc-town' },
         { id: 'loc-fen', name: 'Deep Fen', aliases: [], type: 'wilderness' },
     ];
 
     it('same name, same record, or one cluster — never an unrelated place, never junk', () => {
         expect(isStillAtPlace(locations, 'Stonebridge', 'Stonebridge')).toBe(true);
-        expect(isStillAtPlace(locations, 'Stonebridge', 'The Gilded Eel')).toBe(true); // no shared token in the NAMES — the registry knows
+        expect(isStillAtPlace(locations, 'Stonebridge', 'The Gilded Eel')).toBe(true); // no shared token in the NAMES — the registry's within chain knows
+        expect(isStillAtPlace(locations.map(r => ({ ...r, within: null })), 'Stonebridge', 'The Gilded Eel')).toBe(false); // the alias's words decide nothing (lane 9B)
         expect(isStillAtPlace([], 'Stonebridge', 'The Gilded Eel')).toBe(false);
         expect(isStillAtPlace(locations, 'Stonebridge', 'Deep Fen')).toBe(false);
         expect(isStillAtPlace(locations, '', 'Stonebridge')).toBe(false);

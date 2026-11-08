@@ -79,8 +79,12 @@ describe('absence-drift pending marker', () => {
         // stale stamp — but spent most of that time inside the shop. A related
         // record (the shop names its street — a shared SEGMENT, since 2026-10-30 never a
         // shared trade word) with a fresh stamp means no real absence.
+        // Since lane 9B the kinship is the Scribe's `within` (the shop is on the
+        // lane), never a shared word of the names.
         let state = gameReducer(atMessages(initialGameState, 5), { type: 'SET_LOCATION', payload: 'Tallow Lane, Weatherby' });
         state = gameReducer(atMessages(state, 8), { type: 'SET_LOCATION', payload: 'Duskwell Chandlery, Weatherby' });
+        state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Duskwell Chandlery, Weatherby', profile: { within: 'Tallow Lane, Weatherby' } } });
+        expect(state.locations.find(r => r.name === 'Duskwell Chandlery, Weatherby').within).toBe(state.locations.find(r => r.name === 'Tallow Lane, Weatherby').id);
         state = gameReducer(atMessages(state, 20), { type: 'SET_LOCATION', payload: 'Weatherby Guild Quarter' });
         const returned = gameReducer(atMessages(state, 45), { type: 'SET_LOCATION', payload: 'Tallow Lane, Weatherby' });
         expect(returned.locations.map(r => r.name)).toContain('Duskwell Chandlery, Weatherby');
@@ -134,7 +138,16 @@ describe('traveling rumor on arrival', () => {
     it('does not re-offer a deed at a nested sibling of the place it was offered at (playtest #8)', () => {
         let state = gameReducer(withDeeds(), { type: 'SET_LOCATION', payload: 'Tallow Lane, Weatherby' });
         expect(state.recentHearsay).toHaveLength(1);
-        const next = gameReducer(atMessages(state, 34), { type: 'SET_LOCATION', payload: 'Duskwell Chandlery, Weatherby' });
+        // The DM names the shop (lane 9A: provisional, its arrival HELD); the
+        // Scribe places it on the lane and confirms it new; the tail then runs
+        // with the cluster known — one audience, no second offer (lane 9B).
+        let next = gameReducer(atMessages(state, 34), { type: 'SET_LOCATION', payload: { name: 'Duskwell Chandlery, Weatherby', dm: true } });
+        expect(next.recentHearsay).toHaveLength(1); // held: nothing offered yet
+        expect(next.session.pendingArrival).toMatchObject({ atMessage: 34 });
+        next = gameReducer(next, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Duskwell Chandlery, Weatherby', profile: { within: 'Tallow Lane, Weatherby' } } });
+        next = gameReducer(next, { type: 'LINK_PLACES', payload: { links: [{ name: 'Duskwell Chandlery, Weatherby', is: 'new' }] } });
+        expect(next.session.pendingArrival).toBeNull();
+        expect(next.locations.find(r => r.name === 'Duskwell Chandlery, Weatherby')).toMatchObject({ provisional: false, lastVisitedMessage: 34, visitCount: 1 });
         expect(next.recentHearsay).toHaveLength(1); // same audience, no second offer
         // 2026-08-31 P1 r3: the live offer SURVIVES the related-place move
         // (it used to be nulled here, so the shopkeeper never voiced it).
@@ -586,12 +599,14 @@ describe('first-seen region evidence gate + cluster inheritance (queue P2, playt
             type: 'UPDATE_LOCATION_PROFILE',
             payload: {
                 name: 'Guild Quarter, Weatherby',
-                profile: { type: 'settlement', region: 'the Rimefell Marches' },
+                // The Scribe says where it lies (lane 9B): the cluster is this, not the comma.
+                profile: { type: 'settlement', within: 'Weatherby', region: 'the Rimefell Marches' },
                 evidenceText: 'Talk in the Guild Quarter runs to the Rimefell Marches and its wars.',
             },
         });
         // The quarter sits in Weatherby, and Weatherby sits in the Harchwold —
         // a novel (even evidenced) region for a related record is the phantom class.
+        expect(next.locations.find(r => r.name === 'Guild Quarter, Weatherby').within).toBe(next.locations.find(r => r.name === 'Weatherby').id);
         expect(next.locations.find(r => r.name === 'Guild Quarter, Weatherby').region).toBe('the Harchwold');
         expect(next.session.pendingRegionalFronts).toMatchObject({ region: 'the Harchwold', profileOnly: true }); // the home's face-only call, no seed
     });
@@ -961,11 +976,18 @@ describe('travel links — geography as canon (2026-09-14)', () => {
         expect(fen.links).toEqual([{ id: aldermill.id, direction: null, travelTime: null, route: null, atMessage: 10 }]);
     });
 
-    it('an alias re-statement or a hop inside one place cluster mints nothing', () => {
+    it('a hop inside one place cluster mints no road (lane 9B: the square is WITHIN the town by the Scribe\'s word)', () => {
         let state = gameReducer(atMessages(initialGameState, 2), { type: 'SET_LOCATION', payload: 'Harrowmere' });
-        state = gameReducer(atMessages(state, 4), { type: 'SET_LOCATION', payload: 'Harrowmere market square' });
+        state = gameReducer(atMessages(state, 4), { type: 'SET_LOCATION', payload: { name: 'Harrowmere market square', dm: true } });
+        state = gameReducer(state, { type: 'UPDATE_LOCATION_PROFILE', payload: { name: 'Harrowmere market square', profile: { within: 'Harrowmere' } } });
+        state = gameReducer(state, { type: 'LINK_PLACES', payload: { links: [{ name: 'Harrowmere market square', is: 'new' }] } });
         state = gameReducer(atMessages(state, 6), { type: 'SET_LOCATION', payload: 'Harrowmere' });
+        expect(state.locations).toHaveLength(2);
         expect(state.locations.every(record => record.links.length === 0)).toBe(true);
+        // Without the container the square is a place of its own and the hop is a road.
+        let apart = gameReducer(atMessages(initialGameState, 2), { type: 'SET_LOCATION', payload: 'Harrowmere' });
+        apart = gameReducer(atMessages(apart, 4), { type: 'SET_LOCATION', payload: 'Harrowmere market square' });
+        expect(apart.locations.some(record => record.links.length === 1)).toBe(true);
     });
 
     it('ADD_TRAVEL_LINK fills evidenced detail onto the arrival edge and drops what the turn never said', () => {

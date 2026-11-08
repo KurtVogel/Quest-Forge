@@ -1,6 +1,6 @@
 # Identity by reference: inventory and proposed order
 
-**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11, 6, 7, 8 and 9A are built and deployed (9A the evening of 2026-11-08: exact places, KNOWN PLACES for the DM, `place_links`, save 6; 9B and 9C follow) (8 in the small hours of 2026-11-09; its 40-turn before/after ran on Flash 2026-11-08 twice: turn 20 held in both pairs and turn 40 in the second — 26 / 22 cards, 27 % / 32 %). Open: 9 (review the design first), 10 (on evidence).** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
+**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11, 6, 7, 8, 9A and 9B are built and deployed (9A the evening of 2026-11-08: exact places, KNOWN PLACES for the DM, `place_links`, save 6; 9B that night: the held arrival, `within` as the cluster, lands exact, the evidence gate, save 7; 9C follows) (8 in the small hours of 2026-11-09; its 40-turn before/after ran on Flash 2026-11-08 twice: turn 20 held in both pairs and turn 40 in the second — 26 / 22 cards, 27 % / 32 %). Open: 9 (review the design first), 10 (on evidence).** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
 2026-11-07 for the live proof. Line numbers hold at `667295b`, which changed no app code. Rule behind it: DECISIONS.md 2026-11-05 (first entry), with 2026-11-03 evening
 (`recorded_as`), 2026-11-02 (the repeat judge) and 2026-11-06 night (the id decides) as the lanes already moved.
 
@@ -404,7 +404,7 @@ Ordered by: the id is already shown to the LLM, a defect closes, nothing else de
 | ~~6~~ | ~~People~~ | **Done 2026-11-08** in three slices (aliases, `findNpcByRef`, `name_links`, the migration; `same_person`, ties by id, `npc.dead`) | 1 queue item closed | |
 | ~~7~~ | ~~People reads~~ | **Done 2026-11-08** | `namesMatch` left decisions; it is `shortlistNamesMatch` now | |
 | ~~8~~ | ~~Story cards~~ | **Done 2026-11-09** (merge lane + nearest cards first; the 40-turn Flash before/after held at turns 20 and 40) | | |
-| 9 | Places | **Slice A done 2026-11-08** (exact lookups, KNOWN PLACES for the DM, the Scribe's copies and `place_links`, save 6); B (held arrival tail, `within`, regions, the evidence gate) and C (`same_place`, the cap) open | the containment fold is gone; `areRelatedPlaces` and the region rungs wait for B | Large, three slices |
+| 9 | Places | **Slices A and B done 2026-11-08** (A: exact lookups, KNOWN PLACES for the DM, the Scribe's copies and `place_links`, save 6; B: the held arrival tail, `within` as the cluster, lands exact, the evidence gate's known-copy bar, save 7); C (`same_place`, the cap) open | the containment fold, the kinship rule and the region rungs are gone | Large, three slices |
 | 10 | Facts, evidence, verifier | Low harm; on evidence or your say-so | | Medium |
 
 Each lane ships alone: pins, `npm test`, `npm run lint`, commit on master, build, deploy, a DECISIONS line.

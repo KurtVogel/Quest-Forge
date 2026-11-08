@@ -36,10 +36,10 @@ const oldSave = () => ({
 
 describe('save version 4 — the one run of the frozen matcher', () => {
     it('is version 4, and the pipeline folds forks once and seeds aliases from the names the save holds about people', () => {
-        expect(CURRENT_SAVE_VERSION).toBe(6); // 4 people, 5 the dead flag, 6 places (lane 9A)
-        expect(MIGRATIONS.map(m => m.toVersion)).toEqual([3, 4, 5, 6]);
+        expect(CURRENT_SAVE_VERSION).toBe(7); // 4 people, 5 the dead flag, 6 place aliases (lane 9A), 7 within (lane 9B)
+        expect(MIGRATIONS.map(m => m.toVersion)).toEqual([3, 4, 5, 6, 7]);
         const migrated = migrateLoadedSave(oldSave());
-        expect(migrated.saveVersion).toBe(6);
+        expect(migrated.saveVersion).toBe(7);
         const names = migrated.npcs.map(n => n.name);
         // The fork folded into the longer name; the short name is its alias.
         expect(names).toEqual(['Mira Vane', 'Old Tammo', 'Brother Anselm', 'Tam Reed']);
