@@ -28,6 +28,10 @@
  *   within    a new place first established inside a known one: did the
  *             profile's within copy a KNOWN PLACES name? "within" · "FREE-TEXT"
  *             another string · "none" no within (lane 9B)
+ *   merge     the reflection shown a true twin pair (an inn under a short and
+ *             a qualified name) AND a two-places pair (a ford and its staging
+ *             yard): "merge" folds the twin alone · "WRONG-MERGE" touched the
+ *             two places · "MISSED" left the twin (lane 9C)
  *
  *   npm.cmd run eval:placeid
  *   $env:QF_EVAL_RUNS="1"; npm.cmd run eval:placeid
@@ -38,7 +42,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runScribe } from '../src/llm/scribe.js';
+import { runNpcFrontReflection, runScribe } from '../src/llm/scribe.js';
 import { placeKey } from '../src/engine/locationRegistry.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -83,12 +87,52 @@ const CASES = [
     { id: 'within-forge', kind: 'within', from: 'Bramblecross market',
         player: 'I follow the hammering to the smithy on the corner.',
         narrative: 'The hammering leads you off the Bramblecross market square to a soot-black doorway under a painted horseshoe: Harl Demb\'s forge, the only smithy in Bramblecross. Harl himself, broad as the door, looks up from the anvil. "If it\'s a blade, come back tomorrow. If it\'s coin, come in."' },
+    { id: 'merge-twin-vs-yard', kind: 'merge' },
     { id: 'travel-ford', kind: 'travel', fromPlace: 'Bramblecross', toPlace: 'Larkspur Ford', from: 'Bramblecross',
         player: 'We take the haul road south and keep walking till the ford.',
         narrative: 'Two days on the Southern Haul Road, south out of Bramblecross with the quarry carts, and on the second evening the river shows ahead and the stockade gates of Larkspur Ford with it. The gate-warden waves the carts through and eyes you as you come in behind them.' },
 ];
 
+const MERGE_LOCATIONS = [
+    { id: 'loc-town', name: 'Bramblecross', aliases: [], type: 'settlement', region: 'The Ridge', visitCount: 6, lastVisitedMessage: 50 },
+    { id: 'loc-kettle', name: 'The Copper Kettle', aliases: [], type: 'haven', signature: 'copper pans on every beam, Idra behind the bar', visitCount: 4, lastVisitedMessage: 44, within: 'loc-town' },
+    { id: 'loc-kettle-2', name: 'Copper Kettle, Bramblecross', aliases: [], type: null, lastState: 'full of drovers at the long table', visitCount: 1, lastVisitedMessage: 58 },
+    { id: 'loc-ford', name: 'Larkspur Ford', aliases: [], type: 'settlement', region: 'The Ridge', visitCount: 2, lastVisitedMessage: 30 },
+    { id: 'loc-yard', name: 'Larkspur Ford staging yard', aliases: [], type: 'frontier', signature: 'quarry carts in rows, a tally-house', visitCount: 1, lastVisitedMessage: 32 },
+];
+
+async function runMergeCase(run) {
+    const dispatched = [];
+    const state = {
+        settings,
+        npcs: [{ id: 'npc-idra', name: 'Idra', rosterTier: 'character', kind: 'character', disposition: 'friendly', lastNotes: 'Keeps the Copper Kettle with her chandler husband.', lastSeenMessage: 58 }],
+        fronts: [],
+        journal: [{ summary: 'Kerttu drank at the Copper Kettle in Bramblecross, then walked out to the Larkspur Ford staging yard where the quarry carts wait below the ford\'s gates. Idra kept the Kettle\'s long table for the drovers.', location: 'Bramblecross' }],
+        worldFacts: [], storyMemory: [], messages: [], party: [], currentLocation: 'Copper Kettle, Bramblecross', locations: MERGE_LOCATIONS, session: { id: `eval-places-${run}` },
+    };
+    const realLog = console.log; const realWarn = console.warn; const realInfo = console.info;
+    console.log = () => {}; console.warn = () => {}; console.info = () => {};
+    let error = null;
+    try {
+        await runNpcFrontReflection({ state, dispatch: action => dispatched.push(action), cadence: null });
+    } catch (e) {
+        error = String(e?.message || e);
+    } finally {
+        console.log = realLog; console.warn = realWarn; console.info = realInfo;
+    }
+    const merges = dispatched.filter(a => a.type === 'MERGE_LOCATION_RECORDS').map(a => `${a.payload.keepId}<${a.payload.dropId}`);
+    const twinMerged = merges.some(m => m === 'loc-kettle<loc-kettle-2' || m === 'loc-kettle-2<loc-kettle');
+    const yardMerged = merges.some(m => m.includes('loc-yard'));
+    let outcome;
+    if (error) outcome = 'ERROR';
+    else if (yardMerged) outcome = 'WRONG-MERGE';
+    else if (twinMerged) outcome = 'merge';
+    else outcome = 'MISSED';
+    return { outcome, wire: { merges }, error };
+}
+
 async function runCase(testCase, run) {
+    if (testCase.kind === 'merge') return runMergeCase(run);
     const actions = [];
     const realLog = console.log; const realWarn = console.warn; const realInfo = console.info;
     console.log = () => {}; console.warn = () => {}; console.info = () => {};
@@ -160,7 +204,7 @@ async function runCase(testCase, run) {
 
 async function main() {
     const results = [];
-    const good = new Set(['copy', 'new', 'link', 'omit', 'within']);
+    const good = new Set(['copy', 'new', 'link', 'omit', 'within', 'merge']);
     for (const testCase of CASES) {
         for (let run = 1; run <= RUNS; run += 1) {
             const row = await runCase(testCase, run);
@@ -178,7 +222,7 @@ async function main() {
     const report = [
         `# Places by exact name, ${new Date().toISOString()}`,
         '',
-        `Machinery Flash, the real \`runScribe\`, ${CASES.length} hand-built turns × ${RUNS} run(s), five known places. No judge: read from the SET_LOCATION, LINK_PLACES, ADD_TRAVEL_LINK and ADD_STORY_MEMORY_CARDS payloads.`,
+        `Machinery Flash, the real \`runScribe\` and \`runNpcFrontReflection\`, ${CASES.length} hand-built turns × ${RUNS} run(s), five known places. No judge: read from the SET_LOCATION, LINK_PLACES, ADD_TRAVEL_LINK and ADD_STORY_MEMORY_CARDS payloads.`,
         '',
         `- copy (a known place under a colloquial phrasing: "copy" the exact name, "PHRASING" another string = a mint the old rung folded, "WRONG-COPY" another known place, "none"): ${tally('copy')}`,
         `- new (a new named place beside known ones: "new" its own name, "WRONG-COPY" a known name, "none"): ${tally('new')}`,
@@ -187,6 +231,7 @@ async function main() {
         `- card (a card's location: "copy" a known name, "omit", "FREE-TEXT"): ${tally('card')}`,
         `- travel (both ends exact known names: "copy", "PHRASING", "none"): ${tally('travel')}`,
         `- within (a new place inside a known one: "within" a known name, "FREE-TEXT", "none"): ${tally('within')}`,
+        `- merge (the reflection shown a twin pair AND a ford-and-its-yard pair: "merge" folds the twin alone, "WRONG-MERGE" touched the two places, "MISSED" left the twin): ${tally('merge')}`,
         '',
     ];
     for (const r of results) report.push(`- ${r.id} #${r.run}: **${r.outcome}** ${JSON.stringify(r.wire)}${r.error ? ' ERROR ' + r.error : ''}`);
@@ -194,7 +239,7 @@ async function main() {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'report.md'), report.join('\n'));
     fs.writeFileSync(path.join(dir, 'results.json'), JSON.stringify(results, null, 2));
-    console.log(report.slice(0, 12).join('\n'));
+    console.log(report.slice(0, 13).join('\n'));
     for (const r of results.filter(x => !good.has(x.outcome))) console.log(`${r.id} #${r.run} ${r.outcome} ${JSON.stringify(r.wire)}`);
     console.log(`Report: ${dir}`);
 }

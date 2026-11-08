@@ -1016,6 +1016,30 @@ export const handlers = {
     },
 
     /**
+     * The reflection's `same_place` (identity by reference, lane 9C,
+     * 2026-11-08): two records the shortlist offered (`possibleSamePlacePairs`,
+     * the reflection's `possibleSamePlace`) are one place, by id; the registry
+     * folds the second into the first (`mergeLocationRecords`). The reflection
+     * alone decides; the shortlist only chose what it saw. A held arrival that
+     * named the dropped record follows it. Stale-campaign actions are refused.
+     */
+    MERGE_LOCATION_RECORDS(state, action) {
+        if (isStaleCampaignAction(state, action)) return state;
+        const keepId = typeof action.payload?.keepId === 'string' ? action.payload.keepId.trim() : '';
+        const dropId = typeof action.payload?.dropId === 'string' ? action.payload.dropId.trim() : '';
+        const before = state.locations || [];
+        const locations = mergeLocationRecords(before, keepId, dropId);
+        if (locations === before) return state;
+        const kept = locations.find(record => record?.id === keepId);
+        console.info(`[Location] Merged ${dropId} into ${keepId} ${kept?.name || ''} — the reflection read them as one place.`);
+        const pending = state.session?.pendingArrival;
+        const repointed = pending && typeof pending === 'object' && (pending.recordId === dropId || pending.fromRecordId === dropId)
+            ? { ...pending, recordId: pending.recordId === dropId ? keepId : pending.recordId, fromRecordId: pending.fromRecordId === dropId ? keepId : pending.fromRecordId }
+            : pending;
+        return { ...state, locations, ...(repointed !== pending ? { session: { ...state.session, pendingArrival: repointed } } : {}) };
+    },
+
+    /**
      * A narrated journey between two KNOWN records (the Scribe's `travel`
      * report, 2026-09-14). Never mints a place: both ends must already be
      * registry records — the destination is the arrival SET_LOCATION minted

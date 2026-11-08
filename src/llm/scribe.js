@@ -16,7 +16,7 @@ import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { conversationalGap } from '../engine/replayLedger.js';
 import { BOND_SCENE_WINDOW_MESSAGES, bondKindLabel, curateNpcsForPrompt, dispatchClassifiedNpcUpdate, isPromptRosterNpc, listNpcImpressions, possibleSamePersonPairs, SAME_PERSON_PAIRS_CAP, splitBondMoments } from '../engine/npcRoster.js';
-import { collectKnownRegions, findLocationRecord, isLocationEvidencedInText, listKnownPlaceNames, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
+import { collectKnownRegions, findLocationRecord, isLocationEvidencedInText, listKnownPlaceNames, possibleSamePlacePairs, SAME_PLACE_PAIRS_CAP, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
 import { regionOfPlace } from '../engine/regionProfile.js';
 import { tryParseDirectorJson } from './directorUtils.js';
 import { captureReflection, captureScribePass, captureUsage } from '../debug/memoryInspectorStore.js';
@@ -763,7 +763,7 @@ export const SCRIBE_ANCHORS = [
     'name_links', 'place_links',
 ];
 /** The reflection schema's keys — a quiet cadence honestly answers with the tempo directive alone. */
-export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'settled_cards', 'story_memory', 'tempo_directive', 'front_proposals', 'same_person', 'merge_cards'];
+export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'settled_cards', 'story_memory', 'tempo_directive', 'front_proposals', 'same_person', 'merge_cards', 'same_place'];
 
 /**
  * The Scribe's contract on a "remember when…" turn (2026-09-18): the DM's
@@ -1221,6 +1221,9 @@ Output ONLY valid JSON:
   "merge_cards": [
     ["the id of the story card to KEEP (the fuller text)", "the id of the card that records the SAME beat and folds into it"]
   ],
+  "same_place": [
+    ["the id of the place record to KEEP (the canonical name)", "the id of the record that is the SAME place under another name and folds into it"]
+  ],
   "story_memory": [
     {
       "type": "callback|promise|wound|relationship|mystery|playerCanon|foreshadow|npcAgenda",
@@ -1250,6 +1253,7 @@ Rules:
 - The inverse binds too: when RECENT HEAT sits BELOW the campaign pace's appetite (calm on a standard campaign, calm OR lively on breakneck) and the scenes since the last fight have already given the table its air, LEAN toward granting a window at whatever intensity the arc supports. On breakneck, consecutive quiet directives need an explicit arc reason in the rationale — the player chose that dial to be pushed.
 - FRONT PROPOSALS: only when the PLAYER has repeatedly and deliberately engaged a concrete recurring threat that existing fronts do not cover and it has proven durable across scenes (a raided den that keeps mattering, a rival who keeps returning). At most one, complete or omitted entirely. This is rare — most reflections propose nothing.
 - MERGE CARDS: possibleSameCard lists pairs of story cards that MAY record one beat — the same promise, debt, wound or secret written twice in different words. Confirm a pair in merge_cards ONLY when both texts plainly state the same commitment or event between the same people; keep the fuller text's id first. Two beats about one person (a trust and a slap, a promise and a different promise) are two cards. Leave merge_cards empty when unsure: two cards are cheaper than one wrong merge.
+- SAME PLACE: possibleSamePlace lists pairs of place records that MAY be one place — the same inn under a short and a qualified name, a spelling drift, a sign name beside a proper name. Confirm a pair in same_place ONLY when the journal, the facts and both records' particulars (type, land, what lies within them) show one place; a place INSIDE another (a market in its town, a room in its keep, a yard beside its forge) is TWO. Leave same_place empty when unsure: two records are cheaper than one wrong fold, and a fold cannot be undone.
 - SAME PERSON: possibleSamePerson lists pairs of records that MAY be one person (a short form beside a full name, a title variant). Confirm a pair in same_person ONLY when the facts, the journal and both records show one person — the same place, the same role, the same history with the hero. Two people who merely share a first name are two. Leave same_person empty when unsure: two records are cheaper than one wrong merge, and a merge cannot be undone.
 - Potential companions may be seeded as hooks, but never add them to the party.
 - Intriguing NPCs should emerge from agenda, competence, danger, secrets, attraction, rivalry, vulnerability, or leverage, not default sexualization.
@@ -1414,6 +1418,8 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
     const samePersonPairs = possibleSamePersonPairs(state.npcs || []);
     // Cards that may record one beat (lane 8): the shortlist the reflection confirms or leaves; the engine folds only a pair it offered.
     const sameCardPairs = possibleSameCardPairs(state.storyMemory || []);
+    // Place records that may be one place (lane 9C): the shortlist the reflection confirms or leaves; the engine folds only a pair it offered.
+    const samePlacePairs = possibleSamePlacePairs(state.locations || []);
     const recentJournal = (state.journal || []).slice(-3).map(projectJournalForReflection).filter(Boolean);
     // The cards this cadence may settle (2026-10-31): touched by the cadence's
     // own text first, then the longest silent.
@@ -1439,7 +1445,19 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
         // reflection confirms or leaves; the engine merges only a pair it offered.
         ...(samePersonPairs.length > 0 && { possibleSamePerson: samePersonPairs }),
         ...(sameCardPairs.length > 0 && { possibleSameCard: sameCardPairs }),
+        ...(samePlacePairs.length > 0 && {
+            possibleSamePlace: samePlacePairs.map(pair => ({
+                ...pair,
+                // What each record holds, so a fold is judged on particulars.
+                records: pair.ids.map(id => {
+                    const record = (state.locations || []).find(entry => entry?.id === id);
+                    const within = record?.within ? (state.locations || []).find(entry => entry?.id === record.within)?.name || null : null;
+                    return record ? { id, name: record.name, type: record.type || null, land: record.region || null, within, aliases: (record.aliases || []).slice(0, 4), visits: record.visitCount || 0 } : { id };
+                }),
+            })),
+        }),
         knownLocations: (state.locations || []).slice(-12).map(record => ({
+            id: record.id,
             name: record.name,
             type: record.type,
             danger: record.danger,
@@ -1525,6 +1543,16 @@ export async function runNpcFrontReflection({ state, dispatch, cadence = null })
             if (!offered || keepId === dropId) continue;
             dispatch({ type: 'MERGE_NPC_RECORDS', payload: { keepId, dropId } });
             console.log(`[Reflection] Merged ${dropId} into ${keepId} — read as one person.`);
+        }
+        // same_place (lane 9C): only a pair the reflection was SHOWN folds, in
+        // either order; the first id is kept. Anything else is ignored.
+        for (const pair of (Array.isArray(reflected.same_place) ? reflected.same_place : []).slice(0, SAME_PLACE_PAIRS_CAP)) {
+            if (!Array.isArray(pair) || pair.length !== 2 || pair.some(id => typeof id !== 'string' || !id.trim())) continue;
+            const [keepId, dropId] = pair.map(id => id.trim());
+            const offered = samePlacePairs.some(({ ids }) => (ids[0] === keepId && ids[1] === dropId) || (ids[0] === dropId && ids[1] === keepId));
+            if (!offered || keepId === dropId) continue;
+            dispatch({ type: 'MERGE_LOCATION_RECORDS', payload: { keepId, dropId } });
+            console.log(`[Reflection] Merged place ${dropId} into ${keepId} — read as one place.`);
         }
         // merge_cards (lane 8): only a pair the reflection was SHOWN folds, in
         // either order; the first id is kept. Anything else is ignored.

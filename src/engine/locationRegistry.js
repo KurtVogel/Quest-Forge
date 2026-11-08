@@ -27,7 +27,13 @@ import { normalizeMotifKey, normalizeMotifList } from './worldMotifs.js';
 
 export const LOCATION_TYPES = ['haven', 'settlement', 'wilderness', 'frontier', 'hostile_site'];
 export const DANGER_LEVELS = ['none', 'low', 'moderate', 'high', 'deadly'];
-export const MAX_LOCATIONS = 60;
+/**
+ * The registry cap: 80 since lane 9C (2026-11-08). Exact names mint more
+ * records than the old folds did until the Scribe's links and the
+ * reflection's `same_place` fold them, and the megacampaign export already
+ * sat at 60. Eviction prefers a record nobody visited and nothing lies within.
+ */
+export const MAX_LOCATIONS = 80;
 /** Other names a record has answered to — the Scribe's links and the migration write them; 12 since lane 9A (the busiest records had already dropped aliases at 6). */
 export const MAX_ALIASES = 12;
 
@@ -789,10 +795,15 @@ export function upsertLocation(locations = [], name, profile = null) {
         // likeliest theater — went first, and that front's intensity clamp
         // silently stopped applying everywhere (2026-08-02 audit). Theaters
         // are only evictable if every record is one.
+        // Among those (lane 9C): a record nobody visited goes before one with a
+        // visit, a record nothing lies within before a container; ties by the
+        // oldest touch. A town with its shops hanging off it is the last to go.
         const evictable = list.filter(r => !(r.theaterFrontIds || []).length);
         const pool = evictable.length ? evictable : list;
         const lastTouch = r => r.lastVisitedAt || r.firstSeenAt || 0;
-        const victim = pool.reduce((oldest, r) => (lastTouch(r) < lastTouch(oldest) ? r : oldest));
+        const hasChild = r => list.some(other => other !== r && other?.within === r.id);
+        const rank = r => (hasChild(r) ? 2 : 0) + (Number.isFinite(r.lastVisitedMessage) || (toVisitCount(r.visitCount) || 0) > 0 ? 1 : 0);
+        const victim = pool.reduce((oldest, r) => (rank(r) < rank(oldest) || (rank(r) === rank(oldest) && lastTouch(r) < lastTouch(oldest)) ? r : oldest));
         return [...list.filter(r => r !== victim), record];
     }
 
@@ -807,6 +818,57 @@ export function upsertLocation(locations = [], name, profile = null) {
         lastVisitedAt: Date.now(),
     }, existing);
     return list.map((record, i) => (i === idx ? merged : record));
+}
+
+/** At most this many same-place pairs ride one reflection. */
+export const SAME_PLACE_PAIRS_CAP = 4;
+
+const PLACE_ARTICLES = new Set(['the', 'a', 'an']);
+
+/**
+ * The HEAD of a place name as words: the first comma segment, a leading
+ * article dropped. "The Copper Kettle, Bramblecross" → ["copper", "kettle"].
+ * The qualifier after the comma is the container, not the place — the "X,
+ * Town" shape is what `within` is seeded from, never a twin.
+ */
+function placeHeadWords(text) {
+    const head = placeKey(text).split(',')[0];
+    const words = head.split(/[^\p{L}\p{N}']+/u).filter(Boolean);
+    return words.length > 1 && PLACE_ARTICLES.has(words[0]) ? words.slice(1) : words;
+}
+
+/**
+ * Pairs of records that MAY be one place (lane 9C, 2026-11-08): the shortlist
+ * the cadence reflection confirms in `same_place` or leaves — decision 2's
+ * use of a matcher, never a decision. A pair is offered when one name's head
+ * is the other's whole head or contains it word for word ("copper kettle" in
+ * "copper kettle yard"; "The Copper Kettle" against "Copper Kettle,
+ * Bramblecross"), or an alias of one is the other's name or alias; never a
+ * pair already of one cluster (a market WITHIN its town is two places), never
+ * by the qualifier after a comma, never a word inside a word. Newest records
+ * first, so the fresh duplicate is what the reflection sees; capped.
+ */
+export function possibleSamePlacePairs(locations = [], { cap = SAME_PLACE_PAIRS_CAP } = {}) {
+    const list = (Array.isArray(locations) ? locations : []).filter(record => record && typeof record.id === 'string' && typeof record.name === 'string' && record.name.trim());
+    const keys = (record) => [record.name, ...(Array.isArray(record.aliases) ? record.aliases : [])].map(placeKey).filter(Boolean);
+    const contains = (outer, inner) => inner.length > 0 && inner.length < outer.length
+        && outer.some((_, offset) => inner.every((word, k) => outer[offset + k] === word));
+    const pairs = [];
+    for (let i = list.length - 1; i >= 0 && pairs.length < cap; i -= 1) {
+        for (let j = i - 1; j >= 0 && pairs.length < cap; j -= 1) {
+            const a = list[i];
+            const b = list[j];
+            if (sameCluster(list, a, b)) continue;
+            const headA = placeHeadWords(a.name);
+            const headB = placeHeadWords(b.name);
+            const sameHead = headA.length > 0 && headA.length === headB.length && headA.every((word, k) => word === headB[k]);
+            const aliasHit = keys(a).some(key => keys(b).includes(key));
+            if (aliasHit || sameHead || contains(headA, headB) || contains(headB, headA)) {
+                pairs.push({ ids: [b.id, a.id], names: [b.name.trim(), a.name.trim()] });
+            }
+        }
+    }
+    return pairs;
 }
 
 /**
