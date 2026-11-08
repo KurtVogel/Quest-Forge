@@ -50,7 +50,7 @@ export function stampLastDmMessage(messages, marks) {
 }
 import { bornStoryMemoryCard, findStoryMemoryMatch, normalizeStoryMemoryCard } from '../../engine/storyMemory.js';
 import { sanitizePortraitUrl } from '../../engine/portraitUrl.js';
-import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isDirectionEvidencedInText, isLocationEvidencedInText, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, linkLocations, normalizeTravelDirection, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
+import { areRelatedPlaces, collectKnownRegions, findLocationRecord, isBackstoryRegion, isDirectionEvidencedInText, isLocationEvidencedInText, isRegionEvidenced, isRegionNameOnly, isSameLocation, isSameRegion, linkLocations, mergeLocationRecords, normalizeLocationRecord, normalizeTravelDirection, placeKey, resolvePlaceNamedRegion, sanitizeRegionName, upsertLocation } from '../../engine/locationRegistry.js';
 import { appendHearsayLedger, hearsayOfferSurvivesArrival, selectRegionalHearsay } from '../../engine/regionalHearsay.js';
 import { findRegionProfile, mayAskRegionFace } from '../../engine/regionProfile.js';
 import { recordWorldMotifs } from '../../engine/worldMotifs.js';
@@ -594,6 +594,10 @@ export const handlers = {
         // the Scribe dragged the hero back to a merely-mentioned fen place the
         // DM's own location event had just walked her out of).
         const fillOnly = rawPayload && typeof rawPayload === 'object' && rawPayload.fillOnly === true;
+        // The DM's own location event (lane 9A): a name no record answers to
+        // mints a PROVISIONAL record the Scribe's `place_links` resolves —
+        // the place it IS under another phrasing, or a new one.
+        const dmLane = rawPayload && typeof rawPayload === 'object' && rawPayload.dm === true;
         if (fillOnly && state.currentLocation) {
             const samePlace = (prevRecord && targetRecord && targetRecord.id === prevRecord.id)
                 || isSameLocation(state.currentLocation, name);
@@ -626,6 +630,7 @@ export const handlers = {
             ? departed
             : upsertLocation(departed, name, {
                 ...(profile || {}),
+                ...(dmLane && targetIdx === -1 ? { provisional: true } : {}),
                 lastVisitedMessage: messageIndex,
                 // The place card (2026-09-16): a genuine arrival counts a visit;
                 // an alias re-statement of the current place keeps the count.
@@ -785,7 +790,7 @@ export const handlers = {
         // Strings only — `String(object)` minted "[object Object]" canon.
         const text = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
-        const localNpcs = (state.npcs || []).filter(npc => isAbsenceDriftLocalNpc(npc, pending.locationName));
+        const localNpcs = (state.npcs || []).filter(npc => isAbsenceDriftLocalNpc(npc, pending.locationName, state.locations));
         const developments = (Array.isArray(drift.developments) ? drift.developments : [])
             .map(dev => ({
                 name: text(dev?.name, 100),
@@ -859,6 +864,67 @@ export const handlers = {
         };
         if (!fact) return next;
         return gameReducer(next, { type: 'ADD_WORLD_FACTS', payload: [{ fact, category: 'event' }] });
+    },
+
+    /**
+     * The Scribe's `place_links` (identity by reference, lane 9A, 2026-11-08):
+     * the DM put the hero at a name no record answered to, the Scribe was
+     * shown it as PLACE NAMED WITHOUT A RECORD beside KNOWN PLACES, and it
+     * answers which known place the name IS — or "new". Bounded to what was
+     * offered: the said name must be a provisional record, or the hero's
+     * current place when no record answers to it. "is" a known place folds
+     * the provisional record into it (`mergeLocationRecords`: the said name
+     * becomes an alias, visits and links carry over) or, when the said name
+     * minted nothing (scene furniture under the mint gate), adds it as an
+     * alias so the hero's place resolves. "new" confirms the record. A link
+     * naming a place no record answers to is ignored with a console line —
+     * never a mint from a link.
+     */
+    LINK_PLACES(state, action) {
+        if (isStaleCampaignAction(state, action)) return state;
+        const links = Array.isArray(action.payload?.links) ? action.payload.links : [];
+        const before = state.locations || [];
+        let locations = before;
+        const hereKey = placeKey(state.currentLocation);
+        for (const link of links.slice(0, 4)) {
+            const said = typeof link?.name === 'string' ? link.name.trim().slice(0, 120) : '';
+            const is = typeof link?.is === 'string' ? link.is.trim().slice(0, 120) : '';
+            if (!said || !is) continue;
+            const saidIdx = findLocationRecord(locations, said);
+            const offered = saidIdx !== -1
+                ? locations[saidIdx].provisional === true
+                : (!!hereKey && placeKey(said) === hereKey);
+            if (!offered) {
+                console.warn(`[Location] place_links named "${said}", which was not offered — ignored.`);
+                continue;
+            }
+            if (is.toLowerCase() === 'new') {
+                if (saidIdx !== -1) {
+                    locations = locations.map((record, i) => (i === saidIdx ? { ...record, provisional: false } : record));
+                    console.info(`[Location] "${locations[saidIdx].name}" confirmed as a new place.`);
+                }
+                continue;
+            }
+            const knownIdx = findLocationRecord(locations, is);
+            if (knownIdx === -1) {
+                console.warn(`[Location] place_links said "${said}" is "${is}", which no record answers to — ignored.`);
+                continue;
+            }
+            if (saidIdx === -1) {
+                locations = locations.map((record, i) => (i === knownIdx
+                    ? normalizeLocationRecord({ aliases: [said], lastVisitedAt: record.lastVisitedAt }, record)
+                    : record));
+                console.info(`[Location] "${said}" is "${locations[knownIdx].name}" — alias added.`);
+            } else if (saidIdx !== knownIdx) {
+                const keep = locations[knownIdx];
+                const drop = locations[saidIdx];
+                locations = mergeLocationRecords(locations, keep.id, drop.id);
+                console.info(`[Location] Folded "${drop.name}" into "${keep.name}" — the Scribe linked them.`);
+            } else if (locations[saidIdx].provisional === true) {
+                locations = locations.map((record, i) => (i === saidIdx ? { ...record, provisional: false } : record));
+            }
+        }
+        return locations === before ? state : { ...state, locations };
     },
 
     /**

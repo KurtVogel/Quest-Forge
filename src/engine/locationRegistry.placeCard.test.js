@@ -36,14 +36,14 @@ describe('normalizeLocationRecord — signature / lastState / visitCount', () =>
         expect(record).toMatchObject({ signature: null, lastState: null, visitCount: 0 });
     });
 
-    it('first-stated signature survives a later fragment (appended) and a later rewrite (ignored)', () => {
+    it('first-stated signature survives a later fragment and a later rewrite — both ignored (the fragment-append rung was a word rule; lane 9A)', () => {
         const first = normalizeLocationRecord({ name: 'Rimehollow', signature: SIGNATURE });
         const withFragment = normalizeLocationRecord({ signature: 'a rope bridge' }, first);
-        expect(withFragment.signature).toBe(`${SIGNATURE}; a rope bridge`);
+        expect(withFragment.signature).toBe(SIGNATURE);
         const withRewrite = normalizeLocationRecord({ signature: 'A quiet farming village with a broken mill and a wide grey river that never quite dried' }, withFragment);
-        expect(withRewrite.signature).toBe(`${SIGNATURE}; a rope bridge`);
+        expect(withRewrite.signature).toBe(SIGNATURE);
         const untouched = normalizeLocationRecord({ type: 'settlement' }, withRewrite);
-        expect(untouched.signature).toBe(`${SIGNATURE}; a rope bridge`);
+        expect(untouched.signature).toBe(SIGNATURE);
     });
 
     it('lastState is current-state replace: a new value replaces, absence keeps', () => {
@@ -62,12 +62,12 @@ describe('normalizeLocationRecord — signature / lastState / visitCount', () =>
 });
 
 describe('mergePlaceSignature', () => {
-    it('lands the first text, appends a novel fragment, drops a restated fragment, ignores a rewrite', () => {
+    it('lands the first text and keeps it against a fragment, a restatement and a rewrite (lane 9A)', () => {
         expect(mergePlaceSignature(null, SIGNATURE)).toBe(SIGNATURE);
         expect(mergePlaceSignature(SIGNATURE, '')).toBe(SIGNATURE);
         expect(mergePlaceSignature('', '')).toBeNull();
         expect(mergePlaceSignature(SIGNATURE, 'the dry river')).toBe(SIGNATURE);
-        expect(mergePlaceSignature(SIGNATURE, 'a rope bridge')).toBe(`${SIGNATURE}; a rope bridge`);
+        expect(mergePlaceSignature(SIGNATURE, 'a rope bridge')).toBe(SIGNATURE);
         expect(mergePlaceSignature(SIGNATURE, 'A village whose mill wheel still turns above a river that ran dry long ago, with a rope bridge')).toBe(SIGNATURE);
     });
 
@@ -106,7 +106,7 @@ describe('listVisitedPlaces — the place card projections', () => {
     it('residents = roster NPCs whose basedIn resolves to the record; archived creatures and junk never count', () => {
         const npcs = [
             { name: 'Maren Voss', basedIn: 'Rimehollow' },
-            { name: 'Old Tam', basedIn: 'the mill at Rimehollow' },
+            { name: 'Old Tam', basedIn: 'rimehollow.' }, // the exact key: case and trailing punctuation aside (lane 9A)
             { name: 'Ghost', basedIn: 'Rimehollow', rosterTier: 'archived_creature' },
             { name: 'Nobody', basedIn: 'Ghyll' },
             { name: { junk: true }, basedIn: 'Rimehollow' },
@@ -122,7 +122,7 @@ describe('listVisitedPlaces — the place card projections', () => {
         const journal = [
             { id: 'j1', summary: 'Arrived in Rimehollow.', location: 'Rimehollow', keyDecisions: ['x'] },
             { id: 'j2', summary: 'Rode to Ghyll.', location: 'Ghyll' },
-            { id: 'j3', summary: 'The mill burned.', location: 'the mill at Rimehollow' },
+            { id: 'j3', summary: 'The mill burned.', location: 'Rimehollow.' },
             { id: 'j4', summary: 'Buried the miller.', location: 'Rimehollow' },
             { id: 'j5', summary: `Left town. ${'d'.repeat(400)}`, location: 'Rimehollow' },
             { id: 'j6', summary: { junk: true }, location: 'Rimehollow' },
@@ -169,7 +169,8 @@ describe('describeLastHere / describeCurrentPlace', () => {
     });
 
     it('the DM line is name — signature. Now: state. and degrades to the bare name', () => {
-        const locations = [normalizeLocationRecord({ name: 'Rimehollow', signature: `${SIGNATURE}.`, lastState: 'half-burned; the mill silent.' })];
+        // The current place reaches its record by name or ALIAS (lane 9A), never by word overlap.
+        const locations = [normalizeLocationRecord({ name: 'Rimehollow', aliases: ['the mill at Rimehollow'], signature: `${SIGNATURE}.`, lastState: 'half-burned; the mill silent.' })];
         expect(describeCurrentPlace(locations, 'the mill at Rimehollow')).toBe(`the mill at Rimehollow — ${SIGNATURE}. Now: half-burned; the mill silent.`);
         expect(describeCurrentPlace([normalizeLocationRecord({ name: 'Ghyll', signature: 'the bell' })], 'Ghyll')).toBe('Ghyll — the bell.');
         expect(describeCurrentPlace([], 'Nowhere')).toBe('Nowhere');

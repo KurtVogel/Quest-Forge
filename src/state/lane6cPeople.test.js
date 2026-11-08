@@ -111,7 +111,7 @@ describe('the dead flag (lane 6C): the Scribe\'s died: true writes it, nothing r
             messages: [{ id: 'm0', role: 'user', content: 'x', timestamp: 5 }],
         };
         const migrated = migrateLoadedSave(save);
-        expect(migrated.saveVersion).toBe(5);
+        expect(migrated.saveVersion).toBe(6); // 6 since lane 9A (places)
         expect(migrated.npcs.map(n => [n.id, n.dead === true])).toEqual([['d', true], ['k', false], ['m', true]]);
         const again = migrateLoadedSave({ ...migrated, saveVersion: 4 });
         expect(again.npcs.map(n => n.dead === true)).toEqual([true, false, true]);

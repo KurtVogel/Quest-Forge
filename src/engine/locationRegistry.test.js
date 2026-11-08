@@ -2,30 +2,32 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     areRelatedPlaces,
     dedupeLocationRecords,
+    describeTravelLink,
     findLocationRecord,
     findPlaceRecordByName,
     getCurrentLocationRecord,
     groupPlacesByRegion,
-    listVisitedPlaces,
-    describeTravelLink,
     isDirectionEvidencedInText,
-    linkLocations,
-    listKnownWays,
-    normalizeTravelDirection,
-    normalizeTravelLink,
-    seedTravelLinksFromTrail,
-    MAX_LINKS_PER_LOCATION,
     isLocationEvidencedInText,
     isMintableLocationName,
     isRegionEvidenced,
     isRegionNameOnly,
     isRegistrableLocationName,
     isSameLocation,
+    linkLocations,
+    listKnownWays,
+    listVisitedPlaces,
+    MAX_LINKS_PER_LOCATION,
+    MAX_LOCATIONS,
+    mergeLocationRecords,
+    normalizeLocationRecord,
+    normalizeTravelDirection,
+    normalizeTravelLink,
+    placeKey,
     resolvePlaceNamedRegion,
     sanitizeRegionName,
-    normalizeLocationRecord,
+    seedTravelLinksFromTrail,
     upsertLocation,
-    MAX_LOCATIONS,
 } from './locationRegistry.js';
 
 describe('place-named regions (2026-08-20 playtest §5c: districts tagged region "Ashford" / "The Coast Road")', () => {
@@ -113,11 +115,15 @@ describe('settlementScale (2026-08-20 playtest: type flip settlement → haven m
         expect(locations).toHaveLength(2);
     });
 
-    it('site-scale places never gain the flag and keep the original fold', () => {
+    it('site-scale places never gain the flag; a landing phrasing is its own record until a link folds it (lane 9A)', () => {
         let locations = upsertLocation([], 'Clockwork Tower', { type: 'haven' });
         expect(locations[0].settlementScale).toBe(false);
         locations = upsertLocation(locations, 'Library landing, Clockwork Tower');
-        expect(locations).toHaveLength(1); // rooms and landings are still not places
+        expect(locations).toHaveLength(2); // no word rule folds it: place_links or the migration teach the alias
+        locations = mergeLocationRecords(locations, locations[0].id, locations[1].id);
+        expect(locations).toHaveLength(1);
+        expect(locations[0].name).toBe('Clockwork Tower');
+        expect(locations[0].aliases).toContain('Library landing, Clockwork Tower');
     });
 });
 
@@ -169,11 +175,14 @@ describe('isRegionNameOnly (2026-08-06 registry-noise guard)', () => {
 });
 
 describe('location identity folding', () => {
-    it('folds sub-location phrasings into the same place', () => {
-        expect(isSameLocation('Clockwork Tower', 'Library landing, Clockwork Tower')).toBe(true);
-        expect(isSameLocation('the Whispering Conservatory', 'Whispering Conservatory')).toBe(true);
+    it('two strings are one place only as the same name — case, whitespace and trailing punctuation aside (lane 9A)', () => {
+        expect(isSameLocation('Clockwork Tower', 'Library landing, Clockwork Tower')).toBe(false);
+        expect(isSameLocation('the Whispering Conservatory', 'Whispering Conservatory')).toBe(false); // the article is part of the name (Vesa, 2026-11-08)
+        expect(isSameLocation('Clockwork  Tower.', 'clockwork tower')).toBe(true);
         expect(isSameLocation('Sunlit Orchard', 'Whispering Conservatory')).toBe(false);
         expect(isSameLocation('', 'Clockwork Tower')).toBe(false);
+        expect(placeKey(' The  Copper Kettle, ')).toBe('the copper kettle');
+        expect(placeKey({ name: 'x' })).toBe('');
     });
 
     it('keeps distinct named places apart even with shared generic words', () => {
@@ -182,23 +191,24 @@ describe('location identity folding', () => {
 });
 
 describe('upsertLocation', () => {
-    it('creates a record for a new place and merges variants as aliases', () => {
+    it('creates a record for a new place; a variant phrasing is a second record, and an alias on record resolves exactly', () => {
         let locations = upsertLocation([], 'Clockwork Tower');
         expect(locations).toHaveLength(1);
-        expect(locations[0]).toMatchObject({ name: 'Clockwork Tower', type: null, danger: null });
+        expect(locations[0]).toMatchObject({ name: 'Clockwork Tower', type: null, danger: null, provisional: false });
 
         locations = upsertLocation(locations, 'Library landing, Clockwork Tower');
-        expect(locations).toHaveLength(1);
-        expect(locations[0].name).toBe('Clockwork Tower');
-        expect(locations[0].aliases).toContain('Library landing, Clockwork Tower');
+        expect(locations).toHaveLength(2);
+        const taught = [normalizeLocationRecord({ aliases: ['Library landing, Clockwork Tower'] }, locations[0])];
+        expect(upsertLocation(taught, 'Library landing, Clockwork Tower')).toHaveLength(1);
+        expect(upsertLocation(taught, 'library landing, clockwork tower')[0].name).toBe('Clockwork Tower');
     });
 
-    it('adopts the shorter phrasing as the canonical name', () => {
+    it('never renames: the first name stays whatever phrasing comes later (lane 9A)', () => {
         let locations = upsertLocation([], 'Library landing, Clockwork Tower');
         locations = upsertLocation(locations, 'Clockwork Tower');
-        expect(locations).toHaveLength(1);
-        expect(locations[0].name).toBe('Clockwork Tower');
-        expect(locations[0].aliases).toContain('Library landing, Clockwork Tower');
+        expect(locations).toHaveLength(2);
+        expect(locations[0].name).toBe('Library landing, Clockwork Tower');
+        expect(locations[1].name).toBe('Clockwork Tower');
     });
 
     it('applies a Scribe profile without losing existing data, and clamps junk', () => {
@@ -229,11 +239,12 @@ describe('upsertLocation', () => {
         expect(isMintableLocationName('The Weirs')).toBe(true);
         expect(isMintableLocationName('the docks of Karst')).toBe(true);
         expect(upsertLocation([], 'the freezing muck')).toEqual([]);
-        // But descriptions still MATCH an existing record instead of vanishing.
+        // A description matches no record by word overlap any more (lane 9A):
+        // it neither mints nor folds — the Scribe's place_links teaches the alias.
         let locations = upsertLocation([], 'Drowned Willow tree');
         locations = upsertLocation(locations, description, { type: 'wilderness' });
         expect(locations).toHaveLength(1);
-        expect(locations[0]).toMatchObject({ name: 'Drowned Willow tree', type: 'wilderness' });
+        expect(locations[0]).toMatchObject({ name: 'Drowned Willow tree', type: null });
     });
 
     it('evidence-gates a relocation on the turn text actually naming the place (live playtest #6)', () => {
@@ -294,12 +305,13 @@ describe('upsertLocation', () => {
 });
 
 describe('lookup', () => {
-    it('finds records by name, alias, or containment and returns the current record', () => {
-        // A site-scale record (tower, tavern, ruin): rooms and landings fold in.
+    it('finds records by id, exact name or exact alias — never by containment — and returns the current record', () => {
         let locations = upsertLocation([], 'Clockwork Tower', { type: 'frontier' });
-        locations = upsertLocation(locations, 'Library landing, Clockwork Tower');
+        locations = [normalizeLocationRecord({ aliases: ['Library landing, Clockwork Tower'] }, locations[0])];
         expect(findLocationRecord(locations, 'clockwork tower')).toBe(0);
-        expect(findLocationRecord(locations, 'the Clockwork Tower stairwell')).toBe(0);
+        expect(findLocationRecord(locations, 'library landing, clockwork tower')).toBe(0);
+        expect(findLocationRecord(locations, locations[0].id)).toBe(0);
+        expect(findLocationRecord(locations, 'the Clockwork Tower stairwell')).toBe(-1);
         expect(findLocationRecord(locations, 'Sunlit Orchard')).toBe(-1);
         expect(getCurrentLocationRecord(locations, 'Clockwork Tower')?.type).toBe('frontier');
         expect(getCurrentLocationRecord(locations, null)).toBeNull();
@@ -315,12 +327,11 @@ describe('lookup', () => {
         expect(locations[findLocationRecord(locations, 'Weatherby')].name).toBe('Weatherby');
         // The cluster stays kin for drift/hearsay purposes.
         expect(areRelatedPlaces(locations[0], locations[1])).toBe(true);
-        // An UNCLASSIFIED town (type null) keeps the legacy fold until its
-        // first location_profile lands.
+        // An UNCLASSIFIED town folds nothing either (lane 9A): the no-fold is
+        // not a settlement's privilege any more, it is the rule.
         let untyped = upsertLocation([], 'Millhaven');
         untyped = upsertLocation(untyped, 'Market Square, Millhaven');
-        expect(untyped).toHaveLength(1);
-        expect(untyped[0].aliases).toContain('Market Square, Millhaven');
+        expect(untyped).toHaveLength(2);
     });
 
     it('the load-time dedupe never re-folds a district into its settlement', () => {
@@ -336,24 +347,22 @@ describe('lookup', () => {
         expect(normalizeLocationRecord({})).toBeNull();
     });
 
-    it('prefers an exact name match over an earlier fuzzy containment match', () => {
+    it('an exact name resolves whatever earlier record shares its words; nothing chains through aliases', () => {
         // Playtest 2026-07-14: the tavern's composite alias must not shadow the town.
         let locations = upsertLocation([], 'The Gilded Eel');
-        locations = upsertLocation(locations, 'Gilded Eel tavern, Harrowmere');
+        locations = [normalizeLocationRecord({ aliases: ['Gilded Eel tavern, Harrowmere'] }, locations[0])];
         locations = upsertLocation(locations, 'Harrowmere');
         expect(locations).toHaveLength(2);
         expect(locations[0].name).toBe('The Gilded Eel');
         expect(locations[1].name).toBe('Harrowmere');
         expect(findLocationRecord(locations, 'Harrowmere')).toBe(1);
-        // Containment matches record names only — never chains through aliases.
-        expect(findLocationRecord(locations, 'Back streets of Harrowmere')).toBe(1);
+        expect(findLocationRecord(locations, 'Gilded Eel tavern, Harrowmere')).toBe(0);
+        expect(findLocationRecord(locations, 'Back streets of Harrowmere')).toBe(-1);
     });
 
-    it('never renames a record from a variant that only matched via an alias', () => {
+    it('an alias lookup keeps the canonical name', () => {
         let locations = upsertLocation([], 'The Gilded Eel');
-        locations = upsertLocation(locations, 'Gilded Eel tavern, Harrowmere');
-        // Exact alias lookup of the composite still hits the tavern but must not
-        // adopt a new canonical name from it.
+        locations = [normalizeLocationRecord({ aliases: ['Gilded Eel tavern, Harrowmere'] }, locations[0])];
         locations = upsertLocation(locations, 'Gilded Eel tavern, Harrowmere');
         expect(locations).toHaveLength(1);
         expect(locations[0].name).toBe('The Gilded Eel');
@@ -385,9 +394,10 @@ describe('dedupeLocationRecords', () => {
         expect(dedupeLocationRecords([a, b])).toHaveLength(2);
     });
 
-    it('folds name-level containment fragments into the shorter canonical record', () => {
+    it('does not fold a longer name into a shorter one on load (lane 9A); a merge by id carries the husk\'s theater and name', () => {
         // 2026-07-15 playtest: a rename left a longer name stranded next to
-        // the record it names.
+        // the record it names. Two records are one only when the reflection
+        // says so by id (lane 9C) — the load heal folds the same NAME only.
         const shrine = normalizeLocationRecord({
             name: 'the Alder shrine', type: 'hostile_site', danger: 'deadly',
         });
@@ -395,19 +405,25 @@ describe('dedupeLocationRecords', () => {
             name: 'the Alder shrine at a ring of drowned trees', theaterFrontIds: ['front-v2-1'],
         });
         const healed = dedupeLocationRecords([shrine, husk]);
-        expect(healed).toHaveLength(1);
-        expect(healed[0].name).toBe('the Alder shrine');
-        expect(healed[0].theaterFrontIds).toEqual(['front-v2-1']);
-        expect(healed[0]).toMatchObject({ type: 'hostile_site', danger: 'deadly' });
+        expect(healed).toHaveLength(2);
+        const merged = mergeLocationRecords(healed, shrine.id, husk.id);
+        expect(merged).toHaveLength(1);
+        expect(merged[0].name).toBe('the Alder shrine');
+        expect(merged[0].theaterFrontIds).toEqual(['front-v2-1']);
+        expect(merged[0].aliases).toContain('the Alder shrine at a ring of drowned trees');
+        expect(merged[0]).toMatchObject({ type: 'hostile_site', danger: 'deadly', provisional: false });
+        expect(mergeLocationRecords(healed, shrine.id, 'nobody')).toBe(healed);
+        expect(mergeLocationRecords(healed, shrine.id, shrine.id)).toBe(healed);
     });
 
-    it('a name made only of place-kind words folds nothing by containment (2026-10-31)', () => {
+    it('nothing folds by containment (2026-10-31 → lane 9A); the same name under case folds', () => {
         // Vesa's megacampaign: the Jewelglade "tunnel" claimed the Eir-Vael
         // "Crown Way transit tunnel" a sea away.
         const tunnel = normalizeLocationRecord({ name: 'tunnel', region: 'Jewelglade' });
         const crownWay = normalizeLocationRecord({ name: 'Crown Way transit tunnel' });
         expect(dedupeLocationRecords([tunnel, crownWay])).toHaveLength(2);
-        expect(dedupeLocationRecords([tunnel, normalizeLocationRecord({ name: 'The Tunnel' })])).toHaveLength(1);
+        expect(dedupeLocationRecords([tunnel, normalizeLocationRecord({ name: 'The Tunnel' })])).toHaveLength(2);
+        expect(dedupeLocationRecords([tunnel, normalizeLocationRecord({ name: 'Tunnel.' })])).toHaveLength(1);
     });
 
     it('drops scene-description records that match nothing', () => {
@@ -695,7 +711,7 @@ describe('travel links — geography as canon (2026-09-14)', () => {
         const a = rec('Ashford');
         const b = rec('Deep Fen');
         const c = rec('Rimehollow');
-        const trail = ['Ashford', 'Ashford', 'the Deep Fen', 'an unknown swamp', 'Rimehollow', 'Deep Fen'];
+        const trail = ['Ashford', 'Ashford', 'Deep Fen', 'an unknown swamp', 'Rimehollow', 'deep fen'];
         const once = seedTravelLinksFromTrail([a, b, c], trail);
         expect(once[0].links.map(l => l.id)).toEqual([b.id]);
         expect(once[1].links.map(l => l.id).sort()).toEqual([a.id, c.id].sort());
@@ -713,7 +729,7 @@ describe('travel links — geography as canon (2026-09-14)', () => {
         list = linkLocations(list, here.id, fen.id, { atMessage: 30 });
         list = linkLocations(list, here.id, hollow.id, { direction: 'north', travelTime: 'half a day', route: 'the Coast Road', atMessage: 10 });
         list[0] = { ...list[0], links: [...list[0].links, { id: 'evicted', direction: 'east', travelTime: null, route: null, atMessage: 99 }] };
-        const ways = listKnownWays(list, 'Library landing, Ashford');
+        const ways = listKnownWays(list, 'ashford');
         expect(ways.map(w => describeTravelLink(w, w.name))).toEqual([
             'Rimehollow (north, half a day, by the Coast Road)',
             'Deep Fen',
@@ -738,7 +754,7 @@ describe('travel links — geography as canon (2026-09-14)', () => {
 
     it('dedupeLocationRecords re-aims links at a folded duplicate\'s keeper and drops dangling / self links', () => {
         const keeper = { ...rec('Clockwork Tower'), id: 'keep' };
-        const dupe = { ...rec('Library landing, Clockwork Tower'), id: 'dupe' };
+        const dupe = { ...rec('clockwork tower'), id: 'dupe' };
         const fen = { ...rec('Deep Fen'), id: 'fen', links: [{ id: 'dupe', direction: 'north' }, { id: 'keep' }, { id: 'gone' }, { id: 'fen' }] };
         const healed = dedupeLocationRecords([keeper, dupe, fen]);
         expect(healed.map(r => r.id).sort()).toEqual(['fen', 'keep']);

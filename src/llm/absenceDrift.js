@@ -34,9 +34,9 @@ import {
 import { findNpcByRef } from '../engine/npcRoster.js';
 
 /** The local roster record a director's name copies exactly (lane 6), or null. */
-function localRecordNamed(npcs, name, locationName) {
+function localRecordNamed(npcs, name, locationName, locations = []) {
     const npc = findNpcByRef(npcs, { name }).npc;
-    return npc && isAbsenceDriftLocalNpc(npc, locationName) ? npc : null;
+    return npc && isAbsenceDriftLocalNpc(npc, locationName, locations) ? npc : null;
 }
 
 export { ABSENCE_DRIFT_MIN_AWAY, ABSENCE_DRIFT_WINDOW_MESSAGES, MAX_DRIFT_DEVELOPMENTS };
@@ -83,7 +83,7 @@ export function buildAbsenceDriftContext(state) {
     const theaterFront = findDriftTheaterFront(state.fronts, record);
 
     const localNpcs = (state.npcs || [])
-        .filter(npc => isAbsenceDriftLocalNpc(npc, pending.locationName))
+        .filter(npc => isAbsenceDriftLocalNpc(npc, pending.locationName, state.locations))
         .slice(-8)
         .map(npc => ({
             name: cleanText(npc.name, 100),
@@ -122,7 +122,7 @@ export function buildAbsenceDriftContext(state) {
  * deliberately supplies only the NPCs of the return place, so a hallucinated
  * development for a distant NPC must never rewrite that record.
  */
-export function sanitizeAbsenceDrift(raw, { npcs = [], locationName = '' } = {}) {
+export function sanitizeAbsenceDrift(raw, { npcs = [], locationName = '', locations = [] } = {}) {
     if (!raw || typeof raw !== 'object') return { developments: [], worldFact: '', frontSymptom: '' };
     const developments = (Array.isArray(raw.developments) ? raw.developments : [])
         .map(dev => ({
@@ -131,7 +131,7 @@ export function sanitizeAbsenceDrift(raw, { npcs = [], locationName = '' } = {})
             lastNotes: cleanText(dev?.lastNotes || dev?.last_notes, 400),
             visible: cleanText(dev?.visible, 240),
         }))
-        .filter(dev => dev.name && (dev.agenda || dev.lastNotes) && !!localRecordNamed(npcs, dev.name, locationName))
+        .filter(dev => dev.name && (dev.agenda || dev.lastNotes) && !!localRecordNamed(npcs, dev.name, locationName, locations))
         .slice(0, MAX_DRIFT_DEVELOPMENTS);
     return {
         developments,
@@ -153,6 +153,7 @@ export async function generateAbsenceDrift(state) {
     const drift = sanitizeAbsenceDrift(parsed, {
         npcs: state.npcs || [],
         locationName: state.session?.pendingAbsenceDrift?.locationName || '',
+        locations: state.locations || [],
     });
     // The symptom was written for the ONE front the context offered; the
     // installer binds it to that id or drops it (2026-10-15 living-world nit:

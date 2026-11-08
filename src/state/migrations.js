@@ -66,6 +66,8 @@ import { applyStoryMemoryDormancy } from '../engine/storyMemory.js';
 import { migrateLegacyNpc, normalizeNpcAliases } from '../engine/npcRoster.js';
 import { heroNameForms } from '../engine/textMatch.js';
 import { legacyFoldForkedNpcs, legacyNamesMatch, legacyPeopleNamesInSave, legacyRecordedDead } from './legacyNpcIdentity.js';
+import { legacyFindLocationRecord, legacyPlaceNamesInSave } from './legacyPlaceIdentity.js';
+import { findLocationRecord, normalizeLocationRecord } from '../engine/locationRegistry.js';
 
 /**
  * Save-format version stamped into every persisted payload (persistence.js
@@ -82,7 +84,7 @@ import { legacyFoldForkedNpcs, legacyNamesMatch, legacyPeopleNamesInSave, legacy
  *        flag; the old reading of `lastNotes` runs once more, frozen, to
  *        seed it.
  */
-export const CURRENT_SAVE_VERSION = 5;
+export const CURRENT_SAVE_VERSION = 6;
 
 /** Stamped version of a save payload; pre-versioned or junk stamps read as 0. */
 export function getSaveVersion(save) {
@@ -751,6 +753,34 @@ function seedNpcDeathFlags(save) {
     return changed ? { ...save, npcs } : save;
 }
 
+/**
+ * Save version 6 (identity by reference, lane 9A, 2026-11-08): the one and
+ * only run of the fuzzy place identity over an old save. Every place string
+ * the save holds outside the registry (the hero's place, each person's last
+ * location and base, card and journal stamps, directive theaters) that no
+ * record answers to exactly, and that the frozen containment rung resolved to
+ * a record, becomes that record's alias — so the exact lookups that replace
+ * the rung still find it. Nothing is folded: the megacampaign export showed
+ * the rung's folds were the damage (a tavern into its town, two cabins a sea
+ * apart into one record). Visit stamps are untouched. Idempotent.
+ */
+function seedPlaceAliases(save) {
+    if (!Array.isArray(save?.locations) || save.locations.length === 0) return save;
+    let locations = save.locations.filter(record => record && typeof record === 'object');
+    let changed = false;
+    for (const said of legacyPlaceNamesInSave(save)) {
+        if (findLocationRecord(locations, said) !== -1) continue;
+        const idx = legacyFindLocationRecord(locations, said);
+        if (idx === -1) continue;
+        const target = locations[idx];
+        locations = locations.map(record => (record === target
+            ? normalizeLocationRecord({ aliases: [said], lastVisitedAt: record.lastVisitedAt }, record)
+            : record));
+        changed = true;
+    }
+    return changed ? { ...save, locations } : save;
+}
+
 export const MIGRATIONS = [
     {
         toVersion: 3,
@@ -773,6 +803,13 @@ export const MIGRATIONS = [
         description: 'Identity by reference, lane 6C (DECISIONS.md 2026-11-08): a person\'s death is the record\'s '
             + 'own dead flag, seeded once from the frozen notes regex.',
         migrate: seedNpcDeathFlags,
+    },
+    {
+        toVersion: 6,
+        description: 'Identity by reference, lane 9A (DECISIONS.md 2026-11-08): a place is an id, an exact name or an exact '
+            + 'alias; every stored place string the frozen containment rung resolved to a record is seeded as that '
+            + 'record\'s alias, once. Nothing is folded.',
+        migrate: seedPlaceAliases,
     },
 ];
 

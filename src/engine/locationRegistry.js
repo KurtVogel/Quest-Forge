@@ -4,10 +4,15 @@
  *
  * DM location strings drift ("Clockwork Tower" / "Library landing, Clockwork
  * Tower" / "the tower library"), so gating anything on raw `currentLocation`
- * is hopeless. This registry folds variants into canonical records via
- * meaningful-token containment (the same heuristic family as the NPC dossier
- * merge and story-memory dedupe) and carries the profile the tempo system
- * gates on: place type, intrinsic danger, and front-theater membership.
+ * is hopeless. A place is a RECORD: an id, an exact name, or an exact alias
+ * (identity by reference, lane 9A, 2026-11-08 — DECISIONS.md that day). The
+ * DM and the Scribe are shown KNOWN PLACES and copy a name verbatim; a name
+ * no record answers to mints a provisional record, and the Scribe's
+ * `place_links` says which known place it IS (an alias, the fold) or that it
+ * is new. No word rule folds two names here any more: the containment rung
+ * that did ran once more as the save-6 migration (`legacyPlaceIdentity.js`)
+ * and is gone. The registry carries the profile the tempo system gates on:
+ * place type, intrinsic danger, and front-theater membership.
  *
  * A place's INTRINSIC danger (a ghoul-warren is dangerous because it is a
  * ghoul-warren) is separate from IMPORTED front pressure — hostile sites stay
@@ -23,7 +28,8 @@ import { normalizeMotifKey, normalizeMotifList } from './worldMotifs.js';
 export const LOCATION_TYPES = ['haven', 'settlement', 'wilderness', 'frontier', 'hostile_site'];
 export const DANGER_LEVELS = ['none', 'low', 'moderate', 'high', 'deadly'];
 export const MAX_LOCATIONS = 60;
-const MAX_ALIASES = 6;
+/** Other names a record has answered to — the Scribe's links and the migration write them; 12 since lane 9A (the busiest records had already dropped aliases at 6). */
+export const MAX_ALIASES = 12;
 
 // Travel links (geography-as-canon, 2026-09-14): a bounded compass so a
 // direction is either one of these or nothing — "north-ish", "past the
@@ -79,9 +85,6 @@ export function describeCurrentPlace(locations = [], currentLocation) {
     if (lastState) line += ` Now: ${lastState.replace(/[.;,]\s*$/, '')}.`;
     return line;
 }
-const PLACE_FRAGMENT_LENGTH_RATIO = 0.5;
-const PLACE_FRAGMENT_COVERAGE = 0.5;
-const PLACE_CLAUSE_CONTAINMENT = 0.8;
 const TRAVEL_TIME_MAX = 40;
 const ROUTE_MAX = 60;
 
@@ -96,33 +99,17 @@ function locationTokens(name) {
     return tokenSet(name, { stopWords: STOP_WORDS, minLength: 3 });
 }
 
-function placeTextTokens(text) {
-    return tokenSet(text, { stopWords: STOP_WORDS, minLength: 3 });
-}
-
 /**
- * First-stated-wins merge for a place's signature (the NPC appearance
- * fragment rule, inverted for a record that is the place's fixed identity):
- * no existing text → the incoming lands; an incoming FRAGMENT (under half the
- * record's length, covering under half its tokens) APPENDS its novel clauses
- * within the cap; anything else — a restatement or a rewrite — keeps the
- * existing text. A fragment can never wipe it; a rewrite can never replace it.
+ * First-stated-wins for a place's signature (2026-09-16): no existing text →
+ * the incoming lands; otherwise the existing text stays. The fragment-append
+ * rung (a short incoming text covering few of the record's words joined on)
+ * was a word rule and went with lane 9A (2026-11-08); the Scribe is told the
+ * signature is written once.
  */
 export function mergePlaceSignature(existingText, incomingText, max = LOCATION_SIGNATURE_MAX) {
     const prev = cleanText(existingText, max);
     const next = cleanText(incomingText, max);
-    if (!next) return prev || null;
-    if (!prev) return next;
-    const prevTokens = placeTextTokens(prev);
-    const nextTokens = placeTextTokens(next);
-    const isFragment = next.length < prev.length * PLACE_FRAGMENT_LENGTH_RATIO
-        && prevTokens.size > 0 && nextTokens.size > 0
-        && coverage(prevTokens, nextTokens) < PLACE_FRAGMENT_COVERAGE;
-    if (!isFragment) return prev;
-    // Only a genuinely novel fragment joins; a restated detail is dropped.
-    if (containment(nextTokens, prevTokens) >= PLACE_CLAUSE_CONTAINMENT) return prev;
-    const joined = `${prev.replace(/[.;,]\s*$/, '')}; ${next}`;
-    return joined.length <= max ? joined : prev;
+    return prev || next || null;
 }
 
 function toVisitCount(value) {
@@ -190,74 +177,26 @@ export function isMintableLocationName(name) {
         .some(word => !REGION_FILLER_WORDS.has(word.toLowerCase()) && /^\p{Lu}/u.test(word));
 }
 
-/** "Library landing, Clockwork Tower" names the same place as "Clockwork Tower". */
 /**
- * Words that name a KIND of place, not a place (2026-10-31). A record whose
- * every word is one of these — "tunnel", "The basin", "Tavern", "Armory",
- * "fissure" — claimed every later name containing the word: in Vesa's
- * megacampaign "Crown Way transit tunnel" resolved to the Jewelglade
- * "tunnel" and "Submerged Imperial Toll Slip, Crown Way (Eir-Vael Basin)" to
- * the Jewelglade "The basin" a sea away, which tagged Eir-Vael places with
- * the old land and chained a "known way" from the Eir-Vael watchtower to a
- * Jewelglade fissure. Such a name is the same place only by its whole word set.
+ * The exact place key (identity by reference, lane 9A, 2026-11-08): the name
+ * case-folded, whitespace collapsed, trailing punctuation dropped. Nothing
+ * else — "The Copper Kettle" and "Copper Kettle" are two names until an alias
+ * says otherwise (Vesa's call, decision 1 of the lane 9 review).
  */
-const GENERIC_PLACE_WORDS = new Set([
-    'tunnel', 'tunnels', 'tavern', 'inn', 'armory', 'cabin', 'fissure', 'chokepoint', 'colonnade', 'basin',
-    'cave', 'caves', 'cavern', 'caverns', 'camp', 'campsite', 'road', 'bridge', 'gate', 'hall', 'room', 'chamber',
-    'corridor', 'passage', 'tower', 'watchtower', 'ruin', 'ruins', 'crypt', 'vault', 'shrine', 'temple', 'chapel',
-    'market', 'square', 'street', 'alley', 'dock', 'docks', 'harbor', 'harbour', 'quay', 'pier', 'yard', 'stable',
-    'stables', 'forest', 'woods', 'river', 'ford', 'pass', 'ridge', 'hill', 'hills', 'valley', 'field', 'farm',
-    'mill', 'keep', 'castle', 'fort', 'barracks', 'cell', 'prison', 'sewer', 'sewers', 'well', 'tomb', 'mine',
-    'quarry', 'bailey', 'courtyard', 'garden', 'library', 'kitchen', 'cellar', 'attic', 'shop', 'forge', 'smithy',
-    'warehouse', 'office', 'house', 'home', 'village', 'town', 'city', 'outpost', 'lighthouse', 'beach', 'shore',
-    'coast', 'island', 'cliff', 'cliffs', 'cove', 'swamp', 'marsh', 'bog', 'clearing', 'glade', 'grove', 'wilds',
-    'trail', 'path', 'stair', 'stairs', 'stairwell', 'landing', 'deck', 'hold', 'ship', 'quarters', 'bunks',
-    'workspace', 'antechamber', 'transept', 'hollow', 'gorge', 'canyon', 'encampment', 'checkpoint', 'post',
-    'inner', 'outer', 'upper', 'lower', 'north', 'south', 'east', 'west', 'northern', 'southern', 'eastern',
-    'western', 'old', 'new', 'great', 'small', 'little', 'big', 'high', 'low', 'back', 'front', 'main', 'private',
-    'side', 'central', 'deep', 'dark', 'ruined', 'abandoned', 'hidden', 'secret', 'burial', 'surgical', 'preparation',
-    'common', 'guard', 'captain', 'captains',
-]);
-
-export function isSameLocation(a, b) {
-    const ta = locationTokens(a);
-    const tb = locationTokens(b);
-    if (containment(ta, tb) < 0.99) return false;
-    if (ta.size === tb.size) return true;
-    const smaller = ta.size < tb.size ? ta : tb;
-    return [...smaller].some(token => !GENERIC_PLACE_WORDS.has(token));
+export function placeKey(name) {
+    return cleanText(name, 120).toLowerCase().replace(/\s+/g, ' ').replace(/[.,;:!?]+$/u, '').trim();
 }
 
 /**
- * A town must not absorb its own districts (queue P2, live playtest #7): the
- * containment fold's design assumption — "Library landing, Clockwork Tower"
- * IS the tower — breaks when the container is a whole SETTLEMENT. Every
- * "X, Weatherby" string (the guild quarter, the market, the shop's sign name)
- * folded into the bare town record, so districts never got records and the
- * town's visit stamps stayed eternally fresh. A candidate that names a
- * classified settlement PLUS additional meaningful tokens is a place WITHIN
- * the town, not the town: it gets its own record, and areRelatedPlaces
- * kinship keeps drift/hearsay treating the cluster as one orbit. Site-scale
- * records (towers, taverns, ruins — every non-settlement type) keep the
- * original fold: rooms and landings are still not places. Type is the
- * Scribe-classified size hint, so an unclassified town folds as before until
- * its first location_profile lands.
+ * Two strings name the same place only when they are the same name (the
+ * exact key). The containment rung that folded "Library landing, Clockwork
+ * Tower" into the tower, and the generic-word list that kept "tunnel" from
+ * claiming the Crown Way tunnel, are gone: a variant reaches its record as an
+ * ALIAS (`samePlace` reads the registry), never by word overlap.
  */
-function namesPlaceWithinSettlement(record, target) {
-    if (record?.type !== 'settlement' && record?.settlementScale !== true) return false;
-    const recordTokens = locationTokens(record.name);
-    const targetTokens = locationTokens(target);
-    if (targetTokens.size <= recordTokens.size) return false;
-    // "<the record>, <its town>" is the record QUALIFIED, not a place within
-    // it (2026-10-31: an inn the Scribe typed "settlement" — "Gatehouse Inn"
-    // — kept a twin "Gatehouse Inn, Bramblecross" record, four pairs in the
-    // megacampaign).
-    const comma = String(target).lastIndexOf(',');
-    if (comma > 0) {
-        const head = locationTokens(String(target).slice(0, comma));
-        if (head.size === recordTokens.size && containment(head, recordTokens) >= 0.99) return false;
-    }
-    return coverage(recordTokens, targetTokens) >= 0.99;
+export function isSameLocation(a, b) {
+    const keyA = placeKey(a);
+    return !!keyA && keyA === placeKey(b);
 }
 
 export function normalizeLocationType(value) {
@@ -455,6 +394,10 @@ export function normalizeLocationRecord(rawRecord = {}, existing = null) {
         // In-fiction arrival count: SET_LOCATION passes the incremented value
         // on a genuine arrival; every other upsert keeps the stored count.
         visitCount: toVisitCount(record.visitCount) ?? toVisitCount(existing?.visitCount) ?? 0,
+        // Minted from a DM location no record answered to (lane 9A): the
+        // Scribe's `place_links` either folds it into the place it IS or
+        // confirms it new; `true` until then. An explicit `false` clears it.
+        provisional: record.provisional === true || (record.provisional !== false && existing?.provisional === true),
     };
 }
 
@@ -815,26 +758,53 @@ export function collectKnownRegions(locations = []) {
 }
 
 /**
- * Find the registry record a free-text location string belongs to (or -1).
- *
- * Exact name/alias equality anywhere in the list beats fuzzy containment on an
- * earlier record, and containment compares against record NAMES only — matching
- * against alias token sets chains places together transitively ("Gilded Eel
- * tavern, Harrowmere" as an alias must never make the tavern claim a later
- * lookup of "Harrowmere"; the 2026-07-14 playtest found the tavern record
- * swallowing the whole town that way, shadowing the real town record forever).
+ * Find the registry record a location string belongs to (or -1): the exact
+ * id, else the exact name, else an exact alias (identity by reference, lane
+ * 9A). The containment fall-through that followed is gone — measured on the
+ * megacampaign export (2026-11-08) it decided 35 of 1,043 stored strings and
+ * a third of those wrongly (a tavern to its town, a quarry to its counting
+ * shed, "en route to" to the destination). A string no record answers to is
+ * a new place or an alias the Scribe has not yet taught.
  */
 export function findLocationRecord(locations = [], name) {
     const target = cleanText(name, 120);
     if (!target) return -1;
     const list = locations || [];
-    const lower = target.toLowerCase();
-    const exact = list.findIndex(record => record
-        && (record.name?.toLowerCase() === lower
-            || (record.aliases || []).some(alias => alias.toLowerCase() === lower)));
-    if (exact !== -1) return exact;
-    return list.findIndex(record => record && isSameLocation(record.name, target)
-        && !namesPlaceWithinSettlement(record, target));
+    const byId = list.findIndex(record => record && typeof record.id === 'string' && record.id === target);
+    if (byId !== -1) return byId;
+    const key = placeKey(target);
+    return list.findIndex(record => record
+        && (placeKey(record.name) === key || (record.aliases || []).some(alias => placeKey(alias) === key)));
+}
+
+/**
+ * Do two location strings name one place — the same name, or the same RECORD
+ * (one an alias or a drifted spelling of the other)? The reader's lookup
+ * where a raw string meets a raw string (a sighting's `lastLocation` against
+ * the hero's place, a journal stamp against the current one). Record-aware by
+ * construction: pass the registry.
+ */
+export function samePlace(locations, a, b) {
+    if (isSameLocation(a, b)) return true;
+    const list = Array.isArray(locations) ? locations : [];
+    const idxA = findLocationRecord(list, a);
+    return idxA !== -1 && idxA === findLocationRecord(list, b);
+}
+
+/**
+ * The names the DM and the Scribe are shown as KNOWN PLACES: the most
+ * recently visited records' canonical names, the current place left out when
+ * asked (its card already names it). Compact by design.
+ */
+export function listKnownPlaceNames(locations = [], { limit = 12, exclude = null } = {}) {
+    const list = Array.isArray(locations) ? locations : [];
+    const skip = exclude ? findLocationRecord(list, exclude) : -1;
+    return list
+        .map((record, index) => ({ record, index }))
+        .filter(({ record, index }) => record?.name && index !== skip)
+        .sort((a, b) => (b.record.lastVisitedAt || b.record.firstSeenAt || 0) - (a.record.lastVisitedAt || a.record.firstSeenAt || 0))
+        .slice(0, limit)
+        .map(({ record }) => record.name);
 }
 
 /**
@@ -866,30 +836,63 @@ export function upsertLocation(locations = [], name, profile = null) {
     }
 
     const existing = list[idx];
-    // The shorter phrasing is the better canonical name ("Clockwork Tower"
-    // over "Library landing, Clockwork Tower"); the longer becomes an alias.
-    // But only a NAME-level match may rename the record — a variant that only
-    // matched via a stored alias keeps the existing canonical name, otherwise
-    // a composite alias ("Gilded Eel tavern, Harrowmere") lets the town name
-    // rename the tavern record out from under itself.
-    const nameLevelMatch = existing.name.toLowerCase() === target.toLowerCase()
-        || isSameLocation(existing.name, target);
-    // A bare region name may fold INTO a place record as an alias but never
-    // rename it: "Rimefell Marches" is shorter than "Ghyll, Rimefell Marches",
-    // and the shorter-wins rule let the region steal the town's canonical name
-    // (live playtest #3 — the arrival town lost its record to its region).
-    const keepExistingName = !nameLevelMatch
-        || existing.name.length <= target.length
-        || isRegionNameOnly(list, target);
+    // A record keeps its first name (lane 9A): the match was the name itself
+    // or an alias already on the record, so there is nothing to rename and
+    // nothing to add — a new spelling reaches a record only through the
+    // Scribe's `place_links` or the migration, never by the shorter-wins rule.
     const merged = normalizeLocationRecord({
         ...(profile || {}),
-        name: keepExistingName ? existing.name : target,
-        aliases: existing.name.toLowerCase() === target.toLowerCase()
-            ? []
-            : [keepExistingName ? target : existing.name],
+        name: existing.name,
         lastVisitedAt: Date.now(),
     }, existing);
     return list.map((record, i) => (i === idx ? merged : record));
+}
+
+/**
+ * Fold one record into another by id (lane 9A: the Scribe's `place_links`
+ * said the provisional place IS a known one; lane 9C's reflection will say
+ * two records are one). The kept record keeps its id, name, signature, type,
+ * danger and region where it has them; the dropped record's name and aliases
+ * become aliases, its theaters, links and motifs join, the later visit wins
+ * the state and the stamps, the arrivals add up, and every link in the
+ * registry that pointed at the dropped record is re-aimed. Same reference
+ * back when either id is unknown or they are one record. Never mutates.
+ */
+export function mergeLocationRecords(locations = [], keepId, dropId) {
+    const list = Array.isArray(locations) ? locations : [];
+    if (!keepId || !dropId || keepId === dropId) return list;
+    const keep = list.find(record => record?.id === keepId);
+    const drop = list.find(record => record?.id === dropId);
+    if (!keep || !drop) return list;
+    const dropNewer = (drop.lastVisitedAt || 0) > (keep.lastVisitedAt || 0);
+    const stamps = [keep.lastVisitedMessage, drop.lastVisitedMessage].filter(Number.isFinite);
+    const merged = normalizeLocationRecord({
+        aliases: [drop.name, ...(Array.isArray(drop.aliases) ? drop.aliases : [])],
+        type: keep.type || drop.type,
+        danger: keep.danger || drop.danger,
+        theaterFrontIds: drop.theaterFrontIds,
+        lastVisitedAt: Math.max(keep.lastVisitedAt || 0, drop.lastVisitedAt || 0) || undefined,
+        ...(stamps.length ? { lastVisitedMessage: Math.max(...stamps) } : {}),
+        region: keep.region || drop.region,
+        links: drop.links,
+        signature: keep.signature || drop.signature,
+        lastState: dropNewer ? (drop.lastState || keep.lastState) : (keep.lastState || drop.lastState),
+        archetype: keep.archetype || drop.archetype,
+        motifs: drop.motifs,
+        visitCount: (toVisitCount(keep.visitCount) || 0) + (toVisitCount(drop.visitCount) || 0),
+        provisional: false,
+    }, keep);
+    const retarget = (record) => {
+        const links = Array.isArray(record.links) ? record.links : [];
+        if (!links.some(link => link?.id === dropId)) return record;
+        return {
+            ...record,
+            links: normalizeTravelLinks(links
+                .map(link => (link?.id === dropId ? { ...link, id: keepId } : link))
+                .filter(link => link && link.id !== record.id)),
+        };
+    };
+    return list.filter(record => record !== drop).map(record => retarget(record === keep ? merged : record));
 }
 
 /**
@@ -1086,7 +1089,11 @@ export function getCurrentLocationRecord(locations = [], currentLocation) {
  * prefers known type/danger over null, and keeps the latest lastVisitedAt.
  * Then strips any alias that exactly equals ANOTHER record's canonical name —
  * pre-fix alias chaining could leave "Harrowmere" as an alias of the tavern,
- * shadowing the real town record on every exact lookup.
+ * shadowing the real town record on every exact lookup. The containment fold
+ * that followed (a shorter name swallowing a longer one on every load) is
+ * gone since lane 9A (2026-11-08): two records are one only when the
+ * reflection says so by id (lane 9C), and the save-6 migration ran the old
+ * rule its one last time as ALIASES, not folds.
  */
 export function dedupeLocationRecords(locations = []) {
     // Folded record ids → the keeper's id, so travel links that pointed at a
@@ -1118,30 +1125,15 @@ export function dedupeLocationRecords(locations = []) {
     const byName = new Map();
     for (const record of locations || []) {
         if (!record?.name) continue;
-        const key = record.name.toLowerCase();
+        const key = placeKey(record.name);
         const kept = byName.get(key);
         byName.set(key, kept ? mergeInto(kept, record) : record);
     }
 
-    // Pass 2: fold name-level containment fragments ("the plague-shrine at a
-    // ring of drowned alders" is "the shrine" — 2026-07-15 playtest husks left
-    // behind by renames), then drop scene-description records that match
-    // nothing: they were junk the moment they were minted. Settlement records
-    // never re-absorb their own districts here either — the load heal must not
-    // undo the live no-fold rule.
+    // Pass 2: drop scene-description records that were junk the moment they
+    // were minted. (The containment fold that lived here is gone — lane 9A.)
     const kept = [];
     for (const record of byName.values()) {
-        const matchIdx = kept.findIndex(other => isSameLocation(other.name, record.name)
-            && !namesPlaceWithinSettlement(other, record.name)
-            && !namesPlaceWithinSettlement(record, other.name));
-        if (matchIdx !== -1) {
-            // Keep the shorter (better canonical) name of the pair.
-            const other = kept[matchIdx];
-            const keeper = other.name.length <= record.name.length ? other : record;
-            const folded = keeper === other ? record : other;
-            kept[matchIdx] = mergeInto(keeper, folded);
-            continue;
-        }
         if (!isRegistrableLocationName(record.name)) continue;
         // Pure-noise legacy heal (live playtest #7): pre-mint-gate saves carry
         // lowercase scene-fragment records ("the causeway", "the freezing muck")
@@ -1155,11 +1147,11 @@ export function dedupeLocationRecords(locations = []) {
         kept.push(record);
     }
 
-    const names = new Set(kept.map(record => record.name.toLowerCase()));
+    const names = new Set(kept.map(record => placeKey(record.name)));
     const cleanedRecords = kept.map(record => {
         const cleaned = (record.aliases || []).filter(alias => {
-            const lower = alias.toLowerCase();
-            return lower === record.name.toLowerCase() || !names.has(lower);
+            const key = placeKey(alias);
+            return key === placeKey(record.name) || !names.has(key);
         });
         return cleaned.length === (record.aliases || []).length
             ? record

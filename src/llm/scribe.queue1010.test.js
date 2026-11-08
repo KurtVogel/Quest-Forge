@@ -7,20 +7,22 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-    SCRIBE_ANCHORS,
-    SCRIBE_SYSTEM_PROMPT,
     buildHeldNames,
     buildKnownAppearances,
+    buildKnownFacts,
     buildKnownHeroTells,
-    buildKnownNpcIds,
     buildKnownLands,
     buildKnownLocations,
-    KNOWN_LANDS_PREMISE_MAX,
-    buildKnownFacts, buildKnownOpenPlans,
+    buildKnownNpcIds,
+    buildKnownOpenPlans,
     buildKnownStances,
     buildKnownStoryCards,
+    buildProvisionalPlace,
     buildScribeContext,
+    KNOWN_LANDS_PREMISE_MAX,
     runScribe,
+    SCRIBE_ANCHORS,
+    SCRIBE_SYSTEM_PROMPT,
 } from './scribe.js';
 import { CAST_AUDIT_RULES, LOOT_AUDIT_RULES } from './scribeAudits.js';
 import { sendMessage } from './adapter.js';
@@ -44,7 +46,7 @@ describe('buildScribeContext (scribe P2, 2026-10-10)', () => {
         const texts = ['I ask Mira about the ribbon.', 'Mira wipes her hands. "Not yet," she says.'];
         const context = buildScribeContext(state, ...texts);
         expect(Object.keys(context).sort()).toEqual([
-            'heldNames', 'knownAppearances', 'knownFacts', 'knownHeroTells', 'knownLands', 'knownLocations', 'knownNpcIds', 'knownOpenPlans', 'knownStances', 'knownStoryCards', 'memoryContext',
+            'heldNames', 'knownAppearances', 'knownFacts', 'knownHeroTells', 'knownLands', 'knownLocations', 'knownNpcIds', 'knownOpenPlans', 'knownStances', 'knownStoryCards', 'memoryContext', 'provisionalPlace',
         ]);
         expect(context).toEqual({
             knownAppearances: buildKnownAppearances(state, ...texts),
@@ -56,6 +58,7 @@ describe('buildScribeContext (scribe P2, 2026-10-10)', () => {
             knownNpcIds: buildKnownNpcIds(state, ...texts),
             heldNames: buildHeldNames(state),
             knownLocations: buildKnownLocations(state),
+            provisionalPlace: buildProvisionalPlace(state),
             knownLands: buildKnownLands(state),
             memoryContext: { worldFacts: state.worldFacts, messageCount: 0, location: null, npcs: state.npcs, storyMemory: state.storyMemory, campaign: { sessionId: null, loadNonce: 0 } },
         });

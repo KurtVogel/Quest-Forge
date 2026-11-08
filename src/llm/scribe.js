@@ -16,7 +16,7 @@ import { sendMessage } from './adapter.js';
 import { getBackgroundConfig } from './machinery.js';
 import { conversationalGap } from '../engine/replayLedger.js';
 import { BOND_SCENE_WINDOW_MESSAGES, bondKindLabel, curateNpcsForPrompt, dispatchClassifiedNpcUpdate, isPromptRosterNpc, listNpcImpressions, possibleSamePersonPairs, SAME_PERSON_PAIRS_CAP, splitBondMoments } from '../engine/npcRoster.js';
-import { collectKnownRegions, isLocationEvidencedInText, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
+import { collectKnownRegions, findLocationRecord, isLocationEvidencedInText, listKnownPlaceNames, sanitizeExtractedLocation } from '../engine/locationRegistry.js';
 import { regionOfPlace } from '../engine/regionProfile.js';
 import { tryParseDirectorJson } from './directorUtils.js';
 import { captureReflection, captureScribePass, captureUsage } from '../debug/memoryInspectorStore.js';
@@ -88,7 +88,7 @@ Output ONLY valid JSON:
       "salience": 1,
       "emotionalCharge": 0,
       "linkedNpcNames": ["exact NPC names"],
-      "location": "place tied to the memory if any",
+      "location": "the exact KNOWN PLACES name the memory is tied to — omit when it is none of them",
       "knownBy": "a LIST of the exact names of who knows it, ONLY for private information (use 'the hero' for the player) — omit entirely for common knowledge (never echo a placeholder)",
       "witnessed": false,
       "source": "scribe"
@@ -97,13 +97,16 @@ Output ONLY valid JSON:
   "name_links": [
     { "said": "a name exactly as HELD NAMES lists it", "id": "the id of the listed person this name means — or "new" when it is nobody on record" }
   ],
+  "place_links": [
+    { "name": "the place exactly as PLACE NAMED WITHOUT A RECORD gives it", "is": "the exact KNOWN PLACES name it IS under another phrasing — or "new" when it is a place not on record" }
+  ],
   "hero_tells": [
     { "id": "ONLY when this is another sighting of a pattern listed under KNOWN HERO TELLS — that tell's exact id; omit for a new one", "text": "a VISIBLE habit, manner, or way of the HERO that a character present could notice, stated as the observable pattern, in plain words WITHOUT a pronoun for the hero ('digs out the pipe and walks off when a conversation turns on the hero'; never 'his pipe' / 'her pipe' — the record must not guess or misstate the hero's gender; 'jokes the moment things get serious'; 'pays double without being asked'; 'never draws first')", "kind": "manner|habit|principle|intimate", "witnesses": ["exact names of the characters who SAW it this turn"], "public": "true ONLY when this sighting happened before uninvolved bystanders (a tavern, a market, a road with travelers) — omit otherwise; never for an intimate tell", "voiced": "true ONLY when a character SAID this pattern about the hero aloud this turn (a tease, a guess, a serious question) — then also give voicedBy; omit otherwise", "voicedBy": "exact name of the character who said it — only with voiced", "sighted": "with voiced: true ONLY if the hero ALSO visibly did the thing this turn (a remark alone is not a sighting)" }
   ],
   "player_appearance": "concrete physical/visual description of the PLAYER's character, only if newly described this turn — otherwise omit",
-  "location": "The place the hero PHYSICALLY STANDS at the END of this narrative, only if it changed — NEVER a place that is merely mentioned, discussed, remembered, watched from afar, or being left behind; null if unchanged",
-  "location_profile": { "name": "place name exactly as the narrative calls it", "type": "haven|settlement|wilderness|frontier|hostile_site", "danger": "none|low|moderate|high|deadly", "region": "the broad NAMED land or realm containing many settlements that THIS PLACE ITSELF lies in, as the fiction has stated it — in this scene, in an earlier scene, or in the campaign premise (see KNOWN LANDS) — a capitalized proper name, NEVER a town, district, quarter, dock, street, building, or generic feature like 'the coast', and NEVER a distant land that is merely mentioned, discussed, or named as a destination in the scene. Omit unless the fiction has actually NAMED the land this place lies in — never invent one, never guess one, and never reuse a name from these instructions", "signature": "the ONE concrete particular that IS this place — what a traveler would remember it by ('the mill wheel that turns though the river is dry'), in the narrative's own details, under 160 characters; ONLY when the narrative first meaningfully establishes the place — omit otherwise", "last_state": "what this place is like NOW as the narrative leaves it ('half-burned; the mill silent; the market empty since the levy'), under 200 characters; ONLY when this exchange first shows the place or visibly changes it — omit if unchanged", "archetype": "for a hostile_site or wilderness only: the KIND of creature or threat this place holds, in two or three plain lowercase words ('eyeless undead', 'pine-wood bandits', 'marsh leeches') — the thing a traveler would warn of; omit for a town or a haven", "motifs": ["up to 2 imagery particulars that stamp this place's look, two or three plain lowercase words each ('timber palisade', 'black ichor', 'bone-piles') — omit when the narrative shows none"] },
-  "travel": { "from": "the named place the hero DEPARTED, exactly as the narrative calls it", "to": "the named place the hero ARRIVED at, exactly as the narrative calls it", "direction": "north|northeast|east|southeast|south|southwest|west|northwest|up|down|upriver|downriver — ONLY if the narrative states the bearing; omit otherwise", "travel_time": "how long the journey took, in the narrative's own words ('half a day', 'three days by cart') — ONLY if stated; omit otherwise", "route": "the NAMED road, river, pass, or ferry taken ('the Coast Road') — ONLY if the narrative names it; omit otherwise" }
+  "location": "The place the hero PHYSICALLY STANDS at the END of this narrative, only if it changed — the exact KNOWN PLACES name when it is one of them under any phrasing, else the new place's proper name as the narrative calls it; NEVER a place that is merely mentioned, discussed, remembered, watched from afar, or being left behind; null if unchanged",
+  "location_profile": { "name": "the exact KNOWN PLACES name, or the new place's proper name as the narrative calls it", "type": "haven|settlement|wilderness|frontier|hostile_site", "danger": "none|low|moderate|high|deadly", "region": "the broad NAMED land or realm containing many settlements that THIS PLACE ITSELF lies in, as the fiction has stated it — in this scene, in an earlier scene, or in the campaign premise (see KNOWN LANDS) — a capitalized proper name, NEVER a town, district, quarter, dock, street, building, or generic feature like 'the coast', and NEVER a distant land that is merely mentioned, discussed, or named as a destination in the scene. Omit unless the fiction has actually NAMED the land this place lies in — never invent one, never guess one, and never reuse a name from these instructions", "signature": "the ONE concrete particular that IS this place — what a traveler would remember it by ('the mill wheel that turns though the river is dry'), in the narrative's own details, under 160 characters; ONLY when the narrative first meaningfully establishes the place — omit otherwise", "last_state": "what this place is like NOW as the narrative leaves it ('half-burned; the mill silent; the market empty since the levy'), under 200 characters; ONLY when this exchange first shows the place or visibly changes it — omit if unchanged", "archetype": "for a hostile_site or wilderness only: the KIND of creature or threat this place holds, in two or three plain lowercase words ('eyeless undead', 'pine-wood bandits', 'marsh leeches') — the thing a traveler would warn of; omit for a town or a haven", "motifs": ["up to 2 imagery particulars that stamp this place's look, two or three plain lowercase words each ('timber palisade', 'black ichor', 'bone-piles') — omit when the narrative shows none"] },
+  "travel": { "from": "the place the hero DEPARTED — its exact KNOWN PLACES name, else as the narrative calls it", "to": "the place the hero ARRIVED at — its exact KNOWN PLACES name, else as the narrative calls it", "direction": "north|northeast|east|southeast|south|southwest|west|northwest|up|down|upriver|downriver — ONLY if the narrative states the bearing; omit otherwise", "travel_time": "how long the journey took, in the narrative's own words ('half a day', 'three days by cart') — ONLY if stated; omit otherwise", "route": "the NAMED road, river, pass, or ferry taken ('the Coast Road') — ONLY if the narrative names it; omit otherwise" }
 }
 
 Rules:
@@ -123,6 +126,7 @@ Rules:
 - Keep story_memory compact; do not duplicate ordinary world_facts unless the memory has callback value.
 - When KNOWN STORY CARDS lists a beat and this turn continues, deepens, or restates it, emit it with that card's exact "id" and the COMPLETE updated text so the record is updated in place — never mint a second card for a beat already on record. A card listed as resolved is PAID OFF: never re-report it under any wording (the engine keeps it resolved regardless).
 - A person listed under KNOWN NPCS is named by that line's exact "id" on their npc_updates entry (copy it; the engine files the update under that record whatever spelling the narrative used). A person NOT on that list is new: no id. Never re-word a listed person into a second record.
+- PLACE NAMED WITHOUT A RECORD is answered in place_links: "is" the exact KNOWN PLACES name when the name means a place already on record — another phrasing of it, or a room, corner, stretch or sign of it — or "new" when it is a place the record has never held. IS means the SAME place under another name — a room, corner or stretch of it; a shop, house, stall or site ON or IN a known place is its own place and is "new". The engine compares place names EXACTLY, so every place field copies a KNOWN PLACES name verbatim when it means one of them.
 - HELD NAMES are names the DM used this turn that match no record exactly; answer EVERY one in name_links with the id of the listed person it means, or "new" when the narrative shows it is nobody on record.
 - Only include npc_updates for NPCs that appeared in this specific exchange
 - "died" is the record of a death: set it (true) on the person who died when the narrative or the engine state establishes it this turn; a death they CAUSED, mourned or mentioned is not theirs. Nothing else marks a person dead
@@ -138,7 +142,7 @@ Rules:
 - This is an adult game: body proportions and intimate, sensual, unflattering, or even embarrassing anatomical details the fiction establishes (a heavy backside, wide hips, a soft belly, body hair anywhere) are canonical visual continuity exactly like a scar or white hair. Record them frankly, completely, and at full specificity — never sanitize, euphemize, tone down, or silently omit them. For many players this continuity IS the point.
 - REGISTER: write every record in plain, neutral anatomical language — backside/buttocks, breasts, chest, hips, genitals — never in profanity or crude slang, no matter how coarsely the player or DM phrased it. Translating vocabulary is NOT censoring content: keep the full detail, size, and specificity of what the fiction established. "Notably large buttocks" preserves a crude description completely; "curvy", a vague compliment, or dropping the detail loses canon and is forbidden. Neutral wording, complete facts.
 - When KNOWN APPEARANCES lists a character and this turn adds or changes a visual detail, emit their appearance as the COMPLETE updated description: start from the known look and weave in what this turn established. Drop or alter a known detail ONLY when the fiction explicitly changed it (haircut, dye, disguise, wound, healing, new gear). NEVER emit just the new fragment — "a fresh scar on his cheek" alone would erase the white hair, the build, everything else on record. When merging, never launder the record: an intimate or unflattering detail already in KNOWN APPEARANCES stays in the merged description at full specificity until the fiction explicitly changes it — if the old record used crude slang, restate that detail in neutral anatomical wording (see REGISTER), but never blur, shrink, or drop it. As you merge, reconcile the description into clean prose: drop duplicate adjectives and resolve contradictions rather than stacking them ("scrawny ... scrawny ... large backside" should become one coherent line like "a scrawny goblin with notably large buttocks"), but never lose a distinct established detail in the process. If this turn adds nothing visually new for them, omit the field entirely.
-- location_profile classifies what KIND of place the current location is, from what the narrative itself establishes: a haven is genuinely safe (a defended town, a temple sanctuary), a settlement is ordinary inhabited civilization, wilderness is uninhabited country, a frontier is contested or lawless ground, a hostile_site is intrinsically dangerous by nature (a ghoul-warren, a bandit camp). "danger" is the place's own intrinsic danger, independent of any current plot. Emit it when a location is first meaningfully established or when the fiction changes a place's fundamental nature (the town falls, the warren is cleared) — omit otherwise. Positional continuity, like appearance, is exempt from the extraction budget. Its "signature" is the place's identity and is kept first-stated by the engine (a later fragment is appended, never a replacement), so write it once, concretely, from what the narrative actually showed; "last_state" is the place's CURRENT condition and replaces the previous one — emit it only when the place is first seen or visibly changed, unvarnished, never as a mood. "archetype" and "motifs" feed the engine's count of what this world has ALREADY SHOWN (the variety line the DM reads): write them as the plain kind of thing, not the proper name — "eyeless undead" whatever the narrator called this one, "timber palisade" not the fort's name — so that the same creature or look under a new name counts as the same.
+- location_profile classifies what KIND of place the current location is, from what the narrative itself establishes: a haven is genuinely safe (a defended town, a temple sanctuary), a settlement is ordinary inhabited civilization, wilderness is uninhabited country, a frontier is contested or lawless ground, a hostile_site is intrinsically dangerous by nature (a ghoul-warren, a bandit camp). "danger" is the place's own intrinsic danger, independent of any current plot. Emit it when a location is first meaningfully established or when the fiction changes a place's fundamental nature (the town falls, the warren is cleared) — omit otherwise. Positional continuity, like appearance, is exempt from the extraction budget. Its "signature" is the place's identity and is kept first-stated by the engine (a later text never replaces it), so write it once, concretely, from what the narrative actually showed; "last_state" is the place's CURRENT condition and replaces the previous one — emit it only when the place is first seen or visibly changed, unvarnished, never as a mood. "archetype" and "motifs" feed the engine's count of what this world has ALREADY SHOWN (the variety line the DM reads): write them as the plain kind of thing, not the proper name — "eyeless undead" whatever the narrator called this one, "timber palisade" not the fort's name — so that the same creature or look under a new name counts as the same.
 - travel records GEOGRAPHY: emit it ONLY when this exchange narrates the hero completing a journey between two DISTINCT named places (town to town, camp to ruin) — never for movement inside one town or building, never for a journey merely planned or discussed. Copy every detail from the narrative's own words and omit any the narrative does not state: a direction, duration, or road you infer is a falsehood the DM will be held to later. Exempt from the extraction budget like location.
 - hero_tells records what the people around the hero could NOTICE of the hero's MANNER — a physical habit (the pipe, the coin turned over the knuckles), a manner (deflecting with a joke, going quiet when praised, answering a question with a question), a principle shown in action (never strikes first, always pays the poor double, lets a beaten foe live), or, kind "intimate", what a lover learned of the hero's body, preferences, and ways in bed. Report ONLY what this turn's narrative SHOWS the hero doing, as an observable pattern in plain words — never the hero's thoughts, feelings, or motives (the player owns those; "hides fear behind jokes" is a guess, "jokes the moment things get serious" is a sighting); a feeling or a reason is never the trigger — not "when anxious", "to hide her fear", "because he is proud" — write the VISIBLE trigger instead ("when a question turns on the hero", "the moment a blade is drawn"). ONE sighting per scene per pattern, at most 2 per turn, most turns none; "witnesses" is exactly who was present to see it. When KNOWN HERO TELLS lists the pattern, emit it with that tell's exact "id" so the sighting is added to the record — never re-word it into a second tell. The engine calls a pattern established only after sightings in SEVERAL different scenes; an intimate tell is knowledge the partner has from one night, and its witnesses are ONLY the partner(s) — written frank and complete in the neutral REGISTER, never crude, because it is what that partner can later tease, joke, or talk seriously about. When a character NAMES one of the hero's patterns aloud ("Let me guess — the pipe again?"), report that tell with "voiced": true and "voicedBy" — by its exact id when KNOWN HERO TELLS lists it — so the record knows it has been said; add "sighted": true only if the hero also did the thing this turn. Mark "public": true when bystanders could have watched the sighting. Exempt from the extraction budget.
 - Only include fields you have actual information for — omit empty/unknown fields. The ONE exception is "world_facts": ALWAYS include it, as an empty [] when nothing durable happened — it is the key the engine anchors its read on
@@ -247,12 +251,23 @@ export function buildKnownAppearances({ character, npcs = [] } = {}, ...texts) {
  * place properly. Most recently visited names first; compact by design.
  */
 export function buildKnownLocations({ locations = [] } = {}) {
-    const names = [...(locations || [])]
-        .filter(record => record?.name)
-        .sort((a, b) => (b.lastVisitedAt || b.firstSeenAt || 0) - (a.lastVisitedAt || a.firstSeenAt || 0))
-        .slice(0, 12)
-        .map(record => record.name);
+    const names = listKnownPlaceNames(locations, { limit: 12 });
     return names.length > 0 ? names.join('; ') : null;
+}
+
+/**
+ * The place the DM named this turn that no record answers to (identity by
+ * reference, lane 9A): the hero's current place when it is a PROVISIONAL
+ * record (minted from the DM's location event) or resolves to no record at
+ * all (scene furniture under the mint gate). Printed to the Scribe as PLACE
+ * NAMED WITHOUT A RECORD; its `place_links` answer folds, aliases or confirms.
+ */
+export function buildProvisionalPlace({ locations = [], currentLocation = null } = {}) {
+    const here = typeof currentLocation === 'string' ? currentLocation.trim() : '';
+    if (!here) return null;
+    const idx = findLocationRecord(locations || [], here);
+    if (idx === -1) return here.slice(0, 120);
+    return locations[idx].provisional === true ? locations[idx].name : null;
 }
 
 /** The premise rides the Scribe while the hero's place lies in no land on record (the clamp). */
@@ -588,6 +603,7 @@ export function buildScribeContext(state, ...texts) {
         knownNpcIds: buildKnownNpcIds(state, ...texts),
         heldNames: buildHeldNames(state),
         knownLocations: buildKnownLocations(state),
+        provisionalPlace: buildProvisionalPlace(state),
         knownLands: buildKnownLands(state),
         // The record the Scribe's facts are judged against before they embed
         // live (2026-10-11): the facts, the transcript length, the place —
@@ -740,7 +756,7 @@ export function projectRecallExtraction(extracted) {
 export const SCRIBE_ANCHORS = [
     'world_facts', 'npc_updates', 'story_memory', 'player_appearance', 'location',
     'location_profile', 'travel', 'narrated_loot', 'narrated_payment', 'narrated_losses', 'missing_gear_handoffs', 'narrated_casts', 'hero_tells',
-    'name_links',
+    'name_links', 'place_links',
 ];
 /** The reflection schema's keys — a quiet cadence honestly answers with the tempo directive alone. */
 export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'settled_cards', 'story_memory', 'tempo_directive', 'front_proposals', 'same_person', 'merge_cards'];
@@ -753,7 +769,7 @@ export const REFLECTION_ANCHORS = ['npc_updates', 'front_advances', 'settled_car
  */
 export const RECALL_TURN_RULE = 'RECALL TURN: the player asked about the PAST and the DM answered from the engine\'s own record of this campaign. Extract NOTHING new from the answer — no world_facts, no story cards, no location change, no loot, no payment, no appearance — everything it recounts is already on record. The ONE exception: if the remembering itself visibly moved someone (warmth, grief, a grudge surfacing), report that as an npc_updates bondMoment or stanceToPlayer for that person. Emit "world_facts": [] and leave every other field empty.';
 
-export async function runScribe({ playerMessage, dmNarrative, settings, dispatch: commit, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownFacts = null, knownHeroTells = null, knownLocations = null, knownLands = null, knownNpcIds = null, heldNames = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null, memoryQuery = null }) {
+export async function runScribe({ playerMessage, dmNarrative, settings, dispatch: commit, authoritativeContext = null, lootAudit = null, knownAppearances = null, knownStances = null, knownStoryCards = null, knownOpenPlans = null, knownFacts = null, knownHeroTells = null, knownLocations = null, provisionalPlace = null, knownLands = null, knownNpcIds = null, heldNames = null, dmLocationEvent = null, recallTurn = false, sourceMessageId = null, memoryContext = null, memoryQuery = null }) {
     // Campaign-stamped writes (2026-10-26, the cadence's rule): when the
     // context names the campaign this pass read, every dispatch below carries
     // it and the dispatcher drops the lot once another campaign is live. A
@@ -845,7 +861,10 @@ ${COMBATANT_TAG_RULE}`
                     ? `KNOWN HERO TELLS (patterns of the hero's manner already on record — another sighting of one is reported with its exact "id", never as a new tell):\n${knownHeroTells}`
                     : null,
                 knownLocations
-                    ? `KNOWN PLACES (canonical place names the game already tracks): ${knownLocations}\nWhen this turn's location is one of these places under ANY phrasing — "the back room of the chandlery" IS the chandlery — report "location" as the canonical name verbatim. A distinct named place not on this list (a particular shop, street, or site, even inside a known town) keeps its own proper name.`
+                    ? `KNOWN PLACES (the places on record — the engine compares place names EXACTLY, so every place field copies one of these verbatim when it means one of them): ${knownLocations}\nWhen this turn's location is one of these under ANY phrasing — "the back room of the chandlery" IS the chandlery — report "location" as that exact name. A distinct named place not on this list (a particular shop, street, or site, even inside a known town) keeps its own proper name and becomes a new record; a room, corner or stretch of a known place is that place.`
+                    : null,
+                provisionalPlace
+                    ? `PLACE NAMED WITHOUT A RECORD (the DM put the hero here this turn and no place on record answers to the name exactly — answer in place_links with "is": the exact KNOWN PLACES name this IS under another phrasing, or "new" when it is a place the record has never held — a shop, house, stall or site ON or IN a known place is its own place, so "new"): ${provisionalPlace}`
                     : null,
                 knownLands
                     ? `KNOWN LANDS (the broad named lands of this world):\n${knownLands}\nReport location_profile.region for THIS turn's place when the campaign premise or the narrative — this scene or an earlier one — places it in a named land: a land on record under any phrasing is reported by its exact name above; a land the premise names as the hero's home is that place's land until the fiction carries the hero somewhere else, and a land the hero has now ARRIVED in (the narrative lands them on its shore or at its gate) is that place's land even if earlier scenes named it only as a destination. Never a land merely mentioned, discussed, or still ahead as a destination; never an invented one.`
@@ -892,6 +911,22 @@ ${COMBATANT_TAG_RULE}`
                 .slice(0, 8);
             dispatch({ type: 'LINK_HELD_NPCS', payload: { links }, ...(laneMeta && { meta: laneMeta }) });
             if (links.length > 0) console.log(`[Scribe] Linked ${links.length} held name(s): ${links.map(link => `"${link.said}" → ${link.id}`).join(', ')}`);
+        }
+
+        // Lane 9A (identity by reference): the DM put the hero at a name no
+        // record answers to; the Scribe says which known place it IS, or "new".
+        // Read from the raw reply like the name links; the reducer accepts only
+        // what was offered.
+        if (provisionalPlace) {
+            const placeLinks = (Array.isArray(parsed?.place_links) ? parsed.place_links : [])
+                .filter(link => link && typeof link === 'object' && !Array.isArray(link) && typeof link.name === 'string' && typeof link.is === 'string')
+                .map(link => ({ name: link.name.trim().slice(0, 120), is: link.is.trim().slice(0, 120) }))
+                .filter(link => link.name && link.is)
+                .slice(0, 4);
+            if (placeLinks.length > 0) {
+                dispatch({ type: 'LINK_PLACES', payload: { links: placeLinks }, ...(laneMeta && { meta: laneMeta }) });
+                console.log(`[Scribe] Linked ${placeLinks.length} place name(s): ${placeLinks.map(link => `"${link.name}" → ${link.is}`).join(', ')}`);
+            }
         }
 
         // Engine-owned budget backstop: the prompt caps extraction at 2-3 per turn,

@@ -161,17 +161,18 @@ describe('NPC fields carry meaning', () => {
 });
 
 describe('places: a kind of place is not a place', () => {
-    it('a name of place-kind words matches only by its whole word set', () => {
+    it('a name is the same place only as the same name (2026-10-31 → lane 9A: no containment at all)', () => {
         expect(isSameLocation('tunnel', 'Crown Way transit tunnel (under the northern ridge)')).toBe(false);
         expect(isSameLocation('The basin', 'Submerged Imperial Toll Slip, Crown Way (Eir-Vael Basin)')).toBe(false);
-        expect(isSameLocation('The Tunnel', 'tunnel')).toBe(true);
-        expect(isSameLocation('Clockwork Tower', 'Library landing, Clockwork Tower')).toBe(true);
+        expect(isSameLocation('The Tunnel', 'tunnel')).toBe(false);
+        expect(isSameLocation('Clockwork Tower', 'Library landing, Clockwork Tower')).toBe(false);
+        expect(isSameLocation('Tunnel', 'tunnel')).toBe(true);
     });
 
-    it('"<the place>, <its town>" folds into the place even when the place was typed a settlement', () => {
+    it('"<the place>, <its town>" is a second record on load; the reflection folds it by id (lane 9C), never a word rule', () => {
         const inn = normalizeLocationRecord({ name: 'Gatehouse Inn', type: 'settlement' });
         const twin = normalizeLocationRecord({ name: 'Gatehouse Inn, Bramblecross' });
-        expect(dedupeLocationRecords([inn, twin])).toHaveLength(1);
+        expect(dedupeLocationRecords([inn, twin])).toHaveLength(2);
         const town = normalizeLocationRecord({ name: 'Bramblecross', type: 'settlement' });
         expect(dedupeLocationRecords([town, normalizeLocationRecord({ name: 'Bramblecross market' })])).toHaveLength(2);
     });

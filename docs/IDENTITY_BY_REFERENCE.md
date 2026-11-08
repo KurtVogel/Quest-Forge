@@ -1,6 +1,6 @@
 # Identity by reference: inventory and proposed order
 
-**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11, 6, 7 and 8 are built and deployed (8 in the small hours of 2026-11-09; its 40-turn before/after ran on Flash 2026-11-08 twice: turn 20 held in both pairs and turn 40 in the second — 26 / 22 cards, 27 % / 32 %). Open: 9 (review the design first), 10 (on evidence).** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
+**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11, 6, 7, 8 and 9A are built and deployed (9A the evening of 2026-11-08: exact places, KNOWN PLACES for the DM, `place_links`, save 6; 9B and 9C follow) (8 in the small hours of 2026-11-09; its 40-turn before/after ran on Flash 2026-11-08 twice: turn 20 held in both pairs and turn 40 in the second — 26 / 22 cards, 27 % / 32 %). Open: 9 (review the design first), 10 (on evidence).** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
 2026-11-07 for the live proof. Line numbers hold at `667295b`, which changed no app code. Rule behind it: DECISIONS.md 2026-11-05 (first entry), with 2026-11-03 evening
 (`recorded_as`), 2026-11-02 (the repeat judge) and 2026-11-06 night (the id decides) as the lanes already moved.
 
@@ -221,7 +221,7 @@ both have to hold, and the `[storyMemory] id re-report rewrote card` log counts 
 
 ## Lane 9. Places
 
-### Design review, 2026-11-08 (afternoon) — measured on the megacampaign export, awaiting Vesa's four answers
+### Design review, 2026-11-08 (afternoon) — measured on the megacampaign export. Vesa, that evening: "Yes, all recommended" to the four decisions; slice A built the same evening (DECISIONS.md 2026-11-08 evening); B and C follow
 
 **What the registry actually holds** (`test-results/my-campaign-healed.json`, the healed megacampaign; the
 measuring script is the session scratchpad's `measure_places.mjs`): 60 records — the `MAX_LOCATIONS` cap, so
@@ -404,7 +404,7 @@ Ordered by: the id is already shown to the LLM, a defect closes, nothing else de
 | ~~6~~ | ~~People~~ | **Done 2026-11-08** in three slices (aliases, `findNpcByRef`, `name_links`, the migration; `same_person`, ties by id, `npc.dead`) | 1 queue item closed | |
 | ~~7~~ | ~~People reads~~ | **Done 2026-11-08** | `namesMatch` left decisions; it is `shortlistNamesMatch` now | |
 | ~~8~~ | ~~Story cards~~ | **Done 2026-11-09** (merge lane + nearest cards first; the 40-turn Flash before/after held at turns 20 and 40) | | |
-| 9 | Places | Design reviewed 2026-11-08 on the megacampaign export (the rung decides 3 % of stored strings, a third of those wrongly; the records carry the damage); four decisions wait on Vesa | `findLocationRecord` fuzzy rung | Large, three slices |
+| 9 | Places | **Slice A done 2026-11-08** (exact lookups, KNOWN PLACES for the DM, the Scribe's copies and `place_links`, save 6); B (held arrival tail, `within`, regions, the evidence gate) and C (`same_place`, the cap) open | the containment fold is gone; `areRelatedPlaces` and the region rungs wait for B | Large, three slices |
 | 10 | Facts, evidence, verifier | Low harm; on evidence or your say-so | | Medium |
 
 Each lane ships alone: pins, `npm test`, `npm run lint`, commit on master, build, deploy, a DECISIONS line.

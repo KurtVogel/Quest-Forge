@@ -156,7 +156,7 @@ const DYNAMIC_CEILINGS = {
     recentRolls: 2200,     // 1,947 since 2026-11-05: the newest row is a LOADED hostile one at the faces cap (200 × "1000") — 400,189 before the load bound (744 with five plain rows)
     recentRulings: 1000,   // 876
     worldFacts: 6500,      // 5,631 — 15 lines
-    place: 2400,           // 2,156 — the place card + 6 known ways + the Region line (2026-10-26: five 120-char faces + the rule)
+    place: 2700,           // 2,420 — the place card + Known places (8 names, lane 9A 2026-11-08) + 6 known ways + the Region line (2026-10-26: five 120-char faces + the rule)
     interlude: 1700,       // 1,516 — the region seam at its fullest: the land's face, the places elsewhere, the rules (2026-10-26)
     sessionHistory: 8500,  // 3 × (2,000 + 3 × 150) + headers
     transitionHistory: 900, // two referenced entries or two clamped 300-char summaries

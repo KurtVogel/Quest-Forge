@@ -26,8 +26,9 @@ describe('SET_LOCATION visit stamps and arrival detection', () => {
         expect(state.locations.find(record => record.name === 'Deep Fen').lastVisitedMessage).toBe(10);
     });
 
-    it('does not treat an alias re-statement of the current place as an arrival', () => {
+    it('does not treat a re-statement under an alias ON RECORD as an arrival (lane 9A: the alias is the Scribe\'s or the migration\'s, never a word match)', () => {
         let state = gameReducer(atMessages(initialGameState, 2), { type: 'SET_LOCATION', payload: 'Clockwork Tower' });
+        state = { ...state, locations: state.locations.map(record => ({ ...record, aliases: ['Library landing, Clockwork Tower'] })) };
         state = { ...state, session: { ...state.session, regionalHearsay: { locationName: 'Clockwork Tower', arrivedAtMessage: 2, items: [{ text: 'x', grade: 'firsthand' }] } } };
         const next = gameReducer(atMessages(state, 6), { type: 'SET_LOCATION', payload: 'Library landing, Clockwork Tower' });
         expect(next.locations).toHaveLength(1);
@@ -728,9 +729,12 @@ describe('fillOnly SET_LOCATION (playtest #5: journal cadence must never relocat
         expect(filled.currentLocation).toBe('Weatherby');
 
         let state = gameReducer(base(), { type: 'SET_LOCATION', payload: 'Clockwork Tower' });
+        const unknownPhrasing = gameReducer(state, { type: 'SET_LOCATION', payload: { name: 'Library landing, Clockwork Tower', fillOnly: true } });
+        expect(unknownPhrasing).toBe(state); // not the same name and no alias on record: a fill never relocates (lane 9A)
+        state = { ...state, locations: state.locations.map(record => ({ ...record, aliases: ['Library landing, Clockwork Tower'] })) };
         const affirmed = gameReducer(state, { type: 'SET_LOCATION', payload: { name: 'Library landing, Clockwork Tower', fillOnly: true } });
-        expect(affirmed.locations).toHaveLength(1); // alias fold onto the same record
-        expect(affirmed.locations[0].aliases).toContain('Library landing, Clockwork Tower');
+        expect(affirmed.locations).toHaveLength(1); // the alias resolves to the same record
+        expect(affirmed.currentLocation).toBe('Library landing, Clockwork Tower');
     });
 });
 
@@ -968,7 +972,7 @@ describe('travel links — geography as canon (2026-09-14)', () => {
         const state = gameReducer(travel(), {
             type: 'ADD_TRAVEL_LINK',
             payload: {
-                from: 'Aldermill', to: 'the Deep Fen', direction: 'North', travel_time: 'x',
+                from: 'Aldermill', to: 'Deep Fen', direction: 'North', travel_time: 'x',
                 travelTime: 'half a day', route: 'the Old Causeway',
                 evidenceText: 'You leave Aldermill and walk north along the Old Causeway; by half a day you reach the Deep Fen.',
             },

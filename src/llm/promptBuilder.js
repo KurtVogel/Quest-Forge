@@ -870,7 +870,7 @@ When game events occur, include a structured JSON block at the END of your respo
   "conditions_removed": [],
   "healing": 0,
   "quest_updates": [{ "status": "new|updated|completed|failed", "id": "on updated/completed/failed: the [id: …] printed beside that quest in ACTIVE QUESTS, copied exactly — omit on new", "name": "Quest Name", "description": "Quest description", "patron": "who asked, by their full known name (omit when the hero took it up alone)", "promised": "the fee or stake agreed, a few words", "outcome": "how it ended — on completed/failed only" }],
-  "location": "<the exact name of the place the hero PHYSICALLY stands at the END of this response, ONLY when it changed — never a place merely mentioned, discussed, or being left behind; omit when unchanged>",
+  "location": "<where the hero PHYSICALLY stands at the END of this response, ONLY when it changed: the exact name from Known places when it is one of them under any phrasing, else the new place's proper name — never a place merely mentioned, discussed, or being left behind; omit when unchanged>",
   "world_facts": [
     { "fact": "The bandit captain Rarg is dead, killed by the player at the crossroads.", "category": "event" },
     { "fact": "The village of Thornhaven has been burned by the Iron Claw bandits.", "category": "location" }

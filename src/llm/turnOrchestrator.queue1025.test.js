@@ -427,7 +427,8 @@ describe('nits — the detector gate and the withheld setup\'s location', () => 
         await stageTravel(h);
         await h.runner.acceptRoleplayCheck();
         expect(h.getState().currentLocation).toBe('The Mill');
-        expect(h.dispatched.filter(a => a.type === 'SET_LOCATION').map(a => a.payload)).toEqual(['The Mill']);
+        // The DM lane's own arrival is marked (lane 9A): a name no record answers to mints a PROVISIONAL record.
+        expect(h.dispatched.filter(a => a.type === 'SET_LOCATION').map(a => a.payload)).toEqual([{ name: 'The Mill', dm: true }]);
     });
 
     it('a chained check carries the destination on to the re-staged proposal; the hero still has not moved', async () => {

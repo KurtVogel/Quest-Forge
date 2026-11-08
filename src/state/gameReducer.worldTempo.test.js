@@ -21,14 +21,21 @@ const front = (overrides = {}) => ({
 });
 
 describe('SET_LOCATION registry wiring', () => {
-    it('registers new places and folds variants as aliases', () => {
+    it('registers new places; a DM phrasing no record answers to is a PROVISIONAL record until the Scribe\'s place_links folds it (lane 9A)', () => {
         let state = gameReducer(initialGameState, { type: 'SET_LOCATION', payload: 'Clockwork Tower' });
         expect(state.currentLocation).toBe('Clockwork Tower');
         expect(state.locations).toHaveLength(1);
+        expect(state.locations[0].provisional).toBe(false);
 
-        state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Library landing, Clockwork Tower' });
+        state = gameReducer(state, { type: 'SET_LOCATION', payload: { name: 'Library landing, Clockwork Tower', dm: true } });
+        expect(state.locations).toHaveLength(2);
+        expect(state.locations[1]).toMatchObject({ name: 'Library landing, Clockwork Tower', provisional: true });
+
+        state = gameReducer(state, { type: 'LINK_PLACES', payload: { links: [{ name: 'Library landing, Clockwork Tower', is: 'Clockwork Tower' }] } });
         expect(state.locations).toHaveLength(1);
+        expect(state.locations[0].name).toBe('Clockwork Tower');
         expect(state.locations[0].aliases).toContain('Library landing, Clockwork Tower');
+        expect(state.locations[0].provisional).toBe(false);
 
         state = gameReducer(state, { type: 'SET_LOCATION', payload: 'Sunlit Orchard' });
         expect(state.locations).toHaveLength(2);

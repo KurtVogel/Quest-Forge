@@ -792,7 +792,9 @@ export function createTurnRunner({
                 else landedLocation = deferredLocation;
             }
         }
-        if (landedLocation) record({ type: 'SET_LOCATION', payload: landedLocation });
+        // `dm: true` (lane 9A): a name no record answers to mints a PROVISIONAL
+        // record the Scribe's place_links resolves (the place it IS, or new).
+        if (landedLocation) record({ type: 'SET_LOCATION', payload: { name: landedLocation, dm: true } });
         // A block-only reply whose events dispatched NOTHING is an empty reply
         // (2026-10-25 P1, the floor): no prose, no row, no state change — the
         // player would see silence. The jsonOnly lane is a data block by

@@ -21,7 +21,7 @@
  * instructing). Player-sought danger is never gated by any of this.
  */
 
-import { findLocationRecord, getCurrentLocationRecord, isSameLocation } from './locationRegistry.js';
+import { findLocationRecord, getCurrentLocationRecord, samePlace } from './locationRegistry.js';
 import { conversationalDistance } from './replayLedger.js';
 import { DEFAULT_MAX_CLOCK, DOOM_WINDOW_MESSAGES, describeAvertedPortent, describeFrontDoom, describeFrontPortents } from './fronts.js';
 import { cleanText as typedText } from './text.js';
@@ -91,14 +91,15 @@ export const ABSENCE_DRIFT_COOLDOWN_MESSAGES = 20;
  * a distant roster NPC can never rewrite their agenda/lastNotes; it lives
  * here beside the drift constants so reducer handlers never import from llm/.
  */
-export function isAbsenceDriftLocalNpc(npc, locationName) {
+export function isAbsenceDriftLocalNpc(npc, locationName, locations = []) {
     if (!npc?.name || npc.rosterTier === 'archived_creature') return false;
     const here = String(locationName || '');
     // basedIn OR lastLocation (2026-08-31 P2): an NPC anchored at the return
     // place but last seen elsewhere — the innkeeper met on the road — used to
-    // miss their own town's drift.
-    return !!((npc.lastLocation && isSameLocation(npc.lastLocation, here))
-        || (npc.basedIn && isSameLocation(npc.basedIn, here)));
+    // miss their own town's drift. Record-aware since lane 9A: a sighting
+    // written under an alias of the place is at the place.
+    return !!((npc.lastLocation && samePlace(locations, npc.lastLocation, here))
+        || (npc.basedIn && samePlace(locations, npc.basedIn, here)));
 }
 
 /** Does this active front hold theater at the record? The installer's check for the front the director's context OFFERED (2026-10-15). */

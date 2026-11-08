@@ -12,7 +12,7 @@
 import { LOCATION_NAME_MAX } from '../config/contentLimits.js';
 import { briefNpcFieldForPrompt, curateNpcsForPrompt, describeTiesForPrompt, findCompanionRecord, listNpcImpressions, splitBondMoments } from '../engine/npcRoster.js';
 import { describeAbsence, describeStageForPrompt, resolveOpenThread } from '../engine/relationshipArc.js';
-import { describeCurrentPlace, describeTravelLink, isSameLocation, listKnownWays } from '../engine/locationRegistry.js';
+import { describeCurrentPlace, describeTravelLink, listKnownPlaceNames, listKnownWays, samePlace } from '../engine/locationRegistry.js';
 import { describeRegionLine, findRegionProfile, regionForPrompt } from '../engine/regionProfile.js';
 
 /** KNOWN NPCs line opener budget — the party line's cap for the same fields. */
@@ -70,6 +70,15 @@ export function describeBondForPrompt(npc = {}, storyMemory = [], { messages = n
 export function buildPlaceBlock(currentLocation, { locations = [], regions = null } = {}) {
     if (!currentLocation) return '';
     const lines = [`**Current location:** ${describeCurrentPlace(locations, currentLocation) || currentLocation}`];
+    // KNOWN PLACES for the DM (identity by reference, lane 9A, 2026-11-08):
+    // the engine compares place names exactly, so the `location` event copies
+    // one of these verbatim when the hero ends the turn in a known place; a
+    // name not here mints a provisional record the Scribe resolves. The
+    // eight most recently visited, the current place left to its card.
+    const known = listKnownPlaceNames(locations, { limit: 8, exclude: currentLocation });
+    if (known.length > 0) {
+        lines.push(`**Known places (when the hero ends this turn in one of these under any phrasing, \`location\` is that exact name; a new place gets its own proper name):** ${known.join('; ')}`);
+    }
     // The land's face (WOW 2026-10-26): ONE line under the place — the
     // region profile the regional director wrote, the record every new
     // place, person, foe and name here is drawn from.
@@ -122,13 +131,14 @@ export function buildSessionHistoryBlock(journal) {
 const TRANSITION_SCAN_ENTRIES = 30;
 const TRANSITION_SUMMARY_CHARS = 300;
 
-export function buildTransitionHistoryBlock(journal, currentLocation) {
+export function buildTransitionHistoryBlock(journal, currentLocation, { locations = [] } = {}) {
     const entries = Array.isArray(journal) ? journal : [];
     // Alias-tolerant match (2026-08-31 P2): currentLocation and journal-entry
     // stamps carry RAW alias strings ("Library landing, Clockwork Tower" vs
-    // "Clockwork Tower") — normalizeLocationName exact-equality never matched
-    // them, silently suppressing this block right after travel. isSameLocation
-    // is the registry's token-containment rule.
+    // "Clockwork Tower") — exact string equality never matched them, silently
+    // suppressing this block right after travel. Since lane 9A the tolerance
+    // is the REGISTRY's: two strings are one place when they name one record
+    // (`samePlace`), never by word overlap.
     if (!hasLocationName(currentLocation) || entries.length === 0) return '';
     // The trail must END here (2026-10-26 memory-journal P2): the scan used to
     // keep walking while nothing matched, so on a RETURN before the next
@@ -142,12 +152,12 @@ export function buildTransitionHistoryBlock(journal, currentLocation) {
     const scanFloor = Math.max(0, entries.length - TRANSITION_SCAN_ENTRIES);
     let i = entries.length - 1;
     while (i >= scanFloor && !entries[i]?.location) i--;
-    if (i < scanFloor || !isSameLocation(entries[i].location, currentLocation)) return '';
+    if (i < scanFloor || !samePlace(locations, entries[i].location, currentLocation)) return '';
     let transitionIdx = i;
     while (i >= scanFloor) {
         const entryLoc = entries[i]?.location;
         if (!entryLoc) { i--; continue; }
-        if (!isSameLocation(entryLoc, currentLocation)) break;
+        if (!samePlace(locations, entryLoc, currentLocation)) break;
         transitionIdx = i;
         i--;
     }
@@ -241,7 +251,7 @@ export function buildJournalBlocks(journal, npcs, currentLocation, { presentName
     return [
         { name: 'place', text: buildPlaceBlock(currentLocation, { locations, regions }) },
         { name: 'sessionHistory', text: buildSessionHistoryBlock(journal) },
-        { name: 'transitionHistory', text: buildTransitionHistoryBlock(journal, currentLocation) },
+        { name: 'transitionHistory', text: buildTransitionHistoryBlock(journal, currentLocation, { locations }) },
         { name: 'knownNpcs', text: buildKnownNpcsBlock(npcs, currentLocation, { presentNames, partyNames, messages, storyMemory, locations }) },
     ].filter(block => block.text);
 }

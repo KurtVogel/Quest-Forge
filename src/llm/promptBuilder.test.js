@@ -188,7 +188,7 @@ describe('THE ROAD IS A SCENE clause (WOW 2026-09-16, exploration-travel W1)', (
 
     it('annotates the DM `location` wire in RESPONSE_FORMAT with the end-of-response rule', () => {
         const text = prompt();
-        expect(text).toContain('"location": "<the exact name of the place the hero PHYSICALLY stands at the END of this response, ONLY when it changed');
+        expect(text).toContain('"location": "<where the hero PHYSICALLY stands at the END of this response, ONLY when it changed: the exact name from Known places when it is one of them under any phrasing');
         expect(text).toContain('never a place merely mentioned, discussed, or being left behind; omit when unchanged>"');
     });
 });

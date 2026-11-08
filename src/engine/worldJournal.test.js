@@ -238,10 +238,10 @@ describe('worldJournal context builder', () => {
         expect(context).not.toContain('- **Arrival at Blackroot Cave:** [Entry 3]');
     });
 
-    it('handles transition detection with case-insensitive matching, trimming, punctuation, and leading article removal', () => {
+    it('handles transition detection with case-insensitive matching, trimming and trailing punctuation (a leading article is part of the name since lane 9A)', () => {
         const journal = [
             { summary: 'Fled the guard tower.', location: 'Garrison' }, // Entry 1
-            { summary: 'Entered the dark caverns.', location: 'The  Dark  Caverns!' }, // Entry 2 - Transition
+            { summary: 'Entered the dark caverns.', location: 'Dark  Caverns!' }, // Entry 2 - Transition
             { summary: 'Heard dripping water.', location: 'Dark Caverns' }, // Entry 3
         ];
 
@@ -254,21 +254,25 @@ describe('worldJournal context builder', () => {
         expect(context).toContain('- **Arrival at dark caverns:** Entry 2 in SESSION HISTORY above.');
     });
 
-    it('matches alias-drifted location strings via registry containment (2026-08-31 P2)', () => {
+    it('matches alias-drifted location strings through the registry\'s aliases (2026-08-31 P2 → lane 9A)', () => {
         // currentLocation and journal stamps carry RAW alias strings — the old
         // normalizeLocationName exact-equality never matched "Library landing,
         // Clockwork Tower" against "Clockwork Tower", silently suppressing the
-        // block right after travel.
+        // block right after travel. Since lane 9A the tolerance is the record's
+        // alias list, never word containment.
+        const locations = [{ id: 'ct', name: 'Clockwork Tower', aliases: ['Library landing, Clockwork Tower'], links: [] }];
         const journal = [
             { summary: 'Crossed the gear bridge.', location: 'The Gear Bridge' }, // Entry 1
             { summary: 'Climbed into the tower.', location: 'Clockwork Tower' }, // Entry 2 - Transition
             { summary: 'Searched the archives.', location: 'Library landing, Clockwork Tower' }, // Entry 3
         ];
 
-        const context = buildJournalContext(journal, [], 'Library landing, Clockwork Tower');
+        const context = buildJournalContext(journal, [], 'Library landing, Clockwork Tower', { locations });
 
         expect(context).toContain('## LOCATION TRANSITION HISTORY');
         expect(context).toContain('- **Right before entering:** Entry 1 (at The Gear Bridge) in SESSION HISTORY above.');
+        // Without the registry the strings are two names: the trail is the one entry stamped with this exact name.
+        expect(buildJournalContext(journal, [], 'Library landing, Clockwork Tower')).toContain('- **Arrival at Library landing, Clockwork Tower:** Entry 3 in SESSION HISTORY above.');
         expect(context).toContain('- **Arrival at Library landing, Clockwork Tower:** Entry 2 in SESSION HISTORY above.');
     });
 
@@ -428,8 +432,12 @@ describe('Known ways from here (geography as canon, 2026-09-14)', () => {
             { id: 'b', name: 'Deep Fen', links: [] },
             { id: 'c', name: 'Rimehollow', links: [] },
         ];
-        const context = buildJournalContext([], [], 'Library landing, Ashford', { locations });
+        const context = buildJournalContext([], [], 'Ashford', { locations });
         expect(context).toContain('**Known ways from here (established geography');
+        // KNOWN PLACES for the DM (lane 9A): the other records, the current one left to its card.
+        expect(context).toContain('**Known places (when the hero ends this turn in one of these under any phrasing');
+        expect(context).toContain('Deep Fen; Rimehollow');
+        expect(context).not.toMatch(/Known places[^\n]*Ashford/);
         expect(context).toContain('Deep Fen (north, half a day, by the Coast Road); Rimehollow');
         expect(buildJournalContext([], [], 'Deep Fen', { locations })).not.toContain('Known ways');
         expect(buildJournalContext([], [], 'Ashford')).not.toContain('Known ways');

@@ -19,7 +19,7 @@ const retirementNotice = save =>
 
 describe('save-version machinery', () => {
     it('persistence stamps the pipeline version (the SAVE_VERSION alias went on 2026-10-06)', () => {
-        expect(CURRENT_SAVE_VERSION).toBe(5);
+        expect(CURRENT_SAVE_VERSION).toBe(6);
         expect(serializeGameState(initialGameState).saveVersion).toBe(CURRENT_SAVE_VERSION);
     });
 

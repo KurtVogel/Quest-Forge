@@ -222,7 +222,7 @@ derived from the bond moments on every read, never stored), `heroTells.js`. See 
 `fronts.js` (hidden clocks: `normalizeFrontProposal`, `applyFrontAdvanceBatch`,
 `openDoomWindow`, `describeFrontReveal`), `worldTempo.js` (`buildWorldTempoBlock`: pace vs
 measured heat, one permission or doom card, the encounter ledger), `worldMotifs.js`,
-`locationRegistry.js` (canonical places, theaters, travel links, `listVisitedPlaces`),
+`locationRegistry.js` (canonical places — an id, an exact name or an exact alias since lane 9A, 2026-11-08; theaters, travel links, `listVisitedPlaces`),
 `regionProfile.js`, `regionalHearsay.js`, `interlude.js`, `wonder.js`, `heroDeath.js`,
 `livingWorldSession.js` (load sanitizers for the one-shot markers), `directorRetry.js`.
 Shelves used everywhere: `text.js` (type-strict `cleanText`, flags), `replayLedger.js`
