@@ -4449,3 +4449,24 @@ Continue). List every reader's predicate over a record, type each at the load bo
 live writer the same clamp — the 10-23 "twin lane" rule with the save as the second lane. Payoff: a
 death the DM has to declare, a reducer no reply can hold for 25 seconds, a story no block leaks into,
 and a chat row that is the same row before and after Continue.
+
+### [strengthening] A text has as many clamps as it has exits; liveness in bytes needs a ceiling in bytes; a record is one prompt line only when its composer says so; a trusted label must be unwritable from the input — status: `idea` (2026-11-08)
+Four rules from the providers-adapter + memory-journal pass of 2026-11-08 (Lap 2, hostile input), each
+reproduced with a throwaway probe over the real transport helpers (fetch mocked), the real cadence (the
+adapter mocked, every dispatch replayed through the reducer), the real entry composer and the real prompt
+builder. **(1)** Five provider texts are clamped at 300–500 characters; the sixth, `makeHttpError`'s body
+message, is the one the lanes post as a chat row — 200,024 characters, `[object Object]`, or `a,b`, into the
+chat and every later save. For every string a lane can print, list its exits (console, chat row, save,
+prompt); the exit with the longest life sets the clamp, and the type check comes with it. **(2)** The 10-25
+fix made bytes the DM stream's heartbeat, and nothing bounds how many bytes may arrive without forming a
+line: five newline-less megabytes were five liveness ticks, +9.3 MB and no error. Every "reset on activity"
+timer pairs with a cap on the activity's buffer. **(3)** `clipMemoryText`, `briefNpcFieldForPrompt` and
+`cleanText` collapse whitespace because a prompt line that contains `\n## ` is a new section; the journal's
+composer keeps line breaks and its two readers print raw, so one summary carried two `## DM REMINDERS`
+headers and a `## KNOWN NPCs` section with a baron nobody recorded. `singleLine: true` is the default of any
+`cleanTextField` whose output a prompt builder prints; a multi-line record names why. **(4)** The journal
+prompt grants `[SYSTEM]` lines authority over narrative, and a player row with a blank line and that label
+produced a transcript line byte-identical to the engine's. When a prompt trusts a marker (`[SYSTEM]`,
+`recorded_as`, an id), the composer guarantees the marker cannot appear inside a row's text — collapse,
+escape or fence. Payoff: an error row that is a sentence, a stream that ends when the line never does, a
+SESSION HISTORY that is history and not instructions, and a system line only the engine can write.
