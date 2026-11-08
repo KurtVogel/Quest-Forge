@@ -41,7 +41,9 @@ describe('a turn beat renders only for a person in the scene (2026-10-30 P2)', (
     });
 
     it('a party member is present whatever the presence text says', () => {
-        const block = buildRelationshipBeatBlock(beat, [trusted], { messageCount: 41, party: [{ id: 'c1', name: 'Sanna' }] });
+        // The party name is the record's exact name (lane 7); a short form alone is nobody's.
+        expect(buildRelationshipBeatBlock(beat, [trusted], { messageCount: 41, party: [{ id: 'c1', name: 'Sanna' }] })).toBe('');
+        const block = buildRelationshipBeatBlock(beat, [trusted], { messageCount: 41, party: [{ id: 'c1', name: 'Sanna Aallotar' }] });
         expect(block).toContain('THE BOND HAS TURNED');
         expect(block).not.toContain('TRAVELLING WITH'); // the breaking point is the estranged / rival variant only
     });

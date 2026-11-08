@@ -23,9 +23,11 @@ describe('resolveCompanionLook', () => {
         });
     });
 
-    it('falls back to the party record field by field, and matches names by the shared short-name rule', () => {
+    it('falls back to the party record field by field, and matches names exactly or by alias — never a short-name rule (lane 7)', () => {
         expect(resolveCompanionLook({ name: 'Grub', appearance: 'one ear', gender: 'man' }, roster)).toEqual({ appearance: 'one ear', gender: 'man', species: 'goblin' });
-        expect(resolveCompanionLook({ name: 'Nyanza' }, roster).gender).toBe('woman');
+        expect(resolveCompanionLook({ name: 'Nyanza' }, roster).gender).toBe('');
+        const taught = roster.map(npc => (npc.name === 'Nyanza Okoro' ? { ...npc, aliases: ['Nyanza'] } : npc));
+        expect(resolveCompanionLook({ name: 'Nyanza' }, taught).gender).toBe('woman');
     });
 
     it('is empty-string typed with no roster match, a junk record, or a nameless companion', () => {

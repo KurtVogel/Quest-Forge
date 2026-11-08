@@ -960,12 +960,15 @@ export function mergeNpcTies(existing = [], additions = [], { npcs = [], self = 
  * the scene (present or on the party), at most two, as
  * `ties: Hesper — distrusts her since the ferry money; …`. '' when none.
  */
-export function describeTiesForPrompt(npc = {}, sceneNames = []) {
+export function describeTiesForPrompt(npc = {}, sceneNames = [], npcs = null) {
     const ties = normalizeNpcTies(npc?.ties);
     if (ties.length === 0) return '';
     const names = (Array.isArray(sceneNames) ? sceneNames : []).filter(name => typeof name === 'string' && name.trim());
     if (names.length === 0) return '';
-    const here = ties.filter(tie => names.some(name => namesMatch(name, tie.name))).slice(-2);
+    // The tie's person is in the room when a scene name is that record (lane 7: exact name, alias or id).
+    const roster = Array.isArray(npcs) ? npcs : [];
+    const here = ties.filter(tie => names.some(name => samePerson(name, tie.name, roster)
+        || (tie.npcId && findNpcByRef(roster, { name }).npc?.id === tie.npcId))).slice(-2);
     if (here.length === 0) return '';
     return `ties: ${here.map(tie => `${tie.name} — ${tie.regard}`).join('; ')}`;
 }
@@ -1654,7 +1657,7 @@ export function curateNpcsForPrompt(npcs = [], { location = '', limit = 8, now =
     // racks") — a bonded friend's name still seats them, so talking ABOUT
     // Gretka brings her card.
     const present = Array.isArray(presentNames) && presentNames.length > 0
-        ? ranked.filter(npc => presentNames.some(name => namesMatch(npc.name, name))
+        ? ranked.filter(npc => presentNames.some(name => samePerson(npc.name, name, roster))
             && !isRecordedDead(npc) && !isFarAndForgotten(npc, { messages, messageCount }))
         : [];
     const located = location
@@ -1704,7 +1707,7 @@ export function isRecordedDead(npc) {
 /**
  * Two records the reflection may be asked about (lane 6C; decision 2: a
  * matcher may shortlist, never decide): roster people whose names contain
- * one another (`namesMatch`), or one of whose aliases is the other's name.
+ * one another (`shortlistNamesMatch`), or one of whose aliases is the other's name.
  * Pairs of ids with the names, at most four, for the reflection's
  * `possibleSamePerson`; the reflection's `same_person` answer merges by id.
  */
@@ -1718,7 +1721,7 @@ export function possibleSamePersonPairs(npcs = []) {
             const a = roster[i];
             const b = roster[j];
             const aliasHit = forms(a).some(form => forms(b).includes(form));
-            if (aliasHit || namesMatch(a.name, b.name)) pairs.push({ ids: [a.id, b.id], names: [a.name.trim(), b.name.trim()] });
+            if (aliasHit || shortlistNamesMatch(a.name, b.name)) pairs.push({ ids: [a.id, b.id], names: [a.name.trim(), b.name.trim()] });
         }
     }
     return pairs;
@@ -1956,7 +1959,7 @@ export function healPromotedStoryMemoryTwins(storyMemory = [], npcs = []) {
         for (const index of indexes) {
             if (index !== keep) drop.add(index);
         }
-        const npc = (Array.isArray(npcs) ? npcs : []).find(n => namesMatch(n?.name, cards[keep].subject));
+        const npc = findNpcByRef(npcs, { name: cleanText(cards[keep].subject) }).npc;
         if (npc?.id) {
             const stableId = `npc-bond-${npc.id}`;
             if (cards[keep].id !== stableId) reId.set(keep, stableId);
@@ -2014,20 +2017,35 @@ function meaningfulNameTokens(name) {
  * record is the living canon and wins; the party record is the fallback.
  */
 /**
- * THE roster record a party companion's name resolves to (2026-10-13): the
- * exact (case-folded) name when one exists, else the first short/long-form
- * match through `namesMatch`. The party line, the companion look and the
- * KNOWN NPCs exclusion all read this one rule, so the record the party line
- * renders is exactly the record KNOWN NPCs leaves out.
+ * THE roster record a party companion's name resolves to (2026-10-13; exact
+ * since identity by reference, lane 7, 2026-11-08): the exact name or alias
+ * (`findNpcByRef`), nothing else. The party line, the companion look, the
+ * Companions panel and the KNOWN NPCs exclusion all read this one rule, so
+ * the record the party line renders is exactly the record KNOWN NPCs leaves out.
  */
 export function findCompanionRecord(npcs, name) {
     const wanted = typeof name === 'string' ? name.trim() : '';
     if (!wanted) return null;
-    const roster = Array.isArray(npcs) ? npcs : [];
-    const folded = wanted.toLowerCase();
-    return roster.find(npc => typeof npc?.name === 'string' && npc.name.trim().toLowerCase() === folded)
-        || roster.find(npc => namesMatch(npc?.name, wanted))
-        || null;
+    return findNpcByRef(npcs, { name: wanted }).npc || null;
+}
+
+/**
+ * Do two stored name strings mean one person (identity by reference, lane 7,
+ * 2026-11-08)? Each side is looked up exactly (`findNpcByRef`: name or alias)
+ * when a roster is given; two records found are compared by id, and anything
+ * else — a stranger on either side, no roster — is a case-folded exact
+ * compare. Never a word rule: a witness "Tammo" and a record "Old Tammo" are
+ * one person only because the record answers to "Tammo".
+ */
+export function samePerson(a, b, npcs = null) {
+    const left = typeof a === 'string' ? a.trim() : '';
+    const right = typeof b === 'string' ? b.trim() : '';
+    if (!left || !right) return false;
+    if (left.toLowerCase() === right.toLowerCase()) return true;
+    if (!Array.isArray(npcs) || npcs.length === 0) return false;
+    const one = findNpcByRef(npcs, { name: left }).npc;
+    const other = findNpcByRef(npcs, { name: right }).npc;
+    return !!one && !!other && one.id === other.id;
 }
 
 export function resolveCompanionLook(companion, npcs = []) {
@@ -2041,7 +2059,7 @@ export function resolveCompanionLook(companion, npcs = []) {
     return { appearance: pick('appearance'), gender: pick('gender'), species: pick('species') };
 }
 
-export function namesMatch(name1, name2) {
+export function shortlistNamesMatch(name1, name2) {
     if (typeof name1 !== 'string' || typeof name2 !== 'string' || !name1 || !name2) return false;
     const n1 = name1.toLowerCase();
     const n2 = name2.toLowerCase();
@@ -2119,8 +2137,8 @@ export function addNpcAlias(npcs, id, alias) {
 /**
  * The SHORTLIST a held name is shown with (lane 6; decision 2: a matcher may
  * choose what an LLM is shown, never decide): the roster people whose names
- * contain or are contained in the said name (`namesMatch`, the one reader it
- * has left for people), plus everyone the turn's own text names in full — so
+ * contain or are contained in the said name (`shortlistNamesMatch`, the one
+ * reader it has left for people), plus everyone the turn's own text names in full — so
  * "the widow" can be linked to Maren, which no matcher could do. Ids, capped.
  */
 export const NPC_SHORTLIST_CAP = 6;
@@ -2133,7 +2151,7 @@ export function shortlistNpcCandidates(npcs, name, { presenceText = '' } = {}) {
         const tokens = identifyingNameTokens(n.name);
         return tokens.length > 0 && tokens.every(token => words.has(token));
     };
-    const byWords = said ? roster.filter(n => namesMatch(n.name, said)) : [];
+    const byWords = said ? roster.filter(n => shortlistNamesMatch(n.name, said)) : [];
     const inScene = roster.filter(n => fullyNamed(n) && !byWords.includes(n));
     return [...byWords, ...inScene].slice(0, NPC_SHORTLIST_CAP);
 }

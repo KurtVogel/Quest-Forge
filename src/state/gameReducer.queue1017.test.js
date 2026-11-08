@@ -190,8 +190,9 @@ describe('the fight memory lands on the companion\'s OWN record (P2)', () => {
         const start = {
             ...hero({ currentHP: 20, conditions: [] }),
             party: [tammo({ id: 'maren', name: 'Maren' })],
+            // The companion's record answers to "Maren" by alias (lane 7); the exact lookup lands the moment there.
             npcs: [
-                { id: 'npc-tull', name: 'Maren Tull', kind: 'character', bondMoments: [] },
+                { id: 'npc-tull', name: 'Maren Tull', kind: 'character', bondMoments: [], aliases: ['Maren'] },
                 { id: 'npc-ash', name: 'Maren Ashford', kind: 'character', bondMoments: [] },
             ],
         };

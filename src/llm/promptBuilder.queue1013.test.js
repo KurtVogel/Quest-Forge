@@ -82,8 +82,8 @@ describe('a party companion renders ONCE (2026-10-13 prompt-building P2)', () =>
         expect(party).toContain('Between you now: Waiting for the hero');
     });
 
-    it('a companion whose roster record is found by short form is excluded by that same record', () => {
-        const options = baseOptions({ npcs: [companionRecord('Saima'), { id: 'npc-reeve', name: 'Reeve Holt', rosterTier: 'character', lastNotes: 'Keeps the toll gate.', lastSeenMessage: 5 }] });
+    it('a companion whose roster record is found by alias is excluded by that same record (lane 7: exact name or alias, never a short form)', () => {
+        const options = baseOptions({ npcs: [{ ...companionRecord('Saima'), aliases: ['Saima Aallotar'] }, { id: 'npc-reeve', name: 'Reeve Holt', rosterTier: 'character', lastNotes: 'Keeps the toll gate.', lastSeenMessage: 5 }] });
         const text = buildSystemPrompt(options);
         expect(sectionOf(text, '## KNOWN NPCs')).not.toContain('**Saima**');
         expect(sectionOf(text, '## COMPANIONS (PARTY)')).toContain('Key moments with the hero');

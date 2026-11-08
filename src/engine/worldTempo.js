@@ -26,7 +26,7 @@ import { conversationalDistance } from './replayLedger.js';
 import { DEFAULT_MAX_CLOCK, DOOM_WINDOW_MESSAGES, describeAvertedPortent, describeFrontDoom, describeFrontPortents } from './fronts.js';
 import { cleanText as typedText } from './text.js';
 import { describeWornMotifs, recordWorldMotifs } from './worldMotifs.js';
-import { isGenericCreatureName, namesMatch } from './npcRoster.js';
+import { findNpcByRef, isGenericCreatureName } from './npcRoster.js';
 
 export const INTENSITY_LEVELS = ['whispers', 'indirect', 'presence', 'confrontation'];
 export const PACE_DIALS = ['slow-burn', 'standard', 'breakneck'];
@@ -288,17 +288,17 @@ export function foeFamilyKey(name) {
  * "oar-hand" as motif families, and THIS WORLD HAS ALREADY SHOWN would have
  * warned the DM off a man's name). The roster rule only, never a guess from
  * capitalization: a character-tier record whose name matches the foe's
- * (trailing numeral stripped, namesMatch short / long forms) keeps the foe
+ * (trailing numeral stripped, an exact name or alias — lane 7) keeps the foe
  * out of foeFamilies; an archived creature record ("Ghoul") or a generic
  * creature name never shields a kind. The enemies summary keeps the name.
  */
 function isRosterPerson(name, npcs) {
     const clean = cleanText(name, 60).replace(/\s+\d+$/, '');
     if (!clean || !Array.isArray(npcs)) return false;
-    return npcs.some(npc => npc && typeof npc.name === 'string'
+    const npc = findNpcByRef(npcs, { name: clean }).npc;
+    return !!npc && typeof npc.name === 'string'
         && (!npc.rosterTier || npc.rosterTier === 'character')
-        && !isGenericCreatureName(npc.name)
-        && namesMatch(npc.name, clean));
+        && !isGenericCreatureName(npc.name);
 }
 
 /** Build the ledger entry END_COMBAT appends (cap MAX_RECENT_ENCOUNTERS). */

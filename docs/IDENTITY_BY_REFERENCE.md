@@ -1,6 +1,6 @@
 # Identity by reference: inventory and proposed order
 
-**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11 and 6 (all three slices) are built and deployed 2026-11-08. Open: 7, 8, 9 (review first), 10.** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
+**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11, 6 and 7 are built and deployed 2026-11-08. Open: 8 (needs a merge lane + a 40-turn before/after), 9 (review the design first), 10 (on evidence).** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
 2026-11-07 for the live proof. Line numbers hold at `667295b`, which changed no app code. Rule behind it: DECISIONS.md 2026-11-05 (first entry), with 2026-11-03 evening
 (`recorded_as`), 2026-11-02 (the repeat judge) and 2026-11-06 night (the id decides) as the lanes already moved.
 
@@ -179,7 +179,9 @@ could do.
 **The risk is the 07-23 fork.** If the Scribe says "new" for Saima, she forks again. `same_person` is what
 heals it. This lane needs a real-provider run on a campaign with short names before it ships.
 
-## Lane 7. People: the later reads
+## Lane 7. People: the later reads (done 2026-11-08)
+
+**Built as below** (DECISIONS.md 2026-11-08, late night): every site resolves both sides through `findNpcByRef` and compares ids, or compares the strings exactly (`samePerson`); hero-tell witnesses are canonicalised to the record's name at the reducer; `findCompanionRecord` is exact and the Companions panel reads it; `namesMatch` is renamed `shortlistNamesMatch` with its two shortlist readers. No LLM output changed, so this lane is unit-pinned only. The table below is the design as proposed.
 
 All **a↓**. Each becomes `findNpcByRef` on both sides, then compares record ids. Most of the work is passing
 the roster into functions that don't have it today.
@@ -301,7 +303,7 @@ Ordered by: the id is already shown to the LLM, a defect closes, nothing else de
 | ~~2~~ | ~~Tells, no-id leftover~~ | **Done 2026-11-08**; the count came from `eval:tellid` | | |
 | ~~11~~ | ~~Phrase rules~~ | **Done 2026-11-08** in two slices; `isRecordedDead` deferred to lane 6 | | |
 | ~~6~~ | ~~People~~ | **Done 2026-11-08** in three slices (aliases, `findNpcByRef`, `name_links`, the migration; `same_person`, ties by id, `npc.dead`) | 1 queue item closed | |
-| 7 | People reads | Needs 6 | `namesMatch` leaves decisions | Medium |
+| ~~7~~ | ~~People reads~~ | **Done 2026-11-08** | `namesMatch` left decisions; it is `shortlistNamesMatch` now | |
 | 8 | Story cards | Needs a merge lane first; needs a before and after | | Large |
 | 9 | Places | Needs what 6 teaches. **Stop and review the design before building** | `findLocationRecord` fuzzy rung | Large |
 | 10 | Facts, evidence, verifier | Low harm; on evidence or your say-so | | Medium |

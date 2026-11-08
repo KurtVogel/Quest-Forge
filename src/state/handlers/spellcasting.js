@@ -19,7 +19,7 @@ import {
 } from '../../engine/spellcasting.js';
 import { findExactSourceReplay, findNearbyReplayEntry, rememberLedgerEntry } from '../../engine/replayLedger.js';
 import { repeatCard, repeatContext } from './ledger.js';
-import { isPromptRosterNpc, isRecordedDead, namesMatch } from '../../engine/npcRoster.js';
+import { findNpcByRef, isPromptRosterNpc, isRecordedDead } from '../../engine/npcRoster.js';
 import {
     appendRollHistory,
     clearSustainedSpellState,
@@ -130,16 +130,22 @@ export const handlers = {
             // spellcasting P2): "Ottilie" and "Sister Ottilie" are one person,
             // and Cure Wounds heals ONE — the party lane's ladder already did
             // both; this lane healed every name it was handed.
+            // Exact (lane 7, 2026-11-08): the record whose name or alias the
+            // DM wrote; a stranger, the dead and a name nobody answers to
+            // stay invalid — no roster order, no word match.
             const people = [];
+            const resolvedRefs = new Set();
             for (const ref of invalidRefs) {
-                const npc = (state.npcs || []).find(entry => entry?.name && isPromptRosterNpc(entry) && !isRecordedDead(entry) && namesMatch(entry.name, ref));
-                if (npc && !people.includes(npc)) people.push(npc);
+                const npc = findNpcByRef(state.npcs || [], { name: ref }).npc;
+                if (!npc || !npc.name || !isPromptRosterNpc(npc) || isRecordedDead(npc)) continue;
+                resolvedRefs.add(ref);
+                if (!people.includes(npc)) people.push(npc);
             }
             if (people.length > 0) {
                 const limit = spellTargetLimit(spell);
                 overflow += Math.max(0, people.length - limit);
                 recipients = people.slice(0, limit).map(npc => ({ type: 'other', name: npc.name }));
-                invalidRefs = invalidRefs.filter(ref => !people.some(npc => namesMatch(npc.name, ref)));
+                invalidRefs = invalidRefs.filter(ref => !resolvedRefs.has(ref));
             }
         }
         if (recipients.length === 0) {

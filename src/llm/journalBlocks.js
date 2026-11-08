@@ -217,7 +217,7 @@ export function buildKnownNpcsBlock(npcs, currentLocation, { presentNames = null
             n.stanceToPlayer && `toward the hero: ${briefNpcFieldForPrompt(n.stanceToPlayer)}`,
             ...describeBondForPrompt(n, storyMemory, { messages, messageCount: Array.isArray(messages) ? messages.length : undefined }),
             // How this person regards someone ELSE in the room (2026-11-04).
-            describeTiesForPrompt(n, sceneNames),
+            describeTiesForPrompt(n, sceneNames, npcs),
             Number.isFinite(n.trust) && `trust: ${n.trust}/100`,
             n.basedIn && `based in: ${n.basedIn}`,
             n.lastLocation && `last seen: ${n.lastLocation}`,

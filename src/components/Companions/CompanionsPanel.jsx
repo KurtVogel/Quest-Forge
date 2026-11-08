@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import LookEditor from '../Journal/LookEditor.jsx';
-import { bondKindLabel, listNpcImpressions, namesMatch, resolveCompanionLook, splitBondMoments } from '../../engine/npcRoster.js';
+import { bondKindLabel, findCompanionRecord, listNpcImpressions, resolveCompanionLook, splitBondMoments } from '../../engine/npcRoster.js';
 import { deriveRelationshipStage, describeAbsence, resolveOpenThread } from '../../engine/relationshipArc.js';
 import './Companions.css';
 
@@ -49,7 +49,7 @@ export default function CompanionsPanel() {
                     const hpPercent = Math.max(0, Math.min(100, (companion.hp / companion.maxHp) * 100));
                     const affinityPercent = Math.max(0, Math.min(100, companion.affinity || 50));
                     const status = companion.status || (companion.hp <= 0 ? 'downed' : 'healthy');
-                    const dossier = npcs.find(npc => namesMatch(npc.name, companion.name));
+                    const dossier = findCompanionRecord(npcs, companion.name);
                     const look = resolveCompanionLook(companion, npcs);
                     const lookIdentity = [look.species, look.gender].filter(Boolean).join(' ');
                     // Key moments vs lately (2026-09-12) — same shelves as the
@@ -59,7 +59,7 @@ export default function CompanionsPanel() {
                     // Where you stand + what is pending (2026-09-13): derived
                     // stage and the live thread lead the bond section.
                     const arc = dossier ? deriveRelationshipStage(dossier) : null;
-                    const thread = dossier ? resolveOpenThread(dossier, state.storyMemory) : null;
+                    const thread = dossier ? resolveOpenThread(dossier, state.storyMemory, npcs) : null;
                     const absence = dossier ? describeAbsence(dossier, { messages: state.messages, messageCount: (state.messages || []).length }) : null;
 
                     let affinityClass = '';

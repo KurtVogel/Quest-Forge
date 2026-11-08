@@ -8,7 +8,7 @@
  * `handlers/combat.js` and ChatPanel are the importers.
  */
 import { HEALTH_CRITICAL_RATIO, enemyOutcome } from './enemyStats.js';
-import { namesMatch, splitBondMoments } from './npcRoster.js';
+import { findNpcByRef, samePerson, splitBondMoments } from './npcRoster.js';
 import { conversationalDistance } from './replayLedger.js';
 
 /**
@@ -548,7 +548,7 @@ export function buildFightMemories(tally, state, outcome = 'victory') {
     const foes = describeFoes(state.combat?.enemies);
     const place = tallyName(state.currentLocation);
     const party = (Array.isArray(state.party) ? state.party : []).map(c => tallyName(c?.name)).filter(Boolean);
-    const present = t.witnesses.filter(name => party.some(member => namesMatch(member, name)));
+    const present = t.witnesses.filter(name => party.some(member => samePerson(member, name, state.npcs)));
     const out = [];
     for (const name of present) {
         const others = present.filter(other => other !== name);
@@ -631,7 +631,7 @@ export function describeFightResonance(state, result) {
         if (lines.length >= MAX_RESONANCE_LINES) break;
         const name = tallyName(companion?.name);
         if (!name || (companion?.hp ?? 0) <= 0 || companion?.status === 'downed') continue;
-        const record = npcs.find(npc => namesMatch(npc?.name, name));
+        const record = findNpcByRef(npcs, { name }).npc;
         if (!record) continue;
         const carried = splitBondMoments(record.bondMoments).key
             .filter(moment => RESONANCE_KINDS.has(moment.kind) && Number.isFinite(moment.salience) && moment.salience >= 4

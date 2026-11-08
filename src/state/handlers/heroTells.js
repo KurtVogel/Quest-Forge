@@ -70,7 +70,7 @@ export const handlers = {
     ADD_HERO_TELLS(state, action) {
         const partyNames = (Array.isArray(state.party) ? state.party : []).map(c => c?.name).filter(Boolean);
         const heroName = typeof state.character?.name === 'string' ? state.character.name : '';
-        const reports = prepareHeroTellReports(Array.isArray(action.payload) ? action.payload : [], { partyNames, heroName });
+        const reports = prepareHeroTellReports(Array.isArray(action.payload) ? action.payload : [], { partyNames, heroName, npcs: state.npcs });
         if (reports.length === 0) return state;
         const existing = Array.isArray(state.heroTells) ? state.heroTells : [];
         const messages = Array.isArray(state.messages) ? state.messages : [];

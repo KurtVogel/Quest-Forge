@@ -144,7 +144,8 @@ describe('hero tells — the load boundary', () => {
 });
 
 describe('hero tells — who may voice it', () => {
-    const roster = [{ id: 'npc-maren', name: 'Maren Holt', rosterTier: 'character' }, { id: 'npc-bran', name: 'Bran', rosterTier: 'character' }];
+    // "Maren" is an alias the record was taught (lane 7): a witness is on the roster by exact name or alias.
+    const roster = [{ id: 'npc-maren', name: 'Maren Holt', rosterTier: 'character', aliases: ['Maren'] }, { id: 'npc-bran', name: 'Bran', rosterTier: 'character' }];
 
     it('only a present WITNESS gets the standing line; an unestablished tell never renders; combat hides it', () => {
         const tells = [...sightings([PIPE], [10, 40, 70]), ...sightings([JOKES], [12])];
@@ -413,12 +414,22 @@ describe('hero tells — queue sweep 2026-09-24 (scene window, id claim, witness
 });
 
 describe('hero tells — the 2026-09-29 real-provider playtest (docs/HERO_TELLS_PLAYTEST_2026-09-29.md)', () => {
-    it('folds a short/long form of one witness into ONE name and keeps the fuller form ("Tammo" / "Old Tammo")', () => {
-        let tells = recordHeroTells([], [{ text: 'walks a brass coin over the knuckles before answering', kind: 'habit', witnesses: ['Tammo'] }], { messageCount: 4 });
-        tells = recordHeroTells(tells, [{ id: tells[0].id, text: 'walks a brass coin over the knuckles before answering', kind: 'habit', witnesses: ['Old Tammo'] }], { messageCount: 25 });
-        tells = recordHeroTells(tells, [{ id: tells[0].id, text: 'walks a brass coin over the knuckles before answering', kind: 'habit', witnesses: ['tammo', 'Orsa Pellwyn'] }], { messageCount: 45 });
+    // Flipped 2026-11-08 (lane 7): the fold is the roster's, not a word rule —
+    // a witness name the roster knows (name or alias) is written as the record's
+    // own name at the reducer boundary (prepareHeroTellReports), and the
+    // compare is exact from then on. Without a roster, three spellings are three.
+    it('folds a short/long form of one witness into ONE name through the roster ("Tammo" / "Old Tammo" is one record that answers to both)', () => {
+        const npcs = [{ id: 'npc-tammo', name: 'Old Tammo', rosterTier: 'character', aliases: ['Tammo'] }, { id: 'npc-orsa', name: 'Orsa Pellwyn', rosterTier: 'character' }];
+        const prepare = (witnesses, id) => prepareHeroTellReports([{ ...(id && { id }), text: 'walks a brass coin over the knuckles before answering', kind: 'habit', witnesses }], { npcs });
+        let tells = recordHeroTells([], prepare(['Tammo']), { messageCount: 4 });
+        expect(tells[0].witnesses).toEqual(['Old Tammo']);
+        tells = recordHeroTells(tells, prepare(['Old Tammo'], tells[0].id), { messageCount: 25 });
+        tells = recordHeroTells(tells, prepare(['tammo', 'Orsa Pellwyn'], tells[0].id), { messageCount: 45 });
         expect(tells[0].witnesses).toEqual(['Old Tammo', 'Orsa Pellwyn']);
         expect(tells[0].sightings).toEqual([4, 25, 45]);
+        // A stranger's three spellings stay three without a roster to fold them.
+        const loose = recordHeroTells([], [{ text: 'x', kind: 'habit', witnesses: ['Tammo', 'Old Tammo', 'tammo'] }], { messageCount: 4 });
+        expect(loose[0].witnesses).toEqual(['Tammo', 'Old Tammo']);
     });
 
     it('a voiced-only report never adds its speaker (or anyone) to the witnesses — a remark is not a sighting', () => {

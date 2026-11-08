@@ -15,7 +15,8 @@ const state = (enemies, npcs) => ({
 
 describe('a roster-named foe is not a motif family (2026-10-30 P2)', () => {
     const roster = [
-        { id: 'n1', name: 'Joss Harrow', rosterTier: 'character' },
+        // "Joss" is an alias the record was taught (lane 7): a foe is a roster person by exact name or alias.
+        { id: 'n1', name: 'Joss Harrow', rosterTier: 'character', aliases: ['Joss'] },
         { id: 'n2', name: 'Ghoul', rosterTier: 'archived_creature' },
     ];
 

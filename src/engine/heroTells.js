@@ -25,7 +25,7 @@
 import { heroNameForms } from './textMatch.js';
 import { toFlag } from './text.js';
 import { clampMessageStamp, conversationalAgeSince, conversationalGap } from './replayLedger.js';
-import { BOND_SCENE_WINDOW_MESSAGES, namesMatch } from './npcRoster.js';
+import { BOND_SCENE_WINDOW_MESSAGES, findNpcByRef, samePerson } from './npcRoster.js';
 import { BEAT_COOLDOWN_MESSAGES, BEAT_SCENE_MESSAGES, BEAT_WINDOW_MESSAGES, MAX_BEAT_DELAY_MESSAGES } from './relationshipArc.js';
 
 export const HERO_TELL_KINDS = new Set(['manner', 'habit', 'principle', 'intimate']);
@@ -73,7 +73,7 @@ export function isIntimateTell(tell) {
     return normalizeHeroTellKind(tell?.kind) === 'intimate';
 }
 
-function normalizeWitnesses(value) {
+function normalizeWitnesses(value, npcs = null) {
     const list = Array.isArray(value) ? value : (typeof value === 'string' ? [value] : []);
     const out = [];
     for (const raw of list) {
@@ -81,14 +81,13 @@ function normalizeWitnesses(value) {
         if (!name) continue;
         // One person, one witness (2026-09-29 playtest): the Scribe named the
         // same net-mender "Tammo" and "Old Tammo" across scenes and the record
-        // listed two people. A short/long form of a held name folds into it,
-        // and the fuller form is kept.
-        const held = out.findIndex(known => known.toLowerCase() === name.toLowerCase() || namesMatch(known, name));
-        if (held !== -1) {
-            if (name.length > out[held].length) out[held] = name;
-            continue;
-        }
-        out.push(name);
+        // listed two people. Since lane 7 (2026-11-08) the fold is the
+        // roster's: a name the roster knows (name or alias) is written as the
+        // record's own name; the compare is exact. No word rule.
+        const record = npcs ? findNpcByRef(npcs, { name }).npc : null;
+        const canonical = record && typeof record.name === 'string' && record.name.trim() ? text(record.name, HERO_TELL_NAME_MAX) : name;
+        if (out.some(known => known.toLowerCase() === canonical.toLowerCase())) continue;
+        out.push(canonical);
         if (out.length >= MAX_HERO_TELL_WITNESSES) break;
     }
     return out;
@@ -364,14 +363,14 @@ export function recordHeroTells(existing = [], reports = [], { messageCount, mes
  * whatever its `public` flag (today's rule: a reputation needs someone who
  * saw it), and a remark the hero alone made about themself is nothing.
  */
-export function prepareHeroTellReports(reports = [], { partyNames = [], heroName = '' } = {}) {
-    const party = normalizeWitnesses(partyNames);
+export function prepareHeroTellReports(reports = [], { partyNames = [], heroName = '', npcs = null } = {}) {
+    const party = normalizeWitnesses(partyNames, npcs);
     const heroForms = heroNameForms(heroName);
-    const notHero = (names) => normalizeWitnesses(names).filter(name => !heroForms.has(name.toLowerCase()));
+    const notHero = (names) => normalizeWitnesses(names, npcs).filter(name => !heroForms.has(name.toLowerCase()));
     const out = [];
     for (const report of (Array.isArray(reports) ? reports : [])) {
         if (!report || typeof report !== 'object' || Array.isArray(report)) continue;
-        const namedVoices = normalizeWitnesses(report.voicedBy);
+        const namedVoices = normalizeWitnesses(report.voicedBy, npcs);
         const voicedBy = notHero(namedVoices);
         // `'true'` is true here (2026-10-22 scribe P2): a `voiced: 'true'`
         // remark used to mint a SIGHTING with the party as witnesses.
@@ -475,9 +474,9 @@ export function listPublicTells(tells = [], { messages = null, messageCount } = 
     return out;
 }
 
-export function tellWitnessedBy(tell, name) {
+export function tellWitnessedBy(tell, name, npcs = null) {
     if (!tell || !name) return false;
-    return (Array.isArray(tell.witnesses) ? tell.witnesses : []).some(w => namesMatch(w, name));
+    return (Array.isArray(tell.witnesses) ? tell.witnesses : []).some(w => samePerson(w, name, npcs));
 }
 
 /**
@@ -486,17 +485,17 @@ export function tellWitnessedBy(tell, name) {
  * whoever the presence text names); an intimate tell needs its own witness
  * present, never a bystander. Each entry carries the present witnesses.
  */
-export function listVoiceableTells(tells = [], { presentNames = [], messages = null, messageCount, limit = HERO_TELL_PROMPT_CAP } = {}) {
+export function listVoiceableTells(tells = [], { presentNames = [], messages = null, messageCount, limit = HERO_TELL_PROMPT_CAP, npcs = null } = {}) {
     // One person is one name (2026-10-31): a companion arrives both as party
     // and as a name in the prose — the line read "seen by Ketta Mor, Ketta Mor".
     const present = [];
     for (const name of (Array.isArray(presentNames) ? presentNames : []).map(n => text(n)).filter(Boolean)) {
-        if (!present.some(held => namesMatch(held, name))) present.push(name);
+        if (!present.some(held => samePerson(held, name, npcs))) present.push(name);
     }
     const out = [];
     for (const tell of (Array.isArray(tells) ? tells : [])) {
         if (!isHeroTellLive(tell, { messages, messageCount })) continue;
-        const witnesses = present.filter(name => tellWitnessedBy(tell, name));
+        const witnesses = present.filter(name => tellWitnessedBy(tell, name, npcs));
         if (witnesses.length === 0) {
             // Hearsay (Vesa, 2026-09-30 — after the 09-29 playtest, where Gemini
             // had a dockhand voice a public tell he never saw): a PUBLIC,
@@ -542,7 +541,7 @@ export function selectHeroTellCandidate(tells = [], npcs = [], { messages = null
     let best = null;
     for (const tell of (Array.isArray(tells) ? tells : [])) {
         if (!isHeroTellLive(tell, { messages, messageCount })) continue;
-        const witnesses = (tell.witnesses || []).filter(w => roster.some(n => namesMatch(n.name, w)));
+        const witnesses = (tell.witnesses || []).filter(w => roster.some(n => samePerson(n.name, w, roster)));
         if (witnesses.length === 0) continue;
         const sinceVoiced = conversationalAgeSince(lastRemarkMessage(tell), { messages, messageCount });
         if (sinceVoiced !== null && sinceVoiced < HERO_TELL_BEAT_COOLDOWN_MESSAGES) continue;
@@ -567,7 +566,7 @@ export function selectAbsenceTellCandidate(tells = [], npcs = [], { messages = n
     for (const tell of (Array.isArray(tells) ? tells : [])) {
         if (!isHeroTellFaded(tell, { messages, messageCount })) continue;
         if ((tell.voicedCount || 0) === 0) continue; // an absence is only noticeable of a habit someone once named
-        const witnesses = (tell.witnesses || []).filter(w => roster.some(n => namesMatch(n.name, w)));
+        const witnesses = (tell.witnesses || []).filter(w => roster.some(n => samePerson(n.name, w, roster)));
         if (witnesses.length === 0) continue;
         const sinceRemark = conversationalAgeSince(tell.lastAbsenceRemarkMessage, { messages, messageCount });
         if (sinceRemark !== null && sinceRemark < HERO_TELL_ABSENCE_COOLDOWN_MESSAGES) continue;
@@ -706,9 +705,9 @@ export const HERO_TELLS_BLOCK_CHAR_CEILING = 4800;
  * how to use them lives in the cached prefix (HERO_TELLS_STANDING_RULE).
  * Empty when nobody present has seen a pattern.
  */
-export function buildHeroTellsBlock(tells = [], { presentNames = [], messages = null, messageCount, combatActive = false } = {}) {
+export function buildHeroTellsBlock(tells = [], { presentNames = [], messages = null, messageCount, combatActive = false, npcs = null } = {}) {
     if (combatActive) return '';
-    const voiceable = listVoiceableTells(tells, { presentNames, messages, messageCount });
+    const voiceable = listVoiceableTells(tells, { presentNames, messages, messageCount, npcs });
     if (voiceable.length === 0) return '';
     const lines = voiceable.map(({ tell, witnesses, hearsay }) => describeTell(tell, witnesses, hearsay));
     return `## WHAT THEY HAVE NOTICED ABOUT THE HERO — PRIVATE
@@ -721,7 +720,7 @@ ${lines.join('\n')}`;
  * must be open, the tell must still be live, a witness named on the beat must
  * be present, and never in combat.
  */
-export function buildHeroTellBeatBlock(beat, tells = [], { presentNames = [], messages = null, messageCount, combatActive = false } = {}) {
+export function buildHeroTellBeatBlock(beat, tells = [], { presentNames = [], messages = null, messageCount, combatActive = false, npcs = null } = {}) {
     const b = sanitizeHeroTellBeat(beat);
     if (!b || combatActive || !isHeroTellBeatOpen(b, messageCount)) return '';
     const tell = (Array.isArray(tells) ? tells : []).find(t => t && t.id === b.tellId);
@@ -732,7 +731,7 @@ export function buildHeroTellBeatBlock(beat, tells = [], { presentNames = [], me
     // said since the mint is spent even if the beat is still on the session.
     if (!absence && beatVoicedByFiction(b, tells)) return '';
     const present = (Array.isArray(presentNames) ? presentNames : []).map(n => text(n)).filter(Boolean);
-    const witnesses = b.witnesses.filter(w => present.some(name => namesMatch(name, w)));
+    const witnesses = b.witnesses.filter(w => present.some(name => samePerson(name, w, npcs)));
     if (witnesses.length === 0) return '';
     const speaker = witnesses[0];
     const intimate = isIntimateTell(tell);

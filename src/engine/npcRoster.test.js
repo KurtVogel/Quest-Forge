@@ -34,7 +34,7 @@ import {
     normalizeCallbackHook,
     scoreNpcForPrompt,
     getCoreNpcName,
-    namesMatch,
+    shortlistNamesMatch,
     computeNpcImportance,
     isAppearanceFragment,
     mergeNpcAppearance,
@@ -553,12 +553,12 @@ describe('npcRoster classification', () => {
     });
 
     it('matches names title-insensitively', () => {
-        expect(namesMatch('Confessor Lannis', 'Lannis')).toBe(true);
-        expect(namesMatch('Lannis', 'Confessor Lannis')).toBe(true);
-        expect(namesMatch('Brother Caul', 'Caul')).toBe(true);
-        expect(namesMatch('Magister Galdric', 'Galdric')).toBe(true);
-        expect(namesMatch('John Smith', 'Jane Smith')).toBe(false);
-        expect(namesMatch('Lannis', 'Lannis')).toBe(true);
+        expect(shortlistNamesMatch('Confessor Lannis', 'Lannis')).toBe(true);
+        expect(shortlistNamesMatch('Lannis', 'Confessor Lannis')).toBe(true);
+        expect(shortlistNamesMatch('Brother Caul', 'Caul')).toBe(true);
+        expect(shortlistNamesMatch('Magister Galdric', 'Galdric')).toBe(true);
+        expect(shortlistNamesMatch('John Smith', 'Jane Smith')).toBe(false);
+        expect(shortlistNamesMatch('Lannis', 'Lannis')).toBe(true);
     });
 });
 
@@ -690,17 +690,17 @@ describe('normalizeCallbackHook — truncation fragments vs healthy hooks (2026-
 // save-version-4 migration (decision 4). The live roster compares exactly.
 describe('namesMatch containment (the shortlist) + the frozen fold (fork guard, 2026-07-23 romance playtest; frozen 2026-11-08)', () => {
     it('folds a bare first name into the full name and keeps distinct people apart', () => {
-        expect(namesMatch('Saima', 'Saima Aallotar')).toBe(true);
-        expect(namesMatch('Saima Aallotar', 'Saima')).toBe(true);
-        expect(namesMatch('Aallotar Saima', 'Saima Aallotar')).toBe(true); // reordered
-        expect(namesMatch('Risto', 'Saima Aallotar')).toBe(false);
-        expect(namesMatch('Mother Sorsa', 'Sorsa')).toBe(true); // existing title-strip rule intact
+        expect(shortlistNamesMatch('Saima', 'Saima Aallotar')).toBe(true);
+        expect(shortlistNamesMatch('Saima Aallotar', 'Saima')).toBe(true);
+        expect(shortlistNamesMatch('Aallotar Saima', 'Saima Aallotar')).toBe(true); // reordered
+        expect(shortlistNamesMatch('Risto', 'Saima Aallotar')).toBe(false);
+        expect(shortlistNamesMatch('Mother Sorsa', 'Sorsa')).toBe(true); // existing title-strip rule intact
     });
 
     it('never containment-matches generic or title-only names', () => {
-        expect(namesMatch('Guard', 'Guard Captain Toivo')).toBe(false);
-        expect(namesMatch('The Innkeeper', 'Saima Aallotar')).toBe(false);
-        expect(namesMatch('a bandit', 'Bandit King Ruho')).toBe(false);
+        expect(shortlistNamesMatch('Guard', 'Guard Captain Toivo')).toBe(false);
+        expect(shortlistNamesMatch('The Innkeeper', 'Saima Aallotar')).toBe(false);
+        expect(shortlistNamesMatch('a bandit', 'Bandit King Ruho')).toBe(false);
     });
 
     it('the frozen fold folds forked records: longer name, merged dossier, unioned moments, the short name kept as an alias', () => {
@@ -851,9 +851,11 @@ describe('KNOWN NPCs curation reserves slots for the scene (2026-09-06 P1)', () 
         const ranked = curateNpcsForPrompt([...rivals, ferrywoman], { location: 'Crossing', limit: 8, presentNames: null })
             .map(n => n.id);
         expect(ranked).toContain('ferry'); // location reservation alone already keeps her
-        const present = curateNpcsForPrompt([...rivals, ferrywoman], { location: 'Somewhere else', limit: 8, presentNames: ['Ilsa'] })
+        // Presence is an exact name or alias since lane 7; the short form alone seats nobody.
+        expect(curateNpcsForPrompt([...rivals, ferrywoman], { location: 'Somewhere else', limit: 8, presentNames: ['Ilsa'] }).map(n => n.id)).not.toContain('ferry');
+        const present = curateNpcsForPrompt([...rivals, { ...ferrywoman, aliases: ['Ilsa'] }], { location: 'Somewhere else', limit: 8, presentNames: ['Ilsa'] })
             .map(n => n.id);
-        expect(present).toContain('ferry'); // presence reservation, matched by short name
+        expect(present).toContain('ferry'); // presence reservation, matched by alias
         expect(present).toHaveLength(8);
         const absent = curateNpcsForPrompt([...rivals, ferrywoman], { location: 'Somewhere else', limit: 8 })
             .map(n => n.id);

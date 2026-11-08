@@ -95,7 +95,9 @@ describe('the tie is in the room — prompt rendering', () => {
     it('describeTiesForPrompt renders only the ties whose person shares the scene, at most two', () => {
         expect(describeTiesForPrompt(jethro, [])).toBe('');
         expect(describeTiesForPrompt(jethro, ['Maren Tull'])).toBe('');
-        expect(describeTiesForPrompt(jethro, ['Hesper'])).toBe('ties: Hesper Vane — distrusts her since the ferry money');
+        // "Hesper" reaches Hesper Vane through the roster's alias (lane 7); without the roster it is nobody.
+        expect(describeTiesForPrompt(jethro, ['Hesper'])).toBe('');
+        expect(describeTiesForPrompt(jethro, ['Hesper'], roster())).toBe('ties: Hesper Vane — distrusts her since the ferry money');
         expect(describeTiesForPrompt(jethro, ['Hesper Vane', 'Corvin'])).toBe('ties: Hesper Vane — distrusts her since the ferry money; Corvin — fears him');
     });
 

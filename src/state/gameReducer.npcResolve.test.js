@@ -174,12 +174,13 @@ describe('the frozen fold (legacyNpcIdentity, migration only): two full-named Ma
     });
 });
 
-describe('findCompanionRecord — the exact name first, then the short / long form (lane 7\'s row, unchanged)', () => {
-    it('prefers the exact record over a first-token match', () => {
+describe('findCompanionRecord — the exact name or alias, nothing else (lane 7, 2026-11-08)', () => {
+    it('the exact record, or the record whose alias it is; a short form alone finds nobody', () => {
         const roster = [{ id: 'a', name: 'Saima Aallotar' }, { id: 'b', name: 'Saima' }];
         expect(findCompanionRecord(roster, 'Saima').id).toBe('b');
         expect(findCompanionRecord(roster, 'saima aallotar').id).toBe('a');
-        expect(findCompanionRecord([{ id: 'a', name: 'Saima Aallotar' }], 'Saima').id).toBe('a');
+        expect(findCompanionRecord([{ id: 'a', name: 'Saima Aallotar' }], 'Saima')).toBeNull();
+        expect(findCompanionRecord([{ id: 'a', name: 'Saima Aallotar', aliases: ['Saima'] }], 'Saima').id).toBe('a');
         expect(findCompanionRecord(roster, '')).toBeNull();
         expect(findCompanionRecord(null, 'Saima')).toBeNull();
     });

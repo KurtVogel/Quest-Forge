@@ -32,12 +32,17 @@ describe('listKnownByNpc — what they know about you, from the epistemics layer
         { type: 'promise', text: 'Public promise.', knownBy: [] },
     ];
 
+    // A knower is this person by exact name, or by an alias the roster knows (lane 7).
+    const roster = [{ id: 'h', name: 'Maren Holt', aliases: ['Maren'] }, { id: 'o', name: 'Odo Ferrin', aliases: ['Odo'] }];
+
     it('lists private facts and cards whose knownBy names the NPC; never common knowledge or hero-only secrets', () => {
-        expect(listKnownByNpc({ name: 'Maren Holt' }, worldFacts, storyMemory).map(k => k.text)).toEqual([
+        expect(listKnownByNpc({ name: 'Maren Holt' }, worldFacts, storyMemory, { npcs: roster }).map(k => k.text)).toEqual([
             'The hero is the exiled heir of Saltmere.',
             'The hero swore never to return to Saltmere.',
         ]);
-        expect(listKnownByNpc({ name: 'Odo' }, worldFacts, storyMemory).map(k => k.text)).toEqual(['The hero owes Odo forty gold.']);
+        // Without the roster, "Maren" on the card is not "Maren Holt".
+        expect(listKnownByNpc({ name: 'Maren Holt' }, worldFacts, storyMemory).map(k => k.text)).toEqual(['The hero is the exiled heir of Saltmere.']);
+        expect(listKnownByNpc({ name: 'Odo' }, worldFacts, storyMemory, { npcs: roster }).map(k => k.text)).toEqual(['The hero owes Odo forty gold.']);
         expect(listKnownByNpc({ name: 'Bran' }, worldFacts, storyMemory)).toEqual([]);
         expect(listKnownByNpc({ name: 'Maren' }, 'junk', [null, 4])).toEqual([]);
     });
@@ -226,15 +231,18 @@ describe('resolveOpenThread — the Scribe thread wins, an active linked promise
             .toEqual({ text: 'Waiting to hear about the caravan.', source: 'scribe' });
     });
 
-    it('falls back to the newest active promise linked by name or subject, never a resolved or non-promise card', () => {
-        expect(resolveOpenThread({ name: 'Maren' }, cards)).toEqual({ text: 'The hero swore to Maren he would find the caravan.', source: 'promise' });
+    const roster = [{ id: 'h', name: 'Maren Holt', aliases: ['Maren'] }];
+
+    it('falls back to the newest active promise linked by name or subject (exact, or an alias the roster knows — lane 7), never a resolved or non-promise card', () => {
+        expect(resolveOpenThread({ name: 'Maren' }, cards, roster)).toEqual({ text: 'The hero swore to Maren he would find the caravan.', source: 'promise' });
+        expect(resolveOpenThread({ name: 'Maren' }, cards)).toBeNull();
         expect(resolveOpenThread({ name: 'Odo' }, cards)).toBeNull();
         expect(resolveOpenThread({ name: 'Bran' }, cards)).toEqual({ text: 'Bran expects the hero back by winter.', source: 'promise' });
         expect(resolveOpenThread({ name: 'Nobody' }, cards)).toBeNull();
     });
 
     it('survives hostile input', () => {
-        expect(resolveOpenThread({ name: 'Maren', openThread: { evil: true } }, cards).source).toBe('promise');
+        expect(resolveOpenThread({ name: 'Maren', openThread: { evil: true } }, cards, roster).source).toBe('promise');
         expect(resolveOpenThread({ name: 'Maren' }, 'junk')).toBeNull();
         expect(resolveOpenThread(null, [null, 4, { type: 'promise' }])).toBeNull();
     });

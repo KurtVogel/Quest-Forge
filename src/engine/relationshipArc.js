@@ -14,7 +14,7 @@
  * KNOWN NPCs line and the companion party line so the DM plays TOWARD the
  * thread every scene, and both lead the Journal / Companions cards.
  */
-import { NPC_BOND_MOMENT_MAX, namesMatch, normalizeBondMoments, selectKeyBondMoments } from './npcRoster.js';
+import { NPC_BOND_MOMENT_MAX, normalizeBondMoments, samePerson, selectKeyBondMoments } from './npcRoster.js';
 import { conversationalAgeSince } from './replayLedger.js';
 import { nameTokensPresent, textWordSet } from './textMatch.js';
 import { liveWorldFacts } from './worldFacts.js';
@@ -117,7 +117,7 @@ export function deriveRelationshipStage(npc = {}) {
  * linked name or subject) stands in as the thread — a promise IS the
  * pending thing between two people. Never invents one.
  */
-export function resolveOpenThread(npc = {}, storyMemory = []) {
+export function resolveOpenThread(npc = {}, storyMemory = [], npcs = null) {
     const own = text(npc?.openThread).slice(0, NPC_OPEN_THREAD_MAX);
     if (own) return { text: own, source: 'scribe' };
     const name = text(npc?.name);
@@ -125,8 +125,9 @@ export function resolveOpenThread(npc = {}, storyMemory = []) {
     for (let i = storyMemory.length - 1; i >= 0; i--) {
         const card = storyMemory[i];
         if (!card || card.type !== 'promise' || (card.status || 'active') !== 'active') continue;
-        const linked = (Array.isArray(card.linkedNpcNames) ? card.linkedNpcNames : []).some(n => namesMatch(n, name))
-            || (text(card.subject) && namesMatch(card.subject, name));
+        // Exact (lane 7): a link or subject is this person when it is their name or an alias the roster knows.
+        const linked = (Array.isArray(card.linkedNpcNames) ? card.linkedNpcNames : []).some(n => samePerson(n, name, npcs))
+            || (text(card.subject) && samePerson(card.subject, name, npcs));
         if (!linked) continue;
         const cardText = text(card.text).slice(0, NPC_OPEN_THREAD_MAX);
         if (cardText) return { text: cardText, source: 'promise' };
@@ -184,11 +185,11 @@ const HERO_KNOWER_RE = /^(the\s+)?(hero|player|pc|you)$/i;
  * "knowing something about you"). Derived from the epistemics layer, never
  * stored; capped, newest last.
  */
-export function listKnownByNpc(npc = {}, worldFacts = [], storyMemory = [], { limit = 6 } = {}) {
+export function listKnownByNpc(npc = {}, worldFacts = [], storyMemory = [], { limit = 6, npcs = null } = {}) {
     const name = text(npc?.name);
     if (!name) return [];
     const knows = (knownBy) => (Array.isArray(knownBy) ? knownBy : [])
-        .some(knower => typeof knower === 'string' && !HERO_KNOWER_RE.test(knower.trim()) && namesMatch(knower, name));
+        .some(knower => typeof knower === 'string' && !HERO_KNOWER_RE.test(knower.trim()) && samePerson(knower, name, npcs));
     const out = [];
     for (const fact of liveWorldFacts(worldFacts)) {
         const line = text(fact?.fact);
@@ -309,7 +310,7 @@ export function selectRelationshipBeatCandidate(npcs = [], storyMemory = [], { m
         if (!BEAT_ELIGIBLE_STAGES.has(stage)) continue;
         const away = conversationalAgeSince(npc.lastSeenMessage, { messages, messageCount });
         if (away === null || away < BOND_ABSENCE_MIN_MESSAGES) continue;
-        const thread = resolveOpenThread(npc, storyMemory);
+        const thread = resolveOpenThread(npc, storyMemory, npcs);
         if (!thread && stage !== 'rival') continue;
         const pull = (stage === 'intimate' || stage === 'rival' ? 4 : 3) + (thread ? 3 : 0) + Math.min(3, away / 20);
         if (!best || pull > best.pull) best = { npc, pull, stage, thread };
@@ -407,12 +408,12 @@ export function isRelationshipBeatExpired(beat, messageCount) {
     return Number.isFinite(messageCount) && messageCount > b.closesAtMessage;
 }
 
-/** Does this NPC record match the beat's target (id first, then name)? */
+/** Does this NPC record match the beat's target (id first, then the exact name — lane 7)? */
 export function beatTargets(beat, npc) {
     const b = sanitizeRelationshipBeat(beat);
     if (!b || !npc) return false;
     if (b.npcId && npc.id) return b.npcId === npc.id;
-    return namesMatch(b.npcName, npc.name);
+    return text(b.npcName).toLowerCase() === text(npc.name).toLowerCase() && !!text(npc.name);
 }
 
 const BEAT_MOVES = {
@@ -449,7 +450,7 @@ export function buildRelationshipBeatBlock(beat, npcs = [], { messageCount, comb
     // A travelling companion's breaking point (WOW 2026-10-13): the turn
     // beat's estranged / rival variant for a PARTY member is the moment they
     // say why and leave, or name the one condition on which they stay.
-    const inParty = (Array.isArray(party) ? party : []).some(c => typeof c?.name === 'string' && c.name && namesMatch(c.name, npc.name));
+    const inParty = (Array.isArray(party) ? party : []).some(c => typeof c?.name === 'string' && c.name && samePerson(c.name, npc.name, npcs));
     if (b.mode === 'turn') {
         const inScene = inParty || nameTokensPresent(textWordSet(presenceText), npc.name) === true;
         return inScene ? buildTurnBeatBlock(b, npc, { inParty }) : '';

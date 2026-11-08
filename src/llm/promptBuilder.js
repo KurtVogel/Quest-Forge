@@ -624,6 +624,7 @@ export function buildSystemPromptParts({ ledger = null, character, inventory, qu
             messages: ctx.messages,
             messageCount: ctx.messageCount,
             combatActive: ctx.combatActive,
+            npcs,
         });
         if (tellsBlock) {
             parts.push(tellsBlock, 'heroTells');
@@ -633,6 +634,7 @@ export function buildSystemPromptParts({ ledger = null, character, inventory, qu
             messages: ctx.messages,
             messageCount: ctx.messageCount,
             combatActive: ctx.combatActive,
+            npcs,
         });
         if (tellBeatBlock) {
             parts.push(tellBeatBlock, 'heroTellBeat');
