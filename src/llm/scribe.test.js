@@ -131,6 +131,14 @@ describe('Scribe story memory extraction', () => {
         expect(request.systemPrompt).toContain('REGISTER');
         expect(request.systemPrompt).toContain('neutral anatomical language');
         expect(request.systemPrompt).toContain('never in profanity or crude slang');
+        // An adult is never written in child or youth words (2026-11-09): a
+        // 42-year-old hero's 'giggles boyishly ... childish delight' tell rode
+        // every later DM prompt beside an intimate scene, and Gemini's
+        // non-configurable PROHIBITED_CONTENT class refused the next turn.
+        expect(request.systemPrompt).toContain('An ADULT is never described with child or youth words in any record');
+        expect(request.systemPrompt).toContain('A real child stays exactly as the fiction states.');
+        expect(request.systemPrompt).toContain("never 'boyishly' or 'childish'");
+        expect(request.systemPrompt).toContain('in the neutral REGISTER: plain anatomical words and adult words for adults, never slang');
     });
 
     it('passes personal stance and bond moments through to the NPC record', async () => {
@@ -451,6 +459,7 @@ describe('cadenced living-world reflection', () => {
         });
         expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('A journal cadence is not itself a reason');
         expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('Advance at most ONE front per reflection');
+        expect(sendMessage.mock.calls[0][0].systemPrompt).toContain('An adult is never described with child or youth words');
     });
 
     it('caps reflection story-memory cards at two per cadence', async () => {

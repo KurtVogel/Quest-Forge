@@ -147,6 +147,7 @@ describe('companion look resolves through the roster record (2026-09-12)', () =>
         const system = sendMessage.mock.calls.at(-1)[0].systemPrompt;
         expect(system).toContain('Skin tone, hair state (including baldness), build, and age are equally inviolable');
         expect(system).toContain('OPEN your prompt with every identity lock, copied word for word');
+        expect(system).toContain('Never describe an adult with child or youth words');
     });
 });
 

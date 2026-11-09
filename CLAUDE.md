@@ -115,6 +115,8 @@ docs/         STATUS, IDEAS, DECISIONS, the three queues, ARCHITECTURE.md, flows
   response MODE is a part after the format reminder. `promptBlocks.size.test.js` pins the ceilings.
 - **Write durable records frank in content, clinical in register.** Established looks, bodies and
   relationships are canon; never launder them. Include "unvarnished" in new LLM output prompts.
+  An adult is never written in child or youth words ("boyish", "childish") in any record or image
+  prompt; a real child stays as the fiction states (Gemini PROHIBITED_CONTENT, 2026-11-09).
 - **Stamp long-running writes** (`campaignStamp`) so a lane that outlives its campaign lands nothing.
 - 4-space indent, ES modules, function components + hooks; match the surrounding file.
 

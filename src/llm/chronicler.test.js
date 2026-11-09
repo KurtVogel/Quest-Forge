@@ -86,6 +86,7 @@ describe('writeChronicleChapters', () => {
         const request = sendMessage.mock.calls[0][0];
         expect(request.systemPrompt).toContain('Unvarnished');
         expect(request.systemPrompt).toContain('clinical in register');
+        expect(request.systemPrompt).toContain('An adult is never described with child or youth words');
         expect(request.systemPrompt).toContain('NEVER invent events');
         expect(request.userMessage).toContain('PLAYER (Eero Kaskinen):');
         expect(request.userMessage).toContain('CAMPAIGN PREMISE');

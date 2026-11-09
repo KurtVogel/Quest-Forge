@@ -255,6 +255,7 @@ describe('enrichNpcProfile relationship synthesis', () => {
         // Clinical register: frank content, neutral anatomical vocabulary.
         expect(request.systemPrompt).toContain('neutral anatomical vocabulary');
         expect(request.systemPrompt).toContain('never profanity or crude slang');
+        expect(request.systemPrompt).toContain('An adult is never described with child or youth words');
         expect(request.userMessage).toContain('appearance');
     });
 });
