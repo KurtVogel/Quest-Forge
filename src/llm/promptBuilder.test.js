@@ -110,6 +110,19 @@ describe('stable cache prefix (DECISIONS.md 2026-07-18)', () => {
         expect(text.indexOf('## RESPONSE FORMAT')).toBeLessThan(text.indexOf('## PLAYER CHARACTER'));
         expect(text.trimEnd().endsWith('cut every other sentence of description before you send.')).toBe(true);
     });
+
+    it('asks for plain words in the final reminder, before the length limit, and names the particular in plain words (2026-11-09)', () => {
+        // Vesa: paragraphs "full of ancient Roman architectural words … that
+        // even Google can hardly find". eval:plainwords on Flash: hard words
+        // per turn ~7.8 → 4.4 with the rule and its concrete swaps.
+        const text = prompt({ premise: 'A premise.' });
+        const plain = text.lastIndexOf('**PLAIN WORDS.**');
+        expect(plain).toBeGreaterThan(text.indexOf('## FINAL FORMAT REMINDER'));
+        expect(plain).toBeLessThan(text.lastIndexOf('**LENGTH IS A HARD LIMIT.**'));
+        expect(text).toContain('At most ONE specialist or archaic term in a whole turn');
+        expect(text).toContain('candle, not tallow dip; fire basket, not brazier');
+        expect(text).toContain('named in plain words a reader knows — "a stone pedestal", not "a fluted plinth"');
+    });
 });
 
 describe('party line carries the companion look from the roster record (2026-09-12)', () => {

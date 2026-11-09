@@ -31,7 +31,8 @@
     "eval:cardid": "node scripts/cardIdEval.mjs",
     "eval:placeid": "node scripts/placeIdEval.mjs",
     "eval:register": "node scripts/registerEval.mjs",
-    "eval:within": "node scripts/withinEval.mjs"
+    "eval:within": "node scripts/withinEval.mjs",
+    "eval:plainwords": "node scripts/plainWordsEval.mjs"
   },
   "dependencies": {
     "firebase": "^12.9.0",

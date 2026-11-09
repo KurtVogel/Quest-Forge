@@ -23,7 +23,7 @@ Boarding a ship at Cape Morrow, the DM named the hero's old ship, the Salt Queen
 ### Absence drift on boarding writes the present — status: `idea` (2026-11-09)
 Returning to the Salt Queen after 709 messages, the drift director wrote two developments and a fact about the scene itself — Orlo hauled aboard, the captain taking the passage fee, the ship clearing the roadstead — not the absence. Its "local people" were the ones who had just boarded with the hero. Fixes: leave out people whose location was set inside the arrival window (they were not there while the hero was away); for a ship, ask what happened to the vessel and crew while apart (see "A ship is a moving place").
 
-### Plain words: the DM's prose piles up rare terms — status: `idea` (2026-11-09, Vesa)
+### Plain words: the DM's prose piles up rare terms — status: `shipped` (2026-11-09 later still — DECISIONS.md; the prompt line, not the toggle; `eval:plainwords` ~7.8 → 4.4 hard words per turn on Flash) (2026-11-09, Vesa)
 Flash on the megacampaign: "cooperage gut", "iron fid", "oak bitts", "deadweight strain"; in Caer Eir-Vael Vesa looked up about 30 words. Vesa: even first-language readers would not know them all. Suspects: the length rule's "the one particular" (Flash's idea of a concrete detail is a rare noun), the steering words, and the player's own system prompt in Settings (which pushes frank adult prose). Fix to try: one style line — prefer plain words; at most one specialist term per turn, its meaning clear from the sentence — or a "Plain language" toggle. A prefix line, so one re-bill.
 
 ### A known name the DM reuses for a NEW person lands on the old one — status: `idea` (2026-11-09; no evidence yet)
