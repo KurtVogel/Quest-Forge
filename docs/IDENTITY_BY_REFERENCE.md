@@ -1,6 +1,6 @@
 # Identity by reference: inventory and proposed order
 
-**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11, 6, 7, 8 and 9 are built and deployed (9 in three slices on 2026-11-08: A exact places, KNOWN PLACES for the DM, `place_links`, save 6; B the held arrival, `within` as the cluster, lands exact, the evidence gate, save 7; C `same_place` in the reflection, the cap 80). Lane 9 was played the same night (the two-lands playtest, before and after on Flash: 8 → 7 records, no twins, one arguable reflection fold, two gaps fixed). Lane 8's 40-turn before/after ran on Flash 2026-11-08 twice: turn 20 held in both pairs and turn 40 in the second — 26 / 22 cards, 27 % / 32 %. Lane 9 was played on the megacampaign 2026-11-09: clean migrations, but the old rungs' wrong aliases and lands are exact truth now — slice 9D (the reflection repairs them) proposed. Open: 9D (proposed), 10 (on evidence).** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
+**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11, 6, 7, 8 and 9 are built and deployed (9 in three slices on 2026-11-08: A exact places, KNOWN PLACES for the DM, `place_links`, save 6; B the held arrival, `within` as the cluster, lands exact, the evidence gate, save 7; C `same_place` in the reflection, the cap 80). Lane 9 was played the same night (the two-lands playtest, before and after on Flash: 8 → 7 records, no twins, one arguable reflection fold, two gaps fixed). Lane 8's 40-turn before/after ran on Flash 2026-11-08 twice: turn 20 held in both pairs and turn 40 in the second — 26 / 22 cards, 27 % / 32 %. Lane 9 was played on the megacampaign 2026-11-09: clean migrations, but the old rungs' wrong aliases and lands are exact truth now — slice 9D was proposed, and Vesa chose a one-time repair of his save instead. Open: 10 (on evidence).** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
 2026-11-07 for the live proof. Line numbers hold at `667295b`, which changed no app code. Rule behind it: DECISIONS.md 2026-11-05 (first entry), with 2026-11-03 evening
 (`recorded_as`), 2026-11-02 (the repeat judge) and 2026-11-06 night (the id decides) as the lanes already moved.
 
@@ -356,6 +356,8 @@ Vesa loaded the megacampaign on the deployed build and played a session (STATUS.
 - **Cost:** no new call — the reflection already runs; its prompt grows by the bounded shortlist. A save of this size would heal in about 3–4 cadences (≈ 50 messages). A one-shot repair pass at load was considered and set aside: a load never calls an LLM.
 - **Proof:** this save. Expected after a few cadences: "Dunmire", "Caer Eir-Vael", the stern cabin and the Split Keel rooms moved or dropped; the castle in one land.
 
+**Vesa, 2026-11-09: not built as a lane.** The only old save that matters is his own, so the repair is done once on it: the fixes drafted from the snapshot, approved by Vesa line by line, applied from the console through LOAD_GAME after a backup save. The ✕ per alias in the Places tab stays an idea for future bad links. The same session found a lane 9 gap: a new place's container cannot itself be new, so "<spot>, Corve-in-the-South" records have no town to sit in (IDEAS.md 2026-11-09).
+
 ## Lane 10. Facts, evidence and the verifier
 
 Lowest harm. I'd build these only if you want the last of it gone, or if a playtest shows damage.
@@ -422,7 +424,7 @@ Ordered by: the id is already shown to the LLM, a defect closes, nothing else de
 | ~~7~~ | ~~People reads~~ | **Done 2026-11-08** | `namesMatch` left decisions; it is `shortlistNamesMatch` now | |
 | ~~8~~ | ~~Story cards~~ | **Done 2026-11-09** (merge lane + nearest cards first; the 40-turn Flash before/after held at turns 20 and 40) | | |
 | ~~9~~ | ~~Places~~ | **Done 2026-11-08** in three slices (A: exact lookups, KNOWN PLACES for the DM, the Scribe's copies and `place_links`, save 6; B: the held arrival tail, `within` as the cluster, lands exact, the evidence gate's known-copy bar, save 7; C: `same_place` in the reflection, the cap 80); played 2026-11-08 — DECISIONS.md late night | the containment fold, the kinship rule and the region rungs are gone; the shortlist and the evidence gate are the matchers left, both asking | Large, three slices |
-| 9D | Places: repair the old damage | The megacampaign play, 2026-11-09: wrong aliases and wrong lands now decide exactly | the wrong-land crossings, "Dunmire is a road" | Small to medium |
+| ~~9D~~ | ~~Places: repair the old damage~~ | **Not a lane** (Vesa, 2026-11-09): a one-time repair of the megacampaign save instead | | |
 | 10 | Facts, evidence, verifier | Low harm; on evidence or your say-so | | Medium |
 
 Each lane ships alone: pins, `npm test`, `npm run lint`, commit on master, build, deploy, a DECISIONS line.
