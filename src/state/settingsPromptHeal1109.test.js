@@ -18,8 +18,19 @@ describe('the default campaign prompt', () => {
         expect(DEFAULT_CUSTOM_SYSTEM_PROMPT).toContain('Keep description lean: describe a place only when it is new or when it matters, with at most one sensory detail, and never open a turn on a smell.');
         expect(DEFAULT_CUSTOM_SYSTEM_PROMPT).toContain('Save vivid, sensory narration for the moments that earn it');
         expect(DEFAULT_CUSTOM_SYSTEM_PROMPT).not.toContain('Use vivid, sensory narration for violence, fear, injury, intimacy, poverty, power, and consequence.');
-        // Everything after the first paragraph is the shipped text, unchanged.
-        expect(DEFAULT_CUSTOM_SYSTEM_PROMPT.split('\n\n').slice(1)).toEqual(OLD.split('\n\n').slice(1));
+        // NPCs push back (Vesa, the same evening: "gives a lot of character and life to it").
+        const NPC_LINE = ' They can refuse, lie, bargain, or want something in return.';
+        expect(DEFAULT_CUSTOM_SYSTEM_PROMPT).toContain(`Treat NPCs as people with independent motives, desires and agendas.${NPC_LINE}`);
+        // Everything else after the first paragraph is the shipped text, unchanged.
+        expect(DEFAULT_CUSTOM_SYSTEM_PROMPT.replace(NPC_LINE, '').split('\n\n').slice(1)).toEqual(OLD.split('\n\n').slice(1));
+    });
+
+    it('the default shipped for a few hours on 2026-11-09 is retired too and heals', () => {
+        expect(RETIRED_DEFAULT_CUSTOM_SYSTEM_PROMPTS).toHaveLength(2);
+        const interim = RETIRED_DEFAULT_CUSTOM_SYSTEM_PROMPTS[1];
+        expect(interim).toContain('Keep description lean');
+        expect(interim).not.toContain('They can refuse');
+        expect(healRetiredDefaultPrompt(interim)).toBe(DEFAULT_CUSTOM_SYSTEM_PROMPT.trim());
     });
 
     it('the retired default is the text shipped until 2026-11-09, verbatim', () => {

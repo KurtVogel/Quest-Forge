@@ -123,6 +123,20 @@ describe('stable cache prefix (DECISIONS.md 2026-07-18)', () => {
         expect(text).toContain('candle, not tallow dip; fire basket, not brazier');
         expect(text).toContain('named in plain words a reader knows — "a stone pedestal", not "a fluted plinth"');
     });
+
+    it('never offers the player options: the narration does not close on an either/or, even when earlier turns did (2026-11-09)', () => {
+        // Vesa: "let me decide" — "So do you look inside the hatch or wait
+        // first?". eval:menus on Flash, a history seeded with the habit:
+        // 18 of 18 turns closed on the narrator's either/or → 0 of 18.
+        const text = prompt({ premise: 'A premise.' });
+        const ask = text.indexOf('4. **THE ASK.**');
+        const rule = text.indexOf('**NEVER OFFER OPTIONS.**');
+        expect(rule).toBeGreaterThan(ask);
+        expect(rule).toBeLessThan(text.indexOf('## THE ROAD IS A SCENE'));
+        expect(text).toContain('the narration never closes on a question that lists their choices');
+        expect(text).toContain('and not because earlier turns ended that way');
+        expect(text).toContain('a character may still ask their own question in their own voice');
+    });
 });
 
 describe('party line carries the companion look from the roster record (2026-09-12)', () => {

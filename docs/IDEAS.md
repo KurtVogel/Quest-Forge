@@ -23,6 +23,9 @@ Boarding a ship at Cape Morrow, the DM named the hero's old ship, the Salt Queen
 ### Absence drift on boarding writes the present — status: `idea` (2026-11-09)
 Returning to the Salt Queen after 709 messages, the drift director wrote two developments and a fact about the scene itself — Orlo hauled aboard, the captain taking the passage fee, the ship clearing the roadstead — not the absence. Its "local people" were the ones who had just boarded with the hero. Fixes: leave out people whose location was set inside the arrival window (they were not there while the hero was away); for a ship, ask what happened to the vessel and crew while apart (see "A ship is a moving place").
 
+### A failed roll changes the situation, it never just stops it — status: `idea` (2026-11-09; the candidate Vesa did not pick)
+One sentence for the campaign prompt or the roll rules: failure as a complication, not a dead end. The roll paragraph already says to roll only when failure would change things; this would say what to do with the failure. Build on evidence that failed rolls read as dead ends in play.
+
 ### Ban the smell opener in the built-in turn rules too — status: `idea` (2026-11-09, Vesa)
 The default campaign prompt now says "never open a turn on a smell", but a player who wrote their own prompt never gets that line. THE ORDINARY TURN already bans the abstraction tics ("the air is thick", "silence hangs heavy"); the opener "your nostrils fill with…" / "the smell of X hits you" is the same kind of tic. Build it only if the smell opener survives the new default in play: one line in a prefix block (one re-bill), and the `eval:plainwords` harness can count smell openers per arm.
 
