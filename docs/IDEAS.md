@@ -2032,6 +2032,12 @@ Full context in `test-results/full_session/TEST_REPORT.md` (local) and STATUS.md
 
 ## Tech & Infra
 
+### Ask the browser to keep the campaign: persistent storage — status: `idea` (2026-11-09, Vesa: "what happens if someone deletes all cookies and history?")
+Everything a device holds — the autosave behind Continue, every local save, the memory index, scene art and portraits, and the settings with the API keys — lives in that browser's IndexedDB / localStorage, per device. The app never calls `navigator.storage.persist()`, so its storage is "best effort": under storage pressure (Android Chrome especially) the browser may evict the whole site's data without the player clearing anything. One call, made once when a campaign starts (or at the first save), asks the browser to keep it; Chrome usually grants it silently to a site the player uses often, and `navigator.storage.persisted()` tells the Settings panel whether it held. It does not survive a deliberate "clear cookies and site data" — that is the next entry's job. Zero cost, no prompt change.
+
+### Save to file and load from file — status: `idea` (2026-11-09, Vesa)
+A campaign is only as safe as its last cloud save, and cloud saves need the player's own Firebase. A "Save to file" button that downloads the campaign as one JSON file (the same `serializeGameState` payload a save writes — never settings or keys; images optional, they are large), and a "Load from file" that runs it through LOAD_GAME's validation and migrations like any save. It is a backup without Firebase, a way to move a campaign between devices (desktop ↔ Android), and a clean way to share a save for a bug report. The embedding cache is not in the file; the index rebuilds on the first load (≈ 2,500 items for the megacampaign, a few cents of embeddings). Tonight's hand repair of the megacampaign was done through the console for want of exactly this.
+
 ### [playtest] Findings from the 2026-09-30 proof day (six WOW proofs run) — status: `idea` backlog
 The six unrun WOW proof steps were run in one day (DECISIONS.md 2026-09-30; reports `docs/COMBAT_DRAMA_EVAL_2026-09-30.md`,
 `docs/ROLL_CONSEQUENCE_EVAL_2026-09-30.md`, `docs/OPENING_EVAL_2026-09-30.md`, `docs/PROOF_PLAYTEST_2026-09-30.md`). What they left open:
