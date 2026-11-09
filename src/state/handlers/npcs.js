@@ -1152,14 +1152,41 @@ export const handlers = {
         // and read by the cluster rule below in the same pass (a profile that
         // states both the container and a land inherits the container's land).
         let within = null;
+        // A container the record never held (2026-11-09, the megacampaign's
+        // Corve-in-the-South: every DM name was "<spot>, Corve-in-the-South",
+        // no record was the town, and the Scribe put the Exchange Arcade
+        // "within" the water-stairs — the one Corve record on its list). The
+        // Scribe may now name a container the fiction names that KNOWN PLACES
+        // lacks; the engine mints it as an unvisited record. The Scribe decides
+        // what contains what — the gates only refuse an invention: a proper
+        // name, not a land, not the place itself, and every word of it in the
+        // turn's text or the place's own name.
+        let base = locationsBefore;
+        let mintedContainer = null;
         if (!targetRecord.within && typeof rawProfile.within === 'string' && rawProfile.within.trim()) {
             const parentIdx = findLocationRecord(locationsBefore, rawProfile.within);
             const parent = parentIdx === -1 ? null : locationsBefore[parentIdx];
             if (parent && parent.id !== targetRecord.id && placeRootId(locationsBefore, parent) !== targetRecord.id) within = parent.id;
+            const containerName = rawProfile.within.trim().slice(0, LOCATION_NAME_MAX);
+            if (!parent
+                && isMintableLocationName(containerName)
+                && !isRegionNameOnly(locationsBefore, containerName)
+                && !(rawProfile.region && placeKey(rawProfile.region) === placeKey(containerName))
+                && placeKey(containerName) !== placeKey(name) && placeKey(containerName) !== placeKey(targetRecord.name)
+                && isLocationEvidencedInText(containerName, `${action.payload?.evidenceText || ''}\n${targetRecord.name}`)) {
+                const minted = upsertLocation(locationsBefore, containerName, { provisional: false });
+                const containerIdx = findLocationRecord(minted, containerName);
+                if (containerIdx !== -1 && minted.some(record => record.id === targetRecord.id)) {
+                    base = minted;
+                    within = minted[containerIdx].id;
+                    mintedContainer = minted[containerIdx].name;
+                    console.info(`[Location] "${mintedContainer}" recorded as the place "${targetRecord.name}" lies within — named by the Scribe, no record held it.`);
+                }
+            }
         }
         const clusterBase = within
-            ? locationsBefore.map(record => (record === targetRecord ? { ...record, within } : record))
-            : locationsBefore;
+            ? base.map(record => (record === targetRecord ? { ...record, within } : record))
+            : base;
         const clusterTarget = within ? { ...targetRecord, within } : targetRecord;
         if (region && !targetRecord.region) {
             const clusterRegion = clusterBase.find(record => record !== targetRecord && record.id !== targetRecord.id
@@ -1176,7 +1203,10 @@ export const handlers = {
             }
         }
         const profile = { ...rawProfile, region, within: within || undefined };
-        const locations = upsertLocation(locationsBefore, name, profile);
+        let locations = upsertLocation(base, name, profile);
+        // A town and the spot in it share a land: the minted container takes
+        // the land this classification settled on.
+        if (mintedContainer && region) locations = locations.map(record => (record.id === within && !record.region ? { ...record, region } : record));
         let next = { ...state, locations };
         // The tally's per-place feed (2026-10-26): the archetype / motifs the
         // Scribe tagged on this place, counted once per record.
