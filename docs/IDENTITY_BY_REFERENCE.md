@@ -1,6 +1,6 @@
 # Identity by reference: inventory and proposed order
 
-**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11, 6, 7, 8 and 9 are built and deployed (9 in three slices on 2026-11-08: A exact places, KNOWN PLACES for the DM, `place_links`, save 6; B the held arrival, `within` as the cluster, lands exact, the evidence gate, save 7; C `same_place` in the reflection, the cap 80). Lane 9 was played the same night (the two-lands playtest, before and after on Flash: 8 → 7 records, no twins, one arguable reflection fold, two gaps fixed). Open: 10 (on evidence) (8 in the small hours of 2026-11-09; its 40-turn before/after ran on Flash 2026-11-08 twice: turn 20 held in both pairs and turn 40 in the second — 26 / 22 cards, 27 % / 32 %). Open: 9 (review the design first), 10 (on evidence).** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
+**Status: order approved by Vesa 2026-11-07; decisions 2 to 4 accepted 2026-11-08. Lanes 1, 4, 5, 3, 2, 11, 6, 7, 8 and 9 are built and deployed (9 in three slices on 2026-11-08: A exact places, KNOWN PLACES for the DM, `place_links`, save 6; B the held arrival, `within` as the cluster, lands exact, the evidence gate, save 7; C `same_place` in the reflection, the cap 80). Lane 9 was played the same night (the two-lands playtest, before and after on Flash: 8 → 7 records, no twins, one arguable reflection fold, two gaps fixed). Lane 8's 40-turn before/after ran on Flash 2026-11-08 twice: turn 20 held in both pairs and turn 40 in the second — 26 / 22 cards, 27 % / 32 %. Lane 9 was played on the megacampaign 2026-11-09: clean migrations, but the old rungs' wrong aliases and lands are exact truth now — slice 9D (the reflection repairs them) proposed. Open: 9D (proposed), 10 (on evidence).** Rewritten 2026-11-06 (night) against `16f6d9f`, updated
 2026-11-07 for the live proof. Line numbers hold at `667295b`, which changed no app code. Rule behind it: DECISIONS.md 2026-11-05 (first entry), with 2026-11-03 evening
 (`recorded_as`), 2026-11-02 (the repeat judge) and 2026-11-06 night (the id decides) as the lanes already moved.
 
@@ -339,6 +339,23 @@ Most stored place strings already resolve exactly, because every SET_LOCATION sp
 its record. The gaps are `npc.lastLocation`, `npc.basedIn` and `card.location`, which the Scribe writes
 without passing through the registry. The migration seeds those.
 
+### Played on the megacampaign, 2026-11-09 — the old damage is exact truth now; slice 9D proposed
+
+Vesa loaded the megacampaign on the deployed build and played a session (STATUS.md 2026-11-09, megacampaign play, has the session's findings). Save versions 6 and 7 ran clean (60 records, 0 provisional, 38 with aliases, 7 with `within`). What the session showed sharpens the review's "the damage is in the records": lane 9 removed the rungs that built the bad records, but an exact alias or a stored land is now trusted absolutely, and nothing can take one back — `same_place` only merges.
+
+**What is wrong in this save:**
+- **Aliases that name another place** (about 10 records): "Dunmire" on *Coastal road approaching Dunmire*; "Caer Eir-Vael" on *Counting-House, Caer Eir-Vael* (and save 7 seeded three castle places `within` the counting-house through it); *Cabin* = two cabins a sea apart; *Tavern* = the Split Keel's rooms, beside *The Split Keel*; *Oxtooth* holds "The Drowned Rat, Oxtooth Gorge", beside *Drowned Rat*, and "Mountain ridges, en route to Oxtooth"; *River Ghyll* holds "Adit IV (…)" and "Crown Way north of River Ghyll"; *tunnel* holds "The Crown Way Tunnel, Eir-Vael"; *Armory* holds "Armory, Eir-Vael" beside an early Jewelglade armory.
+- **Lands that are wrong** (26 of 60 records carry one): Caer Eir-Vael's outer works in Eir-Vael and its inner works (11 records) in Jewelglade, the starting land across the sea; *Lower estuary, Cape Morrow* in Eir-Vael; Cape Morrow itself untagged. Every land comparison is exact now, so each of these is a crossing.
+- **Seen in play:** the DM moved the High Terrace counting-house from Eir-Vael to Cape Morrow, and the Scribe recorded it. The facts had it right; one 11-07 fact tied "the high terrace" to Cape Morrow, and the lands on the place card plausibly helped.
+
+**Slice 9D (proposed, not decided): the reflection repairs, from shortlists, by id.** The same shape as 9C:
+1. **`alias_check`.** A shortlist of suspect aliases: an alias that contains another record's name or alias whole, or is contained in one (the 9C head rule), and aliases on a record whose name is a bare generic word. Each offered as `record id | name | the alias | the other record it resembles`. The reflection answers per alias `"keep"`, `"move": <other id>` (the alias joins that record) or `"drop"`. Applied only for an offered alias; a console line each; bounded per cadence (4, like the merges).
+2. **`land_check`.** A shortlist of suspect lands: a record whose land differs from its `within` container's, from the land of a place it was travelled to or from, or from the land of a record sharing its ", <Place>" tail (a word shortlist; it decides nothing). Offered with KNOWN LANDS; the answer is an exact land from the list or `"keep"`. Bounded per cadence.
+3. **`within` re-check** rides 1: a `within` set through an alias that moved or was dropped is offered again.
+- **The player's fallback:** a ✕ on an alias in the Places tab (the tells' "That's not me" pattern), so a wrong alias the reflection never reaches can still go.
+- **Cost:** no new call — the reflection already runs; its prompt grows by the bounded shortlist. A save of this size would heal in about 3–4 cadences (≈ 50 messages). A one-shot repair pass at load was considered and set aside: a load never calls an LLM.
+- **Proof:** this save. Expected after a few cadences: "Dunmire", "Caer Eir-Vael", the stern cabin and the Split Keel rooms moved or dropped; the castle in one land.
+
 ## Lane 10. Facts, evidence and the verifier
 
 Lowest harm. I'd build these only if you want the last of it gone, or if a playtest shows damage.
@@ -405,6 +422,7 @@ Ordered by: the id is already shown to the LLM, a defect closes, nothing else de
 | ~~7~~ | ~~People reads~~ | **Done 2026-11-08** | `namesMatch` left decisions; it is `shortlistNamesMatch` now | |
 | ~~8~~ | ~~Story cards~~ | **Done 2026-11-09** (merge lane + nearest cards first; the 40-turn Flash before/after held at turns 20 and 40) | | |
 | ~~9~~ | ~~Places~~ | **Done 2026-11-08** in three slices (A: exact lookups, KNOWN PLACES for the DM, the Scribe's copies and `place_links`, save 6; B: the held arrival tail, `within` as the cluster, lands exact, the evidence gate's known-copy bar, save 7; C: `same_place` in the reflection, the cap 80); played 2026-11-08 — DECISIONS.md late night | the containment fold, the kinship rule and the region rungs are gone; the shortlist and the evidence gate are the matchers left, both asking | Large, three slices |
+| 9D | Places: repair the old damage | The megacampaign play, 2026-11-09: wrong aliases and wrong lands now decide exactly | the wrong-land crossings, "Dunmire is a road" | Small to medium |
 | 10 | Facts, evidence, verifier | Low harm; on evidence or your say-so | | Medium |
 
 Each lane ships alone: pins, `npm test`, `npm run lint`, commit on master, build, deploy, a DECISIONS line.
