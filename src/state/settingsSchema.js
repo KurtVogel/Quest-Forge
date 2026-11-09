@@ -17,6 +17,21 @@ import { PROVIDERS, RETIRED_MODEL_ALIASES } from '../llm/modelCatalog.js';
 import { PRESETS } from '../data/presets.js';
 import { normalizePaceDial } from '../engine/worldTempo.js';
 import { cleanTextField } from '../config/contentLimits.js';
+import { DEFAULT_CUSTOM_SYSTEM_PROMPT, RETIRED_DEFAULT_CUSTOM_SYSTEM_PROMPTS } from '../data/dmStylePrompt.js';
+
+/** Line endings and the outer whitespace are not an edit. */
+const promptKey = text => String(text || '').replace(/\r\n?/g, '\n').trim();
+const RETIRED_PROMPT_KEYS = new Set(RETIRED_DEFAULT_CUSTOM_SYSTEM_PROMPTS.map(promptKey));
+
+/**
+ * A saved campaign prompt that is still, character for character, a default
+ * this game used to ship was never edited by the player: it moves to the
+ * current default (2026-11-09, the lean-description paragraph). Anything else
+ * is the player's own words and is kept as written.
+ */
+export function healRetiredDefaultPrompt(prompt) {
+    return RETIRED_PROMPT_KEYS.has(promptKey(prompt)) ? cleanTextField(DEFAULT_CUSTOM_SYSTEM_PROMPT, SETTINGS_CUSTOM_PROMPT_MAX) : prompt;
+}
 
 export const SETTINGS_KEY_MAX = 512;
 export const SETTINGS_MODEL_MAX = 120;
@@ -41,6 +56,7 @@ export function sanitizeSettings(raw) {
     for (const [key, max] of Object.entries(STRING_FIELDS)) {
         if (key in raw) out[key] = cleanTextField(raw[key], max);
     }
+    if (typeof out.customSystemPrompt === 'string') out.customSystemPrompt = healRetiredDefaultPrompt(out.customSystemPrompt);
     if ('llmProvider' in raw && typeof raw.llmProvider === 'string' && Object.prototype.hasOwnProperty.call(PROVIDERS, raw.llmProvider)) {
         out.llmProvider = raw.llmProvider;
     }

@@ -8,6 +8,14 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-11-09 (last) · The default campaign prompt keeps description lean; an unedited old default moves to it on load. EXTENDS 2026-11-09 later still (plain words) and 2026-07-15 (the custom prompt is the player's explicitness choice).**
+
+Vesa, reading his own campaign prompt (still the shipped default, word for word): "the vivid sensory thing is over-done often, like I'm stepping into the next room and my nostrils are filled with the smell of tallow, parapets, fluted brass thingamajigs, copper and tallow again." The first paragraph asked for "vivid, sensory narration for violence, fear, injury, intimacy, poverty, power, and consequence" — poverty and power are in nearly every scene, so it read as "vivid always", and THE ORDINARY TURN's one particular stacked on it. Vesa: "do that initialState.js update".
+1. **The first paragraph now reads:** "… Keep description lean: describe a place only when it is new or when it matters, with at most one sensory detail, and never open a turn on a smell. Save vivid, sensory narration for the moments that earn it — violence, fear, injury, intimacy, and consequence. …" Every other paragraph (rolls, agency, adult content and its explicitness) is unchanged, pinned.
+2. **The default moved to `src/data/dmStylePrompt.js`**, with the old one kept verbatim in `RETIRED_DEFAULT_CUSTOM_SYSTEM_PROMPTS`.
+3. **The heal (`sanitizeSettings`, run on every settings load):** a saved prompt that is still exactly a retired default — line endings and outer whitespace aside — was never edited, so it becomes the current default; any edit, however small, is the player's own and is kept. Vesa's own prompt heals on his next load on each device. Exact comparison against shipped text, no word rule.
+**Not measured on its own:** the paragraph rides with the PLAIN WORDS rule measured the same evening; the smell opener is the next thing to watch in play. Tests 4,700 (`src/state/settingsPromptHeal1109.test.js`), lint clean.
+
 **2026-11-09 (later still) · The DM writes plain words: at most one specialist or archaic term in a whole turn, with concrete swaps for Flash's favourites; the one particular is named in words a reader knows. EXTENDS 2026-10-31 (the length lever: the countable limit stays the prompt's last words) and 2026-09-11 (THE ORDINARY TURN's "ONE PARTICULAR").**
 
 Vesa, from the megacampaign: "it's been super heavy reading 2-3 paragraphs full of some ancient Rome architectural words … very rare words for some supports for statues"; in Caer Eir-Vael he looked up about 30 words, and he is sure first-language readers would not know them all either. Suspects, both ours: the turn's "ONE PARTICULAR" (Flash's idea of a concrete detail is a rare noun) and the default campaign prompt's "vivid, sensory narration".
