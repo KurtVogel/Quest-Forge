@@ -4482,3 +4482,28 @@ produced a transcript line byte-identical to the engine's. When a prompt trusts 
 `recorded_as`, an id), the composer guarantees the marker cannot appear inside a row's text — collapse,
 escape or fence. Payoff: an error row that is a sentence, a stream that ends when the line never does, a
 SESSION HISTORY that is history and not instructions, and a system line only the engine can write.
+
+### [strengthening] The audit grep is `trim().slice(`; a carried id is text; a retry budget multiplies across its owners; canon selected by recency is canon about wherever the hero was last — status: `idea` (2026-11-09)
+Four rules from the prompt-building + living-world pass of 2026-11-09 (prompt-building Lap 2, hostile input;
+living-world Lap 3, performance & token budget), each reproduced with a throwaway probe over the real
+`normalizeEvents` → `applyEvents` → reducer → `buildSystemPromptParts` chain, the real load twins and the
+real director context builders. **(1)** Three sweeps fixed the "`\n## ` is a heading" class one composer at a
+time (`clipMemoryText`, the enemy name, the journal summary); seven DM-lane composers were still
+trim-and-slice — an item name, a companion's four texts, a quest id, a roll description, a fact category,
+the location, the Scribe's two place fields — and each printed forged headings into its block, every turn,
+for the record's life, and survived the save. The grep is `trim().slice(` and `cleanTextField(` without
+`singleLine` across the wire normalizers and the load twins; for every hit ask "does a block print it?" —
+`cleanText` is the default and a multi-line record names why. **(2)** The quest id is the one `[id: …]` a DM
+`new` row may supply, and the engine's exact-copy rule then makes that text the handle: a lane-writable id
+goes through an id pattern or is replaced by a mint. **(3)** The adapter retries (3 requests), the director
+ledger retries (3 attempts), and the fan-out effect runs every ready director at once (four can arm in one
+turn): the cost of one unparseable reply is the PRODUCT — nine DM-model requests, ~650k chars for one
+aftermath; four directors at once is ~54k tokens of uncached input in the second the player's turn starts.
+For every background call, multiply `maxRetries + 1` by the ledger's attempts by the directors that can fire
+together; the background lane wants `maxRetries: 0` (the ledger IS its retry) and one director per pass.
+**(4)** `baseDirectorContext` selects canon by `slice(-N)`, and the absence-drift director — asked what
+happened at the RETURN place — was sent 20 facts about the absence and 0 about the place, four journal
+entries all from the road; the regional seed's "narration in this region" is ≥ 8 rows of the old land. A
+director bound to a place or an arrival selects by the stamps that define them (the stay's window, the
+arrival's row), never by recency. Payoff: a prompt whose headings are all the builder's, a quest handle no
+reply can forge, a bad director reply that costs one request, and a drift that knows the town it writes about.
