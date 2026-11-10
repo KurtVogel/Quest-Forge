@@ -34,16 +34,23 @@ const FALSE_FLAG_WORDS = new Set(['false', 'no', 'off', '0', 'none', 'null', 'un
 
 /**
  * A LANE boolean (the 09-15 `is_undead` rule): "false" / "no" / "0" / "" are
- * false, anything else truthy is `!!`. Read wherever an LLM or an import may
+ * false, any other word is true. Read wherever an LLM or an import may
  * spell a flag as a word. One shelf since 2026-10-12 (story-memory Lap-4 P2):
  * four private `toFlag`s under one name carried TWO semantics.
+ *
+ * Type-strict like the rest of this shelf (2026-11-10 strengthening P1): only
+ * a boolean, a number or a string carries a flag. `!!` read `{}` and `[]` —
+ * an empty list copied from a neighbouring wire — as true, and `level_up: []`
+ * paid the story milestone.
  */
 export function toFlag(value) {
     if (typeof value === 'string') {
         const word = value.trim().toLowerCase();
         return word !== '' && !FALSE_FLAG_WORDS.has(word);
     }
-    return !!value;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return Number.isFinite(value) && value !== 0;
+    return false;
 }
 
 const TRUE_FLAG_WORDS = new Set(['true', 'yes', 'on', '1']);

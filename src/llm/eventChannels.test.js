@@ -5,7 +5,7 @@
  * `damage_dealt` channel was advertised to the DM for months while the engine
  * ignored every value it emitted. These tests make that class of drift fail CI.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { EVENT_CHANNELS, KNOWN_WIRE_KEYS, RETIRED_WIRE_KEYS, normalizeEvents, validateCombatStart } from './eventChannels.js';
 import { RESPONSE_FORMAT } from './promptBuilder.js';
 
@@ -331,6 +331,31 @@ describe('hostile wire shapes (2026-09-15 audit, Lap 2)', () => {
         expect(normalizeEvents({ level_up: 'no' }).levelUp).toBe(false);
         expect(normalizeEvents({ level_up: true }).levelUp).toBe(true);
         expect(normalizeEvents({ level_up: 'true' }).levelUp).toBe(true);
+    });
+
+    it('level_up is false for every non-flag shape: an empty list or object buys no milestone (2026-11-10 audit P1)', () => {
+        for (const junk of [{}, [], [true], { level: 2 }, null, undefined, NaN, () => true]) {
+            expect(normalizeEvents({ level_up: junk }).levelUp).toBe(false);
+        }
+        expect(normalizeEvents({ level_up: 1 }).levelUp).toBe(true);
+        expect(normalizeEvents({ level_up: 0 }).levelUp).toBe(false);
+    });
+
+    it('player_death is declared, never truthy: a flag word, an empty object or a list is no death (2026-11-07 audit P1)', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            for (const spelling of ['false', 'no', 'none', 'null', 'N/A', '', {}, [], false, 0, null, undefined, [{ description: 'x' }], 'The tower falls on them.', { cause: 'a fall' }]) {
+                expect(normalizeEvents({ player_death: spelling }).playerDeath).toBeNull();
+            }
+            // A plain "no" is quiet; junk says so once each.
+            const warned = warn.mock.calls.filter(call => String(call[0]).includes('Ignored player_death'));
+            expect(warned).toHaveLength(6); // 'N/A', {}, [], [{…}], the prose string, { cause }
+        } finally {
+            warn.mockRestore();
+        }
+        for (const yes of [true, 'true', 'yes', 1]) {
+            expect(normalizeEvents({ player_death: yes }).playerDeath).toEqual({ description: 'Your character has fallen.' });
+        }
     });
 
     it('the integer wires floor fractions at the boundary (2026-09-19 audit P2)', () => {

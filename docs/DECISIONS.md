@@ -8,6 +8,14 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-11-10 · A lane flag is a boolean, a number or a word; a hero's death is declared, never truthy. EXTENDS 2026-09-19 (a flag wire is a `toFlag` wire) and the 2026-09-08 type-strict text rule.**
+
+Two queue P1s, one root: `toFlag` read any non-string by `!!`, and `player_death` read by `if (!raw.player_death)`.
+1. **`toFlag` is type-strict:** a boolean is itself, a finite number is non-zero, a string is its word; every other shape (`{}`, `[]`, a function, `null`) is false. Why: an empty list copied from a neighbouring list wire bought the story milestone through `level_up` (+150 XP at L1). One helper, so every wire that reads through it changes together (items, enemies, tells, cards, the NPC thread).
+2. **`player_death` has two declaring shapes:** a plain object carrying a `description` key (a junk-typed description keeps the fallback line), or a bare yes through `triFlag` (`true` / "true" / "yes" / 1). A worded no is quiet; anything else is no death with one warn. Why: "false" / "none" / "N/A" / `{}` / `[]` finished a campaign at full HP, the one irreversible outcome in the game.
+3. **A bare prose string is refused** (`"player_death": "The tower falls."`). Why: the format documents the object, and reading "a string that looks like a sentence" as a death is a word rule over DM text. The cost is a narrated death that is not recorded; the warn names it. Revisit on the first live case.
+4. **The stale check found nothing stale:** the 40 other open queue items were re-read against the code after lanes 3–11; none had been fixed in passing. Identity by reference removed matchers, not the clamps and projections the queue lists.
+
 **2026-11-09 (the session's end) · The narration never closes on the player's options; NPCs can refuse. EXTENDS 2026-09-11 (THE ASK: the live question, never a stacked menu) and 2026-11-09 last (the default campaign prompt).**
 
 Vesa: "I haven't really liked it asking me 'do you a) or do you b)' in the end. it's like, let me decide" — not a list, a natural-sounding close: "So do you look inside the hatch or wait first?" THE ASK banned only STACKED rhetorical questions, so one either/or slipped through.

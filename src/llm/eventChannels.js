@@ -22,7 +22,7 @@ import { normalizeCombatExchange, reconcileStartingCombatExchange } from '../eng
 import { dedupeCastTargets } from '../engine/spellcasting.js';
 import { DEFAULT_ROLL_DC, LOCATION_NAME_MAX, MAX_COIN_EVENT, MAX_COMBAT_ENEMIES, MAX_ROLL_DC } from '../config/contentLimits.js';
 import { toFiniteNumber } from '../data/items.js';
-import { toFlag } from '../engine/text.js';
+import { toFlag, triFlag } from '../engine/text.js';
 import { normalizeConditionName, findSkillInText, CONDITION_LIST_CAP } from '../engine/rules.js';
 
 /**
@@ -577,12 +577,24 @@ export const EVENT_CHANNELS = [
         wire: 'player_death', key: 'playerDeath',
         // String-or-fallback + clamp (2026-09-15 audit P2): an object description
         // rendered "**[object Object]**" in the death line and PLAYER_DEFEAT.
+        // A death is DECLARED, never read by truthiness (2026-11-07 audit P1):
+        // `if (!raw.player_death)` let "false" / "none" / "N/A" / `{}` / `[]`
+        // finish a campaign at full HP. Two shapes declare one: the documented
+        // object carrying a `description`, or a bare yes (`true` / "true" /
+        // "yes" / 1). Anything else is no death; junk says so once.
         read: raw => {
-            if (!raw.player_death) return null;
-            const text = isPlainObject(raw.player_death) && typeof raw.player_death.description === 'string'
-                ? raw.player_death.description.trim().slice(0, 500)
-                : '';
-            return { description: text || 'Your character has fallen.' };
+            const value = raw.player_death;
+            if (value === null || value === undefined) return null;
+            if (isPlainObject(value) && 'description' in value) {
+                const text = typeof value.description === 'string' ? value.description.trim().slice(0, 500) : '';
+                return { description: text || 'Your character has fallen.' };
+            }
+            const verdict = triFlag(value);
+            if (verdict === true) return { description: 'Your character has fallen.' };
+            if (verdict === undefined && !(typeof value === 'string' && toFlag(value) === false)) {
+                console.warn('[eventChannels] Ignored player_death — it must be { "description": "..." } or null.');
+            }
+            return null;
         },
     },
     // combat_exchange is registered for wire-key recognition; its normalization
