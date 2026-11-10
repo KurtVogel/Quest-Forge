@@ -8,6 +8,14 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-11-10 (the session's end) · One DM story milestone per character level; a quest completion beside `level_up` keeps paying both. REVISES 2026-09-07 ("two milestones = exactly one level") — revisited with Vesa, who said build it.**
+
+The 11-10 progression audit called a quest completion + `level_up` in one reply (188 of 300 XP at L1) a double pay. It is not: 09-07 bounds one reply at the milestone tier (50 %) + the quest tier (12.5 %), and `level_up` + a freeform bonus pays the same 188 with no quest at all.
+1. **The pairing stays.** Dropping `level_up` beside a completion is bypassed one turn later and loses a real finale's milestone; absorbing the quest's XP ("pay once, the larger" — approved, then withdrawn before a line was written) pays a verified completion less than an unverified bonus. Pinned: every pairing lands on 62.5 %.
+2. **The DM milestone is capped at one per level.** `character.milestoneLevel` stamps the level it was paid at (read before the award may cross a level); a second at that level pays nothing, says so in one DM-visible line, and its bonus still pays. Why: the tier bounded the amount, nothing bounded the frequency — outside the 12-row replay window every emission paid half a level. Now at least half of every level comes from what the engine can verify (fronts, quests, fights). rpg-balance-master's ruling.
+3. **LEVELING is reworded:** a milestone is "an arc closed, a turning point in the hero's story — never an ordinary quest's end", paid once per level. Why: "a great deed decisively completed" invited `level_up` on every completion. A true finale may still carry both.
+4. **Accepted costs:** a campaign with two real milestones inside one level loses the second (it is told so); a hero taken through the roster into a new campaign starts with no stamp; no provider run measured the new wording. Built without evidence that Flash over-emits `level_up` — Vesa's call over my "count it first".
+
 **2026-11-10 (later) · A director bound to a place or an arrival selects by stamp; directors run one at a time, one request per attempt. EXTENDS 2026-09-20 (the director give-up rule) and 2026-10-03 (one shared director context).**
 
 The three living-world queue items of 11-09, fixed before the megacampaign's first arrival in a land the save never had.

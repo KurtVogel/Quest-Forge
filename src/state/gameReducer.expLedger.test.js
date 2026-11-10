@@ -216,16 +216,18 @@ describe('DM XP lanes are bounded engine-side (2026-09-07)', () => {
         expect(state.messages.at(-1).content).toContain('story milestone');
     });
 
-    it('four milestones outside the echo window are two levels, not four', () => {
+    it('four milestones outside the echo window are ONE half level, not two levels (one per level, 2026-11-10; was two levels since 09-07)', () => {
         let state = makeState();
         for (let i = 0; i < 4; i++) {
             state = gameReducer(state, dmLevelUp(0, { sourceId: `msg-${10 + i}` }));
             state = passTurns(state, 14); // outside the 12-message echo window (2026-10-31)
         }
-        // L3 (1800) crossed by two milestones of 900, L4 (3800) by two of 1900.
-        expect(state.character.level).toBe(5);
-        expect(state.character.exp).toBe(0);
+        // The first pays 900 of L3's 1800; the other three find the level's
+        // milestone already paid. Not the echo ledger's refusal: the cap's.
+        expect(state.character.level).toBe(3);
+        expect(state.character.exp).toBe(900);
         expect(state.messages.some(m => (m.content || '').includes('Duplicate'))).toBe(false);
+        expect(state.messages.filter(m => (m.content || '').includes('already paid (one per level)'))).toHaveLength(3);
     });
 
     it('exp_awarded is capped at the quest tier, and the XP line itself says so', () => {

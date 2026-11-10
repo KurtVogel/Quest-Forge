@@ -215,6 +215,10 @@ function applySingleLevelUp(character, { keepDowned = false } = {}) {
  * same weight as decisively ending a campaign pressure), and a DM bonus is
  * capped at the QUEST tier (12.5%) — a freeform flourish can never outrank a
  * completed quest. Neither lane can cross more than one level per emission.
+ *
+ * Since 2026-11-10 the milestone is also bounded in FREQUENCY: one per
+ * character level (`character.milestoneLevel`, the LEVEL_UP handler), so
+ * "two milestones = one level" no longer happens inside a single level.
  */
 
 /** XP a DM-declared story milestone (`level_up: true`) is worth: the front tier. */

@@ -547,15 +547,28 @@ export const handlers = {
             // +25000 XP through the threshold table's last-row fallback — a
             // number with no level behind it); the bonus still pays.
             const atCap = isMaxLevel(level);
-            const milestoneXp = atCap ? 0 : getStoryMilestoneXp(level);
-            if (atCap && bonusExp <= 0) {
+            // ONE DM milestone per level (2026-11-10, rpg-balance-master
+            // ruling): the tier bounded what one `level_up` pays, nothing
+            // bounded how OFTEN it fires — outside the 12-row replay window
+            // every emission paid half a level, so a DM that marks each
+            // quest's end a milestone levels the hero every second quest.
+            // `character.milestoneLevel` is the level the last one paid at; a
+            // second at that level pays nothing and says so (the bonus, like
+            // at max level, still pays). At least half of every level now
+            // comes from what the engine can verify: fronts, quests, fights.
+            const spent = !atCap && state.character?.milestoneLevel === level;
+            const unpaid = atCap
+                ? 'max level reached, no level gained'
+                : (spent ? `this level's milestone is already paid (one per level)` : '');
+            const milestoneXp = unpaid ? 0 : getStoryMilestoneXp(level);
+            if (unpaid && bonusExp <= 0) {
                 return {
                     ...state,
                     recentExpAwards,
                     messages: [
                         ...state.messages,
                         ...extraMessages,
-                        systemMessage('**Story milestone** — max level reached, no level gained.', { dmVisible: true }),
+                        systemMessage(`**Story milestone** — ${unpaid}.`, { dmVisible: true }),
                     ],
                 };
             }
@@ -563,8 +576,13 @@ export const handlers = {
             const bonusNote = bonusExp > 0 && bonusExp < requestedBonus
                 ? ` + bonus ${bonusExp}, capped from ${requestedBonus}`
                 : '';
-            return foldExperience({ ...state, recentExpAwards, messages: [...state.messages, ...extraMessages] }, milestoneXp + bonusExp, {
-                reason: `${atCap ? 'story milestone — max level reached, no level gained' : 'story milestone'}${bonusNote}`,
+            // The stamp is the level the milestone was PAID at — read before
+            // the award may cross into the next one, where a new one is owed.
+            const character = milestoneXp > 0 && state.character
+                ? { ...state.character, milestoneLevel: level }
+                : state.character;
+            return foldExperience({ ...state, character, recentExpAwards, messages: [...state.messages, ...extraMessages] }, milestoneXp + bonusExp, {
+                reason: `${unpaid ? `story milestone — ${unpaid}` : 'story milestone'}${bonusNote}`,
                 // A DM-declared milestone never stands a down hero up (see ADD_EXP).
                 keepDowned: isHeroDown(state.character || {}),
             });

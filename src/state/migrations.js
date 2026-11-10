@@ -360,9 +360,17 @@ function healLoadedCharacter(character) {
     const name = cleanTextField(character.name, HERO_TEXT_LIMITS.name) || 'Adventurer';
     // The portrait PROMPT is never read anywhere (2026-09-21 audit P2) — up to
     // 2,000 chars of write-only ballast on every autosave; stripped at load.
-    const { portraitPrompt: _portraitPrompt, ...kept } = character;
+    // The level a DM story milestone last paid at (2026-11-10, one per level)
+    // is a whole level the hero has reached, else no stamp at all: a string
+    // never equals the level it is compared to, and a stamp ABOVE the hero's
+    // level would withhold a milestone they have not been paid.
+    const { portraitPrompt: _portraitPrompt, milestoneLevel: rawMilestoneLevel, ...kept } = character;
+    const milestoneLevel = Number.isInteger(rawMilestoneLevel) && rawMilestoneLevel >= 1 && rawMilestoneLevel <= level
+        ? rawMilestoneLevel
+        : null;
     const healed = {
         ...kept,
+        ...(milestoneLevel !== null && { milestoneLevel }),
         // The hero id is the roster's own key and is typed like every other
         // identity field (2026-10-19 character-vault P2): string-or-mint. A
         // non-string id (`42`, `{}`) rode the spread, `toHeroTemplate` kept a
