@@ -37,12 +37,11 @@ status. STATUS is a handoff; the live queues own their current open items.
    master-only workflow, including its code-shipping deployment rule.
 2. Read the current STATUS handoff and task-relevant entries above. Inspect code only
    as needed. Recheck old findings against current implementation.
-3. For race/class/combat/balance work, use `rpg-balance-master` when available. Its
-   [definition](agents/rpg-balance-master.toml) and
-   [shared memory index](../.claude/agent-memory/rpg-balance-master/MEMORY.md) are tracked.
-   Read relevant rulings explicitly; agent-memory files are not a substitute for loading
-   their contents. If the runtime does not expose the agent, read its definition and
-   rulings, perform the review directly, and report that limitation.
+3. For race/class/combat/balance work, review directly against the current engine code.
+   The `rpg-balance-master` agent was retired 2026-11-11 (DECISIONS). Its old rulings
+   stay as history under the
+   [shared memory index](../.claude/agent-memory/rpg-balance-master/MEMORY.md); DECISIONS
+   is the authority, and a note there may be stale against the code.
 4. Use `npm.cmd` / `npx.cmd` on Windows. Run AGENTS' required checks for changed code;
    distinguish unit tests, build, real-provider playtests, and deployment evidence.
    For documentation-only work, check the diff, links, and twin consistency.
@@ -69,9 +68,8 @@ Official reference: [Codex AGENTS.md discovery and size limits](https://learn.ch
   simply because files exist. Existing schedules remain owned by their documented
   runners. Consume their queues; create or migrate a schedule only when asked. An
   explicitly requested audit follows the same registry, rotation, and reporting rules.
-- Keep shared balance findings under `.claude/agent-memory/rpg-balance-master/` and link
-  them from its MEMORY index. `.codex/agent-memory/` bridges existing Codex notes.
-  Avoid two independent sets of rulings; promote project-wide choices into DECISIONS.
+- The balance notes under `.claude/agent-memory/rpg-balance-master/` and
+  `.codex/agent-memory/` are history; add no new ones. Record balance choices in DECISIONS.
 - Tool availability, credentials, and hosted Linux browser paths are session capabilities,
   not guarantees of this Windows checkout. Check availability without printing secrets.
   Report unavailable real-provider validation honestly.

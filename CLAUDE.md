@@ -18,8 +18,9 @@ NPC intent. LLM-rich does not mean verbose: ordinary turns stay brief.
 
 - **Stack:** React 19 + Vite 7, plain `.js`/`.jsx` (one `.ts`: the dice engine). Package `rpg-client`.
 - **Deploy:** Firebase Hosting, project `quest-forge-99ab1` → https://quest-forge-99ab1.web.app
-- **Content:** 4 races, 4 classes (`src/data/`); the deliberately trimmed core set. Use the
-  `rpg-balance-master` subagent for any race / class / combat / balance work.
+- **Content:** 4 races, 4 classes (`src/data/`); the deliberately trimmed core set. Balance work is
+  done in the main session against the current engine code (the `rpg-balance-master` subagent was
+  retired 2026-11-11; its old rulings stay in `.claude/agent-memory/rpg-balance-master/` as history).
 
 ## Session start and session end
 

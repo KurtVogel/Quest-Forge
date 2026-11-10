@@ -18,8 +18,9 @@ NPC intent. LLM-rich does not mean verbose: ordinary turns stay brief.
 
 - **Stack:** React 19 + Vite 7, plain `.js`/`.jsx` (one `.ts`: the dice engine). Package `rpg-client`.
 - **Deploy:** Firebase Hosting, project `quest-forge-99ab1` → https://quest-forge-99ab1.web.app
-- **Content:** 4 races, 4 classes (`src/data/`); the deliberately trimmed core set. Use the
-  `rpg-balance-master` subagent for any race / class / combat / balance work.
+- **Content:** 4 races, 4 classes (`src/data/`); the deliberately trimmed core set. Balance work is
+  done in the main session against the current engine code (the `rpg-balance-master` subagent was
+  retired 2026-11-11; its old rulings stay in `.claude/agent-memory/rpg-balance-master/` as history).
 
 ## Session start and session end
 
@@ -156,6 +157,6 @@ docs/         STATUS, IDEAS, DECISIONS, the three queues, ARCHITECTURE.md, flows
   with `node scripts/build-docs-map.mjs`).
 - `docs/DECISIONS.md` — every settled call with its reason (dated, newest first).
 - `docs/LLM_WOW_LAYER.md` — the narrative-memory design note.
-- `.codex/README.md` — Codex routing (shared balance memory, session conventions); `CLAUDE.md` is this file's twin for Claude Code.
+- `.codex/README.md` — Codex routing (session conventions); `CLAUDE.md` is this file's twin for Claude Code.
 - The previous guide (every subsystem's dated detail inline, ~250 KB) is in git history:
   `git show 6b8278f:AGENTS.md`. Its stable half moved to `docs/ARCHITECTURE.md` and `docs/flows/`.

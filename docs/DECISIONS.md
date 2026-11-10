@@ -8,6 +8,11 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-11-11 · The `rpg-balance-master` subagent is retired; balance work is done in the main session.**
+
+Vesa's call ("Yes, retire it"). Deleted: `.claude/agents/rpg-balance-master.md` and its Codex twin `.codex/agents/rpg-balance-master.toml`; the routing lines in `CLAUDE.md`, `AGENTS.md` and `.codex/README.md` now say to review directly. The notes under `.claude/agent-memory/rpg-balance-master/` and `.codex/agent-memory/` stay as history; this log is the authority for rulings.
+- **Why:** the definition was pinned to a weaker model than the session that calls it, last edited 2026-06-01 and last used 2026-08-26. Its map of the code was stale (rests in `gameReducer.js`, no `combatExchange.js`, the LLM adjudicating features), its memory path named another machine, and its scope was a race / class scorecard, not the attrition and encounter rules the 11-10 review's mechanics item is about. A standing "use it for any balance work" rule kept routing sessions to it.
+
 **2026-11-10 (night) · All three scheduled routines are paused: the daily strengthening audit, the weekly wow audit, the weekly memory research.**
 
 Vesa's calls ("Yes, pause it", then "pause those too ... focus clearly and only" on the review's list) after a whole-project review. Disabled cloud routines: "Quest Forge scheduled strengthening" (`trig_01LQM3zvhBMdUmqkTAPk3V6m`), "Quest Forge WOW audit" (`trig_01A81mWgNEcBUCdbYLMRgUit`), "Quest Forge weekly memory research" (`trig_015TLi2Mz8QhdiqdZoXK6V4x`). The three queues stay as lists; nothing in them was closed by this. The wow audit and the memory research are paused for focus, so their proposals do not land in queues that are being reprioritised; the reasons below are the strengthening audit's.
