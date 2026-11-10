@@ -77,7 +77,9 @@ field exists. If the DM "should" do math, the client already does it.
 ```
 src/
   state/      gameReducer.js (dispatcher over handlers/), applyEvents.js, persistence.js, idb.js,
-              portraitStore.js, cloudSync.js, rosterStore.js, migrations.js, autosave*, GameContext.jsx
+              portraitStore.js, cloudSync.js, rosterStore.js, migrations.js, autosave*, GameContext.jsx,
+              save safety: restorePoints.js + restorePointStore.js, campaignFile.js, campaignLock.js,
+              storageDurability.js
   engine/     mechanics (dice.ts, rules, combatMath, combatExchange, rollResolver, progression,
               spellcasting, equipment), memory (worldFacts, worldJournal, storyMemory, vectorMemory,
               npcRoster, retraction, recallDossier), living world (fronts, worldTempo,
@@ -150,6 +152,9 @@ docs/         STATUS, IDEAS, DECISIONS, the three queues, ARCHITECTURE.md, flows
   refuses to start without it.
 - Windows-first repo: CRLF tree, `install.cmd`, no python; script edits with node.
 - The autosave is local only (Continue = this device); cloud saves are manual, bring-your-own Firebase.
+- The autosave slot is copied to a restore point before a load, another campaign or 50 messages
+  overwrite it (reserved `__restore__-*` slot ids, 5 + 2 kept); a second tab holding a campaign
+  does not autosave; a campaign file never carries settings or keys.
 
 ## Where the detail lives
 

@@ -67,7 +67,14 @@ const SUPERSEDED = Symbol('superseded');
  */
 export const AUTOSAVE_BACKGROUND_DEBOUNCE_MS = 15000;
 
-export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
+/**
+ * `isBlocked` (2026-11-11, the second-tab guard — campaignLock.js): while it
+ * answers true this tab writes nothing to the autosave slot — no debounced
+ * write, no flush, no hide flush, no toast. The dirty flag keeps its truth,
+ * so the first write after the block lifts carries everything.
+ * `onCampaignClosed` fires when the state stops being a live campaign.
+ */
+export function createAutosaveRuntime({ getState, autoSave, showSaveToast, isBlocked = () => false, onCampaignClosed = () => {} }) {
     let timer = null;
     // Which lane the pending timer serves: a foreground timer (2 s) is never
     // pushed back by a background change; a background timer (15 s) is reset
@@ -98,6 +105,7 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
             timerBackground = false;
             // Save the LATEST state at fire time, stamped so cross-device sync
             // can pick the newest file.
+            if (isBlocked()) return;
             const source = getState();
             const snapshot = buildAutosaveSnapshot(source);
             if (!snapshot) return;
@@ -131,6 +139,7 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
     });
 
     const flush = async ({ action = null } = {}) => {
+        if (isBlocked()) return;
         const source = getState();
         const replay = buildAutosaveSnapshot(source, { action });
         if (!replay) return;
@@ -169,7 +178,7 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
 
     const flushOnHide = () => {
         // Nothing changed since the last landed save → nothing to protect.
-        if (!dirty) return;
+        if (!dirty || isBlocked()) return;
         const snapshot = buildAutosaveSnapshot(getState());
         if (!snapshot) return;
         // This write carries what the pending timer would have written (the
@@ -178,12 +187,20 @@ export function createAutosaveRuntime({ getState, autoSave, showSaveToast }) {
         clearTimer();
         dirty = false;
         // If the write fails (and the page survives), the state is still dirty.
-        autoSave(snapshot).then(saved => { if (!saved) dirty = true; });
+        // `urgent`: the page may be going away — an interval restore point
+        // waits for the next ordinary autosave (persistence.js autoSave).
+        autoSave(snapshot, { urgent: true }).then(saved => { if (!saved) dirty = true; });
     };
 
     const noteStateChange = (prev, state) => {
         // The policy's own predicate (a null `session` used to throw here).
-        if (!isAutosavableState(state)) return;
+        if (!isAutosavableState(state)) {
+            // The campaign just closed (New Game): whatever is loaded next is
+            // a new timeline for the restore-point check, even under the same
+            // session id and load nonce.
+            if (isAutosavableState(prev)) onCampaignClosed();
+            return;
+        }
         // A settings/user/ui-only change between the flush and its re-render
         // neither schedules a save nor settles the waiting flush.
         if (prev && !hasGameplayChange(prev, state)) return;

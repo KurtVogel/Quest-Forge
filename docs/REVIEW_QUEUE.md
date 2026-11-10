@@ -14,13 +14,8 @@ This page is the only live work queue. Vesa, 2026-11-10: "focus clearly and only
 
 ## The queue, in order
 
-### 1. Save safety — NEXT, proposal ready
-- **How sure:** verified in code.
-- **Problem:** one autosave record, overwritten ~2 s after every change. A load runs migrations in memory and the next autosave writes the result over the only copy. A new campaign reuses the slot. No campaign file; no `navigator.storage.persist()`.
-- **Build (one session):** (a) ask the browser to keep the data at the first save, and show the result and space used in Settings; (b) restore points: stored copies of the autosave taken at load before the first autosave after it ("before update" when the save version is older), before a different campaign overwrites the slot, and every 50 messages; keep 5 rolling + the newest "before update" + the newest "previous campaign", listed in the saves dialog; (c) save to file / load from file: one JSON, never settings or keys, loaded through the normal validation and migrations; (d) a second tab on the same campaign is told so and does not autosave.
-- **Before deploy:** measure the megacampaign payload (lower the copy count if seven are too heavy); a fresh-context review of the diff.
-- **Done means:** a restore point and a file each bring the megacampaign back with the same message and record counts, checked in the browser; Vesa has saved the megacampaign to a file.
-- Covers `IDEAS.md` "persistent storage" and "Save to file and load from file" (both 2026-11-09).
+### 1. Save safety — SHIPPED 2026-11-11 (deployed)
+- Measured on the megacampaign before anything touched it: autosave payload 3.77 MB (3,677 messages), the whole site 18 MB of a 10 GB quota, storage not persistent; seven copies cost about 26 MB, so the count stayed at 5 rolling + 1 "before update" + 1 "previous campaign". Checked in the browser on the preview build with a megacampaign-sized test campaign (3.81 MB, save version 6): a restore point and a 3.89 MB file each brought it back with the same counts (3,678 messages, 120 people, 800 facts, 500 cards, 150 journal entries, 5 portraits, 1 chapter) and the same content digest; a second tab showed the notice and wrote nothing. Tests 4,837. **Still open: Vesa saves the megacampaign to a file (Settings → Saves → Save to file) and gives the played verdict.** Detail: `DECISIONS.md` 2026-11-11.
 
 ### 2. Turn latency — experiment first
 - **How sure:** the problem is measured (Flash DM calls p50 27–30 s, first word p50 10.9 s / p90 18.6 s; GPT-6.1 Sol first byte 4.1 s). The fix is unproven.

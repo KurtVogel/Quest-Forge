@@ -392,6 +392,25 @@
     }
 }
 
+/* The second-tab guard: this tab does not autosave (state/campaignLock.js) */
+.open-elsewhere-banner {
+    position: fixed;
+    /* Below the header bar: its buttons (Settings is the way to a manual save) stay reachable. */
+    top: 3.75rem;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: min(92vw, 44rem);
+    background: var(--surface-secondary, #232218);
+    color: #e0a54a;
+    border: 1px solid #8a6a2a;
+    border-radius: 6px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    text-align: center;
+    z-index: 9999;
+}
+
 /* Save toast */
 .save-toast {
     position: fixed;

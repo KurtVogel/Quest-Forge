@@ -284,6 +284,33 @@
     margin-bottom: 1rem;
 }
 
+/* Save to file / Load from file (the campaign file) */
+.save-file-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.save-file-hint {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.restore-points {
+    margin-top: 1.25rem;
+}
+
+.storage-status {
+    margin-top: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+}
+
 .saves-list-title {
     font-size: 0.8rem;
     color: var(--text-muted);

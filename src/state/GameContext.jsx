@@ -6,7 +6,9 @@ import { createContext, useContext, useReducer, useEffect, useCallback, useState
 import { getInspectorSnapshot } from '../debug/memoryInspectorStore.js';
 import { gameReducer, initialGameState } from './gameReducer.js';
 import { createAutosaveRuntime } from './autosaveRuntime.js';
-import { loadSettings, saveSettings, autoSave } from './persistence.js';
+import { isAutosavableState } from './autosavePolicy.js';
+import { LOCK_STATUS, createCampaignLock } from './campaignLock.js';
+import { loadSettings, saveSettings, autoSave, forgetCoveredTimeline } from './persistence.js';
 import { initializeFirebase } from '../config/firebase.js';
 import { subscribeToAuth } from './auth.js';
 
@@ -14,6 +16,7 @@ const GameContext = createContext(null);
 const GameDispatchContext = createContext(null);
 const SaveToastContext = createContext(null);
 const FlushAutoSaveContext = createContext(null);
+const OpenElsewhereContext = createContext(false);
 
 export function GameProvider({ children }) {
     // null = hidden, otherwise { status: 'local' | 'cloud' | 'cloud-error' }
@@ -70,6 +73,34 @@ export function GameProvider({ children }) {
     // (2026-10-18 persistence nit; every live caller flushes on a user action,
     // so it was dormant). The getter is the one creation site for the effect
     // and the flush alike.
+    // The second-tab guard (campaignLock.js): the tab holding a campaign
+    // holds the autosave slot's Web Lock; a tab that is refused it writes
+    // nothing to the slot and says so (AppShell's banner). The ref is what
+    // the runtime reads at write time; the state is what the banner renders.
+    const campaignLockRef = useRef(null);
+    const autosaveBlockedRef = useRef(false);
+    const [lockStatus, setLockStatus] = useState(null);
+    const hasCampaign = isAutosavableState(state);
+    useEffect(() => {
+        if (!hasCampaign) return undefined;
+        if (!campaignLockRef.current) campaignLockRef.current = createCampaignLock();
+        const lock = campaignLockRef.current;
+        let cancelled = false;
+        lock.acquire().then(status => {
+            if (cancelled) return;
+            autosaveBlockedRef.current = status === LOCK_STATUS.ELSEWHERE;
+            setLockStatus(status);
+        });
+        return () => {
+            // The campaign closed (New Game, back to the start screen): let
+            // the slot go, and ask afresh when a campaign is opened again.
+            cancelled = true;
+            autosaveBlockedRef.current = false;
+            lock.release();
+        };
+    }, [hasCampaign]);
+    const openElsewhere = hasCampaign && lockStatus === LOCK_STATUS.ELSEWHERE;
+
     const autosaveRuntimeRef = useRef(null);
     const getAutosaveRuntime = useCallback(() => {
         if (!autosaveRuntimeRef.current) {
@@ -77,6 +108,8 @@ export function GameProvider({ children }) {
                 getState: () => stateRef.current,
                 autoSave,
                 showSaveToast,
+                isBlocked: () => autosaveBlockedRef.current,
+                onCampaignClosed: forgetCoveredTimeline,
             });
         }
         return autosaveRuntimeRef.current;
@@ -177,7 +210,9 @@ export function GameProvider({ children }) {
             <GameDispatchContext.Provider value={dispatch}>
                 <FlushAutoSaveContext.Provider value={flushAutoSave}>
                     <SaveToastContext.Provider value={saveToast}>
-                        {children}
+                        <OpenElsewhereContext.Provider value={openElsewhere}>
+                            {children}
+                        </OpenElsewhereContext.Provider>
                     </SaveToastContext.Provider>
                 </FlushAutoSaveContext.Provider>
             </GameDispatchContext.Provider>
@@ -188,6 +223,11 @@ export function GameProvider({ children }) {
 /** @returns {{status: 'local'|'cloud'|'cloud-error'}|null} current save toast, or null when hidden */
 export function useSaveToast() {
     return useContext(SaveToastContext);
+}
+
+/** Is this campaign's autosave held by ANOTHER tab (this tab then writes nothing to the slot)? */
+export function useOpenElsewhere() {
+    return useContext(OpenElsewhereContext);
 }
 
 /**

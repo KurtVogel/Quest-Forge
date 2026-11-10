@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { GameProvider, useGameState, useGame } from './state/GameContext.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import AppShell from './components/Layout/AppShell.jsx';
 import CharacterCreation from './components/CharacterSheet/CharacterCreation.jsx';
 import SettingsModal from './components/Settings/SettingsModal.jsx';
-import { loadAutoSave, listSaves, loadGame } from './state/persistence.js';
+import { loadAutoSave, listSaves, listRestorePoints, loadGame } from './state/persistence.js';
+import { describeRestoreReason } from './state/restorePoints.js';
+import { readCampaignFile } from './components/Settings/campaignFileIO.js';
 import { loadGameFromCloud, listCloudSaves } from './state/cloudSync.js';
 import { describeTimeAgo } from './components/Chat/returnCard.js';
 import './App.css';
@@ -13,6 +15,8 @@ function StartScreen() {
   const { state, dispatch } = useGame();
   const [autoSaveData, setAutoSaveData] = useState(null);
   const [saves, setSaves] = useState([]);
+  const [restorePoints, setRestorePoints] = useState([]);
+  const fileInputRef = useRef(null);
   const [cloudSaves, setCloudSaves] = useState([]);
   const [cloudLoadError, setCloudLoadError] = useState('');
   const [loadError, setLoadError] = useState('');
@@ -28,6 +32,9 @@ function StartScreen() {
         ]);
         setAutoSaveData(autoSave);
         setSaves(saveList);
+        // The automatic copies of the autosave (state/restorePoints.js): the
+        // way back when Continue itself is the problem. Never fatal to boot.
+        setRestorePoints(await listRestorePoints().catch(() => []));
       } catch (e) {
         // A blocked/quota/corrupt IndexedDB used to render as "no autosave, no
         // saves" — the player saw their campaign gone while the data sat intact
@@ -102,6 +109,21 @@ function StartScreen() {
     dispatch({ type: 'SET_UI', payload: { isCharacterCreationOpen: true } });
   };
 
+  // Load from file (state/campaignFile.js): the envelope is unwrapped, then
+  // LOAD_GAME validates and migrates the state like any save. No DM call.
+  const handleLoadFile = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = ''; // allow picking the same file again
+    if (!file) return;
+    setLoadError('');
+    const read = await readCampaignFile(file);
+    if (read.ok) {
+      dispatch({ type: 'LOAD_GAME', payload: read.state });
+    } else {
+      setLoadError(read.message);
+    }
+  };
+
   const handleCloudSync = () => {
     dispatch({ type: 'SET_UI', payload: { isSettingsOpen: true, settingsTab: 'cloud' } });
   };
@@ -174,15 +196,33 @@ function StartScreen() {
             </button>
           )}
 
-          {(saves.length > 0 || cloudSaves.length > 0) && (
+          {(saves.length > 0 || cloudSaves.length > 0 || restorePoints.length > 0) && (
             <button className="start-btn load-btn" onClick={() => setShowSaves(!showSaves)}>
               <span className="start-btn-icon start-btn-icon-load" aria-hidden="true" />
               <span className="start-btn-text">
                 <span className="start-btn-label">Load Game</span>
-                <span className="start-btn-detail">{saves.length + cloudSaves.length} saved games</span>
+                <span className="start-btn-detail">
+                  {saves.length + cloudSaves.length} saved games
+                  {restorePoints.length > 0 ? ` · ${restorePoints.length} restore point${restorePoints.length === 1 ? '' : 's'}` : ''}
+                </span>
               </span>
             </button>
           )}
+
+          <button className="start-btn load-btn" onClick={() => fileInputRef.current?.click()}>
+            <span className="start-btn-icon start-btn-icon-load" aria-hidden="true" />
+            <span className="start-btn-text">
+              <span className="start-btn-label">Load from File</span>
+              <span className="start-btn-detail">Open a campaign file saved from Quest Forge</span>
+            </span>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            style={{ display: 'none' }}
+            onChange={handleLoadFile}
+          />
 
           <button className="start-btn new-btn" onClick={handleNewGame}>
             <span className="start-btn-icon start-btn-icon-new" aria-hidden="true" />
@@ -224,6 +264,19 @@ function StartScreen() {
                   </span>
                 </div>
                 <span className="start-save-date">{save.savedAt ? new Date(save.savedAt).toLocaleDateString() : '—'}</span>
+              </button>
+            ))}
+
+            {restorePoints.length > 0 && <h4 style={{ margin: '1rem 0 0.5rem 0', color: 'var(--text-muted)' }}>Restore Points (automatic copies of this device&apos;s autosave)</h4>}
+            {restorePoints.map(point => (
+              <button key={`restore-${point.slotId}`} className="start-save-slot" onClick={() => handleLoadSave(point.slotId, false)}>
+                <div className="start-save-info">
+                  <span className="start-save-name">{describeRestoreReason(point.reason)}</span>
+                  <span className="start-save-meta">
+                    {point.characterName} · Lv.{point.characterLevel} {point.characterClass} · {point.messageCount} msgs
+                  </span>
+                </div>
+                <span className="start-save-date">{point.savedAt ? new Date(point.savedAt).toLocaleString() : '—'}</span>
               </button>
             ))}
           </div>

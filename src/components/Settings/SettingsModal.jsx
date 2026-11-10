@@ -1,9 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useGame } from '../../state/GameContext.jsx';
 import { initialGameState } from '../../state/gameReducer.js';
 import { PROVIDERS, PROVIDER_LIST } from '../../llm/adapter.js';
 import { PRESETS, PRESET_LIST } from '../../data/presets.js';
-import { saveGame, loadGame, listSaves, deleteSave, getSaveSessionId } from '../../state/persistence.js';
+import { saveGame, loadGame, listSaves, listRestorePoints, deleteSave, getSaveSessionId } from '../../state/persistence.js';
+import { describeRestoreReason } from '../../state/restorePoints.js';
+import { formatBytes, readStorageStatus, requestPersistentStorage } from '../../state/storageDurability.js';
+import { downloadCampaignFile, readCampaignFile } from './campaignFileIO.js';
 import { deleteCampaignMemories, shouldPurgeCampaignEmbeddings } from '../../engine/vectorMemory.js';
 import { saveGameToCloud, loadGameFromCloud, listCloudSaves, deleteGameFromCloud, describeCloudUploads } from '../../state/cloudSync.js';
 import { getFirebaseConfigError, initializeFirebase } from '../../config/firebase.js';
@@ -18,6 +21,9 @@ export default function SettingsModal() {
     const [activeTab, setActiveTab] = useState(state.ui.settingsTab || 'llm');
     const [saves, setSaves] = useState([]);
     const [cloudSaves, setCloudSaves] = useState([]);
+    const [restorePoints, setRestorePoints] = useState([]);
+    const [storageStatus, setStorageStatus] = useState(null);
+    const fileInputRef = useRef(null);
     const [saveName, setSaveName] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [firebaseConfig, setFirebaseConfig] = useState(state.settings.firebaseConfig || {
@@ -39,6 +45,10 @@ export default function SettingsModal() {
             const list = await listSaves();
             if (isCancelled) return;
             setSaves(list);
+            // The restore points and the storage line are extras: neither may
+            // cost or delay the saves list.
+            listRestorePoints().catch(() => []).then(points => { if (!isCancelled) setRestorePoints(points); });
+            readStorageStatus().then(storage => { if (!isCancelled) setStorageStatus(storage); });
 
             if (state.user?.uid) {
                 const listed = await listCloudSaves(state.user.uid);
@@ -73,6 +83,8 @@ export default function SettingsModal() {
     const loadSavesList = async () => {
         const list = await listSaves();
         setSaves(list);
+        setRestorePoints(await listRestorePoints().catch(() => []));
+        setStorageStatus(await readStorageStatus());
         if (state.user?.uid) {
             const listed = await listCloudSaves(state.user.uid);
             setCloudSaves(listed.ok ? listed.saves : []);
@@ -166,16 +178,70 @@ export default function SettingsModal() {
         try {
             const autosaveSessionId = await getSaveSessionId('__autosave__').catch(() => null);
             const remaining = await listSaves();
+            // A restore point holds a campaign too (it is not in the list either).
+            const restorable = await listRestorePoints().catch(() => []);
             if (shouldPurgeCampaignEmbeddings({
                 deletedSessionId,
                 liveSessionId: state.session?.id || null,
-                remainingSessionIds: [...remaining.map(s => s.sessionId), autosaveSessionId].filter(Boolean),
+                remainingSessionIds: [...remaining.map(s => s.sessionId), ...restorable.map(p => p.sessionId), autosaveSessionId].filter(Boolean),
             })) {
                 await deleteCampaignMemories(deletedSessionId);
                 console.info('[VectorMemory] Purged the deleted campaign\'s embedding cache.');
             }
         } catch (e) {
             console.warn('[VectorMemory] Embedding purge check failed (cache left in place):', e);
+        }
+    };
+
+    // === The campaign file (state/campaignFile.js): never settings or keys ===
+
+    const handleSaveToFile = () => {
+        try {
+            const filename = downloadCampaignFile(state);
+            setSyncStatus(`✓ Campaign saved to the file "${filename}" (your browser's downloads folder). Settings and API keys are not in it.`);
+        } catch (e) {
+            console.error('Failed to save the campaign to a file', e);
+            setSyncStatus(`Save to file failed — ${e?.message || 'details in the browser console'}`);
+        }
+    };
+
+    // A stored slot (a local save or a restore point) goes to a file without
+    // being loaded: it keeps its own save stamps.
+    const handleSlotToFile = async (slotId) => {
+        try {
+            const savedState = await loadGame(slotId);
+            if (!savedState) {
+                setSyncStatus('That save could not be read — details in the browser console.');
+                return;
+            }
+            const filename = downloadCampaignFile(savedState, { stored: true });
+            setSyncStatus(`✓ Saved to the file "${filename}" (your browser's downloads folder).`);
+        } catch (e) {
+            console.error('Failed to save the slot to a file', e);
+            setSyncStatus(`Save to file failed — ${e?.message || 'details in the browser console'}`);
+        }
+    };
+
+    // Load from file: the envelope is unwrapped, then LOAD_GAME validates and
+    // migrates the state like any save. No DM call.
+    const handleLoadFile = async (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = ''; // allow picking the same file again
+        if (!file) return;
+        const read = await readCampaignFile(file);
+        if (!read.ok) {
+            setSyncStatus(read.message);
+            return;
+        }
+        dispatch({ type: 'LOAD_GAME', payload: read.state });
+        handleClose();
+    };
+
+    const handleAskPersist = async () => {
+        const asked = await requestPersistentStorage();
+        setStorageStatus(await readStorageStatus());
+        if (!asked.persisted) {
+            setSyncStatus("The browser did not agree to keep this site's data for now. Chrome decides by how much the site is used: bookmarking it or installing it as an app helps. A campaign file is the copy that does not depend on the browser.");
         }
     };
 
@@ -646,6 +712,27 @@ export default function SettingsModal() {
                                 </div>
                             )}
 
+                            <div className="save-file-row">
+                                {state.character && (
+                                    <button className="btn" onClick={handleSaveToFile}>
+                                        Save to file
+                                    </button>
+                                )}
+                                <button className="btn" onClick={() => fileInputRef.current?.click()}>
+                                    Load from file
+                                </button>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept=".json,application/json"
+                                    style={{ display: 'none' }}
+                                    onChange={handleLoadFile}
+                                />
+                                <span className="save-file-hint">
+                                    One file holds the whole campaign, never your settings or API keys. Keep a copy outside the browser.
+                                </span>
+                            </div>
+
                             {syncStatus && (
                                 <div className="auth-status" style={{ margin: '0.5rem 0', fontSize: '0.8rem' }}>
                                     {syncStatus}
@@ -725,6 +812,9 @@ export default function SettingsModal() {
                                                             Overwrite
                                                         </button>
                                                     )}
+                                                    <button className="btn btn-sm" title="Save this slot to a file" onClick={() => handleSlotToFile(save.slotId)}>
+                                                        File
+                                                    </button>
                                                     <button className="btn btn-sm btn-danger" onClick={() => handleDelete(save.slotId)}>
                                                         ✕
                                                     </button>
@@ -734,6 +824,59 @@ export default function SettingsModal() {
                                     </>
                                 )}
                             </div>
+
+                            {restorePoints.length > 0 && (
+                                <div className="saves-list restore-points">
+                                    <h4 className="saves-list-title">Restore points</h4>
+                                    <div className="save-file-hint">
+                                        Automatic copies of this device&apos;s autosave: the newest five, plus the last one taken before an update and the last one of a previous campaign. Loading one replaces the game in play; a copy of that is kept here too.
+                                    </div>
+                                    {restorePoints.map(point => (
+                                        <div key={point.slotId} className="save-slot">
+                                            <div className="save-info">
+                                                <div className="save-name">{describeRestoreReason(point.reason)} · {point.messageCount} msgs</div>
+                                                <div className="save-meta">
+                                                    {point.characterName} · Lv.{point.characterLevel} {point.characterClass}
+                                                    {point.location ? ` · ${point.location}` : ''}
+                                                </div>
+                                                <div className="save-date">
+                                                    {point.savedAt ? new Date(point.savedAt).toLocaleString() : '—'}
+                                                </div>
+                                            </div>
+                                            <div className="save-actions">
+                                                <button className="btn btn-sm btn-primary" onClick={() => handleLoad(point.slotId)}>
+                                                    Load
+                                                </button>
+                                                <button className="btn btn-sm" title="Save this restore point to a file" onClick={() => handleSlotToFile(point.slotId)}>
+                                                    File
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {storageStatus && (
+                                <div className="storage-status">
+                                    <h4 className="saves-list-title">Browser storage</h4>
+                                    <div className="save-meta">
+                                        {storageStatus.persisted
+                                            ? "Kept: the browser will not clear this site's data on its own."
+                                            : storageStatus.supported
+                                                ? "Not guaranteed: the browser may clear this site's data when the device runs low on space."
+                                                : "This browser does not say whether it keeps this site's data."}
+                                        {storageStatus.usage != null && ` Using ${formatBytes(storageStatus.usage)}${storageStatus.quota ? ` of ${formatBytes(storageStatus.quota)}` : ''}.`}
+                                    </div>
+                                    {storageStatus.supported && !storageStatus.persisted && (
+                                        <button className="btn btn-sm" onClick={handleAskPersist}>
+                                            Ask the browser to keep it
+                                        </button>
+                                    )}
+                                    <div className="save-file-hint">
+                                        Clearing site data in the browser removes everything either way. A campaign file is the copy that survives.
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 

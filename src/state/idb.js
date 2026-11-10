@@ -28,6 +28,8 @@ export const PAYLOAD_STORE = 'savePayloads';
 export const PORTRAIT_STORE = 'portraits';
 export const CHAPTER_STORE = 'chronicleChapters';
 export const ROSTER_STORE = 'characters';
+/** The one reserved slot the autosave writes (Continue = this device's session). */
+export const AUTOSAVE_SLOT = '__autosave__';
 
 /**
  * Every store a transaction must include to sweep orphan PORTRAITS: the slot

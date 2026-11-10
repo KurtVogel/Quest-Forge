@@ -8,6 +8,7 @@ import { sanitizeSettings } from './settingsSchema.js';
 import { ROLL_HISTORY_CAP } from '../config/contentLimits.js';
 import { BLOB_LANES, collectLaneRefs, extractLanes, restoreLanes } from './portraitStore.js';
 import {
+    AUTOSAVE_SLOT,
     BLOB_SWEEP_STORES,
     PAYLOAD_STORE,
     STORE_NAME,
@@ -21,9 +22,11 @@ import {
     sweepOrphanBlobs,
     withDb,
 } from './idb.js';
+import { isRestoreSlot, readRestorePoint } from './restorePoints.js';
+import { keepRestorePoint, readRestorePointRecords } from './restorePointStore.js';
+import { requestPersistentStorageOnce } from './storageDurability.js';
 
 const SETTINGS_KEY = 'rpg-client-settings';
-const AUTOSAVE_SLOT = '__autosave__';
 
 // === LocalStorage (Settings) ===
 
@@ -255,7 +258,12 @@ export function saveGame(slotId, gameState) {
         // not-yet-committed write and miss it — the list looks unchanged, so you click
         // Save again... and again. (See SettingsModal handleSave.)
         // withDb closes the connection once this settles, whichever way.
-        tx.oncomplete = () => resolve();
+        tx.oncomplete = () => {
+            resolve();
+            // The first save that lands asks the browser to keep this site's
+            // storage (fire-and-forget; storageDurability.js).
+            requestPersistentStorageOnce();
+        };
         tx.onabort = () => reject(tx.error || metadataRequest?.error || payloadRequest?.error || previousRequest.error);
     });
 }
@@ -327,7 +335,9 @@ export function listSaves() {
             // carries its whole `state`, and the renderers trust every field).
             const saves = request.result
                 .map((record, index) => ({ record, key: keys[index] }))
-                .filter(({ record, key }) => record && typeof record === 'object' && key !== AUTOSAVE_SLOT)
+                // Reserved slots are not saves the player made: the autosave
+                // and its restore points (`listRestorePoints`).
+                .filter(({ record, key }) => record && typeof record === 'object' && key !== AUTOSAVE_SLOT && !isRestoreSlot(key))
                 .map(({ record, key }) => ({ ...projectSaveMetadata(record), slotId: addressableKey(key) }))
                 .filter(save => save.slotId !== null)
                 .sort((a, b) => metaNumber(b.savedAt, 0) - metaNumber(a.savedAt, 0));
@@ -375,11 +385,67 @@ export function deleteSave(slotId) {
 }
 
 /**
+ * The restore points (stored copies of the autosave — restorePoints.js),
+ * newest first, as save-list rows plus why and when each was taken. Typed
+ * like `listSaves` rows; never materializes a payload. `loadGame(slotId)`
+ * loads one like any slot.
+ */
+export async function listRestorePoints() {
+    const records = await readRestorePointRecords();
+    return records
+        .map(({ record, key }) => {
+            const { reason, takenAt } = readRestorePoint(record, key);
+            return { ...projectSaveMetadata(record), slotId: key, reason, takenAt };
+        })
+        .sort((a, b) => b.takenAt - a.takenAt);
+}
+
+// The timeline (`session.id` + `session.loadNonce`) whose first autosave
+// has already been covered by the restore-point check. Anything else — a
+// fresh page, a load, a new campaign — is "the first autosave after a load".
+let coveredTimeline = null;
+
+/**
+ * The campaign closed (New Game, back to the start screen): the next load is
+ * a first autosave again. `NEW_GAME` resets `session.loadNonce`, so without
+ * this a re-load of the same campaign in the same page repeated the key of
+ * the first and was never covered (the fresh-context review, 2026-11-11).
+ */
+export function forgetCoveredTimeline() {
+    coveredTimeline = null;
+}
+
+/**
+ * Before the autosave slot is overwritten: copy the stored record to a
+ * restore point when one is due (restorePoints.js). Never throws — a copy
+ * that could not be taken is logged and retried at the next autosave; the
+ * save itself goes ahead.
+ */
+async function coverAutosaveOverwrite(gameState, urgent) {
+    const sessionId = gameState?.session?.id || null;
+    const timeline = `${sessionId}:${gameState?.session?.loadNonce || 0}`;
+    // The hide / unload flush on a covered timeline goes straight to the
+    // save: its only possible copy is an interval one, which waits anyway,
+    // and the extra database round trip sat in front of the write that
+    // carries the player's last turn while the page was going away.
+    if (urgent && timeline === coveredTimeline) return;
+    try {
+        const taken = await keepRestorePoint({ sessionId, afterLoad: timeline !== coveredTimeline, urgent });
+        coveredTimeline = timeline;
+        if (taken) console.info(`[Persistence] Restore point kept (${taken}).`);
+    } catch (e) {
+        console.warn('[Persistence] Restore point could not be kept (the autosave goes ahead):', e);
+    }
+}
+
+/**
  * Auto-save (uses a reserved slot). Returns whether the save actually landed —
  * callers surface failures to the player instead of showing a false success toast.
+ * `urgent` is the hide / unload flush: an interval restore point waits.
  */
-export async function autoSave(gameState) {
+export async function autoSave(gameState, { urgent = false } = {}) {
     try {
+        await coverAutosaveOverwrite(gameState, urgent);
         await saveGame(AUTOSAVE_SLOT, gameState);
         return true;
     } catch (e) {

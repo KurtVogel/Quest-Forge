@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useGame, useSaveToast } from '../../state/GameContext.jsx';
+import { useGame, useOpenElsewhere, useSaveToast } from '../../state/GameContext.jsx';
 import ErrorBoundary from '../ErrorBoundary.jsx';
 import ChatPanel from '../Chat/ChatPanel.jsx';
 import CharacterSheet from '../CharacterSheet/CharacterSheet.jsx';
@@ -18,6 +18,7 @@ import './Layout.css';
 export default function AppShell() {
     const { state, dispatch } = useGame();
     const saveToast = useSaveToast();
+    const openElsewhere = useOpenElsewhere();
     const [isJournalOpen, setIsJournalOpen] = useState(false);
     const [isInspectorOpen, setIsInspectorOpen] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -199,6 +200,12 @@ export default function AppShell() {
             <JournalPanel isOpen={isJournalOpen} onClose={() => setIsJournalOpen(false)} requestedTab={journalRequest} />
             {inspectorEnabled && (
                 <MemoryInspector isOpen={isInspectorOpen} onClose={() => setIsInspectorOpen(false)} />
+            )}
+
+            {openElsewhere && (
+                <div className="open-elsewhere-banner" role="alert">
+                    Quest Forge is open in another tab. This tab does not autosave, so nothing here overwrites that game. Close this tab, or close the other one and reload this page.
+                </div>
             )}
 
             {saveToast && (

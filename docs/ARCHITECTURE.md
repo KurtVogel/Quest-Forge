@@ -125,6 +125,12 @@ subcollection, same lane table, one `{ ok, reason }` result shape), `rosterStore
 not campaigns), `migrations.js` (`migrateLoadedSave`: unconditional heals, then versioned
 steps), `autosavePolicy.js` + `autosaveRuntime.js` (two debounce lanes, an action flush that
 waits for the action's own re-render before falling back to a reducer replay),
+`restorePoints.js` + `restorePointStore.js` (copies of the autosave record under reserved
+`__restore__-*` slot ids, taken before a load, another campaign or 50 messages overwrite it;
+5 rolling + the newest "before update" + the newest "previous campaign"), `campaignFile.js`
+(the Save to file / Load from file envelope; never settings or keys), `campaignLock.js` (a Web
+Lock on the autosave slot: a second tab does not autosave), `storageDurability.js`
+(`navigator.storage.persist()` and the usage readout),
 `settingsSchema.js` (`sanitizeSettings`, the typed settings boundary), `auth.js`.
 
 ### `src/llm/turnOrchestrator.js`
@@ -307,7 +313,7 @@ numbers visible). No field whitelist in serialization, ever again.
 - **Provider boundary:** only `llm/adapter.js` and `llm/providers/` know HTTP. Everything else
   receives `sendMessage` / `streamMessage` or a config object from `machinery.js`.
 - **Storage boundary:** only `state/persistence.js`, `idb.js`, `portraitStore.js`,
-  `rosterStore.js`, `cloudSync.js` and `engine/vectorMemory.js` read or write IndexedDB or
+  `restorePointStore.js`, `rosterStore.js`, `cloudSync.js` and `engine/vectorMemory.js` read or write IndexedDB or
   Firestore; `config/firebase.js` only loads the SDK.
 - **The campaign boundary** is `session.id` + `session.loadNonce`: long-running lanes stamp
   their writes (`campaignStamp`) and the dispatcher drops a stale one.

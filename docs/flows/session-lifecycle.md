@@ -89,6 +89,7 @@ sequenceDiagram
         RT->>RT: debounce AUTOSAVE_BACKGROUND_DEBOUNCE_MS (a foreground change supersedes it)
     end
     RT->>P: autoSave(state) → saveGame('__autosave__', state)
+    P->>IDB: first: keepRestorePoint — its own readwrite tx: read the saves metadata, copy the stored autosave record to a __restore__-* slot when due (first autosave after a load, another campaign, every 50 messages), rotate to 5 + 2. A failure is logged; the save goes ahead
     P->>P: serializeGameState: spread, strip user / ui / settings, stamp saveVersion + savedAt
     P->>P: prepareSavePayload: extractLanes swaps portrait and chapter bytes for content-addressed refs
     P->>IDB: one readwrite tx: ensureLaneBlobs (write a blob only if absent), put saves metadata + savePayloads, sweepOrphanBlobs if a ref was released
@@ -107,12 +108,17 @@ sequenceDiagram
 | localStorage `rpg-client-settings` | device settings incl. the three API keys, through `sanitizeSettings` |
 | localStorage `qf-return-card-dismissed:<sessionId>` | return-card dismissal |
 | IndexedDB `rpg-client-saves` → `saves` | slot metadata (projected by `projectSaveMetadata`), `portraitRefs`, `chapterRefs` |
-| → `savePayloads` | the slim state per slot (`__autosave__` included) |
+| → `savePayloads` | the slim state per slot (`__autosave__` and the `__restore__-*` restore points included) |
 | → `portraits`, `chronicleChapters` | content-addressed blobs (`BLOB_LANES`) |
 | → `characters` | the hero roster |
 | IndexedDB `rpg-vector-memory` → `embeddings` | the RAG cache, keyed `[sessionId, text]`; rebuildable from the save |
 | Firestore `users/{uid}/saves/{slotId}` + `chunks/{index}` | manual cloud saves (metadata + payload slices) |
 | Firestore `users/{uid}/portraits/{key}`, `chronicleChapters/{key}` | the same blob lanes |
+
+The tab that holds a campaign holds the Web Lock `quest-forge-autosave`; a tab that is refused
+it writes nothing to the autosave slot and shows a notice. A campaign file (Settings → Saves,
+and Load from File on the start screen) is the `serializeGameState` payload in a versioned
+envelope, loaded through `LOAD_GAME` like any save.
 
 Autosave is local only by design (Continue means this device's session); cloud saves are
 manual and visible on every signed-in device. The hosted Firebase project
