@@ -4531,3 +4531,27 @@ entries all from the road; the regional seed's "narration in this region" is ≥
 director bound to a place or an arrival selects by the stamps that define them (the stay's window, the
 arrival's row), never by recency. Payoff: a prompt whose headings are all the builder's, a quest handle no
 reply can forge, a bad director reply that costs one request, and a drift that knows the town it writes about.
+
+### [strengthening] A flag fixed by string is still a flag; the same-response guard is a table; a widened window owes every lane its escape; the dynamic half is for state; a block kept on in combat must speak to the fight — status: `idea` (2026-11-10)
+Five rules from the progression + hidden-fronts pass of 2026-11-10 (progression Lap 2, hostile input;
+hidden-fronts Lap 3, performance & token budget), each reproduced with a throwaway probe over the real
+load, the real `normalizeEvents` → `applyEvents` → reducer chain, `buildWorldTempoBlock`, the reflection's
+front projection and the director context builders. **(1)** `toFlag` was fixed on 09-19 for the string
+"false"; the 11-07 audit found `{}` / `[]` truthy on `player_death`; `level_up` reads through the same helper
+and pays half a level for an empty list. Rule: a normalizer fixed by shape is re-tested on every wire that
+reads through it — grep the helper, pin each wire. **(2)** The engine pays XP on three DM triggers (quest
+completion, front resolution, `level_up`) and `applyEvents` guards two of the three pairs; the third (quest +
+`level_up`) pays 188 where the quest pays 38, and LEVELING names the quest's own phrase as the milestone
+moment. Rule: write a same-response guard as the full table of triggers, never as two precedents. **(3)** The
+10-31 ruling widened the XP gain window 4 → 12 and lane 11 gave `ADD_EXP` the judge's card for a twin from
+another message; `LEVEL_UP` took the window and not the card, so two arcs closing within five turns lose half
+a level with no lever. Rule: a window widened against doubles owes every lane under it the same escape.
+**(4)** 504 of the quiet tempo block's 946 bytes are rules that never change, two of them already in the
+cached prefix, re-sent uncached every turn (~160k tokens over a 1,000-turn campaign). Rule: the dynamic half
+carries state; a sentence that is byte-identical across turns belongs in the prefix, and the audit diffs each
+dynamic block across a run of turns. **(5)** In combat the tempo block renders "Give the player breathing
+room: quiet character beats, recovery, daily life" to the narration lane mid-exchange, 1,266 chars per call.
+Rule: read every block that renders under `combatActive` as the narrator mid-fight; a lane kept on in combat
+says something the call can use (the stubs for `front_updates`, the echoes) or nothing. Payoff: a milestone
+no empty list can buy, one XP ceremony per deed, a second milestone the player can claim, ~650 fewer uncached
+bytes per turn, and a combat narration without pacing advice.
