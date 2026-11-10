@@ -430,6 +430,10 @@ function arriveAt(state, { name, messageIndex, profile = null, fromRecordId = nu
                 locationName: targetRecord.name,
                 awayDistance,
                 returnMessage: messageIndex,
+                // The row the hero LEFT at (the record's departure stamp, read
+                // before this arrival overwrote it): the director's canon is
+                // selected as of it (2026-11-09 living-world P2).
+                leftMessage: targetRecord.lastVisitedMessage,
             },
         };
     }

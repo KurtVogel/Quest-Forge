@@ -67,6 +67,46 @@ describe('shouldGenerateAbsenceDrift', () => {
 });
 
 describe('buildAbsenceDriftContext', () => {
+    // The audit's measurement (2026-11-09 living-world P2): a 10-fact stay,
+    // a 25-fact absence — recency shipped 20 fen facts and none of the mill's.
+    const stayThenAbsence = (leftMessage) => {
+        const state = baseState();
+        state.session.pendingAbsenceDrift = { key: 'loc-aldermill|90', locationName: 'Aldermill', awayDistance: 80, returnMessage: 90, ...(leftMessage !== undefined && { leftMessage }) };
+        state.worldFacts = [
+            ...Array.from({ length: 10 }, (_, i) => ({ id: `stay-${i}`, category: 'event', fact: `Aldermill fact ${i}`, atMessage: i })),
+            ...Array.from({ length: 25 }, (_, i) => ({ id: `away-${i}`, category: 'event', fact: `Fen fact ${i}`, atMessage: 20 + i })),
+        ];
+        state.journal = [
+            { summary: 'Weeks at the mill.', messageRange: [0, 10] },
+            ...Array.from({ length: 4 }, (_, i) => ({ summary: `Fen journey ${i}`, messageRange: [11 + i * 10, 20 + i * 10] })),
+        ];
+        return state;
+    };
+
+    it('reads canon as of the DEPARTURE by stamp, and the absence as a few rows apart', () => {
+        const context = buildAbsenceDriftContext(stayThenAbsence(10));
+        expect(context.canonicalWorldFacts).toHaveLength(10);
+        expect(context.canonicalWorldFacts.every(fact => fact.fact.startsWith('Aldermill'))).toBe(true);
+        expect(context.journal.map(entry => entry.summary)).toEqual(['Weeks at the mill.']);
+        expect(context.sinceTheHeroLeft.worldFacts.map(fact => fact.fact)).toEqual(['Fen fact 21', 'Fen fact 22', 'Fen fact 23', 'Fen fact 24']);
+        expect(context.sinceTheHeroLeft.journal.map(entry => entry.summary)).toEqual(['Fen journey 3']);
+        // Never more rows than the shared defaults ship.
+        expect(context.canonicalWorldFacts.length + context.sinceTheHeroLeft.worldFacts.length).toBeLessThanOrEqual(20);
+    });
+
+    it('a marker with no departure stamp, or a save with nothing stamped before it, keeps plain recency', () => {
+        const old = buildAbsenceDriftContext(stayThenAbsence(undefined));
+        expect(old).not.toHaveProperty('sinceTheHeroLeft');
+        expect(old.canonicalWorldFacts).toHaveLength(20);
+        expect(old.canonicalWorldFacts.every(fact => fact.fact.startsWith('Fen'))).toBe(true);
+
+        const legacy = stayThenAbsence(10);
+        legacy.worldFacts = legacy.worldFacts.map(fact => ({ id: fact.id, category: fact.category, fact: fact.fact }));
+        const context = buildAbsenceDriftContext(legacy);
+        expect(context).not.toHaveProperty('sinceTheHeroLeft');
+        expect(context.canonicalWorldFacts).toHaveLength(20);
+    });
+
     it('projects only NPCs of the return place and flags bond-bearing ones as untouchable', () => {
         const context = buildAbsenceDriftContext(baseState());
         expect(context.returnedTo).toMatchObject({ name: 'Aldermill', type: 'settlement' });

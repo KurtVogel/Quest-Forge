@@ -50,6 +50,7 @@ describe('absence-drift pending marker', () => {
         expect(state.session.pendingAbsenceDrift).toMatchObject({
             locationName: 'Aldermill',
             returnMessage: returnAt,
+            leftMessage: 10, // the departure stamp, read before the arrival overwrote it
         });
         expect(state.session.pendingAbsenceDrift.awayDistance).toBeGreaterThanOrEqual(ABSENCE_DRIFT_MIN_AWAY);
         expect(state.session.pendingAbsenceDrift.key).toContain(`|${returnAt}`);

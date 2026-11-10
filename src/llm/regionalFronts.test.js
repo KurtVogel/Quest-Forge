@@ -90,6 +90,23 @@ describe('buildRegionalFrontsContext', () => {
         expect(context.newRegion.arrivalPlaceDanger).toBeNull();
     });
 
+    it('the narration "in this region" starts at the arrival turn, not on the old land\'s road (2026-11-09 living-world P2)', () => {
+        const state = baseState();
+        const road = Array.from({ length: 30 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `old road ${i}` }));
+        state.messages = [
+            ...road,
+            { role: 'user', content: 'I step off the ferry.' },
+            { role: 'assistant', content: 'The salt flats stretch to a grey horizon.' },
+        ];
+        // SET_LOCATION stamps the record with the row count at the arrival.
+        state.locations = [{ ...state.locations[0], lastVisitedMessage: 32 }];
+        expect(buildRegionalFrontsContext(state).recentNarrationInThisRegion.map(row => row.content))
+            .toEqual(['I step off the ferry.', 'The salt flats stretch to a grey horizon.']);
+        // A record with no stamp keeps the plain tail (ten rows).
+        state.locations = [{ ...state.locations[0], lastVisitedMessage: null }];
+        expect(buildRegionalFrontsContext(state).recentNarrationInThisRegion).toHaveLength(10);
+    });
+
     it('filters hidden messages and finished quests out of the projected context', () => {
         const context = buildRegionalFrontsContext(baseState());
         expect(context.recentNarrationInThisRegion.some(message => message.content.includes('Hidden line'))).toBe(false);

@@ -53,6 +53,11 @@ export async function runDirector(state, { prompt, context, anchor, label, tempe
         messageHistory: [],
         userMessage: JSON.stringify(context),
         temperature, // creative invention, inside a strict JSON schema
+        // ONE request per attempt (2026-11-09 living-world P2): the failure
+        // ledger (`engine/directorRetry.js`) is this lane's retry, with a
+        // backoff in play. The adapter's default two retries under it made a
+        // marker whose reply never parsed cost up to nine DM-model requests.
+        maxRetries: 0,
     });
     return parseDirectorJson(response, anchor, label, errors);
 }
@@ -81,12 +86,34 @@ export const DIRECTOR_CONTEXT_DEFAULTS = Object.freeze({
     journal: 4, journalChars: 800,
 });
 
+/**
+ * A record's place in a message window, by its STAMP (never by its words): a
+ * fact's birth (`atMessage`), a journal entry's closing row (`messageRange`).
+ * With no window every record passes; inside one, an unstamped (legacy)
+ * record does not — it cannot be placed.
+ */
+function inMessageWindow(stamp, { asOfMessage, afterMessage }) {
+    const hasCeiling = Number.isFinite(asOfMessage);
+    const hasFloor = Number.isFinite(afterMessage);
+    if (!hasCeiling && !hasFloor) return true;
+    if (!Number.isFinite(stamp)) return false;
+    return (!hasCeiling || stamp <= asOfMessage) && (!hasFloor || stamp > afterMessage);
+}
+
+/**
+ * `asOfMessage` / `afterMessage` (2026-11-09 living-world P2) select facts and
+ * journal entries by stamp before the newest-N cut: a lane asked about a place
+ * the hero LEFT reads canon as of the departure, where plain recency hands it
+ * the absence (measured: 20 of 20 facts about the road, none about the place).
+ */
 export function baseDirectorContext(state, overrides = {}) {
     const limits = { ...DIRECTOR_CONTEXT_DEFAULTS, ...overrides };
+    const facts = liveWorldFacts(state.worldFacts).filter(fact => inMessageWindow(fact?.atMessage, limits));
+    const journal = (state.journal || []).filter(entry => inMessageWindow(entry?.messageRange?.[1], limits));
     return {
         campaignPremise: cleanText(state.session?.premise, CAMPAIGN_PREMISE_MAX_LENGTH),
         hero: directorHero(state.character),
-        canonicalWorldFacts: liveWorldFacts(state.worldFacts).slice(-limits.facts).map(fact => ({
+        canonicalWorldFacts: (limits.facts > 0 ? facts.slice(-limits.facts) : []).map(fact => ({
             category: cleanText(fact.category, 60),
             fact: cleanText(fact.fact, limits.factChars),
         })),
@@ -94,7 +121,7 @@ export function baseDirectorContext(state, overrides = {}) {
         // the old title/content projection shipped `title: ""` every time and
         // documented a schema that isn't real (2026-08-31 P2).
         ...(limits.journal > 0 && {
-            journal: (state.journal || []).slice(-limits.journal).map(entry => ({
+            journal: journal.slice(-limits.journal).map(entry => ({
                 summary: cleanText(entry.summary, limits.journalChars),
             })),
         }),

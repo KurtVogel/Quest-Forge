@@ -125,6 +125,14 @@ export function buildRegionalFrontsContext(state) {
     // arc's history. The FIRST profile this campaign writes (the home region,
     // or a pre-profile save's land) reads the journal — its texture is there.
     const base = baseDirectorContext(state, { journal: wants.wantsProfile && knownRegions.length === 0 ? DIRECTOR_CONTEXT_DEFAULTS.journal : 0 });
+    // "Narration in this region" starts at the arrival (2026-11-09 living-world
+    // P2): the last 20 rows were mostly the OLD land's road and departure,
+    // labeled as this one's. The arrival record's visit stamp is the cut, less
+    // the two rows of the arrival turn itself (the player's move, the DM's
+    // arrival); a record with no stamp keeps the plain tail.
+    const rows = state.messages || [];
+    const arrivedAt = record?.lastVisitedMessage;
+    const sinceArrival = Number.isFinite(arrivedAt) ? rows.slice(Math.max(0, Math.floor(arrivedAt) - 2)) : rows;
     return {
         newRegion: {
             name: cleanText(pending.region, REGION_NAME_MAX),
@@ -143,7 +151,7 @@ export function buildRegionalFrontsContext(state) {
                 faction: cleanText(front.faction?.name, 100),
             })),
         ...base,
-        recentNarrationInThisRegion: (state.messages || []).slice(-20).map(m => compactMessage(m, 700)).filter(Boolean).slice(-10),
+        recentNarrationInThisRegion: sinceArrival.slice(-20).map(m => compactMessage(m, 700)).filter(Boolean).slice(-10),
     };
 }
 

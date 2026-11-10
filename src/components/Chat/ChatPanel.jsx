@@ -23,7 +23,7 @@ import { generateFrontDoom, shouldGenerateFrontDoom } from '../../llm/frontDoom.
 import { generateAbsenceDrift, shouldGenerateAbsenceDrift } from '../../llm/absenceDrift.js';
 import { generateRegionalFronts, shouldGenerateRegionalFronts } from '../../llm/regionalFronts.js';
 import { generateWonder, shouldGenerateWonder } from '../../llm/wonderDirector.js';
-import { isDirectorBackingOff, RETRYABLE_DIRECTORS } from '../../engine/directorRetry.js';
+import { pickDirectorToRun, RETRYABLE_DIRECTORS } from '../../engine/directorRetry.js';
 import { isWonderRequest } from '../../engine/wonder.js';
 import { isInterludeRequest } from '../../engine/interlude.js';
 import { liveWorldFacts } from '../../engine/worldFacts.js';
@@ -156,6 +156,8 @@ export default function ChatPanel() {
     const narratedCueIdsRef = useRef(new Set()); // Mechanic system messages already given an LLM flavor beat
     const narratedCombatExchangeIdsRef = useRef(new Set()); // Prevent duplicate narration calls for one mechanics commit
     const directorKeysRef = useRef({}); // One in-flight/served key per background director (see BACKGROUND_DIRECTORS)
+    const directorInFlightRef = useRef(false); // One director call at a time (pickDirectorToRun)
+    const [directorTick, setDirectorTick] = useState(0); // Re-runs the director effect when a call settles
 
     // Use a ref to always read the latest state inside async callbacks
     const stateRef = useRef(state);
@@ -387,26 +389,30 @@ export default function ChatPanel() {
         // invited a future director row to read seconds-stale state. The
         // reducer's own sessionId check then rejects a cross-campaign install.
         const sessionId = s.session?.id;
-        for (const director of BACKGROUND_DIRECTORS) {
-            const key = director.getKey(s);
-            if (!key || directorKeysRef.current[director.name] === key) continue;
-            // Give-up rule (2026-09-20 audit P1): a failed key waits out its
-            // backoff; the reducer consumes the marker on the third failure.
-            if (isDirectorBackingOff(s.session, director.name, key, s.messages)) continue;
-            directorKeysRef.current[director.name] = key;
-            director.generate(s)
-                .then(result => {
-                    dispatch(director.install(sessionId, key, result));
-                    console.info(director.logSuccess(s, key, result));
-                })
-                .catch(error => {
-                    console.warn(director.failureNote, error.message || error);
-                    if (directorKeysRef.current[director.name] === key) {
-                        directorKeysRef.current[director.name] = null;
-                    }
-                    dispatch({ type: 'DIRECTOR_ATTEMPT_FAILED', payload: { sessionId, name: director.name, key } });
-                });
-        }
+        // ONE director per pass, one in flight (2026-11-09 living-world P2):
+        // the next ready one runs when this one settles (the tick re-runs
+        // the effect; a failure changes no dependency by itself).
+        const picked = pickDirectorToRun(BACKGROUND_DIRECTORS, s, directorKeysRef.current, directorInFlightRef.current);
+        if (!picked) return;
+        const { director, key } = picked;
+        directorKeysRef.current[director.name] = key;
+        directorInFlightRef.current = true;
+        director.generate(s)
+            .then(result => {
+                dispatch(director.install(sessionId, key, result));
+                console.info(director.logSuccess(s, key, result));
+            })
+            .catch(error => {
+                console.warn(director.failureNote, error.message || error);
+                if (directorKeysRef.current[director.name] === key) {
+                    directorKeysRef.current[director.name] = null;
+                }
+                dispatch({ type: 'DIRECTOR_ATTEMPT_FAILED', payload: { sessionId, name: director.name, key } });
+            })
+            .finally(() => {
+                directorInFlightRef.current = false;
+                setDirectorTick(tick => tick + 1);
+            });
     }, [
         state.session?.id,
         state.session?.frontDirector?.generationVersion,
@@ -418,6 +424,7 @@ export default function ChatPanel() {
         state.settings.apiKey,
         state.messages.length,
         state.combat?.active,
+        directorTick,
         dispatch,
     ]);
 

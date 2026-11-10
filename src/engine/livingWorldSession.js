@@ -50,7 +50,7 @@ export const CHAPTER_CLOSE_REASONS = Object.freeze(['front', 'death', 'quest']);
  * `pendingRegionalFronts.atMessage` were stamped, typed here, and read nowhere.
  */
 export const PENDING_MARKER_KEYS = Object.freeze({
-    pendingAbsenceDrift: Object.freeze(['key', 'locationName', 'awayDistance', 'returnMessage']),
+    pendingAbsenceDrift: Object.freeze(['key', 'locationName', 'awayDistance', 'returnMessage', 'leftMessage']),
     // A `profileOnly: true` rides beside these ONLY on a face-only marker
     // (2026-10-26: the call writes the land's face and seeds no fronts); a
     // seed marker keeps exactly this shape.
@@ -114,7 +114,13 @@ export function sanitizePendingAbsenceDrift(raw, { maxMessageCount } = {}) {
     const locationName = text(raw.locationName, 120);
     const returnMessage = clampMessageStamp(raw.returnMessage, maxMessageCount);
     if (!key || !locationName || returnMessage === null) return null;
-    return { key, locationName, awayDistance: clampMessageStamp(raw.awayDistance) ?? 0, returnMessage };
+    // The departure stamp never passes the return (a marker minted before
+    // 2026-11-10 has none, and the director then reads plain recency).
+    const leftMessage = clampMessageStamp(raw.leftMessage, returnMessage);
+    return {
+        key, locationName, awayDistance: clampMessageStamp(raw.awayDistance) ?? 0, returnMessage,
+        ...(leftMessage !== null && { leftMessage }),
+    };
 }
 
 export function sanitizePendingRegionalFronts(raw) {

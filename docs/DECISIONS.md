@@ -8,6 +8,14 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-11-10 (later) · A director bound to a place or an arrival selects by stamp; directors run one at a time, one request per attempt. EXTENDS 2026-09-20 (the director give-up rule) and 2026-10-03 (one shared director context).**
+
+The three living-world queue items of 11-09, fixed before the megacampaign's first arrival in a land the save never had.
+1. **The regional seed's narration starts at the arrival** — two rows before the arrival record's `lastVisitedMessage`. Why: the last 20 rows were mostly the old land, sent under the label "narration in this region", and the prompt's contrast rule then had to fight its own context.
+2. **The absence drift reads canon as of the departure.** The marker carries `leftMessage`; `baseDirectorContext` selects by `asOfMessage` / `afterMessage` on a fact's `atMessage` and a journal entry's `messageRange`. 16 + 3 as of the departure, 4 + 1 since, same total as the shared defaults. Why: the newest canon is by construction the absence's. No text matching decides what is "about the place" (the 11-05 ruling); the stamp does. Limit accepted: it is the record up to the departure, not a filter to the place.
+3. **One director per pass, none while one is in flight; `maxRetries: 0` on the director lane.** Why: four could arm on one turn, each a full uncached DM-model call beside the player's own, and the adapter's retries under the ledger's three attempts made one stuck marker nine requests. The table's order is the priority; a later director waits seconds, not turns.
+4. **Unit-pinned, not provider-proven.** No eval exists for either director; building one was not worth holding the fix for. The megacampaign's Corve arrival is the proof.
+
 **2026-11-10 · A lane flag is a boolean, a number or a word; a hero's death is declared, never truthy. EXTENDS 2026-09-19 (a flag wire is a `toFlag` wire) and the 2026-09-08 type-strict text rule.**
 
 Two queue P1s, one root: `toFlag` read any non-string by `!!`, and `player_death` read by `if (!raw.player_death)`.

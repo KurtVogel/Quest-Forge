@@ -32,7 +32,7 @@ describe('pending one-shot markers', () => {
 
     it('project to the keys that have a READER (2026-10-03 audit: resolvedAt and atMessage were stamped, typed, and read nowhere)', () => {
         const loaded = {
-            pendingAbsenceDrift: sanitizePendingAbsenceDrift({ key: 'loc|50', locationName: 'Aldermill', returnMessage: 50, awayDistance: 40, extra: 'x' }),
+            pendingAbsenceDrift: sanitizePendingAbsenceDrift({ key: 'loc|50', locationName: 'Aldermill', returnMessage: 50, awayDistance: 40, leftMessage: 8, extra: 'x' }),
             pendingRegionalFronts: sanitizePendingRegionalFronts({ key: 'k', region: 'Rimefell', locationName: 'Cold Harbor', atMessage: 60 }),
             pendingFrontAftermath: sanitizePendingFrontAftermath({ frontId: 'front-x', title: 'The Tithe', resolvedAt: 1700000000000 }),
             pendingFrontDoom: sanitizePendingFrontAftermath({ frontId: 'front-y', title: 'The Ashen Hand', extra: 1 }),

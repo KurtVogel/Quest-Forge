@@ -105,6 +105,40 @@ describe('baseDirectorContext — one default set, overrides stated at the call 
     });
 });
 
+describe('baseDirectorContext — a message window selects by stamp (2026-11-09 living-world P2)', () => {
+    const stamped = () => ({
+        ...state(),
+        worldFacts: [
+            { id: 'legacy', category: 'lore', fact: 'an unstamped legacy fact' },
+            ...Array.from({ length: 10 }, (_, i) => ({ id: `stay-${i}`, category: 'event', fact: `mill fact ${i}`, atMessage: 10 + i })),
+            ...Array.from({ length: 25 }, (_, i) => ({ id: `away-${i}`, category: 'event', fact: `fen fact ${i}`, atMessage: 60 + i })),
+        ],
+        journal: [
+            { id: 'j-legacy', summary: 'an unstamped entry' },
+            { id: 'j-stay', summary: 'the mill weeks', messageRange: [0, 40] },
+            { id: 'j-away-1', summary: 'fen journey one', messageRange: [41, 70] },
+            { id: 'j-away-2', summary: 'fen journey two', messageRange: [71, 90] },
+        ],
+    });
+
+    it('asOfMessage keeps what was on record by that row; afterMessage what came later; an unstamped record is in neither', () => {
+        const then = baseDirectorContext(stamped(), { asOfMessage: 50 });
+        expect(then.canonicalWorldFacts).toHaveLength(10);
+        expect(then.canonicalWorldFacts.every(fact => fact.fact.startsWith('mill'))).toBe(true);
+        expect(then.journal.map(entry => entry.summary)).toEqual(['the mill weeks']);
+
+        const since = baseDirectorContext(stamped(), { afterMessage: 50, facts: 4, journal: 1 });
+        expect(since.canonicalWorldFacts.map(fact => fact.fact)).toEqual(['fen fact 21', 'fen fact 22', 'fen fact 23', 'fen fact 24']);
+        expect(since.journal.map(entry => entry.summary)).toEqual(['fen journey two']);
+    });
+
+    it('with no window nothing changes: plain newest-N, unstamped records included', () => {
+        const base = baseDirectorContext(stamped(), { facts: 40 });
+        expect(base.canonicalWorldFacts).toHaveLength(36);
+        expect(base.journal).toHaveLength(4);
+    });
+});
+
 describe('runDirector — the one call', () => {
     it('sends the DM\'s own provider / key / model, an empty history, the context as the user message, and parses on the anchor', async () => {
         sendMessageMock.mockResolvedValue('Here you go:\n{"hooks": [1, 2,],}\nDone.');
@@ -114,6 +148,8 @@ describe('runDirector — the one call', () => {
         expect(sendMessageMock.mock.calls[0][0]).toEqual({
             provider: 'gemini', apiKey: 'k', model: 'gemini-3.8-flash',
             systemPrompt: 'PROMPT', messageHistory: [], userMessage: '{"a":1}', temperature: 0.9,
+            // ONE request per attempt (2026-11-09 P2): the failure ledger is the retry.
+            maxRetries: 0,
         });
     });
 

@@ -92,6 +92,33 @@ export function sanitizeDirectorFailures(raw, { maxMessageCount } = {}) {
     return out;
 }
 
+/**
+ * ONE director per pass, one in flight (2026-11-09 living-world P2, measured):
+ * the effect launched every ready director at once — four can arm on one turn
+ * (aftermath + doom + drift + seed; drift + seed on a return into a deferred
+ * land is the common pair), each a DM-model call with its whole context
+ * uncached, in the same second as the player's turn on the same key. The
+ * table's order is the priority; the next one runs when this one settles.
+ *
+ * @param {{ name: string, getKey: (state: object) => string|null }[]} directors
+ * @param {object} state
+ * @param {Record<string, string|null>} parkedKeys - the keys already fired, by director name
+ * @param {boolean} inFlight - a director call has not settled yet
+ * @returns {{ director: object, key: string }|null}
+ */
+export function pickDirectorToRun(directors, state, parkedKeys = {}, inFlight = false) {
+    if (inFlight) return null;
+    for (const director of directors || []) {
+        const key = director.getKey(state);
+        if (!key || parkedKeys[director.name] === key) continue;
+        // Give-up rule (2026-09-20 audit P1): a failed key waits out its
+        // backoff; the reducer consumes the marker on the third failure.
+        if (isDirectorBackingOff(state?.session, director.name, key, state?.messages)) continue;
+        return { director, key };
+    }
+    return null;
+}
+
 /** The failure entry for this exact (director, key), or null. */
 export function getDirectorFailure(session, name, key) {
     if (!Object.hasOwn(RETRYABLE_DIRECTORS, name) || !isRecord(session?.directorFailures)) return null;
