@@ -30,7 +30,9 @@ NPC intent. LLM-rich does not mean verbose: ordinary turns stay brief.
   sentences. Do NOT crawl the codebase to "get familiar"; open `docs/ARCHITECTURE.md` when a task
   spans subsystems, and only the code the task needs.
 - **Before proposing or redesigning:** search `docs/IDEAS.md` and `docs/DECISIONS.md` for the
-  task's terms. Live work queues: `docs/SCHEDULED_STRENGTHENING.md` (correctness),
+  task's terms. **The one live work queue is `docs/REVIEW_QUEUE.md`** (the 2026-11-10 review: one
+  item per session, one change per deploy, each item ends on a number or Vesa's played verdict).
+  The older queues are paused lists: `docs/SCHEDULED_STRENGTHENING.md` (correctness),
   `docs/SCHEDULED_WOW.md` (player experience), `docs/MEMORY_RESEARCH.md` (memory adoption). Their
   three scheduled routines are paused since 2026-11-10; do not re-enable one without Vesa.
 - **End of any session that shipped or decided anything:** update `docs/STATUS.md` (replace

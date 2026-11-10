@@ -8,6 +8,10 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-11-11 · `docs/REVIEW_QUEUE.md` is the one live work queue.**
+
+Vesa: "focus clearly and only" on the 2026-11-10 review's list, then "Yes, write it". The page holds each item with how sure it is, how it is measured and what done means. Its working rules (one item per fresh session, one change per deploy and then Vesa plays, hypotheses measured before anything is built, every item ends on a number or a played verdict, a stop rule after items 1–3) were proposed in that conversation and stand until Vesa changes them. The order is save safety, turn latency, then the megacampaign measurement for "the DM sees more story". The three older queues are paused lists. Why: the list existed only in a chat, and a list worked as seven builds would repeat the audit routine's mistake — only about a third of it is verified; the rest are hypotheses.
+
 **2026-11-11 · The `rpg-balance-master` subagent is retired; balance work is done in the main session.**
 
 Vesa's call ("Yes, retire it"). Deleted: `.claude/agents/rpg-balance-master.md` and its Codex twin `.codex/agents/rpg-balance-master.toml`; the routing lines in `CLAUDE.md`, `AGENTS.md` and `.codex/README.md` now say to review directly. The notes under `.claude/agent-memory/rpg-balance-master/` and `.codex/agent-memory/` stay as history; this log is the authority for rulings.
