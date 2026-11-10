@@ -1,5 +1,10 @@
 # Scheduled Wow Log — "the best possible game in this genre"
 
+> **PAUSED 2026-11-10 (Vesa's call).** Cloud routine "Quest Forge WOW audit"
+> (`trig_01A81mWgNEcBUCdbYLMRgUit`, Wednesdays 14:00 Helsinki) is disabled. Do not re-enable it without
+> Vesa. Work is focused on the 2026-11-10 whole-project review's list; the queue below stays as a
+> list. Reason: `docs/DECISIONS.md` 2026-11-10 (night).
+
 An automated **player-experience audit** (Claude Code scheduled task `wow-audit`, sibling of the
 daily strengthening audit). Where `SCHEDULED_STRENGTHENING.md` asks *"is this feature correct?"*,
 this one asks *"is this MOMENT as good as the best game in the genre makes it — and what is the

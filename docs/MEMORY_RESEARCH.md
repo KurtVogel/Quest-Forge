@@ -1,5 +1,10 @@
 # Memory Research Log — "is our memory design still the best available?"
 
+> **PAUSED 2026-11-10 (Vesa's call).** Cloud routine "Quest Forge weekly memory research"
+> (`trig_015TLi2Mz8QhdiqdZoXK6V4x`, Wednesdays 15:00 Helsinki) is disabled. Do not re-enable it without
+> Vesa. Work is focused on the 2026-11-10 whole-project review's list; the doctrine and the registry
+> below stay as reference. Reason: `docs/DECISIONS.md` 2026-11-10 (night).
+
 An automated **weekly memory-research routine** (Claude.ai Routine `Quest Forge weekly memory
 research`, Fable 5.1, Wednesdays 15:00 Finnish time; sibling of `SCHEDULED_STRENGTHENING.md` and
 `SCHEDULED_WOW.md`). Where strengthening asks *"is this code correct?"* and the wow audit asks
