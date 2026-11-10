@@ -17,6 +17,7 @@ import { foldExperience, getQuestCompletionXp, isHeroDown, QUEST_INSTANT_XP } fr
 import { cleanText } from '../../engine/text.js';
 import { conversationalGap } from '../../engine/replayLedger.js';
 import { findNpcByRef } from '../../engine/npcRoster.js';
+import { STORY_CARD_TEXT_MAX } from '../../engine/storyMemory.js';
 import { gameReducer } from '../gameReducer.js';
 import { normalizeRefToken, systemMessage } from './shared.js';
 
@@ -170,14 +171,42 @@ function describeQuestClosed(row, terminalStatus) {
  * ending back as a thing someone was there for. Salience 3; 4 for an arc that
  * lived QUEST_LONG_ARC_ROWS conversational rows.
  */
+const QUEST_CARD_NAME_CHARS = 60;
+const QUEST_CARD_PATRON_CHARS = 40;
+const QUEST_CARD_PROMISE_MIN = 12;
+
+/** A part cut to its budget, with an ellipsis when it was cut. */
+function clipCardPart(value, max) {
+    const text = String(value || '');
+    return text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+}
+
 function buildQuestCard(row, terminalStatus, { longArc, location }) {
+    // The ending is the card (2026-11-10 quests P2, measured): the text used
+    // to read `"name" for patron (promised: …) — completed: ending`, and the
+    // record's 260-char clamp fell on the ENDING — 129 of 145 chars kept on
+    // an ordinary row, none at the wire's own caps (160 + 80 + 120 before it
+    // began). Same order, budgeted from the ending back: the ending is
+    // written whole (its wire cap is 200), then the name (the card's `subject`
+    // holds it too), then the patron whole or not at all (`linkedNpcNames`
+    // holds them), and the promise takes what is left — cut, or dropped when
+    // under QUEST_CARD_PROMISE_MIN chars remain.
     const ending = row.outcome || (terminalStatus === 'completed' ? 'done.' : 'the goal was lost.');
-    const forWhom = row.patron ? ` for ${row.patron}` : '';
-    const promised = row.promised ? ` (promised: ${row.promised})` : '';
+    const tail = ` — ${terminalStatus}: ${ending}`;
+    let room = Math.max(0, STORY_CARD_TEXT_MAX - tail.length);
+    const name = clipCardPart(row.name, Math.max(1, Math.min(QUEST_CARD_NAME_CHARS, room - 2)));
+    room -= name.length + 2;
+    const patron = clipCardPart(row.patron, QUEST_CARD_PATRON_CHARS);
+    const forWhom = patron && ` for ${patron}`.length <= room ? ` for ${patron}` : '';
+    room -= forWhom.length;
+    const promiseRoom = room - ' (promised: )'.length;
+    const promised = row.promised && promiseRoom >= Math.min(row.promised.length, QUEST_CARD_PROMISE_MIN)
+        ? ` (promised: ${clipCardPart(row.promised, promiseRoom)})`
+        : '';
     return {
         type: 'quest',
         subject: row.name.slice(0, 80),
-        text: `"${row.name}"${forWhom}${promised} — ${terminalStatus}: ${ending}`,
+        text: `"${name}"${forWhom}${promised}${tail}`,
         salience: longArc ? 4 : 3,
         emotionalCharge: terminalStatus === 'failed' ? 3 : 2,
         status: 'active',

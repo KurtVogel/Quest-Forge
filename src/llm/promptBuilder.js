@@ -422,7 +422,9 @@ export function buildSystemPromptParts({ ledger = null, character, inventory, qu
             fronts: ctx.fronts,
             worldTempo: worldTempo || null,
             paceDial,
-            heat: computeRecentHeat({
+            // No pace line in a fight (2026-11-10): the combat render is the
+            // ids and the echoes only, so the heat is not computed for it.
+            heat: ctx.combatActive ? null : computeRecentHeat({
                 messageCount: ctx.messageCount,
                 messages: ctx.messages,
                 combat,

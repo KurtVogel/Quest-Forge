@@ -30,7 +30,7 @@ import { CHARACTER_APPEARANCE_MAX, NPC_DOSSIER_FIELD_MAX } from '../config/conte
 import { HERO_TELL_REPORT_CAP, isHeroTellEstablished } from '../engine/heroTells.js';
 import { liveWorldFacts, planWorldFactAdditions, sanitizeWorldFactPayload } from '../engine/worldFacts.js';
 import { cleanText } from '../engine/text.js';
-import { compareCardRecency, findStoryMemoryMatch, normalizeStoryMemoryCard, pickMergedCardText, possibleSameCardPairs, SAME_CARD_PAIRS_CAP, selectSettleCandidates, stripStoryMemoryEngineStamps } from '../engine/storyMemory.js';
+import { compareCardRecency, findStoryMemoryMatch, isEngineOnlyCardType, normalizeStoryMemoryCard, pickMergedCardText, possibleSameCardPairs, SAME_CARD_PAIRS_CAP, selectSettleCandidates, stripStoryMemoryEngineStamps } from '../engine/storyMemory.js';
 import {
     CAST_AUDIT_RULES,
     describeAppliedLoot,
@@ -659,6 +659,9 @@ export function capAcceptedFacts(candidates, plan) {
 export function capNovelCards(candidates, pool) {
     let novel = 0;
     return candidates.filter(candidate => {
+        // The engine's type is not a lane's to mint (2026-11-10): the reducer
+        // refuses it, so it must not spend the cap or reach the embed rows.
+        if (isEngineOnlyCardType(candidate?.type)) return false;
         const normalized = normalizeStoryMemoryCard(stripStoryMemoryEngineStamps(candidate));
         if (!normalized) return false;
         const probe = typeof candidate.id === 'string' && candidate.id ? { ...normalized, id: candidate.id } : { ...normalized, id: null };

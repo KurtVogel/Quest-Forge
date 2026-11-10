@@ -84,7 +84,7 @@ never in combat unless noted):
 
 | Block | Builder |
 |---|---|
-| `## WORLD TEMPO — PRIVATE PACING STATE` — pace dial vs measured heat, front stubs, ONE permission card or the doom card, victory / came-to-pass echoes, recent fights, worn motifs | `buildWorldTempoBlock` (engine/worldTempo.js) |
+| `## WORLD TEMPO — PRIVATE PACING STATE` — pace dial vs measured heat, front stubs, ONE permission card or the doom card, victory / came-to-pass echoes, recent fights, worn motifs; in combat the stubs and the echoes only (2026-11-10) | `buildWorldTempoBlock` (engine/worldTempo.js) |
 | `## REGIONAL HEARSAY — PRIVATE` | `buildRegionalHearsayBlock` |
 | `## WHILE YOU WERE AWAY — PRIVATE` | `buildWhileYouWereAwayBlock` (llm/absenceDrift.js) |
 | `## SOMETHING STRANGE ARRIVES — PRIVATE` | `buildWonderBlock` |

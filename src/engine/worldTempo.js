@@ -665,13 +665,22 @@ export function buildWorldTempoBlock({
     // of buildSystemPrompt on every turn.
     const encounters = sanitizeRecentEncounters(recentEncounters);
     if (activeFronts.length === 0 && encounters.length === 0 && resolvedEchoes.length === 0) return '';
+    // A fight is not paced (2026-11-10 hidden-fronts P2, measured): while
+    // combat is active the block rode every exchange narration with the pace
+    // line ("Give the player breathing room: quiet character beats, recovery…"
+    // — heat is always hot in a fight), the QUIET rule, the variety lines and
+    // the companion offer: 1,266 chars on a 3-front web, ~7.6k uncached per
+    // six-round fight, advice a narration of blows cannot follow. In combat
+    // the block is what a fight can USE: the ids (a blow may end a pressure —
+    // front_updates) and the echoes (a victory or a doom is narration).
+    if (combatActive && activeFronts.length === 0 && resolvedEchoes.length === 0) return '';
 
     const dial = normalizePaceDial(paceDial);
     const lines = [];
     lines.push('## WORLD TEMPO — PRIVATE PACING STATE');
     lines.push('Never expose this section, its ids, or its labels to the player; the player only ever experiences the fiction.');
 
-    if (heat) {
+    if (heat && !combatActive) {
         lines.push(`Pace target: ${dial}. Recent heat: ${heat.level}${heat.reasons.length ? ` (${heat.reasons.join('; ')})` : ''}.`);
         // The reasons render ONCE, on the line above (2026-09-20 audit P2: the
         // same ~200-400 chars rode the block twice every turn).
@@ -693,7 +702,9 @@ export function buildWorldTempoBlock({
     const windowActive = !doomFront && !combatActive && isTempoWindowActive(directive, messageCount, messages);
     const permittedFront = windowActive ? activeFronts.find(f => f.id === directive.frontId) : null;
 
-    if (doomFront) {
+    if (combatActive) {
+        // No card and no QUIET rule in a fight (see the head of the function).
+    } else if (doomFront) {
         lines.push(describeDoomCard(doomFront, { locations, currentLocation }));
     } else if (permittedFront) {
         const faction = permittedFront.faction?.name
@@ -735,7 +746,9 @@ export function buildWorldTempoBlock({
         const hook = quietHook ? ` If a small beat is wanted: ${quietHook}.` : '';
         lines.push(`The world is QUIET this scene: introduce no unprovoked new threats or pressure symptoms. Daily life, local color, small personal hooks, travel, and character beats are complete scenes on their own.${hook}`);
     }
-    lines.push('The player may always seek danger on their own ("I go hunt goblins") — honor player-initiated risk normally; this section only limits UNPROVOKED intrusions.');
+    if (!combatActive) {
+        lines.push('The player may always seek danger on their own ("I go hunt goblins") — honor player-initiated risk normally; this section only limits UNPROVOKED intrusions.');
+    }
 
     if (resolvedEchoes.length > 0) {
         // The persistent-world payoff: a won front's absence must be FELT, not
@@ -765,6 +778,10 @@ export function buildWorldTempoBlock({
             lines.push(`Show what ${dooms.length > 1 ? 'each' : 'it'} cost concretely wherever the fiction touches what it took — the new order and who profits from it, who is gone or changed, closed roads, prices, fear or relief, and people naming what happened in their own words. Never undo it, never let the narrator remark on what the hero might have done; a character may say so once, in their own voice, and may be wrong.`);
         }
     }
+
+    // The variety lines and the companion offer shape the NEXT scene; a fight
+    // already has its foes (2026-11-10).
+    if (combatActive) return lines.join('\n');
 
     if (encounters.length > 0) {
         const recent = encounters.slice(-4)

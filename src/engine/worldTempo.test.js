@@ -385,17 +385,22 @@ describe('world tempo prompt block', () => {
             frontId: 'front-v2-1', maxIntensity: 'indirect',
             grantedAtMessage: 10, activatesAtMessage: 10, expiresAtMessage: 34,
         };
-        const block = buildWorldTempoBlock({
+        const scene = {
             fronts,
             worldTempo: { directive },
             heat: { level: 'high', reasons: ['combat is happening right now'] },
             messageCount: 12,
-            combatActive: true,
             recentEncounters: [{ enemies: '2× ghoul', location: 'Old Crypt', outcome: 'victory', messageIndex: 8 }],
-        });
+        };
+        const block = buildWorldTempoBlock({ ...scene, combatActive: true });
         expect(block).not.toContain("THIS SCENE'S PERMISSION");
-        expect(block).toContain('Recent fights: 2× ghoul (Old Crypt, victory)');
-        expect(block).toContain('cleared once won');
+        // A fight carries the ids and the echoes only (2026-11-10): the
+        // variety line shapes the NEXT scene, so it waits for the fight's end.
+        expect(block).not.toContain('Recent fights');
+        const after = buildWorldTempoBlock(scene);
+        expect(after).toContain("THIS SCENE'S PERMISSION");
+        expect(after).toContain('Recent fights: 2× ghoul (Old Crypt, victory)');
+        expect(after).toContain('cleared once won');
     });
 
     it('returns empty with no fronts and no encounters', () => {

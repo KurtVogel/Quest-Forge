@@ -10,6 +10,7 @@ import {
     bornStoryMemoryCard,
     findStoryMemoryMatch,
     idReportDrifted,
+    isEngineOnlyCardType,
     mergeStoryCards,
     normalizeStoryMemoryCard,
     normalizeStoryMemoryUpdate,
@@ -227,7 +228,16 @@ export const handlers = {
         const cards = Array.isArray(action.payload)
             ? action.payload.filter(card => card && typeof card === 'object' && !Array.isArray(card))
             : [];
-        for (const card of cards) {
+        for (const raw of cards) {
+            // This is the LANES' door (the Scribe pass and the reflection are
+            // its only dispatchers; the engine's own cards — a quest's end, a
+            // fight's wound — go through the singular action). A lane card
+            // never claims what is the engine's (2026-11-10 story-memory P2):
+            // the `quest` type is refused whole, and a `source` it wrote is
+            // dropped — `source: "engine"` froze the card's text against
+            // every later re-report and put it under the engine's dormancy rule.
+            if (isEngineOnlyCardType(raw.type)) continue;
+            const { source: _laneSource, ...card } = raw;
             next = gameReducer(next, { type: 'ADD_STORY_MEMORY_CARD', payload: card, ...(action.meta && { meta: action.meta }) });
         }
         return next;

@@ -22,6 +22,8 @@ const ALLOWED_TYPES = new Set([
 
 const ALLOWED_STATUS = new Set(['active', 'resolved', 'dormant']);
 const MAX_TEXT_LENGTH = 260;
+/** The card text cap, for an engine composer that budgets its own parts (the quest card). */
+export const STORY_CARD_TEXT_MAX = MAX_TEXT_LENGTH;
 const MAX_SUBJECT_LENGTH = 80;
 const MAX_TAGS = 8;
 const MAX_LINKED_NPCS = 6;
@@ -86,7 +88,30 @@ const LEGACY_RECENCY_DECAY_HOURS = 24;
 function foldTypeKey(value) {
     return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
-const TYPE_BY_FOLDED_KEY = new Map([...ALLOWED_TYPES].map(type => [foldTypeKey(type), type]));
+/**
+ * Four type words a lane writes for a commitment (2026-11-10 story-memory
+ * P2, measured): `vow` / `oath` / `pledge` / `debt` are not on the wire's
+ * list, so they fell to `callback` — the promise's scoring, its commitment
+ * rung and the settle lane lost for exactly the cards those exist for. A
+ * closed table of TYPE words read after the same fold as the canonical names
+ * (an enum alias, like the quest status table) — never a reading of the
+ * card's text.
+ */
+const TYPE_ALIASES = [['vow', 'promise'], ['oath', 'promise'], ['pledge', 'promise'], ['debt', 'promise']];
+const TYPE_BY_FOLDED_KEY = new Map([
+    ...[...ALLOWED_TYPES].map(type => [foldTypeKey(type), type]),
+    ...TYPE_ALIASES,
+]);
+
+/**
+ * `quest` is the ENGINE's type (COMPLETE_QUEST / FAIL_QUEST mint it); a lane
+ * card that claims it is refused whole (2026-11-10: the fold accepted it, so
+ * a Scribe `type: "quest"` landed as a second record of a job the DM's quest
+ * log already holds — the Scribe is told a job is not a card).
+ */
+export function isEngineOnlyCardType(value) {
+    return foldTypeKey(value) === 'quest';
+}
 
 /**
  * String-or-drop (2026-09-17 audit P2, the 09-15/09-16 rule): an object
