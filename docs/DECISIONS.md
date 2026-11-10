@@ -8,6 +8,12 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-11-10 (night) · The daily strengthening audit is paused.**
+
+Vesa's call ("Yes, pause it") after a whole-project review. The cloud routine "Quest Forge scheduled strengthening" (`trig_01LQM3zvhBMdUmqkTAPk3V6m`) is disabled; the weekly wow audit and the weekly memory research still run. The queue in `docs/SCHEDULED_STRENGTHENING.md` stays; nothing in it was closed by this.
+- **Why:** the audit reads existing code and asks what could go wrong in it. It finds real local defects (the 11-10 `level_up {}` and `player_death "false"` P1s), but it cannot find a missing thing or a design choice. In about 875 closed items the log never names storage persistence, autosave rotation or a campaign export, and names time-to-first-token once; the review's top findings (turn latency, a 20-row history for the DM, one autosave with no backup) are all of that kind. Each fix also added code, dated comments, tests and doc entries, and a closed item read as progress whether or not play improved. The largest real improvements came from play: the megacampaign and the Opus playtests.
+- **Not decided, proposed only:** if it returns, weekly at most, and a finding needs a reproduced player-visible failure from a real save or a playtest transcript before it earns a fix session. The freed slot is better spent on something that plays the game (a long-save soak harness).
+
 **2026-11-10 (evening) · A fight carries no pacing advice; the quest card is budgeted from its ending back; a commitment word is a promise and a lane never claims the engine's type or source; the QUIET rule stays in the tail.**
 
 The strengthening queue's ordinary-play batch (Vesa: "Yes, fix batch"). Unit-pinned; no provider run.

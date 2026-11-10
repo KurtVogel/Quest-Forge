@@ -1,5 +1,11 @@
 # Scheduled Strengthening Log
 
+> **PAUSED 2026-11-10 (Vesa's call).** The daily audit is switched off: cloud routine
+> "Quest Forge scheduled strengthening" (`trig_01LQM3zvhBMdUmqkTAPk3V6m`, 07:00 Helsinki) is disabled;
+> the older desktop task `daily-feature-strengthening-audit` was already off. Do not re-enable it
+> without Vesa. The Open Findings Queue below stays as a list; an item earns a session only on
+> evidence of player harm. Reason and the proposed terms for a return: `docs/DECISIONS.md` 2026-11-10 (night).
+
 An automated **daily feature audit** (Claude Code scheduled task `daily-feature-strengthening-audit`,
 runs 6:00 AM Finnish time while the desktop app is open). Each run picks **two features** from the
 Feature Registry below, scrutinizes their implementation, code quality, and test coverage, and
