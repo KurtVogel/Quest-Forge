@@ -390,59 +390,72 @@ h1 canvas { width: auto; height: auto; }
     requestAnimationFrame(tick);
   }
 
-  // A woman seen from behind: long hair and a long coat blown to the right, a lantern in her left hand.
-  // Drawn as smooth shapes at the target size and thresholded, like the logo.
+  // Smooth value noise, for the cloud bands and the mist.
+  const vnoise = (x, y) => {
+    const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+    return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+  };
+
+  // A woman seen from behind, feet apart on the cliff edge: hair and a long cloak blown to the left,
+  // a lantern in her right hand. Smooth shapes drawn at the target size and thresholded, like the logo.
   function womanSprite(h) {
-    const s = h / 212, w = Math.ceil(128 * s) + 1, hh = h + 2, c = document.createElement('canvas');
+    const s = h / 212, w = Math.ceil(142 * s) + 1, hh = h + 2, c = document.createElement('canvas');
     c.width = w; c.height = hh;
     const g = c.getContext('2d', { willReadFrequently: true });
     g.scale(s, s); g.fillStyle = '#fff';
     const shape = fn => { g.beginPath(); fn(); g.fill(); };
-    shape(() => g.ellipse(50, 20, 9, 11, 0, 0, 7));                         // head
-    shape(() => g.rect(46, 28, 8, 14));                                     // neck
+    shape(() => g.ellipse(90, 20, 9, 11, 0, 0, 7));                         // head
+    shape(() => g.rect(86, 28, 8, 14));                                     // neck
     shape(() => {                                                           // shoulders, waist, hips
-      g.moveTo(34, 47); g.quadraticCurveTo(50, 39, 66, 47); g.quadraticCurveTo(61, 68, 57, 84);
-      g.quadraticCurveTo(64, 94, 65, 104); g.lineTo(35, 104); g.quadraticCurveTo(36, 94, 43, 84);
-      g.quadraticCurveTo(38, 68, 34, 47);
+      g.moveTo(74, 47); g.quadraticCurveTo(90, 39, 106, 47); g.quadraticCurveTo(101, 68, 97, 84);
+      g.quadraticCurveTo(105, 94, 106, 106); g.lineTo(74, 106); g.quadraticCurveTo(76, 94, 83, 84);
+      g.quadraticCurveTo(78, 68, 74, 47);
     });
-    shape(() => {                                                           // the coat's skirt, hem blown right
-      g.moveTo(35, 102); g.bezierCurveTo(30, 130, 28, 165, 30, 198); g.bezierCurveTo(42, 204, 52, 196, 62, 200);
-      g.bezierCurveTo(74, 204, 82, 190, 92, 192); g.bezierCurveTo(100, 192, 106, 184, 112, 178);
-      g.bezierCurveTo(96, 160, 78, 130, 65, 102);
+    shape(() => { g.moveTo(74, 104); g.lineTo(106, 104); g.lineTo(110, 146); g.lineTo(72, 146); });        // coat to the thigh
+    shape(() => { g.moveTo(76, 140); g.lineTo(90, 140); g.lineTo(86, 200); g.lineTo(87, 212); g.lineTo(68, 212); g.lineTo(73, 200); });
+    shape(() => { g.moveTo(92, 140); g.lineTo(106, 140); g.lineTo(110, 200); g.lineTo(117, 212); g.lineTo(98, 212); g.lineTo(98, 200); });
+    shape(() => {                                                           // right arm, held off the body
+      g.moveTo(106, 47); g.quadraticCurveTo(116, 58, 118, 80); g.lineTo(128, 110); g.lineTo(120, 114);
+      g.lineTo(110, 84); g.quadraticCurveTo(107, 66, 100, 52);
     });
-    shape(() => { g.moveTo(36, 194); g.lineTo(47, 194); g.lineTo(47, 206); g.lineTo(50, 212); g.lineTo(34, 212); });
-    shape(() => { g.moveTo(52, 194); g.lineTo(63, 194); g.lineTo(63, 206); g.lineTo(66, 212); g.lineTo(52, 212); });
-    shape(() => {                                                           // left arm, held off the body
-      g.moveTo(34, 47); g.quadraticCurveTo(24, 58, 22, 80); g.lineTo(12, 110); g.lineTo(20, 114);
-      g.lineTo(30, 84); g.quadraticCurveTo(33, 66, 40, 52);
+    shape(() => {                                                           // hair, three locks in the wind
+      g.moveTo(99, 14); g.bezierCurveTo(95, 3, 80, 3, 80, 18); g.bezierCurveTo(78, 26, 72, 30, 62, 31);
+      g.bezierCurveTo(50, 32, 36, 36, 20, 44); g.bezierCurveTo(32, 48, 42, 48, 52, 46);
+      g.bezierCurveTo(44, 54, 38, 60, 32, 68); g.bezierCurveTo(44, 66, 54, 60, 62, 54);
+      g.bezierCurveTo(60, 64, 56, 74, 52, 84); g.bezierCurveTo(64, 78, 72, 66, 78, 52);
+      g.bezierCurveTo(82, 46, 88, 44, 92, 42); g.lineTo(100, 34);
     });
-    shape(() => {                                                           // hair: leaves the head below the crown, in three locks
-      g.moveTo(41, 14); g.bezierCurveTo(45, 3, 60, 3, 60, 18); g.bezierCurveTo(62, 26, 68, 30, 78, 31);
-      g.bezierCurveTo(90, 32, 104, 36, 120, 44); g.bezierCurveTo(108, 48, 98, 48, 88, 46);
-      g.bezierCurveTo(96, 54, 102, 60, 108, 68); g.bezierCurveTo(96, 66, 86, 60, 78, 54);
-      g.bezierCurveTo(80, 64, 84, 74, 88, 84); g.bezierCurveTo(76, 78, 68, 66, 62, 52);
-      g.bezierCurveTo(58, 46, 52, 44, 48, 42); g.lineTo(40, 34);
+    shape(() => {                                                           // cloak, from the shoulders, ragged at the hem
+      g.moveTo(104, 44); g.lineTo(76, 43); g.bezierCurveTo(58, 62, 40, 100, 26, 140);
+      g.bezierCurveTo(18, 160, 10, 172, 2, 184); g.bezierCurveTo(14, 182, 22, 178, 30, 188);
+      g.bezierCurveTo(38, 176, 46, 180, 52, 192); g.bezierCurveTo(60, 180, 68, 184, 74, 198);
+      g.bezierCurveTo(84, 170, 92, 130, 95, 90); g.bezierCurveTo(97, 70, 101, 56, 104, 44);
     });
     const a = g.getImageData(0, 0, w, hh).data;
-    return { w, h: hh, ax: Math.round(50 * s), lx: Math.round(16 * s), ly: Math.round(124 * s),
+    return { w, h: hh, ax: Math.round(90 * s), lx: Math.round(125 * s), ly: Math.round(124 * s),
       on: (x, y) => x >= 0 && y >= 0 && x < w && y < hh && a[(y * w + x) * 4 + 3] > 110 };
   }
 
-  // The title scene: an open book on a candlelit table, and the realm it opens onto.
+  // The title scene: an open book on a candlelit table, and above it the world it opens onto:
+  // one figure on a cliff edge under a wide, quiet sky (after Vesa's reference image).
   function makeBook(canvas) {
     const ctx = canvas.getContext('2d');
-    const SKYR = ['#07060c', '#0a0914', '#0e0e20', '#12162e', '#172240', '#1d3454', '#27506c', '#3a7a86'].map(hex);
-    const LAKE = ['#0b1322', '#0f1c30', '#142a40', '#1b3d54', '#27506c', '#5fa0a8'].map(hex);
+    const SKYR = ['#0a0b14', '#0e1120', '#131829', '#192034', '#202a42', '#293651', '#354563', '#465978', '#5d7391'].map(hex);
+    const PLAINR = ['#0a0d17', '#0f1423', '#141b2e', '#1a243b'].map(hex), RIV_HI = hex('#8fd0e6'), RIV_LO = hex('#4a8fb0');
+    const ROCK = ['#07070b', '#0c0c13', '#13141d', '#1b1d29'].map(hex), ROCK_TOP = hex('#3a3e52');
     const WOOD = ['#08060a', '#120c0e', '#1f1412', '#301d16', '#47291a', '#633a1f', '#855227', '#a96d33', '#c98f48'].map(hex);
     const PAGE = ['#1a120c', '#3a2a1a', '#6b5230', '#9c7d4a', '#c9a868', '#e8cf8e', '#fff0b8', '#fffbe0'].map(hex);
     const HALO = ['#06050a', '#0e0806', '#1c0e08', '#30160b', '#4a220e', '#6b3212'].map(hex);
-    const FAR = hex('#1f3355'), FAR_RIM = hex('#3a5c82'), NEAR = hex('#131d38'), CASTLE = hex('#182a48');
-    const MOON_HI = hex('#f3ead0'), MOON_LO = hex('#cfc3a0'), FIG = hex('#050409'), RIM = hex('#4f8597');
+    const FAR = hex('#1c2740'), FAR_RIM = hex('#2e3f5e');
+    const MIST = hex('#3d5070'), CASTLE = hex('#0d111e'), FIG = hex('#050509'), RIM = hex('#59607c');
+    const SP_HI = hex('#eef0f8'), SP_LO = hex('#8d92ab');
     const LEATHER = hex('#3b1f14'), EDGE = hex('#8a6d42'), RIBBON = hex('#a33a34'), DISH = hex('#4a2e1c');
     const WAX = ['#b9a57a', '#e6d6a8', '#8f7d58'].map(hex), WAX_TOP = hex('#fff0c0'), MOTE = hex('#f6e7b0');
-    const TABLE = 1, PAGEK = 2, AIR = 3, LAKEK = 4, WIN = 5, LAMP = 6, FW = 7, FH = 12;
+    const TABLE = 1, PAGEK = 2, AIR = 3, SKYK = 4, WIN = 5, LAMP = 6, MISTK = 7, RIVERK = 8, FW = 7, FH = 12;
     let W = 0, H = 0, cw = 0, ch = 0, img, D, base, dyn, kind, alb, dA, dB, dK, dG, sky;
-    let fires, flames, stars, motes, shoot, lamp, moon, geo, Rc2, Rb2, Rh2, Rg2, lastStep = 0;
+    let fires, flames, stars, motes, shoot, lamp, geo, Rc2, Rb2, Rh2, Rg2, lastStep = 0;
 
     function layout() {
       cw = canvas.clientWidth; ch = canvas.clientHeight;
@@ -450,20 +463,25 @@ h1 canvas { width: auto; height: auto; }
       W = Math.ceil(cw / px); H = Math.ceil(ch / px);
       canvas.width = W; canvas.height = H;
       const N = W * H, tall = H > W, cx = W >> 1;
-      const tableY = Math.round(H * (tall ? 0.62 : 0.60));
+      const tableY = Math.round(H * (tall ? 0.62 : 0.60)), ms = tableY / 151;
+      // The vision ends in a dithered fade to black, then a dark gap, then the table: it is what the book shows.
+      const airY = tableY - Math.round(12 * ms), fadeH = Math.round(13 * ms);
+      const fade = (x, y) => Math.min((airY - y) / fadeH, (x + 2) / 9, (W - x + 1) / 9);
       const bw = Math.round(Math.min(W * 0.62, 90)), half = bw / 2, bh = Math.round(bw * 0.24);
       const by0 = tableY + 3, by1 = by0 + bh, frontY = by1 + 9;
-      const figH = Math.round(tableY * 0.46), feetY = tableY - Math.round(tableY * 0.10);
-      const hy = feetY - Math.round(figH * 0.36), ms = tableY / 151;
-      const fxc = Math.round(cx + W * (tall ? 0.10 : 0.16));
-      moon = { x: Math.round(W * 0.2), y: Math.round(hy * (tall ? 0.56 : 0.6)), r: tall ? 8 : 7 };
+      const figH = Math.round(tableY * (tall ? 0.42 : 0.40)), feetY = airY - Math.round(24 * ms);
+      const hy = feetY - Math.round(6 * ms);
+      const fxc = Math.round(W * (tall ? 0.40 : 0.26)), tipX = fxc + Math.round(figH * 0.40);
       geo = { cx, bw, by0, hy, tableY };
       Rc2 = (bw * 0.28) ** 2; Rb2 = (bw * 0.35) ** 2; Rh2 = 72; Rg2 = (bw * 0.2) ** 2;
-      const farM = x => hy - Math.round((11 + 8 * Math.sin(x * 0.071 + 1) + 5 * Math.sin(x * 0.19 + 4) + 2 * Math.sin(x * 0.53)) * ms);
-      const nearM = x => hy - Math.round((4 + 4 * Math.sin(x * 0.11 + 2.3) + 2 * Math.sin(x * 0.31)) * ms);
-      const ridge = x => Math.min(tableY - 8, feetY + 1 + Math.round(x < fxc ? (fxc - x) * 0.33 : (x - fxc) * 0.06)) - (hash(x, 99) < 0.3 ? 1 : 0);
-      const kx = Math.round(W * (tall ? 0.40 : 0.36)), ky = farM(kx) + 2, R = n => Math.round(n * ms);
-      const towers = [[-6, 3, 10], [-2, 3, 17], [3, 4, 13], [8, 2, 8]].map(v => v.map(R));
+      const kx = Math.round(W * (tall ? 0.80 : 0.74));
+      const farM = x => hy - Math.round((3 + 3 * Math.sin(x * 0.06 + 0.5) + 2 * Math.sin(x * 0.17 + 2) + Math.sin(x * 0.45) + 7 * Math.exp(-(((x - kx) / (11 * ms)) ** 2))) * ms);
+      const pines = [[0.05, 17], [0.13, 12], [0.2, 8]].map(([fx, h]) => ({ x: Math.round(W * fx), h: Math.round(h * ms) })).filter(p => p.x < fxc - figH * 0.5);
+      const inPine = (x, y) => pines.some(p => { const dy = feetY - y; return dy >= 0 && dy < p.h && Math.abs(x - p.x) <= (dy < 2 ? 0 : Math.floor((p.h - dy) * 0.42) - (dy % 4 === 3 ? 1 : 0)); });
+      const riverX = y => { const tt = (y - hy) / (airY - hy); return kx - 7 * ms + (W * 0.66 - kx + 7 * ms) * tt + Math.sin(tt * 8) * (0.25 + tt) * W * 0.07; };
+      const under = x => feetY + 7 + Math.round((tipX - x) * 0.75) + (hash(x >> 1, 7) < 0.4 ? 1 : 0) + (hash(x >> 2, 11) < 0.3 ? 2 : 0);
+      const ky = farM(kx) + 1, R = n => Math.round(n * ms);
+      const towers = [[-6, 3, 9], [-2, 3, 15], [3, 4, 11], [8, 2, 7]].map(v => v.map(R));
       const inCastle = (x, y) => {
         if (y > ky) return false;
         if (x >= kx - R(6) && x <= kx + R(10) && y >= ky - R(4)) return true;
@@ -478,14 +496,14 @@ h1 canvas { width: auto; height: auto; }
       base = new Uint8ClampedArray(N * 4); kind = new Uint8Array(N); alb = new Float32Array(N); sky = new Uint8Array(N);
       dA = new Float32Array(N); dB = new Float32Array(N); dK = new Float32Array(N); dG = new Float32Array(N);
       const setB = (i, c) => { const o = i * 4; base[o] = c[0]; base[o + 1] = c[1]; base[o + 2] = c[2]; base[o + 3] = 255; kind[i] = 0; sky[i] = 0; };
-      const candles = [{ x: Math.max(5, cx - Math.round(half) - 9), h: 11 }, { x: Math.min(W - 6, cx + Math.round(half) + 9), h: 7 }];
+      const candles = [{ x: Math.max(6, cx - Math.round(half) - 10), h: 15, w: 2 }, { x: Math.min(W - 6, cx + Math.round(half) + 9), h: 7, w: 1 }];
       const cBase = by0 + Math.round(bh * 0.55);
       flames = candles.map(c => ({ x: c.x, y: cBase - c.h - 1 }));
       fires = flames.map(() => new Uint8Array(FW * FH));
       stars = []; motes = []; shoot = null;
 
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-        const i = y * W + x, dx = x - cx, b = BAYER[(x & 3) | ((y & 3) << 2)];
+        const i = y * W + x, dx = x - cx;
         base[i * 4 + 3] = 255;
         dA[i] = (x - flames[0].x) ** 2 + (y - flames[0].y + 4) ** 2;
         dB[i] = (x - flames[1].x) ** 2 + (y - flames[1].y + 4) ** 2;
@@ -499,30 +517,32 @@ h1 canvas { width: auto; height: auto; }
           else alb[i] = ry % 8 === 7 ? 0.45 : (0.68 + hash(x / 11 | 0, ry / 8 | 0) * 0.2) * (hash(x / 5 | 0, y) < 0.14 ? 0.82 : 1);
           continue;
         }
-        if (y >= ridge(x)) { kind[i] = AIR; continue; }
-        const md = Math.hypot(x - moon.x, y - moon.y);
-        if (md <= moon.r) setB(i, hash(x, y) < 0.16 ? MOON_LO : MOON_HI);
+        if (y >= airY || fade(x, y) <= BAYER[(x & 3) | ((y & 3) << 2)]) { kind[i] = AIR; continue; }
+        if (x <= tipX && y > feetY && y <= under(x)) {           // the cliff
+          const d = y - feetY;
+          setB(i, d === 1 ? ROCK_TOP : (y % 4 === 0 && hash(x >> 2, y) < 0.6) ? ROCK[d > 16 ? 2 : 3] : ROCK[d > 16 ? 1 : 2]);
+        }
+        else if (inPine(x, y)) setB(i, FIG);
         else if (inCastle(x, y)) setB(i, CASTLE);
-        else if (y >= hy) kind[i] = LAKEK;
-        else if (y >= nearM(x)) setB(i, NEAR);
-        else if (y >= farM(x)) setB(i, y === farM(x) ? FAR_RIM : FAR);
+        else if (y > hy && Math.abs(x - riverX(y)) <= 0.7 + (y - hy) / (airY - hy) * 4) kind[i] = RIVERK;
+        else if (y >= hy) setB(i, ramp(PLAINR, 0.25 + 0.6 * (1 - (y - hy) / (airY - hy)), BAYER[(x & 3) | ((y & 3) << 2)]));
+        else if (y >= farM(x)) { setB(i, y === farM(x) ? FAR_RIM : FAR); if (y >= hy - 4) kind[i] = MISTK; }
         else {
-          let v = Math.pow(y / hy, 1.7) * 0.86;
-          if (md < moon.r + 5) v += (1 - (md - moon.r) / 5) * 0.22;
-          setB(i, ramp(SKYR, v, b)); sky[i] = 1;
-          if (hash(x * 7, y * 13) < 0.011) stars.push({ i, ph: hash(y, x) * 6.28, big: y < hy * 0.6 && hash(x, y * 3) < 0.12 });
+          kind[i] = SKYK; sky[i] = 1;
+          const u = y / hy;
+          if (u < 0.82 && hash(x * 7, y * 13) < 0.0085 * (1 - u * 0.6)) stars.push({ i, ph: hash(y, x) * 6.28, big: u < 0.62 && y > 3 && x > 3 && x < W - 4 && hash(x, y * 3) < 0.13 });
         }
       }
-      for (const [wx, wy] of [[kx + towers[1][0] + 1, ky - towers[1][2] + 2], [kx + towers[2][0] + 1, ky - towers[2][2] + 3], [kx, ky - 2]]) {
-        if (wy < hy && wy >= 0) { setB(wy * W + wx, CASTLE); kind[wy * W + wx] = WIN; }
+      for (const [wx, wy] of [[kx + towers[1][0] + 1, ky - towers[1][2] + 2], [kx + towers[1][0] + 1, ky - towers[1][2] + 6], [kx + towers[2][0] + 1, ky - towers[2][2] + 3], [kx + towers[2][0] + 2, ky - 2], [kx + towers[0][0] + 1, ky - towers[0][2] + 2], [kx, ky - 2], [kx - R(4), ky - 1], [kx + R(7), ky - 2]]) {
+        if (wy < hy && wy >= 0 && wx < W) { setB(wy * W + wx, CASTLE); kind[wy * W + wx] = WIN; }
       }
 
-      // Her, on the near ridge, the lake and the far light behind her.
+      // Her, on the edge.
       const sp = womanSprite(figH), fx0 = fxc - sp.ax, fy0 = feetY - figH;
       for (let sy = 0; sy < sp.h; sy++) for (let sx = 0; sx < sp.w; sx++) {
         const x = fx0 + sx, y = fy0 + sy;
-        if (!sp.on(sx, sy) || x < 0 || x >= W || y < 0 || y >= tableY) continue;
-        setB(y * W + x, !sp.on(sx - 1, sy) && sp.on(sx + 1, sy) && sp.on(sx + 2, sy) ? RIM : FIG);
+        if (!sp.on(sx, sy) || x < 0 || x >= W || y < 0 || y >= airY || kind[y * W + x] === AIR) continue;
+        setB(y * W + x, !sp.on(sx + 1, sy) && sp.on(sx - 1, sy) && sp.on(sx - 2, sy) && y <= feetY ? RIM : FIG);
       }
       lamp = { x: fx0 + sp.lx, y: fy0 + sp.ly };
       for (const [lx, ly, k] of [[-1, -2, 0], [0, -2, 0], [1, -2, 0], [0, -3, 0], [-1, 2, 0], [0, 2, 0], [1, 2, 0],
@@ -548,9 +568,9 @@ h1 canvas { width: auto; height: auto; }
 
       // Two candles beside it.
       for (const c of candles) {
-        for (let y = cBase - c.h; y <= cBase; y++) for (let k = -1; k <= 1; k++) setB(y * W + c.x + k, y === cBase - c.h ? WAX_TOP : WAX[k + 1]);
-        setB((cBase - c.h + 3) * W + c.x - 2, WAX[0]);
-        for (let k = -3; k <= 3; k++) setB((cBase + 1) * W + c.x + k, DISH);
+        for (let y = cBase - c.h; y <= cBase; y++) for (let k = -c.w; k <= c.w; k++) setB(y * W + c.x + k, y === cBase - c.h ? WAX_TOP : WAX[k < 0 ? 0 : k < c.w ? 1 : 2]);
+        setB((cBase - c.h + 3) * W + c.x - c.w - 1, WAX[0]);
+        for (let k = -c.w - 2; k <= c.w + 2; k++) setB((cBase + 1) * W + c.x + k, DISH);
       }
 
       dyn = [];
@@ -563,32 +583,39 @@ h1 canvas { width: auto; height: auto; }
 
     function frame(t) {
       const fA = 0.8 + Math.random() * 0.3, fB = 0.8 + Math.random() * 0.3, pulse = 0.5 + 0.5 * Math.sin(t / 1800);
-      const { cx, bw, by0, hy, tableY } = geo;
+      const { cx, bw, by0, hy, tableY } = geo, drift = t / 2600;
       D.set(base);
       for (let n = 0; n < dyn.length; n++) {
         const i = dyn[n], x = i % W, y = i / W | 0, b = BAYER[(x & 3) | ((y & 3) << 2)], k = kind[i];
+        if (k === SKYK) {                                     // the sky: a slow gradient and drifting cloud bands
+          const u = y / hy, band = u < 0.2 ? 0 : Math.min(1, (u - 0.2) / 0.3);
+          let v = Math.pow(u, 1.5) * 0.7 + 0.1 * u * (x / W);
+          const c = vnoise((x + drift) * 0.035, y * 0.2) * 0.65 + vnoise((x + drift * 1.6) * 0.09, y * 0.45 + 9) * 0.35;
+          if (c > 0.5) v += (c - 0.5) * 0.75 * band;
+          put(i, ramp(SKYR, v, b));
+          continue;
+        }
+        if (k === RIVERK) { put(i, Math.sin(y * 1.3 + x * 0.7 - t / 350) > 0.1 ? RIV_HI : RIV_LO); continue; }
+        if (k === MISTK) { if (vnoise((x - drift * 2) * 0.07, y * 0.6) > 0.42 + b * 0.35) put(i, MIST); continue; }
         const cA = fA / (1 + dA[i] / Rc2), cB = fB / (1 + dB[i] / Rc2);
         if (k === TABLE) put(i, ramp(WOOD, (0.04 + (cA + cB) * 0.85 + (0.3 + 0.25 * pulse) / (1 + dK[i] / Rb2)) * alb[i], b));
         else if (k === PAGEK) put(i, ramp(PAGE, (0.6 + 0.3 * pulse + (cA + cB) * 0.2) * alb[i], b));
         else if (k === AIR) put(i, ramp(HALO, 0.8 * (fA / (1 + dA[i] / Rh2) + fB / (1 + dB[i] / Rh2)) + (0.25 + 0.3 * pulse) / (1 + dG[i] / Rg2), b));
-        else if (k === LAKEK) {
-          let v = 0.3 + 0.25 * (1 - (y - hy) / 22) + (Math.sin(x * 0.8 + y * 2.1 + t / 500) > 0.55 ? 0.22 : 0);
-          if (Math.abs(x - moon.x) < 1.5 + (y - hy) * 0.1 && Math.sin(y * 1.7 + x * 2.3 + t / 300) > 0) v = 0.9;
-          put(i, ramp(LAKE, v, b));
-        }
         else if (k === WIN) put(i, FIRE[4 + ((t / 900 + i) % 3 < 1 ? 1 : 0)]);
         else put(i, FIRE[5 + (Math.random() * 3 | 0)]);
       }
       for (const s of stars) {
-        const hi = Math.sin(t / 700 + s.ph) > 0.3;
-        put(s.i, hi ? STAR_HI : STAR_LO);
-        if (s.big && hi) for (const d of [-1, 1, -W, W]) if (sky[s.i + d]) put(s.i + d, STAR_LO);
+        const tw = Math.sin(t / 800 + s.ph);
+        put(s.i, tw > -0.2 ? SP_HI : SP_LO);
+        if (!s.big) continue;
+        for (const d of [-1, 1, -W, W]) if (sky[s.i + d]) put(s.i + d, tw > 0.2 ? SP_HI : SP_LO);
+        if (tw > 0.2) for (const d of [-2, 2, -2 * W, 2 * W]) if (sky[s.i + d]) put(s.i + d, SP_LO);
       }
       if (!still && !shoot && Math.random() < 0.006) shoot = { x: W * (0.45 + Math.random() * 0.5), y: hy * (0.1 + Math.random() * 0.3), life: 9 };
       if (shoot) {
         for (let k = 0; k < 5; k++) {
           const X = Math.round(shoot.x + k * 2), Y = Math.round(shoot.y - k);
-          if (X >= 0 && X < W && Y >= 0 && sky[Y * W + X]) put(Y * W + X, k < 2 ? STAR_HI : STAR_LO);
+          if (X >= 0 && X < W && Y >= 0 && sky[Y * W + X]) put(Y * W + X, k < 2 ? SP_HI : SP_LO);
         }
         shoot.x -= 3; shoot.y += 1.5; if (--shoot.life <= 0) shoot = null;
       }
@@ -599,7 +626,7 @@ h1 canvas { width: auto; height: auto; }
         m.y -= m.vy; m.x += Math.sin(t / 500 + m.ph) * 0.25;
         const X = Math.round(m.x), Y = Math.round(m.y);
         if (X < 0 || X >= W || (m.life + (m.ph * 10 | 0)) % 9 === 0) continue;
-        put(Y * W + X, Y > tableY - 12 ? FIRE[6] : Y > hy ? MOTE : STAR_HI);
+        put(Y * W + X, Y > tableY - 12 ? FIRE[6] : Y > hy ? MOTE : SP_HI);
       }
       flames.forEach((fl, k) => {
         const f = fires[k], x0 = fl.x - (FW >> 1), y0 = fl.y - FH + 1;
