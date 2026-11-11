@@ -94,6 +94,8 @@ const { send: sendRaw, stream: streamRaw } = makeOpenAICompatProvider({
     streamUsage: true,
     // The prefix boundary, told to OpenAI (memory-research M1, 2026-10-14).
     explicitCacheFor: isExplicitCacheModel,
+    // Chat Completions' name for the reasoning effort a stream is handed.
+    reasoningEffortParam: 'reasoning_effort',
 });
 
 /** Send a non-streaming message to OpenAI. */

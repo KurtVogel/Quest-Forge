@@ -17,9 +17,11 @@
  *   $env:QF_LAT_CELLS="gemini:gemini-3.8-flash:default,gemini:gemini-3.8-flash:low"   # provider:model:setting
  *   $env:QF_LAT_TURNS="5"; $env:QF_LAT_REPS="1"                                       # a short run
  *
- * Settings: gemini default | minimal | low | medium | high | budget0;
- * openai default | none | low | medium | high. `default` sends nothing, which
- * is what the app does today. Gemini Flash and GPT only, never the Grok DM.
+ * Settings: gemini default | unset | minimal | low | medium | high | budget0;
+ * openai default | unset | none | low | medium | high. `default` leaves the
+ * request as the app built it (the app as it ships); `unset` removes the
+ * thinking field, so the provider's own default governs. Gemini Flash and GPT
+ * only, never the Grok DM.
  *
  * Keys come from the environment or the git-ignored .env (GEMINI_API_KEY,
  * OPENAI_API_KEY) and are never printed or written. The Gemini key is needed

@@ -90,9 +90,14 @@ export function formatMessages(systemPrompt, messageHistory, userMessage, { syst
  *   `prompt_cache_breakpoint` on the prefix message (OpenAI gpt-5.6+). A 400
  *   naming either field drops both for the rest of the session (one-time
  *   fallback, the affinity header's pattern) and tells the caller.
+ * @param {string|null} [options.reasoningEffortParam] - Wire name of the
+ *   reasoning-effort field (OpenAI: `reasoning_effort`). When set, a stream
+ *   call that is handed a `thinkingLevel` sends it under this name; a
+ *   provider without one (xAI) never sends the field, whatever it is handed.
+ *   Which models get a level is the catalog's call (modelCatalog `dmThinking`).
  * @returns {{ send: function, stream: function }}
  */
-export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key, maxTokensParam = 'max_tokens', temperatureUnsupported = () => false, maxOutputTokensFor = () => DEFAULT_MAX_TOKENS, streamUsage = false, extraHeaders = () => ({}), explicitCacheFor = () => false }) {
+export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => key, maxTokensParam = 'max_tokens', temperatureUnsupported = () => false, maxOutputTokensFor = () => DEFAULT_MAX_TOKENS, streamUsage = false, extraHeaders = () => ({}), explicitCacheFor = () => false, reasoningEffortParam = null }) {
     let explicitCacheRejected = false;
     const wantsExplicitCache = (args) => !explicitCacheRejected && usableParts(args.systemPromptParts) && !!explicitCacheFor(args.model);
     const namesCacheField = (error) => /prompt_cache_(?:breakpoint|options)/i.test(String(error?.message || ''));
@@ -211,7 +216,7 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
 
     /** Stream a message, calling onChunk with each text fragment. */
     async function stream(args) {
-        const { model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk, temperature, maxOutputTokens, onUsage, onActivity } = args;
+        const { model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk, temperature, maxOutputTokens, thinkingLevel, onUsage, onActivity } = args;
         const response = await requestWithCacheFallback(args, (explicitCache) => ({
             model,
             messages: formatMessages(systemPrompt, messageHistory, userMessage, { systemPromptParts, explicitCache }),
@@ -220,6 +225,9 @@ export function makeOpenAICompatProvider({ label, baseUrl, mapApiKey = (key) => 
             // stream ignored it); the DM lane passes none and keeps the
             // per-model cap (REASONING_MAX_TOKENS on a reasoning model).
             [maxTokensParam]: Number.isFinite(maxOutputTokens) ? maxOutputTokens : maxOutputTokensFor(model),
+            // The model's reasoning effort, when the caller hands one and
+            // this provider has a field for it; else the model's default.
+            ...(reasoningEffortParam && typeof thinkingLevel === 'string' && thinkingLevel ? { [reasoningEffortParam]: thinkingLevel } : {}),
             stream: true,
             // OpenAI reports usage on a stream only when asked; the final
             // chunk then carries it (cached_tokens included). xAI sends it

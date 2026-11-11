@@ -167,9 +167,10 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, syste
  * Calls onChunk with each text fragment as it arrives. The visible DM turn's
  * lane: it takes NONE of sendMessage's timeoutMs / maxRetries / thinkingBudget
  * / fallbackModel — its stall guard is the idle timer, its retry budget is
- * STREAM_START_MAX_RETRIES (before the first byte only), and the provider's
- * own model defaults govern thinking; `maxOutputTokens` is forwarded like the
- * send's (2026-10-25 — the providers honored it, the adapter dropped it).
+ * STREAM_START_MAX_RETRIES (before the first byte only). Thinking is the
+ * caller's `thinkingLevel` when it passes one, else the provider's own model
+ * default; `maxOutputTokens` is forwarded like the send's (2026-10-25 — the
+ * providers honored it, the adapter dropped it).
  * @param {object} options
  * @param {string} options.provider - Provider name ('gemini' | 'openai' | 'xai')
  * @param {string} options.apiKey - API key
@@ -183,6 +184,10 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, syste
  * @param {number} [options.temperature] - Sampling temperature (default 0.9)
  * @param {number} [options.maxOutputTokens] - Per-call output cap override;
  *   omitted, the provider's per-model cap governs.
+ * @param {string} [options.thinkingLevel] - The thinking / reasoning level to
+ *   ask the model for (Gemini `thinkingLevel`, OpenAI `reasoning_effort`;
+ *   ignored by xAI). Omitted, the model's own default governs. The level for
+ *   a model comes from the catalog (modelCatalog `dmThinkingLevelFor`).
  * @param {number} [options.idleTimeoutMs] - Abort when no BYTES have arrived
  *   for this long (default DEFAULT_STREAM_IDLE_TIMEOUT_MS). Reset on every
  *   transport read through the provider's `onActivity` (2026-10-25 — a
@@ -193,7 +198,7 @@ export async function sendMessage({ provider, apiKey, model, systemPrompt, syste
  * @param {function} [options.onHeaderRejected] - As sendMessage
  * @returns {Promise<string>} Complete response text
  */
-export async function streamMessage({ provider, apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk, signal, temperature, maxOutputTokens, idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected }) {
+export async function streamMessage({ provider, apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk, signal, temperature, maxOutputTokens, thinkingLevel, idleTimeoutMs = DEFAULT_STREAM_IDLE_TIMEOUT_MS, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected }) {
     const p = providers[provider];
     if (!p) throw new Error(`Unknown LLM provider: "${provider}"`);
     if (!apiKey) throw new Error('API key is required. Please set it in Settings.');
@@ -224,7 +229,7 @@ export async function streamMessage({ provider, apiKey, model, systemPrompt, sys
                 // `onActivity`: the transport's per-read liveness arms the idle
                 // timer too — the text callback alone missed a reasoning
                 // model's text-less events (2026-10-25).
-                result = await p.stream({ apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk: (chunk) => { streamed = true; guardedOnChunk(chunk); }, onActivity: armIdleTimer, signal: controller.signal, temperature, maxOutputTokens, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected });
+                result = await p.stream({ apiKey, model, systemPrompt, systemPromptParts, messageHistory, userMessage, onChunk: (chunk) => { streamed = true; guardedOnChunk(chunk); }, onActivity: armIdleTimer, signal: controller.signal, temperature, maxOutputTokens, thinkingLevel, onUsage, conversationId, onHeaderRejected, onCacheBreakpointRejected });
                 break;
             } catch (error) {
                 // A transient refusal BEFORE the first byte is safe to retry —

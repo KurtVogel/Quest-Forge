@@ -8,6 +8,20 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-11-11 (item 2) · The DM stream asks for low thinking on the two models where it was measured: `thinkingLevel: "low"` on Gemini 3.8 Flash and `reasoning_effort: "low"` on GPT-6.1 Sol. The level is a per-model fact in the catalog, and only the play loop's lanes ask for it. REVISES the standing "DM narration omits the thinking field and keeps the model's own default" (`providers/gemini.js`, `adapter.js`).**
+
+Vesa, shown the latency table and the lettered replies (`docs/LATENCY_EVAL_2026-11-11.md`): "Ship low". What that settles:
+1. **The level.** With nothing sent, 3.8 Flash thought for 311 to 2,193 tokens before every reply and the first word waited on it (r = 0.98 between the two over 20 turns). At low it spent none. Over the same 20 turns, p50 / p90: first word 10.6 / 19.6 s to 2.0 / 3.3 s, whole call 12.2 / 21.3 s to 4.4 / 6.0 s; a whole check 33.4 s to 11.9 s; a whole fight round 18.1 s to 10.8 s. GPT-6.1 Sol: first word 3.8 / 7.7 s to 1.7 / 3.7 s, whole call 8.5 / 11.8 s to 6.0 / 8.4 s.
+2. **Per model, in the catalog** (`modelCatalog.js`: a row's `dmThinking`, read through `dmThinkingLevelFor`). There is no provider-wide default, because the models differ: the Flash-Lite rows do not think when nothing is sent and a level would make them start; 3.8 Flash refuses `minimal`; 3.5 Flash-Lite refuses `thinkingBudget: 0`; Sol refuses `none`. A row gets a level only after `npm run eval:latency` has timed it against that model's default and the replies have been read. Every other row sends nothing, as before.
+3. **The play loop's lanes only** (`DM_LANES.thinking`): the ordinary turn, the combat intent, the combat narration and the plain narration lane. The opening scene and table talk (the recap and the epilogue ride it) keep the provider default: they were not in the measurement, they are asked for once in a while, and the opening sets canon. The other DM-model calls (the directors, the chronicler, the missing-events nudge) are unchanged.
+4. **The level, not the budget.** `thinkingBudget: 0` measured the same on 3.8 Flash, but Google's thinking guide no longer documents it and one picker model refuses it. The machinery lane still sends `thinkingBudget: 0` to 3.8 Flash, where it works; that is a separate call and was not touched.
+
+Known costs, counted on 3.8 Flash at low: replies run longer (median 154 words against 127), and the reply that proposes a check carries a paragraph the game then withholds (76, 0 and 107 words against 17 to 20). Whether a check is proposed at all did not separate the settings: the default missed the check line in 0 of 3 tries in the morning run and in 3 of 3 in the afternoon one.
+
+Proof after the change (the app's own request, six turns, with the old default run beside it in the same minutes): 3.8 Flash first word 2.2 / 3.0 s against 9.2 / 12.7 s; Sol 2.0 / 2.5 s. Not seen in a browser. To undo for a model, remove `dmThinking` from its row.
+
+Why: the queue's rule for item 2 was that the default changes only if a setting is clearly faster and Vesa sees no loss in the replies. What would reopen it: Vesa's played verdict, or a provider changing a model's default or its accepted levels under the same id.
+
 **2026-11-11 (evening) · The look: pixel art with live fire, a dim and inviting mood, and the line "A world that remembers".**
 
 Vesa, on the mockup `docs/mockups/pixel-direction.html`: "I really liked the style you created for the title", "we'll definitely keep animated fire of some sort and a dim, cozy, imagination-exciting atmosphere, like 'entering a fantasy world' type of feel in a remembering world". What that settles:

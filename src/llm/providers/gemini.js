@@ -126,7 +126,7 @@ const GEMINI_SAFETY_SETTINGS = [
 /**
  * Convert our message format to Gemini's content format.
  */
-function formatMessages(systemPrompt, messageHistory, userMessage, temperature, { thinkingBudget, maxOutputTokens } = {}) {
+function formatMessages(systemPrompt, messageHistory, userMessage, temperature, { thinkingBudget, thinkingLevel, maxOutputTokens } = {}) {
     const contents = [];
 
     // Convert history. Only genuine assistant turns are the model's own;
@@ -158,10 +158,16 @@ function formatMessages(systemPrompt, messageHistory, userMessage, temperature, 
             temperature: temperature ?? 0.9,
             topP: 0.95,
             maxOutputTokens: Number.isFinite(maxOutputTokens) ? maxOutputTokens : GEMINI_MAX_OUTPUT_TOKENS,
-            // Machinery calls (pure-JSON extraction, 2-4 per turn) pass 0 so
-            // default-on thinking cannot burn reasoning tokens against the cap;
-            // DM narration omits it and keeps the model's own default.
-            ...(Number.isFinite(thinkingBudget) && { thinkingConfig: { thinkingBudget } }),
+            // Machinery calls (pure-JSON extraction, 2-4 per turn) pass a
+            // budget of 0 so default-on thinking cannot burn reasoning tokens
+            // against the cap. The DM stream passes the model's thinking
+            // LEVEL when the catalog has one (modelCatalog `dmThinking`);
+            // with neither, the field is omitted and the model's own default
+            // governs. The API refuses a request that carries both, so a
+            // level wins over a budget.
+            ...(typeof thinkingLevel === 'string' && thinkingLevel
+                ? { thinkingConfig: { thinkingLevel } }
+                : (Number.isFinite(thinkingBudget) && { thinkingConfig: { thinkingBudget } })),
         },
     };
 }
@@ -476,11 +482,12 @@ export const MAX_BAD_TEXT_ISOLATION_REQUESTS = 100;
 /**
  * Stream a message from Gemini.
  */
-export async function streamGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, maxOutputTokens, onUsage, onActivity }) {
+export async function streamGeminiMessage({ apiKey, model, systemPrompt, messageHistory, userMessage, onChunk, signal, temperature, maxOutputTokens, thinkingLevel, onUsage, onActivity }) {
     const url = `${GEMINI_API_BASE}/${model}:streamGenerateContent?alt=sse`;
     // A passed output cap is honored like the send's (2026-10-12); the DM
-    // lane passes none and keeps GEMINI_MAX_OUTPUT_TOKENS.
-    const body = formatMessages(systemPrompt, messageHistory, userMessage, temperature, { maxOutputTokens });
+    // lane passes none and keeps GEMINI_MAX_OUTPUT_TOKENS. A passed thinking
+    // level rides `thinkingConfig`; none leaves the model's default.
+    const body = formatMessages(systemPrompt, messageHistory, userMessage, temperature, { maxOutputTokens, thinkingLevel });
 
     const response = await fetch(url, {
         method: 'POST',

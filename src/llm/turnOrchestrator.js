@@ -38,7 +38,7 @@ import { judgePendingRepeats } from './repeatJudge.js';
 import { isEpilogueRequest } from './tableTalk.js';
 import { factMemoryItem, flushMemoryQueue, journalMemoryItem, queueMemoryItem, retrieveRelevant, sceneMemoryItem } from '../engine/vectorMemory.js';
 import { buildPresenceText, PRESENCE_MESSAGE_COUNT } from './narrativeMessages.js';
-import { describeMemoryUnavailable, dmCallConfig, getMachineryGeminiKey, PRE_COMMIT_TIMEOUT_MS } from './machinery.js';
+import { describeMemoryUnavailable, dmCallConfig, dmStreamThinkingLevel, getMachineryGeminiKey, PRE_COMMIT_TIMEOUT_MS } from './machinery.js';
 import { curateStoryMemory } from '../engine/storyMemory.js';
 import { findNamedPeople } from '../engine/npcRoster.js';
 import { markTurn, turnFlags } from './turnFlags.js';
@@ -89,14 +89,21 @@ export const PRESENT_NPC_CAP = 8;
  * - openingScene — the one-time opening: `starting_items` honored, a stray
  *   roll request stripped, the nudge's opening cue.
  * - usage — the ONE mode name the usage capture and the timing log share.
+ * - thinking — `'model'`: the call asks for the model's DM thinking level
+ *   (modelCatalog `dmThinking`; a model without one keeps its default).
+ *   These are the lanes of the play loop, the ones the player waits on turn
+ *   after turn, and the ones the level was timed and read on. `null`: the
+ *   provider's default. The opening scene and table talk (the recap and the
+ *   epilogue ride it) are asked for once in a while, were not part of that
+ *   measurement, and keep the default until they are.
  */
 export const DM_LANES = Object.freeze({
-    standard: Object.freeze({ projection: null, mode: null, discardsEvents: false, wantsMemories: true, detectors: true, nudge: true, jsonOnly: false, openingScene: false, usage: 'standard' }),
-    opening: Object.freeze({ projection: null, mode: null, discardsEvents: false, wantsMemories: true, detectors: true, nudge: true, jsonOnly: false, openingScene: true, usage: 'standard' }),
-    tableTalk: Object.freeze({ projection: null, mode: 'tableTalk', discardsEvents: true, wantsMemories: true, detectors: false, nudge: false, jsonOnly: false, openingScene: false, usage: 'table-talk' }),
-    combatIntent: Object.freeze({ projection: 'intentOnly', mode: 'combatIntent', discardsEvents: false, wantsMemories: false, detectors: false, nudge: false, jsonOnly: true, openingScene: false, usage: 'combat-intent' }),
-    combatNarration: Object.freeze({ projection: 'narrationOnly', mode: null, discardsEvents: true, wantsMemories: false, detectors: false, nudge: false, jsonOnly: false, openingScene: false, usage: 'combat-narration' }),
-    narration: Object.freeze({ projection: null, mode: null, discardsEvents: true, wantsMemories: false, detectors: false, nudge: false, jsonOnly: false, openingScene: false, usage: 'narration' }),
+    standard: Object.freeze({ projection: null, mode: null, discardsEvents: false, wantsMemories: true, detectors: true, nudge: true, jsonOnly: false, openingScene: false, usage: 'standard', thinking: 'model' }),
+    opening: Object.freeze({ projection: null, mode: null, discardsEvents: false, wantsMemories: true, detectors: true, nudge: true, jsonOnly: false, openingScene: true, usage: 'standard', thinking: null }),
+    tableTalk: Object.freeze({ projection: null, mode: 'tableTalk', discardsEvents: true, wantsMemories: true, detectors: false, nudge: false, jsonOnly: false, openingScene: false, usage: 'table-talk', thinking: null }),
+    combatIntent: Object.freeze({ projection: 'intentOnly', mode: 'combatIntent', discardsEvents: false, wantsMemories: false, detectors: false, nudge: false, jsonOnly: true, openingScene: false, usage: 'combat-intent', thinking: 'model' }),
+    combatNarration: Object.freeze({ projection: 'narrationOnly', mode: null, discardsEvents: true, wantsMemories: false, detectors: false, nudge: false, jsonOnly: false, openingScene: false, usage: 'combat-narration', thinking: 'model' }),
+    narration: Object.freeze({ projection: null, mode: null, discardsEvents: true, wantsMemories: false, detectors: false, nudge: false, jsonOnly: false, openingScene: false, usage: 'narration', thinking: 'model' }),
 });
 
 /** The lane row for a name — an unknown name is a programming error, said at once. */
@@ -529,6 +536,9 @@ export function createTurnRunner({
 
         const fullResponse = await streamMessage({
             ...dmCallConfig(s.settings),
+            // The model's own thinking level on the play loop's lanes; the
+            // provider's default elsewhere and for a model with none.
+            thinkingLevel: lane.thinking === 'model' ? dmStreamThinkingLevel(s.settings) : undefined,
             systemPrompt,
             // The prefix boundary, told to the provider (memory-research M1,
             // 2026-10-14): two leading system messages on the OpenAI-compatible

@@ -21,6 +21,7 @@
 // the quality gate on any future swap; the parser / Scribe golden fixtures
 // and scribe.size.test.js are the floor.
 import { BACKGROUND_RETRY_AFTER_CAP_MS, RETRY_AFTER_CAP_MS } from './providers/sse.js';
+import { dmThinkingLevelFor } from './modelCatalog.js';
 
 export const MACHINERY_MODEL = 'gemini-3.8-flash';
 
@@ -163,6 +164,17 @@ export function dmCallConfig(settings) {
         apiKey: settings?.apiKey,
         model: settings?.model,
     };
+}
+
+/**
+ * The thinking level the DM STREAM asks the player's model for, or undefined
+ * when the catalog has none for it and the model's default governs
+ * (modelCatalog `dmThinkingLevelFor`). The stream's lanes decide whether to
+ * ask at all (turnOrchestrator `DM_LANES.thinking`); the other DM-model
+ * calls (the directors, the chronicler, the nudge) do not send it.
+ */
+export function dmStreamThinkingLevel(settings) {
+    return dmThinkingLevelFor(settings?.llmProvider, settings?.model) || undefined;
 }
 
 /**

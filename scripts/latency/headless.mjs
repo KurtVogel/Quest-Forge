@@ -81,14 +81,20 @@ export function scrubKeys(text, keys) {
 }
 
 /**
- * What each setting name puts on the wire. `default` sends nothing, which is
- * what the app does today. Gemini's field is `generationConfig.thinkingConfig`
- * (`thinkingLevel`, or the older `thinkingBudget`); OpenAI's is the top-level
- * `reasoning_effort` on Chat Completions.
+ * What each setting name puts on the wire. `default` leaves the request as
+ * the app built it, so it measures the app as it ships (the app sets its own
+ * level per model, modelCatalog `dmThinking`). `unset` removes the field, so
+ * the provider's own default governs: the baseline the app's level is
+ * measured against. Any other name replaces whatever the app set. Gemini's
+ * field is `generationConfig.thinkingConfig` (`thinkingLevel`, or the older
+ * `thinkingBudget`); OpenAI's is the top-level `reasoning_effort` on Chat
+ * Completions.
  */
+const UNSET = Object.freeze({ unset: true });
 export const WIRE_SETTINGS = Object.freeze({
     gemini: Object.freeze({
         default: null,
+        unset: UNSET,
         minimal: { thinkingLevel: 'minimal' },
         low: { thinkingLevel: 'low' },
         medium: { thinkingLevel: 'medium' },
@@ -97,6 +103,7 @@ export const WIRE_SETTINGS = Object.freeze({
     }),
     openai: Object.freeze({
         default: null,
+        unset: UNSET,
         none: { reasoning_effort: 'none' },
         low: { reasoning_effort: 'low' },
         medium: { reasoning_effort: 'medium' },
@@ -224,10 +231,12 @@ export function createFetchRecorder({ keys = {} } = {}) {
         let sentThinking = null;
         if (body && info.kind === 'dm-stream') {
             if (info.provider === 'gemini') {
-                if (dmThinking) body.generationConfig = { ...(body.generationConfig || {}), thinkingConfig: dmThinking };
+                if (dmThinking?.unset) delete body.generationConfig?.thinkingConfig;
+                else if (dmThinking) body.generationConfig = { ...(body.generationConfig || {}), thinkingConfig: dmThinking };
                 sentThinking = body.generationConfig?.thinkingConfig ?? null;
             } else if (info.provider === 'openai') {
-                if (dmThinking) Object.assign(body, dmThinking);
+                if (dmThinking?.unset) delete body.reasoning_effort;
+                else if (dmThinking) Object.assign(body, dmThinking);
                 sentThinking = body.reasoning_effort ? { reasoning_effort: body.reasoning_effort } : null;
             }
             if (dmThinking) init = { ...init, body: JSON.stringify(body) };

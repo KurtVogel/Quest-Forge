@@ -1,6 +1,6 @@
 # Turn latency experiment, 2026-11-11 (review queue item 2)
 
-**Status:** measured on real providers. Nothing in the app changed. The setting to ship, if any, is Vesa's pick after the blind read.
+**Status:** measured on real providers, then shipped the same day on Vesa's pick ("Ship low"); see "What shipped" at the end. Everything above that section was measured before the change, with the setting put on the request by the harness.
 
 - The replies, lettered: `docs/LATENCY_EVAL_2026-11-11_BLIND_READ.md`. Read it before the key.
 - The key to the letters: `docs/LATENCY_EVAL_2026-11-11_KEY.md`.
@@ -142,3 +142,19 @@ The scripted lines are data in `scripts/latency/script.mjs` and the saved states
 ## The decision
 
 The queue's rule: the default changes only if a setting is clearly faster and Vesa sees no loss in the replies. The speed half is answered for 3.8 Flash: low is about five times faster to the first word and about three times faster to the end of the turn. The reading half is the blind file. If the pick is to ship a setting, the change is to send a thinking level on the DM stream, by model; it is not built.
+
+## What shipped (the same day, after the pick)
+
+Vesa: "Ship low". The DM stream now asks for low thinking on the two models where it was measured: `thinkingLevel: "low"` on Gemini 3.8 Flash and `reasoning_effort: "low"` on GPT-6.1 Sol (`DECISIONS.md` 2026-11-11, item 2). The level is a per-model fact in `src/llm/modelCatalog.js`; the other picker rows send nothing, as before. Only the play loop's lanes ask for it; the opening scene and table talk keep the provider default.
+
+Proof on the changed app: the same harness with no setting of its own (`default`), six turns, one check and one round, with the old default (`unset`, the field removed) run beside it in the same minutes.
+
+| Model | What the request carried | First word p50 / p90 | Whole call p50 / p90 | Thinking tokens p50 | Whole check | Whole round |
+|---|---|---|---|---|---|---|
+| gemini-3.8-flash | the app as it ships: thinkingLevel low | 2.2 / 3.0 s | 4.6 / 5.1 s | 0 | 11.4 s | 6.2 s |
+| gemini-3.8-flash | field removed: the old default | 9.2 / 12.7 s | 10.5 / 15.2 s | 695 | no check proposed in 3 tries | 16.6 s |
+| gpt-6.1-sol | the app as it ships: reasoning_effort low | 2.0 / 2.5 s | 6.0 / 7.1 s | 0 | 19.3 s | 6.7 s |
+
+One correction to point 7 of the result: in this run the old default narrated straight through the check line in 3 of 3 tries, where the morning run had it at 0 of 3 and low at 1 of 4. Whether the DM proposes a check for that line does not separate the settings.
+
+Not verified: the change was not seen in a browser. The proof is the app's own request as the headless harness sent it, and unit tests on the request bodies (`src/llm/dmThinking.test.js`). Vesa's played verdict is open.

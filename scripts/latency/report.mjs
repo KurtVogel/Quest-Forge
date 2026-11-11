@@ -30,7 +30,13 @@ const COIN_CHANNELS = ['purchases', 'sells', 'coinTo', 'goldLost', 'silverLost',
 /** What the request carried, in words. */
 export function describeWire(result) {
     const wire = result.wire;
-    if (!wire) return 'nothing sent (the app as it ships)';
+    if (!wire) {
+        // The request as the app built it: say what the app itself sent.
+        const sent = result.turns?.[0]?.dmCalls?.[0]?.sentThinking;
+        const field = sent ? Object.entries(sent).map(([name, value]) => `${name}: ${value}`).join(', ') : 'no thinking field';
+        return `the app as it ships (${field})`;
+    }
+    if (wire.unset) return 'no thinking field (the provider default)';
     if ('thinkingLevel' in wire) return `thinkingLevel: ${wire.thinkingLevel}`;
     if ('thinkingBudget' in wire) return `thinkingBudget: ${wire.thinkingBudget}`;
     if ('reasoning_effort' in wire) return `reasoning_effort: ${wire.reasoning_effort}`;

@@ -21,7 +21,7 @@ export const PROVIDERS = {
     gemini: {
         name: 'Google Gemini',
         models: [
-            { id: DEFAULT_DM_MODEL, name: 'Gemini 3.8 Flash (Recommended)', description: 'The DM model — newest Flash, stable, fast and cheap (1M context, 64k output)' },
+            { id: DEFAULT_DM_MODEL, name: 'Gemini 3.8 Flash (Recommended)', description: 'The DM model — newest Flash, stable, fast and cheap (1M context, 64k output)', dmThinking: 'low' },
             { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', description: 'Fast frontier-class, great value' },
             { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite', description: 'Budget tier — what Gemini 2.5 Flash becomes on 2026-12-01; stronger multi-turn persona consistency than 3.1 Flash-Lite ($0.30 / $2.50 per M tokens)' },
             { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', description: 'Cheapest ($0.25 / $1.50 per M tokens)' },
@@ -36,7 +36,7 @@ export const PROVIDERS = {
             // GPT-6 family (Astra 2026-09-03, Sol/Luna 09-22, 6.1 Sol 09-29). For a
             // DM the tier is the prose: Terra reviewed as narratively flat, Astra
             // leads EQ-Bench creative writing at 5× Sol's price (2026-10-03).
-            { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol (Recommended)', description: 'Newest — near-Astra quality at a fifth of the price' },
+            { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol (Recommended)', description: 'Newest — near-Astra quality at a fifth of the price', dmThinking: 'low' },
             { id: 'gpt-6-astra', name: 'GPT-6 Astra', description: 'Best prose, priciest ($10/$50 per M tokens)' },
             { id: 'gpt-6-luna', name: 'GPT-6 Luna', description: 'Fast, cheapest current-gen' },
             { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', description: 'Previous flagship tier, strong fiction' },
@@ -79,3 +79,22 @@ export const RETIRED_MODEL_ALIASES = Object.freeze({
 });
 
 export const PROVIDER_LIST = Object.keys(PROVIDERS);
+
+/**
+ * The thinking level the DM stream asks a model for: the row's `dmThinking`,
+ * or null when the row has none and the provider's own default governs.
+ *
+ * A level is a fact about ONE model, never a provider-wide default. With
+ * nothing sent, Gemini 3.8 Flash thinks before every reply and the player
+ * waits on it, while the Flash-Lite rows do not think at all and a level
+ * would make them start. The models also disagree on what they accept
+ * (3.8 Flash refuses `minimal`; GPT-6.1 Sol refuses `none`). So a row carries
+ * a level only where that level was timed against the model's default on the
+ * same scripted turns (`npm run eval:latency`) and the replies were read
+ * blind. The value is the wire value: Gemini's `thinkingLevel`, OpenAI's
+ * `reasoning_effort`.
+ */
+export function dmThinkingLevelFor(provider, model) {
+    const row = PROVIDERS[provider]?.models?.find(entry => entry.id === model);
+    return typeof row?.dmThinking === 'string' && row.dmThinking ? row.dmThinking : null;
+}
