@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quest Forge: pixel direction mockup</title>
+<!-- A static mockup of a proposed art direction (2026-11-11). Not app code: nothing imports it,
+     the sample campaign text is invented, and the scene is drawn by the script below. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Grenze+Gotisch:wght@800&family=Jersey+15&family=Literata:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink: #0b0910; --night: #14111b; --panel: #191521; --stone: #2d2634; --stone-hi: #4d4252;
+  --bone: #eadfc8; --bone-dim: #a89c88; --ember: #e0702a; --flame: #f6b24a; --cold: #7fdcc8;
+  --blood: #b0413a; --moss: #7fae66;
+  --ui: 'Jersey 15', ui-monospace, monospace;
+  --prose: 'Literata', Georgia, serif;
+  --display: 'Grenze Gotisch', Georgia, serif;
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; background: var(--ink); color: var(--bone); }
+body { font-family: var(--ui); overflow: hidden; }
+canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+button { font: inherit; color: inherit; background: none; border: 0; border-radius: 0; cursor: pointer; }
+.app, .title, .play { height: 100dvh; }
+.app[data-view="title"] .play, .app[data-view="play"] .title { display: none; }
+.swap { font-size: 16px; color: var(--bone-dim); text-decoration: underline; padding: 6px 8px; }
+
+/* The classic one-pixel-missing corner, at 3 px a pixel. */
+.nx { clip-path: polygon(0 3px, 3px 3px, 3px 0, calc(100% - 3px) 0, calc(100% - 3px) 3px, 100% 3px,
+  100% calc(100% - 3px), calc(100% - 3px) calc(100% - 3px), calc(100% - 3px) 100%, 3px 100%,
+  3px calc(100% - 3px), 0 calc(100% - 3px)); }
+
+/* === Title === */
+.title { position: relative; }
+.title > canvas { position: absolute; inset: 0; }
+.title-ui { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center;
+  justify-content: space-between; padding: max(4vh, 20px) 16px calc(8px + env(safe-area-inset-bottom)); }
+h1 { display: grid; justify-items: center; }
+h1 canvas { width: auto; height: auto; }
+.tag { margin-top: 6px; text-align: center; font-size: clamp(17px, 2.5vh, 22px); letter-spacing: 0.12em;
+  color: var(--flame); text-shadow: 0 2px 0 var(--ink); }
+.menu { width: min(100%, 420px); display: grid; gap: 6px; justify-items: stretch; }
+.menu-main { position: relative; display: grid; gap: 2px; min-height: 60px; padding: 10px 14px 10px 40px;
+  text-align: left; background: rgba(11, 9, 16, 0.88); border: 3px solid var(--flame); }
+.menu-main::before { content: ''; position: absolute; left: 14px; top: 50%; margin-top: -9px;
+  border: 9px solid transparent; border-left: 12px solid var(--flame); border-right: 0;
+  animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0.25; } }
+.menu-main b { font-size: 25px; font-weight: 400; color: var(--flame); }
+.menu-main small { font-size: 17px; color: var(--bone-dim); }
+.menu-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.menu-row button { min-height: 48px; font-size: 20px; color: var(--bone);
+  background: rgba(11, 9, 16, 0.88); border: 3px solid var(--stone-hi); }
+.menu-row button:hover, .menu-row button:focus-visible { border-color: var(--bone); outline: 0; }
+.menu .swap { justify-self: center; }
+
+/* === Play === */
+.play { display: grid; grid-template: "banner" auto "vitals" auto "story" minmax(0, 1fr)
+  "composer" auto "tabs" auto / minmax(0, 1fr); }
+.rail { display: none; }
+.banner { grid-area: banner; position: relative; height: 136px; border-bottom: 3px solid var(--stone); }
+.place { position: absolute; left: 10px; bottom: 8px; padding: 3px 9px; font-size: 17px;
+  background: rgba(11, 9, 16, 0.88); border: 2px solid var(--stone-hi); }
+.banner .swap { position: absolute; right: 6px; top: 4px; background: rgba(11, 9, 16, 0.7); }
+.vitals { grid-area: vitals; display: flex; align-items: center; gap: 16px; padding: 8px 14px;
+  font-size: 19px; background: var(--night); border-bottom: 3px solid var(--stone); }
+.hp { flex: 1; display: flex; align-items: center; gap: 8px; }
+.pips { flex: 1; max-width: 170px; height: 12px;
+  background: repeating-linear-gradient(90deg, var(--blood) 0 6px, transparent 6px 8px); }
+.vitals em { font-style: normal; color: var(--flame); }
+
+.story { grid-area: story; overflow-y: auto; padding: 18px 18px 26px; font: 400 17px/1.62 var(--prose); }
+.story > * { max-width: 62ch; margin-inline: auto; }
+.turn p + p { margin-top: 0.9em; }
+.turn > p:first-child::first-letter { float: left; padding: 4px 8px 0 0; font: 800 3.3em/0.74 var(--display);
+  color: var(--flame); }
+.you { margin-block: 1.3em; padding-left: 14px; border-left: 3px solid var(--ember); font-style: italic;
+  color: #d9c9a8; }
+.you::before { content: 'You'; display: block; font: 400 17px var(--ui); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ember); }
+.roll { display: flex; align-items: center; gap: 12px; margin-block: 1.2em; padding: 9px 12px;
+  font: 400 18px/1.25 var(--ui); background: var(--panel); border: 3px solid var(--stone-hi); }
+.d20 { flex: none; display: grid; place-items: center; width: 40px; height: 40px; font-size: 27px;
+  color: var(--ink); background: var(--flame); }
+.roll b { color: var(--moss); }
+.receipt { margin-block: 1.2em; text-align: center; font: 400 18px var(--ui); letter-spacing: 0.04em;
+  color: var(--flame); }
+
+.composer { grid-area: composer; display: flex; gap: 8px; padding: 10px 12px; background: var(--night);
+  border-top: 3px solid var(--stone); }
+.composer input { flex: 1; min-width: 0; height: 48px; padding: 0 12px; font: 400 17px var(--prose);
+  color: var(--bone); background: var(--ink); border: 3px solid var(--stone-hi); border-radius: 0; }
+.composer input::placeholder { color: var(--bone-dim); font-style: italic; }
+.composer button { width: 64px; height: 48px; font-size: 22px; color: var(--ink);
+  background: var(--ember); }
+.tabs { grid-area: tabs; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--ink);
+  border-top: 3px solid var(--stone); padding-bottom: env(safe-area-inset-bottom); }
+.tabs button { display: grid; justify-items: center; align-content: center; gap: 3px; min-height: 58px;
+  font-size: 16px; color: var(--bone-dim); }
+.tabs button[aria-current] { color: var(--flame); }
+.tabs i { width: 24px; height: 24px; background: currentColor;
+  -webkit-mask: var(--m) center / 24px 24px no-repeat; mask: var(--m) center / 24px 24px no-repeat; }
+
+.rail h2 { font: 800 30px/1 var(--display); color: var(--flame); margin-bottom: 10px; }
+.rail h2:not(:first-child) { margin-top: 26px; }
+.rail .card { padding: 10px 12px; font-size: 17px; line-height: 1.25; background: var(--panel);
+  border: 3px solid var(--stone-hi); }
+.rail .card + .card { margin-top: 8px; }
+.rail .card b { display: block; font-size: 21px; font-weight: 400; }
+.rail .card span { color: var(--bone-dim); }
+.who { display: flex; gap: 12px; align-items: center; }
+.face { flex: none; display: grid; place-items: center; width: 64px; height: 64px;
+  font: 800 44px/1 var(--display); color: var(--flame); background: var(--ink); border: 3px solid var(--flame); }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+.stats div { padding: 6px 4px; text-align: center; font-size: 16px; color: var(--bone-dim);
+  background: var(--panel); border: 3px solid var(--stone); }
+.stats strong { display: block; font-size: 24px; font-weight: 400; color: var(--bone); }
+.rail .line { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 18px; }
+.log { list-style: none; padding: 0; font-size: 18px; line-height: 1.7; color: var(--bone-dim); }
+.log b { color: var(--moss); } .log s { text-decoration: none; color: var(--blood); }
+
+@media (min-width: 900px) {
+  .play { grid-template: "left banner right" auto "left story right" minmax(0, 1fr)
+    "left composer right" auto / 290px minmax(0, 1fr) 310px; }
+  .vitals, .tabs { display: none; }
+  .rail { display: block; overflow-y: auto; padding: 20px 16px; background: var(--night); }
+  .rail.left { grid-area: left; border-right: 3px solid var(--stone); }
+  .rail.right { grid-area: right; border-left: 3px solid var(--stone); }
+  .banner { height: 230px; }
+  .story { padding: 28px 32px; font-size: 18px; }
+  .composer { padding: 12px 32px 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .menu-main::before { animation: none; } }
+</style>
+</head>
+<body>
+<div class="app" id="app" data-view="title">
+
+  <section class="title">
+    <canvas data-scene></canvas>
+    <div class="title-ui">
+      <header>
+        <h1 aria-label="Quest Forge"><canvas id="logo"></canvas></h1>
+        <p class="tag">a dungeon master who remembers</p>
+      </header>
+      <nav class="menu">
+        <button class="menu-main nx"><b>Continue</b><small>Ysolde · Lv 5 fighter · Greywater Ford</small></button>
+        <div class="menu-row">
+          <button class="nx">New game</button>
+          <button class="nx">Load</button>
+          <button class="nx">From file</button>
+        </div>
+        <button class="swap" data-swap>mockup: see the play screen</button>
+      </nav>
+    </div>
+  </section>
+
+  <section class="play">
+    <aside class="rail left">
+      <h2>Ysolde</h2>
+      <div class="who">
+        <div class="face nx">Y</div>
+        <div style="font-size:18px">Human fighter, level 5<div class="line"><span>AC</span> 19 · <span>Purse</span> 159 gp</div></div>
+      </div>
+      <div class="line">HP <i class="pips"></i> 44 / 44</div>
+      <div class="stats">
+        <div class="nx"><strong>16</strong>STR</div><div class="nx"><strong>12</strong>DEX</div>
+        <div class="nx"><strong>15</strong>CON</div><div class="nx"><strong>10</strong>INT</div>
+        <div class="nx"><strong>13</strong>WIS</div><div class="nx"><strong>8</strong>CHA</div>
+      </div>
+      <h2>Company</h2>
+      <div class="card nx"><b>Brannoch</b><span>Axe-hand, owes you a debt · HP 31 / 38</span></div>
+      <h2>Pack</h2>
+      <div class="card nx"><b>Longsword</b><span>1d8 slashing · in hand</span></div>
+      <div class="card nx"><b>Chain mail, shield</b><span>worn</span></div>
+      <div class="card nx"><b>Lump of fresh pitch</b><span>new</span></div>
+    </aside>
+
+    <div class="banner">
+      <canvas data-scene></canvas>
+      <div class="place nx">Greywater Ford · dusk</div>
+      <button class="swap" data-swap>back to title</button>
+    </div>
+
+    <div class="vitals">
+      <div class="hp">HP <i class="pips"></i> 44</div>
+      <div>AC <em>19</em></div>
+      <div><em>159</em> gp</div>
+    </div>
+
+    <main class="story">
+      <div class="turn">
+        <p>The ford runs black under the old toll-gate, and the two torches somebody still lights there hiss in the drizzle. Beyond the raised portcullis the road does not go on. It goes down: wet steps, a green light a long way below, and a smell like a struck flint.</p>
+        <p>Brannoch thumbs the edge of his axe and does not look at you. "Nobody lights torches for a hole in the ground," he says. "Somebody's expecting company."</p>
+      </div>
+      <p class="you">I check the torch brackets. How fresh is the pitch?</p>
+      <div class="roll nx"><span class="d20 nx">17</span><span>Investigation · d20 14 + 3 against DC 13<br><b>Success</b></span></div>
+      <div class="turn">
+        <p>Fresh. Still tacky, and thumbed into place by a small hand. Whoever tends this gate was here inside the hour, and left by the stairs.</p>
+      </div>
+      <p class="receipt">+ Lump of fresh pitch</p>
+    </main>
+
+    <form class="composer" onsubmit="return false">
+      <input type="text" placeholder="What do you do?" aria-label="What do you do?">
+      <button class="nx" type="submit">Act</button>
+    </form>
+
+    <nav class="tabs">
+      <button aria-current="page"><i data-icon="story"></i>Story</button>
+      <button><i data-icon="hero"></i>Hero</button>
+      <button><i data-icon="pack"></i>Pack</button>
+      <button><i data-icon="journal"></i>Journal</button>
+      <button><i data-icon="more"></i>More</button>
+    </nav>
+
+    <aside class="rail right">
+      <h2>Quests</h2>
+      <div class="card nx"><b>The toll nobody collects</b><span>Find who keeps the gate at Greywater lit.</span></div>
+      <div class="card nx"><b>Brannoch's debt</b><span>He says one more road and you are square.</span></div>
+      <h2>Dice</h2>
+      <ul class="log">
+        <li>Investigation 17 against 13 <b>passed</b></li>
+        <li>Athletics 9 against 12 <s>failed</s></li>
+        <li>Perception 21 against 15 <b>passed</b></li>
+      </ul>
+    </aside>
+  </section>
+</div>
+
+<script>
+(() => {
+  const hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  // One locked palette: warm torchlight on stone, cold light under the gate.
+  const WARM = ['#0b0910', '#14111b', '#1f1a27', '#2d2634', '#413642', '#5c4648', '#84583f', '#b5763c', '#e09a4a'].map(hex);
+  const GRND = ['#09080d', '#110f16', '#1a1720', '#26212a', '#362d33', '#4d3d38', '#6e5038', '#9a6c3a'].map(hex);
+  const COLD = ['#06060b', '#0a0e18', '#0e1a28', '#11303c', '#17505a', '#2f8f8a', '#7fdcc8'].map(hex);
+  const SKY = ['#07060c', '#0b0a13', '#100e1b', '#151225', '#1b162e'].map(hex);
+  const FIRE = [null, '#5a1d0e', '#8f3212', '#c8501a', '#e8782a', '#f6a63c', '#ffd56a', '#fff3b8'].map(h => h && hex(h));
+  const DARK = hex('#0a0810'), SPIRE = hex('#17142a'), STAR_HI = hex('#cfc8e6'), STAR_LO = hex('#6f6a8c');
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16);
+  const FIGURE = ['..##..', '.####.', '..##..', '.####.', '######', '######', '######', '.####.', '.####.', '.#..#.', '.#..#.'];
+  const hash = (x, y) => {
+    let n = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263)) | 0;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  };
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function makeScene(canvas) {
+    const ctx = canvas.getContext('2d');
+    let W = 0, H = 0, cw = 0, ch = 0, mat, alb, d1, d2, dc, img, D, torches, fires, stars, sparks;
+    let fw, fh, wallTop, R2, C2, lastStep = 0;
+
+    function layout() {
+      cw = canvas.clientWidth; ch = canvas.clientHeight;
+      const px = Math.max(cw > 700 ? 4 : 3, Math.round(Math.min(cw, ch) / 150));
+      W = Math.ceil(cw / px); H = Math.ceil(ch / px);
+      canvas.width = W; canvas.height = H;
+      const tall = H > W, cx = W >> 1;
+      const gy = Math.round(H * (tall ? 0.72 : 0.80));
+      wallTop = Math.round(H * (tall ? 0.30 : 0.33));
+      const wallH = gy - wallTop;
+      const gw = Math.round(Math.min(W * 0.40, wallH * 0.5, 70));
+      const r = gw / 2, gh = Math.round(gw * 1.45), gTop = gy - gh, ac = gTop + r;
+      const raise = Math.round(Math.min(12, wallH * 0.14));
+      const houseHalf = r + Math.max(6, gw * 0.4);
+      fw = Math.max(5, Math.round(gw / 6) | 1); fh = Math.round(fw * 1.7);
+      const ty = gTop + Math.round(gh * 0.42), off = Math.round(r + Math.max(5, gw * 0.18));
+      torches = [{ x: cx - off, y: ty }, { x: cx + off, y: ty }];
+      fires = torches.map(() => new Uint8Array(fw * fh));
+      R2 = (gw * 0.42) ** 2; C2 = (r * 0.95) ** 2;
+      const coldY = gy - gh * 0.25, barsTo = gTop + gh * 0.36, scale = wallH / 112;
+      const spires = [[-0.34, 5, 22], [0.30, 7, 31], [0.41, 4, 15]].map(([fx, w, h]) =>
+        ({ x: Math.round(cx + W * fx), w, h: Math.round(h * scale) }));
+
+      const N = W * H;
+      mat = new Uint8Array(N); alb = new Float32Array(N);
+      d1 = new Float32Array(N); d2 = new Float32Array(N); dc = new Float32Array(N);
+      stars = []; sparks = [];
+      const inArch = (dx, y, rr) => Math.abs(dx) < rr && y < gy && (y >= ac || dx * dx + (y - ac) * (y - ac) < rr * rr);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const i = y * W + x, dx = x - cx, adx = Math.abs(dx);
+        const top = adx < houseHalf ? wallTop - raise : wallTop;
+        const merlon = ((dx + 3 + 1200) % 12) < 7;
+        let m = 0, a = 0;
+        if (y >= gy) {
+          m = 3;
+          const spread = r * (1 + (y - gy) / Math.max(1, H - gy) * 1.8);
+          a = adx < spread ? 0.62 + hash(x / 4 | 0, y / 3 | 0) * 0.38 : 0.34 + hash(x, y) * 0.22;
+        } else if (inArch(dx, y, r)) {
+          m = 2; a = 1;
+          const bar = (((dx % 6) + 6) % 6 === 0) || ((y - gTop) % 6 === 3);
+          if (y < barsTo && bar) m = 4;
+          else if (y > coldY && (gy - y) % 4 === 0) a = 0.55;
+        } else if (inArch(dx, y, r + 3)) {
+          m = 5;
+          a = y >= ac ? (y % 6 === 0 ? 0.6 : 1) : (Math.round(Math.atan2(ac - y, dx) * 6) % 2 ? 1 : 0.8);
+        } else if (y >= top + 4 || (y >= top && merlon)) {
+          m = 1;
+          const ry = y - wallTop + 60, row = ry / 5 | 0, bx = x + (row % 2) * 5;
+          a = (ry % 5 === 0 || bx % 10 === 0) ? 0.42 : 0.66 + hash(bx / 10 | 0, row) * 0.34;
+          if (Math.abs(adx - houseHalf) < 1) a *= 0.5;
+        } else {
+          for (const s of spires) {
+            const sd = Math.abs(x - s.x), roofTop = wallTop - s.h - s.w;
+            if (sd <= s.w / 2 && y >= wallTop - s.h) m = (sd < 1 && y === wallTop - s.h + 4) ? 7 : 6;
+            else if (y >= roofTop && y < wallTop - s.h && sd <= (y - roofTop) / 2) m = 6;
+          }
+          if (m === 0 && hash(x * 7, y * 13) < 0.007) stars.push({ i, ph: hash(y, x) * 6.28 });
+        }
+        mat[i] = m; alb[i] = a;
+        d1[i] = (x - torches[0].x) ** 2 + (y - (ty - fh / 2)) ** 2;
+        d2[i] = (x - torches[1].x) ** 2 + (y - (ty - fh / 2)) ** 2;
+        dc[i] = dx * dx * 1.6 + (y - coldY) ** 2;
+      }
+      if (gw >= 30) FIGURE.forEach((line, fy) => [...line].forEach((c, fx) => {
+        if (c === '#') mat[(gy + 2 - FIGURE.length + fy) * W + cx - 3 + fx] = 4;
+      }));
+      for (const t of torches) for (const [bx, by] of [[-1, 0], [0, 0], [1, 0], [0, 1], [0, 2]]) mat[(t.y + by) * W + t.x + bx] = 4;
+      img = ctx.createImageData(W, H); D = img.data;
+      for (let k = 0; k < 40; k++) fires.forEach(stepFire);
+    }
+
+    function stepFire(f) {
+      const mid = (fw - 1) / 2, base = Math.min(0.85, 5 / (fh - 1));
+      for (let x = 0; x < fw; x++) {
+        const e = Math.abs(x - mid) / (mid + 0.5);
+        f[(fh - 1) * fw + x] = Math.max(0, Math.round(7 - e * 7 - Math.random() * 1.5));
+      }
+      for (let y = 0; y < fh - 1; y++) for (let x = 0; x < fw; x++) {
+        const sx = Math.min(fw - 1, Math.max(0, x + ((Math.random() * 3 | 0) - 1)));
+        const e = Math.abs(x - mid) / (mid + 0.5);
+        f[y * fw + x] = Math.max(0, f[(y + 1) * fw + sx] - (Math.random() < base + e * 0.6 ? 1 : 0));
+      }
+    }
+
+    const put = (i, c) => { const o = i * 4; D[o] = c[0]; D[o + 1] = c[1]; D[o + 2] = c[2]; D[o + 3] = 255; };
+    const ramp = (R, v, b) => {
+      const n = R.length - 1, k = v <= 0 ? 0 : v >= 1 ? n : v * n, k0 = k | 0;
+      return R[(k - k0 > b && k0 < n) ? k0 + 1 : k0];
+    };
+
+    function frame(t) {
+      const f1 = 0.82 + Math.random() * 0.26, f2 = 0.82 + Math.random() * 0.26;
+      const pulse = 0.75 + 0.25 * Math.sin(t / 1400);
+      for (let y = 0, i = 0; y < H; y++) for (let x = 0; x < W; x++, i++) {
+        const b = BAYER[(x & 3) | ((y & 3) << 2)], m = mat[i];
+        if (m === 0) put(i, ramp(SKY, y / Math.max(1, wallTop) * 0.9, b));
+        else if (m === 2) put(i, ramp(COLD, pulse * alb[i] / (1 + dc[i] / C2), b));
+        else if (m === 4) put(i, DARK);
+        else if (m === 6) put(i, SPIRE);
+        else if (m === 7) put(i, FIRE[4 + (Math.random() * 2 | 0)]);
+        else {
+          const v = (0.07 + f1 / (1 + d1[i] / R2) + f2 / (1 + d2[i] / R2)) * alb[i];
+          const c = m === 3 ? pulse * 0.9 * alb[i] / (1 + dc[i] / C2) : 0;
+          put(i, c > v ? ramp(COLD, c, b) : ramp(m === 3 ? GRND : WARM, v, b));
+        }
+      }
+      for (const s of stars) put(s.i, Math.sin(t / 700 + s.ph) > 0.3 ? STAR_HI : STAR_LO);
+      torches.forEach((tc, k) => {
+        const f = fires[k], x0 = tc.x - (fw >> 1), y0 = tc.y - fh;
+        for (let fy = 0; fy < fh; fy++) for (let fx = 0; fx < fw; fx++) {
+          const v = f[fy * fw + fx];
+          if (v && y0 + fy >= 0) put((y0 + fy) * W + x0 + fx, FIRE[v]);
+        }
+        if (!still && Math.random() < 0.22) sparks.push({ x: tc.x + (Math.random() * 3 | 0) - 1, y: y0 + 2, life: 5 + (Math.random() * 8 | 0) });
+      });
+      sparks = sparks.filter(s => s.life-- > 0 && s.y > 1);
+      for (const s of sparks) {
+        s.y -= 1; if (Math.random() < 0.4) s.x += Math.random() < 0.5 ? -1 : 1;
+        if (s.x >= 0 && s.x < W) put(s.y * W + s.x, FIRE[s.life > 3 ? 6 : 3]);
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+
+    function tick(now) {
+      requestAnimationFrame(tick);
+      if (!canvas.clientWidth) return;                       // its view is hidden
+      const resized = canvas.clientWidth !== cw || canvas.clientHeight !== ch;
+      if (resized) layout();
+      if (!resized && (still || now - lastStep < 85)) return;
+      lastStep = now;
+      if (!still) fires.forEach(stepFire);
+      frame(now);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // Tab icons: 8 x 8 bitmaps, drawn large and used as masks so they take the text colour.
+  const ICONS = {
+    story: ['........', '.##..##.', '#..##..#', '#..##..#', '#..##..#', '#..##..#', '########', '........'],
+    hero: ['..####..', '.######.', '.#.##.#.', '.######.', '..####..', '.######.', '########', '##.##.##'],
+    pack: ['..####..', '..#..#..', '.######.', '########', '#..##..#', '########', '########', '.######.'],
+    journal: ['###..###', '#.####.#', '#..#...#', '#.##.#.#', '#....#.#', '#.##...#', '###..###', '........'],
+    more: ['........', '........', '........', '##.##.##', '##.##.##', '........', '........', '........'],
+  };
+  for (const el of document.querySelectorAll('[data-icon]')) {
+    const c = document.createElement('canvas'); c.width = c.height = 48;
+    const g = c.getContext('2d');
+    ICONS[el.dataset.icon].forEach((line, y) => [...line].forEach((ch, x) => { if (ch === '#') g.fillRect(x * 6, y * 6, 6, 6); }));
+    el.style.setProperty('--m', `url(${c.toDataURL()})`);
+  }
+
+  // The logo: any typeface becomes pixel lettering when it is drawn small, thresholded and scaled up.
+  // A blackletter pixel font was tried first and its Q read as a D.
+  async function drawLogo() {
+    const c = document.getElementById('logo'), g = c.getContext('2d', { willReadFrequently: true });
+    const vw = innerWidth, vh = innerHeight;
+    const px = Math.max(vw > 700 ? 4 : 3, Math.round(Math.min(vw, vh) / 150));
+    const Wl = Math.floor(Math.min(vw - 32, 132 * px) / px);
+    await document.fonts.load("800 40px 'Grenze Gotisch'");
+    const face = size => `800 ${size}px 'Grenze Gotisch', Georgia, serif`;
+    g.font = face(100);
+    const size = Math.floor(100 * (Wl - 12) / g.measureText('Quest Forge').width);
+    const Hl = Math.ceil(size * 1.05) + 5;
+    c.width = Wl; c.height = Hl; c.style.width = Wl * px + 'px'; c.style.height = Hl * px + 'px';
+    g.font = face(size); g.textAlign = 'center'; g.textBaseline = 'alphabetic'; g.fillStyle = '#fff';
+    g.fillText('Quest Forge', Wl / 2, Math.round(size * 0.86));
+    const src = g.getImageData(0, 0, Wl, Hl), out = g.createImageData(Wl, Hl);
+    const on = (x, y) => x >= 0 && y >= 0 && x < Wl && y < Hl && src.data[(y * Wl + x) * 4 + 3] > 120;
+    const set = (x, y, col) => { const o = (y * Wl + x) * 4; out.data[o] = col[0]; out.data[o + 1] = col[1]; out.data[o + 2] = col[2]; out.data[o + 3] = 255; };
+    const TOP = hex('#fff6de'), MID = hex('#eadfc8'), LOW = hex('#c2ad84'), SH = hex('#8f3212'), INK = hex('#0b0910');
+    for (let y = 0; y < Hl; y++) for (let x = 0; x < Wl; x++) {
+      if (on(x, y)) set(x, y, y < size * 0.42 ? TOP : y < size * 0.7 ? MID : LOW);
+      else if (on(x, y - 1) || on(x - 1, y - 1)) set(x, y, SH);
+      else if (on(x, y - 2) || on(x - 1, y - 2) || on(x - 2, y - 2)) set(x, y, INK);
+    }
+    g.putImageData(out, 0, 0);
+  }
+  drawLogo();
+  let logoTimer; addEventListener('resize', () => { clearTimeout(logoTimer); logoTimer = setTimeout(drawLogo, 150); });
+
+  document.querySelectorAll('[data-scene]').forEach(makeScene);
+  const app = document.getElementById('app');
+  if (location.hash === '#play') app.dataset.view = 'play';
+  document.querySelectorAll('[data-swap]').forEach(b => b.addEventListener('click', () => {
+    app.dataset.view = app.dataset.view === 'title' ? 'play' : 'title';
+  }));
+})();
+</script>
+</body>
+</html>
