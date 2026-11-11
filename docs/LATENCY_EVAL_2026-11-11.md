@@ -157,4 +157,4 @@ Proof on the changed app: the same harness with no setting of its own (`default`
 
 One correction to point 7 of the result: in this run the old default narrated straight through the check line in 3 of 3 tries, where the morning run had it at 0 of 3 and low at 1 of 4. Whether the DM proposes a check for that line does not separate the settings.
 
-Not verified: the change was not seen in a browser. The proof is the app's own request as the headless harness sent it, and unit tests on the request bodies (`src/llm/dmThinking.test.js`). Vesa's played verdict is open.
+Seen in the browser on the dev build: one real turn on 3.8 Flash sent `thinkingConfig: { thinkingLevel: "low" }` and the app's own log read `TTFT 2035ms, total 5075ms`. Unit tests pin the request bodies (`src/llm/dmThinking.test.js`). Not verified: the deployed bundle was not played (same source; the built files carry the level). Vesa's played verdict is open.

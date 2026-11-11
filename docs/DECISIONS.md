@@ -18,7 +18,7 @@ Vesa, shown the latency table and the lettered replies (`docs/LATENCY_EVAL_2026-
 
 Known costs, counted on 3.8 Flash at low: replies run longer (median 154 words against 127), and the reply that proposes a check carries a paragraph the game then withholds (76, 0 and 107 words against 17 to 20). Whether a check is proposed at all did not separate the settings: the default missed the check line in 0 of 3 tries in the morning run and in 3 of 3 in the afternoon one.
 
-Proof after the change (the app's own request, six turns, with the old default run beside it in the same minutes): 3.8 Flash first word 2.2 / 3.0 s against 9.2 / 12.7 s; Sol 2.0 / 2.5 s. Not seen in a browser. To undo for a model, remove `dmThinking` from its row.
+Proof after the change (the app's own request, six turns, with the old default run beside it in the same minutes): 3.8 Flash first word 2.2 / 3.0 s against 9.2 / 12.7 s; Sol 2.0 / 2.5 s. In the browser on the dev build, one real turn sent the field and the app logged a 2.0 s first word. To undo for a model, remove `dmThinking` from its row.
 
 Why: the queue's rule for item 2 was that the default changes only if a setting is clearly faster and Vesa sees no loss in the replies. What would reopen it: Vesa's played verdict, or a provider changing a model's default or its accepted levels under the same id.
 
