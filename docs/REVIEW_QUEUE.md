@@ -65,6 +65,13 @@ This page is the only live work queue. Vesa, 2026-11-10: "focus clearly and only
 - **The problem:** memory is about nine stores with no authority order. One 34 KB Scribe prompt fans each turn into facts, cards, NPC fields, tells, ledgers, places and vector copies, each with its own dedupe; when two disagree, nothing says which one wins.
 - **One proposed answer: one append-only moment log** with facts, cards and bond moments as views of it. The largest and least certain item; revisit after item 3 with its numbers.
 - **A player-facing way to correct a record** (the "✕ per alias" idea). The megacampaign's place and alias damage was repaired by hand on 2026-11-09; what is missing is a tool, not a repair.
+- **From the 2026-11-11 game-design evaluation** (twelve entries dated 2026-11-11 in `IDEAS.md`; not scheduled, the order above is unchanged, Vesa decides). Each is listed under the item it bears on:
+  - **Item 2:** a plain combat action could skip the intent call ("A click is an intent").
+  - **Item 3:** the hero's pursuit and the overdue threads beside "the story so far"; a character director that gives an important NPC an authored core; the campaign contract (tone and content saved with the campaign, changeable from table talk).
+  - **Item 4:** ask first whether small coin needs booking ("Pocket change is not bookkept").
+  - **Item 5:** foes with one trait from a bounded palette; something to earn after level 5; an engine-owned calendar, which a rest gate needs anyway.
+  - **Item 6:** more than one turn shape; `eval:menus` with a companion-voiced history.
+  - **Item 7:** the default preset and the default instructions contradict each other (high fantasy against low-fantasy); first-run and layout notes ("The screen shows the story, not the ledger"); premise starters in more than one register.
 
 ## Keep (do not redesign)
 
