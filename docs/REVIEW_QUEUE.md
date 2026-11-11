@@ -72,6 +72,7 @@ This page is the only live work queue. Vesa, 2026-11-10: "focus clearly and only
   - **Item 5:** foes with one trait from a bounded palette; something to earn after level 5; an engine-owned calendar, which a rest gate needs anyway.
   - **Item 6:** more than one turn shape; `eval:menus` with a companion-voiced history.
   - **Item 7:** the default preset and the default instructions contradict each other (high fantasy against low-fantasy); first-run and layout notes ("The screen shows the story, not the ledger"); premise starters in more than one register.
+- **A from-scratch architecture review and a rebuild plan (2026-11-11): `docs/REWRITE_PLAN.md`.** A proposal; not scheduled, the order above unchanged, Vesa decides. Its phase 0 is items 2 and 3 as they stand; its phase 1 is item 4 widened from coins and items to the whole wire, with a stop rule; the moment log above is its memory design. Items 5 and 7 are unaffected; item 6 is overtaken only if the rebuild goes ahead.
 
 ## Keep (do not redesign)
 
