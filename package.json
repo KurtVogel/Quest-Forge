@@ -33,7 +33,8 @@
     "eval:register": "node scripts/registerEval.mjs",
     "eval:within": "node scripts/withinEval.mjs",
     "eval:plainwords": "node scripts/plainWordsEval.mjs",
-    "eval:menus": "node scripts/menuEndingEval.mjs"
+    "eval:menus": "node scripts/menuEndingEval.mjs",
+    "eval:latency": "node scripts/latencyEval.mjs"
   },
   "dependencies": {
     "firebase": "^12.9.0",

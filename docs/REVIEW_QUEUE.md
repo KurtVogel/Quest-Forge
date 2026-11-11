@@ -25,6 +25,7 @@ This page is the only live work queue. Vesa, 2026-11-10: "focus clearly and only
 - **Experiment:** the same 20 scripted turns across thinking settings and 2–3 models; record time to first word and total time; also time one whole skill-check turn and one whole fight round per setting, since (b) is not fixed by a thinking setting; Vesa reads the replies blind.
 - **Done means:** a table of p50 / p90 per setting, Vesa's blind pick, and the default changed only if a setting is clearly faster with no loss he can see. Seconds become a graded column in every later playtest.
 - **Needs:** keys for one local session.
+- **Measured 2026-11-11** (`docs/LATENCY_EVAL_2026-11-11.md`, `npm run eval:latency`): cause (a) holds. On Gemini 3.8 Flash, default against `thinkingLevel: low`, p50 / p90 over the same 20 turns: first word 10.6 / 19.6 s against 2.0 / 3.3 s, whole call 12.2 / 21.3 s against 4.4 / 6.0 s; a whole check 33.4 s against 11.9 s, a whole fight round 18.1 s against 10.8 s. Cause (b) stands beside it: a check is still two DM calls and an arbiter call. **Open: Vesa's blind read (`docs/LATENCY_EVAL_2026-11-11_BLIND_READ.md`) and his pick; nothing in the app has changed.**
 
 ### 3. Give the DM the story — measure first, then plan, then slices
 - **How sure:** hypothesis. The facts are verified (20-row window; 3 journal summaries, 15 facts, 8 NPCs, 5 cards, 8 retrieved rows; live state sits before the history, so the history is never cached; an NPC's `voice` line reaches the player and not the DM). That more story improves play is not measured.
