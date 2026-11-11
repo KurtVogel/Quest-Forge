@@ -138,11 +138,11 @@ h1 canvas { width: auto; height: auto; }
 <div class="app" id="app" data-view="title">
 
   <section class="title">
-    <canvas data-scene></canvas>
+    <canvas data-scene="book"></canvas>
     <div class="title-ui">
       <header>
         <h1 aria-label="Quest Forge"><canvas id="logo"></canvas></h1>
-        <p class="tag">a dungeon master who remembers</p>
+        <p class="tag">a world that remembers</p>
       </header>
       <nav class="menu">
         <button class="menu-main nx"><b>Continue</b><small>Ysolde · Lv 5 fighter · Greywater Ford</small></button>
@@ -178,7 +178,7 @@ h1 canvas { width: auto; height: auto; }
     </aside>
 
     <div class="banner">
-      <canvas data-scene></canvas>
+      <canvas data-scene="gate"></canvas>
       <div class="place nx">Greywater Ford · dusk</div>
       <button class="swap" data-swap>back to title</button>
     </div>
@@ -247,6 +247,25 @@ h1 canvas { width: auto; height: auto; }
     return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
   };
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // A value 0..1 picks a step on a colour ramp; the Bayer threshold dithers between two steps.
+  const ramp = (R, v, b) => {
+    const n = R.length - 1, k = v <= 0 ? 0 : v >= 1 ? n : v * n, k0 = k | 0;
+    return R[(k - k0 > b && k0 < n) ? k0 + 1 : k0];
+  };
+  // The classic fire: heat is fed along the bottom row and cools as it climbs and drifts.
+  function stepFire(f, fw, fh) {
+    const mid = (fw - 1) / 2, base = Math.min(0.85, 5 / (fh - 1));
+    for (let x = 0; x < fw; x++) {
+      const e = Math.abs(x - mid) / (mid + 0.5);
+      f[(fh - 1) * fw + x] = Math.max(0, Math.round(7 - e * 7 - Math.random() * 1.5));
+    }
+    for (let y = 0; y < fh - 1; y++) for (let x = 0; x < fw; x++) {
+      const sx = Math.min(fw - 1, Math.max(0, x + ((Math.random() * 3 | 0) - 1)));
+      const e = Math.abs(x - mid) / (mid + 0.5);
+      f[y * fw + x] = Math.max(0, f[(y + 1) * fw + sx] - (Math.random() < base + e * 0.6 ? 1 : 0));
+    }
+  }
 
   function makeScene(canvas) {
     const ctx = canvas.getContext('2d');
@@ -320,27 +339,10 @@ h1 canvas { width: auto; height: auto; }
       }));
       for (const t of torches) for (const [bx, by] of [[-1, 0], [0, 0], [1, 0], [0, 1], [0, 2]]) mat[(t.y + by) * W + t.x + bx] = 4;
       img = ctx.createImageData(W, H); D = img.data;
-      for (let k = 0; k < 40; k++) fires.forEach(stepFire);
-    }
-
-    function stepFire(f) {
-      const mid = (fw - 1) / 2, base = Math.min(0.85, 5 / (fh - 1));
-      for (let x = 0; x < fw; x++) {
-        const e = Math.abs(x - mid) / (mid + 0.5);
-        f[(fh - 1) * fw + x] = Math.max(0, Math.round(7 - e * 7 - Math.random() * 1.5));
-      }
-      for (let y = 0; y < fh - 1; y++) for (let x = 0; x < fw; x++) {
-        const sx = Math.min(fw - 1, Math.max(0, x + ((Math.random() * 3 | 0) - 1)));
-        const e = Math.abs(x - mid) / (mid + 0.5);
-        f[y * fw + x] = Math.max(0, f[(y + 1) * fw + sx] - (Math.random() < base + e * 0.6 ? 1 : 0));
-      }
+      for (let k = 0; k < 40; k++) fires.forEach(f => stepFire(f, fw, fh));
     }
 
     const put = (i, c) => { const o = i * 4; D[o] = c[0]; D[o + 1] = c[1]; D[o + 2] = c[2]; D[o + 3] = 255; };
-    const ramp = (R, v, b) => {
-      const n = R.length - 1, k = v <= 0 ? 0 : v >= 1 ? n : v * n, k0 = k | 0;
-      return R[(k - k0 > b && k0 < n) ? k0 + 1 : k0];
-    };
 
     function frame(t) {
       const f1 = 0.82 + Math.random() * 0.26, f2 = 0.82 + Math.random() * 0.26;
@@ -382,7 +384,249 @@ h1 canvas { width: auto; height: auto; }
       if (resized) layout();
       if (!resized && (still || now - lastStep < 85)) return;
       lastStep = now;
-      if (!still) fires.forEach(stepFire);
+      if (!still) fires.forEach(f => stepFire(f, fw, fh));
+      frame(now);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // A woman seen from behind: long hair and a long coat blown to the right, a lantern in her left hand.
+  // Drawn as smooth shapes at the target size and thresholded, like the logo.
+  function womanSprite(h) {
+    const s = h / 212, w = Math.ceil(128 * s) + 1, hh = h + 2, c = document.createElement('canvas');
+    c.width = w; c.height = hh;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.scale(s, s); g.fillStyle = '#fff';
+    const shape = fn => { g.beginPath(); fn(); g.fill(); };
+    shape(() => g.ellipse(50, 20, 9, 11, 0, 0, 7));                         // head
+    shape(() => g.rect(46, 28, 8, 14));                                     // neck
+    shape(() => {                                                           // shoulders, waist, hips
+      g.moveTo(34, 47); g.quadraticCurveTo(50, 39, 66, 47); g.quadraticCurveTo(61, 68, 57, 84);
+      g.quadraticCurveTo(64, 94, 65, 104); g.lineTo(35, 104); g.quadraticCurveTo(36, 94, 43, 84);
+      g.quadraticCurveTo(38, 68, 34, 47);
+    });
+    shape(() => {                                                           // the coat's skirt, hem blown right
+      g.moveTo(35, 102); g.bezierCurveTo(30, 130, 28, 165, 30, 198); g.bezierCurveTo(42, 204, 52, 196, 62, 200);
+      g.bezierCurveTo(74, 204, 82, 190, 92, 192); g.bezierCurveTo(100, 192, 106, 184, 112, 178);
+      g.bezierCurveTo(96, 160, 78, 130, 65, 102);
+    });
+    shape(() => { g.moveTo(36, 194); g.lineTo(47, 194); g.lineTo(47, 206); g.lineTo(50, 212); g.lineTo(34, 212); });
+    shape(() => { g.moveTo(52, 194); g.lineTo(63, 194); g.lineTo(63, 206); g.lineTo(66, 212); g.lineTo(52, 212); });
+    shape(() => {                                                           // left arm, held off the body
+      g.moveTo(34, 47); g.quadraticCurveTo(24, 58, 22, 80); g.lineTo(12, 110); g.lineTo(20, 114);
+      g.lineTo(30, 84); g.quadraticCurveTo(33, 66, 40, 52);
+    });
+    shape(() => {                                                           // hair: leaves the head below the crown, in three locks
+      g.moveTo(41, 14); g.bezierCurveTo(45, 3, 60, 3, 60, 18); g.bezierCurveTo(62, 26, 68, 30, 78, 31);
+      g.bezierCurveTo(90, 32, 104, 36, 120, 44); g.bezierCurveTo(108, 48, 98, 48, 88, 46);
+      g.bezierCurveTo(96, 54, 102, 60, 108, 68); g.bezierCurveTo(96, 66, 86, 60, 78, 54);
+      g.bezierCurveTo(80, 64, 84, 74, 88, 84); g.bezierCurveTo(76, 78, 68, 66, 62, 52);
+      g.bezierCurveTo(58, 46, 52, 44, 48, 42); g.lineTo(40, 34);
+    });
+    const a = g.getImageData(0, 0, w, hh).data;
+    return { w, h: hh, ax: Math.round(50 * s), lx: Math.round(16 * s), ly: Math.round(124 * s),
+      on: (x, y) => x >= 0 && y >= 0 && x < w && y < hh && a[(y * w + x) * 4 + 3] > 110 };
+  }
+
+  // The title scene: an open book on a candlelit table, and the realm it opens onto.
+  function makeBook(canvas) {
+    const ctx = canvas.getContext('2d');
+    const SKYR = ['#07060c', '#0a0914', '#0e0e20', '#12162e', '#172240', '#1d3454', '#27506c', '#3a7a86'].map(hex);
+    const LAKE = ['#0b1322', '#0f1c30', '#142a40', '#1b3d54', '#27506c', '#5fa0a8'].map(hex);
+    const WOOD = ['#08060a', '#120c0e', '#1f1412', '#301d16', '#47291a', '#633a1f', '#855227', '#a96d33', '#c98f48'].map(hex);
+    const PAGE = ['#1a120c', '#3a2a1a', '#6b5230', '#9c7d4a', '#c9a868', '#e8cf8e', '#fff0b8', '#fffbe0'].map(hex);
+    const HALO = ['#06050a', '#0e0806', '#1c0e08', '#30160b', '#4a220e', '#6b3212'].map(hex);
+    const FAR = hex('#1f3355'), FAR_RIM = hex('#3a5c82'), NEAR = hex('#131d38'), CASTLE = hex('#182a48');
+    const MOON_HI = hex('#f3ead0'), MOON_LO = hex('#cfc3a0'), FIG = hex('#050409'), RIM = hex('#4f8597');
+    const LEATHER = hex('#3b1f14'), EDGE = hex('#8a6d42'), RIBBON = hex('#a33a34'), DISH = hex('#4a2e1c');
+    const WAX = ['#b9a57a', '#e6d6a8', '#8f7d58'].map(hex), WAX_TOP = hex('#fff0c0'), MOTE = hex('#f6e7b0');
+    const TABLE = 1, PAGEK = 2, AIR = 3, LAKEK = 4, WIN = 5, LAMP = 6, FW = 7, FH = 12;
+    let W = 0, H = 0, cw = 0, ch = 0, img, D, base, dyn, kind, alb, dA, dB, dK, dG, sky;
+    let fires, flames, stars, motes, shoot, lamp, moon, geo, Rc2, Rb2, Rh2, Rg2, lastStep = 0;
+
+    function layout() {
+      cw = canvas.clientWidth; ch = canvas.clientHeight;
+      const px = Math.max(cw > 700 ? 4 : 3, Math.round(Math.min(cw, ch) / 150));
+      W = Math.ceil(cw / px); H = Math.ceil(ch / px);
+      canvas.width = W; canvas.height = H;
+      const N = W * H, tall = H > W, cx = W >> 1;
+      const tableY = Math.round(H * (tall ? 0.62 : 0.60));
+      const bw = Math.round(Math.min(W * 0.62, 90)), half = bw / 2, bh = Math.round(bw * 0.24);
+      const by0 = tableY + 3, by1 = by0 + bh, frontY = by1 + 9;
+      const figH = Math.round(tableY * 0.46), feetY = tableY - Math.round(tableY * 0.10);
+      const hy = feetY - Math.round(figH * 0.36), ms = tableY / 151;
+      const fxc = Math.round(cx + W * (tall ? 0.10 : 0.16));
+      moon = { x: Math.round(W * 0.2), y: Math.round(hy * (tall ? 0.56 : 0.6)), r: tall ? 8 : 7 };
+      geo = { cx, bw, by0, hy, tableY };
+      Rc2 = (bw * 0.28) ** 2; Rb2 = (bw * 0.35) ** 2; Rh2 = 72; Rg2 = (bw * 0.2) ** 2;
+      const farM = x => hy - Math.round((11 + 8 * Math.sin(x * 0.071 + 1) + 5 * Math.sin(x * 0.19 + 4) + 2 * Math.sin(x * 0.53)) * ms);
+      const nearM = x => hy - Math.round((4 + 4 * Math.sin(x * 0.11 + 2.3) + 2 * Math.sin(x * 0.31)) * ms);
+      const ridge = x => Math.min(tableY - 8, feetY + 1 + Math.round(x < fxc ? (fxc - x) * 0.33 : (x - fxc) * 0.06)) - (hash(x, 99) < 0.3 ? 1 : 0);
+      const kx = Math.round(W * (tall ? 0.40 : 0.36)), ky = farM(kx) + 2, R = n => Math.round(n * ms);
+      const towers = [[-6, 3, 10], [-2, 3, 17], [3, 4, 13], [8, 2, 8]].map(v => v.map(R));
+      const inCastle = (x, y) => {
+        if (y > ky) return false;
+        if (x >= kx - R(6) && x <= kx + R(10) && y >= ky - R(4)) return true;
+        for (const [dx, w, h] of towers) {
+          const x0 = kx + dx, roof = ky - h - w;
+          if (x >= x0 && x < x0 + w && y >= ky - h) return true;
+          if (y >= roof && y < ky - h && Math.abs(x - (x0 + (w - 1) / 2)) <= (y - roof) / 2) return true;
+        }
+        return false;
+      };
+
+      base = new Uint8ClampedArray(N * 4); kind = new Uint8Array(N); alb = new Float32Array(N); sky = new Uint8Array(N);
+      dA = new Float32Array(N); dB = new Float32Array(N); dK = new Float32Array(N); dG = new Float32Array(N);
+      const setB = (i, c) => { const o = i * 4; base[o] = c[0]; base[o + 1] = c[1]; base[o + 2] = c[2]; base[o + 3] = 255; kind[i] = 0; sky[i] = 0; };
+      const candles = [{ x: Math.max(5, cx - Math.round(half) - 9), h: 11 }, { x: Math.min(W - 6, cx + Math.round(half) + 9), h: 7 }];
+      const cBase = by0 + Math.round(bh * 0.55);
+      flames = candles.map(c => ({ x: c.x, y: cBase - c.h - 1 }));
+      fires = flames.map(() => new Uint8Array(FW * FH));
+      stars = []; motes = []; shoot = null;
+
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const i = y * W + x, dx = x - cx, b = BAYER[(x & 3) | ((y & 3) << 2)];
+        base[i * 4 + 3] = 255;
+        dA[i] = (x - flames[0].x) ** 2 + (y - flames[0].y + 4) ** 2;
+        dB[i] = (x - flames[1].x) ** 2 + (y - flames[1].y + 4) ** 2;
+        dK[i] = dx * dx * 0.5 + (y - (by0 + bh / 2)) ** 2 * 4;
+        dG[i] = dx * dx * 0.6 + (y - by0) ** 2 * 0.6;
+        if (y >= tableY) {
+          kind[i] = TABLE;
+          const ry = y - tableY;
+          if (y > frontY + 2) alb[i] = x % 14 === 0 ? 0.18 : 0.32;
+          else if (y >= frontY || ry === 0) alb[i] = 1;
+          else alb[i] = ry % 8 === 7 ? 0.45 : (0.68 + hash(x / 11 | 0, ry / 8 | 0) * 0.2) * (hash(x / 5 | 0, y) < 0.14 ? 0.82 : 1);
+          continue;
+        }
+        if (y >= ridge(x)) { kind[i] = AIR; continue; }
+        const md = Math.hypot(x - moon.x, y - moon.y);
+        if (md <= moon.r) setB(i, hash(x, y) < 0.16 ? MOON_LO : MOON_HI);
+        else if (inCastle(x, y)) setB(i, CASTLE);
+        else if (y >= hy) kind[i] = LAKEK;
+        else if (y >= nearM(x)) setB(i, NEAR);
+        else if (y >= farM(x)) setB(i, y === farM(x) ? FAR_RIM : FAR);
+        else {
+          let v = Math.pow(y / hy, 1.7) * 0.86;
+          if (md < moon.r + 5) v += (1 - (md - moon.r) / 5) * 0.22;
+          setB(i, ramp(SKYR, v, b)); sky[i] = 1;
+          if (hash(x * 7, y * 13) < 0.011) stars.push({ i, ph: hash(y, x) * 6.28, big: y < hy * 0.6 && hash(x, y * 3) < 0.12 });
+        }
+      }
+      for (const [wx, wy] of [[kx + towers[1][0] + 1, ky - towers[1][2] + 2], [kx + towers[2][0] + 1, ky - towers[2][2] + 3], [kx, ky - 2]]) {
+        if (wy < hy && wy >= 0) { setB(wy * W + wx, CASTLE); kind[wy * W + wx] = WIN; }
+      }
+
+      // Her, on the near ridge, the lake and the far light behind her.
+      const sp = womanSprite(figH), fx0 = fxc - sp.ax, fy0 = feetY - figH;
+      for (let sy = 0; sy < sp.h; sy++) for (let sx = 0; sx < sp.w; sx++) {
+        const x = fx0 + sx, y = fy0 + sy;
+        if (!sp.on(sx, sy) || x < 0 || x >= W || y < 0 || y >= tableY) continue;
+        setB(y * W + x, !sp.on(sx - 1, sy) && sp.on(sx + 1, sy) && sp.on(sx + 2, sy) ? RIM : FIG);
+      }
+      lamp = { x: fx0 + sp.lx, y: fy0 + sp.ly };
+      for (const [lx, ly, k] of [[-1, -2, 0], [0, -2, 0], [1, -2, 0], [0, -3, 0], [-1, 2, 0], [0, 2, 0], [1, 2, 0],
+        [0, -1, 1], [-1, 0, 1], [0, 0, 1], [1, 0, 1], [0, 1, 1], [-1, -1, 1], [1, -1, 1], [-1, 1, 1], [1, 1, 1]]) {
+        const i = (lamp.y + ly) * W + lamp.x + lx;
+        setB(i, FIG); if (k) kind[i] = LAMP;
+      }
+      stars = stars.filter(s => sky[s.i]);
+
+      // The book.
+      for (let y = by0 - 1; y <= by1 + 5; y++) for (let x = Math.floor(cx - half - 3); x <= cx + half + 3; x++) {
+        const i = y * W + x, dx = x - cx, adx = Math.abs(dx), hw = (0.86 + 0.14 * (y - by0) / bh) * half;
+        if (y <= by1 && adx <= hw && y >= by0 + 2 - Math.round(2 * Math.sin(Math.PI * Math.min(1, adx / hw)))) {
+          kind[i] = PAGEK;
+          const inked = (y - by0) % 3 === 2 && adx > 3 && adx < hw - 3 && y < by1 - 2 && hash(dx / 4 | 0, y) > 0.22
+            && adx < 3 + (0.55 + hash(y, dx > 0 ? 1 : 2) * 0.45) * (hw - 6);
+          alb[i] = adx < 1 ? 0.4 : inked ? 0.42 : 0.82 + 0.18 * Math.sin(Math.PI * adx / hw);
+        } else if (y >= by0 + 1 && y <= by1 + 2 && adx <= hw + 1.5) setB(i, y === by1 + 1 ? EDGE : LEATHER);
+        else if (y > by1 + 2 && y <= by1 + 4 && adx <= half) alb[i] *= 0.5;
+      }
+      for (let y = by0 + 4; y <= by0 + 6; y++) for (let x = cx - Math.round(half * 0.86) + 5; x < cx - Math.round(half * 0.86) + 8; x++) setB(y * W + x, FIRE[4]);
+      for (let y = by1 + 1; y <= by1 + 6; y++) setB(y * W + cx + 2, RIBBON);
+
+      // Two candles beside it.
+      for (const c of candles) {
+        for (let y = cBase - c.h; y <= cBase; y++) for (let k = -1; k <= 1; k++) setB(y * W + c.x + k, y === cBase - c.h ? WAX_TOP : WAX[k + 1]);
+        setB((cBase - c.h + 3) * W + c.x - 2, WAX[0]);
+        for (let k = -3; k <= 3; k++) setB((cBase + 1) * W + c.x + k, DISH);
+      }
+
+      dyn = [];
+      for (let i = 0; i < N; i++) if (kind[i]) dyn.push(i);
+      img = ctx.createImageData(W, H); D = img.data;
+      for (let k = 0; k < 40; k++) fires.forEach(f => stepFire(f, FW, FH));
+    }
+
+    const put = (i, c) => { const o = i * 4; D[o] = c[0]; D[o + 1] = c[1]; D[o + 2] = c[2]; };
+
+    function frame(t) {
+      const fA = 0.8 + Math.random() * 0.3, fB = 0.8 + Math.random() * 0.3, pulse = 0.5 + 0.5 * Math.sin(t / 1800);
+      const { cx, bw, by0, hy, tableY } = geo;
+      D.set(base);
+      for (let n = 0; n < dyn.length; n++) {
+        const i = dyn[n], x = i % W, y = i / W | 0, b = BAYER[(x & 3) | ((y & 3) << 2)], k = kind[i];
+        const cA = fA / (1 + dA[i] / Rc2), cB = fB / (1 + dB[i] / Rc2);
+        if (k === TABLE) put(i, ramp(WOOD, (0.04 + (cA + cB) * 0.85 + (0.3 + 0.25 * pulse) / (1 + dK[i] / Rb2)) * alb[i], b));
+        else if (k === PAGEK) put(i, ramp(PAGE, (0.6 + 0.3 * pulse + (cA + cB) * 0.2) * alb[i], b));
+        else if (k === AIR) put(i, ramp(HALO, 0.8 * (fA / (1 + dA[i] / Rh2) + fB / (1 + dB[i] / Rh2)) + (0.25 + 0.3 * pulse) / (1 + dG[i] / Rg2), b));
+        else if (k === LAKEK) {
+          let v = 0.3 + 0.25 * (1 - (y - hy) / 22) + (Math.sin(x * 0.8 + y * 2.1 + t / 500) > 0.55 ? 0.22 : 0);
+          if (Math.abs(x - moon.x) < 1.5 + (y - hy) * 0.1 && Math.sin(y * 1.7 + x * 2.3 + t / 300) > 0) v = 0.9;
+          put(i, ramp(LAKE, v, b));
+        }
+        else if (k === WIN) put(i, FIRE[4 + ((t / 900 + i) % 3 < 1 ? 1 : 0)]);
+        else put(i, FIRE[5 + (Math.random() * 3 | 0)]);
+      }
+      for (const s of stars) {
+        const hi = Math.sin(t / 700 + s.ph) > 0.3;
+        put(s.i, hi ? STAR_HI : STAR_LO);
+        if (s.big && hi) for (const d of [-1, 1, -W, W]) if (sky[s.i + d]) put(s.i + d, STAR_LO);
+      }
+      if (!still && !shoot && Math.random() < 0.006) shoot = { x: W * (0.45 + Math.random() * 0.5), y: hy * (0.1 + Math.random() * 0.3), life: 9 };
+      if (shoot) {
+        for (let k = 0; k < 5; k++) {
+          const X = Math.round(shoot.x + k * 2), Y = Math.round(shoot.y - k);
+          if (X >= 0 && X < W && Y >= 0 && sky[Y * W + X]) put(Y * W + X, k < 2 ? STAR_HI : STAR_LO);
+        }
+        shoot.x -= 3; shoot.y += 1.5; if (--shoot.life <= 0) shoot = null;
+      }
+      // Motes lift off the pages and thin out into the stars.
+      if (!still && motes.length < 36 && Math.random() < 0.5) motes.push({ x: cx + (Math.random() - 0.5) * bw * 0.8, y: by0 + 2, vy: 0.3 + Math.random() * 0.5, ph: Math.random() * 6.28, life: 150 + (Math.random() * 120 | 0) });
+      motes = motes.filter(m => m.life-- > 0 && m.y > hy * 0.4);
+      for (const m of motes) {
+        m.y -= m.vy; m.x += Math.sin(t / 500 + m.ph) * 0.25;
+        const X = Math.round(m.x), Y = Math.round(m.y);
+        if (X < 0 || X >= W || (m.life + (m.ph * 10 | 0)) % 9 === 0) continue;
+        put(Y * W + X, Y > tableY - 12 ? FIRE[6] : Y > hy ? MOTE : STAR_HI);
+      }
+      flames.forEach((fl, k) => {
+        const f = fires[k], x0 = fl.x - (FW >> 1), y0 = fl.y - FH + 1;
+        for (let fy = 0; fy < FH; fy++) for (let fx = 0; fx < FW; fx++) {
+          const v = f[fy * FW + fx];
+          if (v && y0 + fy >= 0 && x0 + fx >= 0 && x0 + fx < W) put((y0 + fy) * W + x0 + fx, FIRE[Math.min(7, v + 1)]);
+        }
+        put(fl.y * W + fl.x, FIRE[7]); put((fl.y - 1) * W + fl.x, FIRE[7]); put((fl.y - 2) * W + fl.x, FIRE[6]);   // the steady core
+      });
+      const lf = 0.8 + Math.random() * 0.2;                 // the lantern's small warm halo
+      for (let yy = -4; yy <= 4; yy++) for (let xx = -4; xx <= 4; xx++) {
+        const d = Math.hypot(xx, yy), X = lamp.x + xx, Y = lamp.y + yy;
+        if (d > 4.5 || X < 0 || X >= W || Y < 0 || Y >= H) continue;
+        const o = (Y * W + X) * 4, a = 0.34 * (1 - d / 5) * lf;
+        D[o] += (246 - D[o]) * a; D[o + 1] += (166 - D[o + 1]) * a; D[o + 2] += (60 - D[o + 2]) * a;
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+
+    function tick(now) {
+      requestAnimationFrame(tick);
+      if (!canvas.clientWidth) return;
+      const resized = canvas.clientWidth !== cw || canvas.clientHeight !== ch;
+      if (resized) layout();
+      if (!resized && (still || now - lastStep < 85)) return;
+      lastStep = now;
+      if (!still) fires.forEach(f => stepFire(f, FW, FH));
       frame(now);
     }
     requestAnimationFrame(tick);
@@ -410,6 +654,7 @@ h1 canvas { width: auto; height: auto; }
     const vw = innerWidth, vh = innerHeight;
     const px = Math.max(vw > 700 ? 4 : 3, Math.round(Math.min(vw, vh) / 150));
     const Wl = Math.floor(Math.min(vw - 32, 132 * px) / px);
+    if (Wl < 30) return;                                     // no size yet; the resize handler draws it
     await document.fonts.load("800 40px 'Grenze Gotisch'");
     const face = size => `800 ${size}px 'Grenze Gotisch', Georgia, serif`;
     g.font = face(100);
@@ -432,9 +677,11 @@ h1 canvas { width: auto; height: auto; }
   drawLogo();
   let logoTimer; addEventListener('resize', () => { clearTimeout(logoTimer); logoTimer = setTimeout(drawLogo, 150); });
 
-  document.querySelectorAll('[data-scene]').forEach(makeScene);
+  // The title shows the book; add #gate to the address to see the first version, the torch-lit gate.
+  const gateTitle = location.hash.includes('gate');
+  document.querySelectorAll('[data-scene]').forEach(c => (c.dataset.scene === 'book' && !gateTitle ? makeBook : makeScene)(c));
   const app = document.getElementById('app');
-  if (location.hash === '#play') app.dataset.view = 'play';
+  if (location.hash.includes('play')) app.dataset.view = 'play';
   document.querySelectorAll('[data-swap]').forEach(b => b.addEventListener('click', () => {
     app.dataset.view = app.dataset.view === 'title' ? 'play' : 'title';
   }));

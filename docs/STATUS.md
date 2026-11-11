@@ -30,9 +30,11 @@ Vesa: the UI "looks like every Opus 4.7 UI in spring 2026"; he proposed pseudo p
 
 - **Filed:** one entry at the top of UX & Platform in `docs/IDEAS.md` (the diagnosis, the phone measurements, the proposal, costs, open choices) and a mockup, `docs/mockups/pixel-direction.html` (title and play screens, both sizes, scene drawn by script, invented text; `#play` opens the play screen).
 - **Reproduced:** the start screen's Load Game list shows 47 px of its 250 at phone size and cannot be scrolled to. Not fixed; it belongs to the start-screen slice or to item 7.
-- **Not decided:** whether the direction goes ahead, how far the pixel look reaches, and where it sits against the review queue. No app code changed.
+- **Decided the same evening** (`docs/DECISIONS.md`): the style is pixel art with live fire and a dim, inviting mood; the line is "A world that remembers"; the figure is a woman's silhouette. The mockup's title is now an open book on a candlelit table under a star-lit realm; the gate is kept at `#gate`.
+- **Not decided:** which title scene, whether Vesa's own art replaces the scripted one, the order of the slices, and where the work sits against the review queue. No app code changed.
+- **To look at it:** open the file in a browser, or start the `quest-forge-mockups` launch entry (port 4192) and open `/pixel-direction.html`.
 
-**Next:** Vesa's verdict on the mockup. The queue is unchanged: item 2, the latency experiment.
+**Next:** Vesa's pick of a title scene, then the first slice in the app (palette, type, the start screen with the saves fix) if he places it. The queue's own next step is in the entry above.
 
 ## 2026-11-11 (later still) — a from-scratch architecture review; its rebuild plan is accepted behind a gate — docs only, nothing to deploy
 

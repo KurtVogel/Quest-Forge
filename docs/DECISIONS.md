@@ -8,6 +8,15 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-11-11 (evening) · The look: pixel art with live fire, a dim and inviting mood, and the line "A world that remembers".**
+
+Vesa, on the mockup `docs/mockups/pixel-direction.html`: "I really liked the style you created for the title", "we'll definitely keep animated fire of some sort and a dim, cozy, imagination-exciting atmosphere, like 'entering a fantasy world' type of feel in a remembering world". What that settles:
+1. **The style.** Pixel art for the title, with fire that moves. The mood is dim, warm and inviting: entering a fantasy world. Grim comes second.
+2. **The line.** "A world that remembers", not "a dungeon master who remembers". Why: everything in it remembers, not only the DM, and "dungeon master" names the mechanism in tabletop jargon. It replaces "AI-powered tabletop RPG" when the start screen is built.
+3. **The figure.** A woman's silhouette, large enough to read, in place of the small stout figure of the first mockup.
+
+Not settled: which title scene (the mockup now shows an open book on a candlelit table under a star-lit realm; the torch-lit gate is kept at `#gate`), whether Vesa's own art replaces the scripted scene, the order of the slices, and where the work sits against the review queue. No app code has changed. The proposal and its costs: `docs/IDEAS.md`, UX & Platform, first entry.
+
 **2026-11-11 (later still) · The rebuild is accepted behind a gate: phases 0 and 1 of `docs/REWRITE_PLAN.md` go ahead, and rebuild code starts only if the phase-1 spike beats v1. REVISES, for new code only, the "no TypeScript beyond the dice engine" absence (`ARCHITECTURE.md`); REVISES, for the spike and what follows it, the 2026-08-22 focus plan's "the main DM call keeps narrate + trailing JSON"; EXTENDS 2026-08-22 (Gemini-first).**
 
 Vesa, on the four calls of the from-scratch review: "I trust you on this and go by your recommendation on everything." What that settles:
