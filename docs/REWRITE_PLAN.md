@@ -1,6 +1,6 @@
 # Rebuild plan — how Quest Forge would be built today, and how to get there
 
-**Status: a proposal, not a decision (2026-11-11).** Vesa asked for an objective from-scratch review and a rewrite plan. Nothing here is scheduled. `docs/REVIEW_QUEUE.md` stays the one live queue and its order is unchanged; phase 0 below is that queue's items 2 and 3.
+**Status: accepted behind a gate (2026-11-11, `docs/DECISIONS.md`).** Vesa took the four calls at the end as recommended. Phases 0 and 1 are on `docs/REVIEW_QUEUE.md` as items 2, 3 and 4. Phase 2 onward starts only if phase 1 wins, and no rebuild code is written before that.
 
 **What this rests on:** the DM prompt, the turn orchestrator, the Scribe prompt, the event registry, the state shape and the provider settings, read in the code; three read-only inventories (every model call, every memory store, the React shell and the tests) with file and line for each claim; and aggregate counts from the megacampaign export of 2026-10-28 (sizes only, no content). No turn was played and nothing was built. The export is two weeks and about 700 messages behind the live campaign; facts, cards, summaries and people have no count cap, so the stores only grow.
 
@@ -177,9 +177,11 @@ Each phase ends on a number or Vesa's played verdict, as the queue requires.
 - **During the build the rule "one change per deploy, then Vesa plays" cannot hold for the new code.** Headless numbers and blind reads stand in until phase 5.
 - **Scope.** Mechanics design, new content and a hosted version each stay out; mixing one in is how a rebuild fails.
 
-## Vesa's calls
+## Vesa's calls — answered 2026-11-11
 
-1. **Rebuild beside v1, or keep fixing in place.** The in-place path is the queue as it stands. It delivers items 2 and 3 as fast and keeps every workaround.
-2. **Phase 0 now.** It is the queue's next two items and is worth doing under either answer.
-3. **TypeScript for the new code.** `ARCHITECTURE.md` lists "no TypeScript beyond the dice engine" as a deliberate absence; this revisits it.
-4. **Gemini only in the first version**, with the provider seam kept. This matches the 2026-08-22 Gemini-first decision.
+Vesa: "I trust you on this and go by your recommendation on everything." Recorded in `docs/DECISIONS.md`.
+
+1. **Rebuild beside v1, behind the gate.** The rebuild starts only if phase 1 wins; if it loses, the queue carries on in place.
+2. **Phase 0 now.** Item 2, then item 3 through its first two slices. Item 3's later slices wait for the gate.
+3. **TypeScript, strict, for the rebuild's code.** v1 stays plain JavaScript. This revises the "no TypeScript beyond the dice engine" absence in `ARCHITECTURE.md` for new code only.
+4. **Gemini only in the first version**, with the provider seam kept. This extends the 2026-08-22 Gemini-first decision.

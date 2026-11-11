@@ -10,6 +10,7 @@ This page is the only live work queue. Vesa, 2026-11-10: "focus clearly and only
 - **Hypotheses are measured before anything is built** (the "How sure" line says which items those are).
 - **Measurement sessions are local**, with API keys Vesa supplies for that session. Flash or GPT, never the Grok DM.
 - **Stop rule:** if items 1–3 ship and play does not feel different to Vesa, stop and rethink the rest.
+- **The rebuild gate (2026-11-11, `DECISIONS.md`):** `docs/REWRITE_PLAN.md` is accepted behind item 4. Items 2 and 3 (through its first two slices) are its phase 0; item 4 is its phase 1 and decides it. No rebuild code is written before item 4's numbers and Vesa's read of them.
 - Balance and mechanics design happens in the main session with Vesa (the balance subagent is retired).
 - **No new hardening against hand-edited or hostile saves, and no dates or playtest anecdotes in code comments or prompt text.** What exists stays (removing it is churn nobody feels in play). The LLM-lane trust-boundary rule in `CLAUDE.md` stands.
 
@@ -32,11 +33,14 @@ This page is the only live work queue. Vesa, 2026-11-10: "focus clearly and only
 - **Then, as separate slices:** live state after the history so the history is the cached prefix; a window sized in tokens (30–60k); a "story so far" block rebuilt at the journal cadence; the recall dossier's cast-and-place assembly on every turn; each present NPC's voice lines and uncut key moments shown to the DM; verbatim rows that survive the cap; a promise that stays live until it is kept or broken.
 - **Done means:** the score before and after each slice, the measured cost per turn (estimate: ~$0.004 for 50k cached tokens on Flash, ~$0.04 on a cache miss), and Vesa's played verdict.
 - **Needs:** the megacampaign as a file — it is in this machine's autosave (3.77 MB, 3,677 messages, measured in item 1), so Vesa's "Save to file" produces it; plan approval.
+- **Order with the rebuild gate (2026-11-11):** the measurement and the first two slices (live state after the history, the token-sized window) run now. The later slices wait for item 4's verdict: built in the rebuild if it goes ahead, here if it stops. Vesa's verdict on play with the long window is also the first read on whether a long history makes the voice repeat itself.
 
-### 4. Tool calls for coins and items — time-boxed spike
-- **How sure:** hypothesis. The DM narrates and then reports its own state changes; that is the root of the replay guards and the repeat judge. Combat already resolves first and narrates after.
-- **Spike:** resolve-then-narrate for coins and items behind a debug flag, by native tool call or structured output.
-- **Done means:** the `eval:repeats` score and the added seconds per mechanical turn, against today's; keep it or delete it on those two numbers.
+### 4. Tool calls — the spine spike, time-boxed (widened 2026-11-11; the gate for the rebuild in `docs/REWRITE_PLAN.md`)
+- **How sure:** hypothesis. The DM narrates and then reports its own state changes; that is the root of the parser guards, the replay ledgers and the repeat judge. Combat already resolves first and narrates after.
+- **Spike:** headless, in Node, on a real provider: the DM acts through tool calls, the engine resolves them, the DM narrates the result. Six tools over v1's engine functions (a check, coins, items, a trade, starting a fight, travel) and item 3's context order. Nothing in `src/` changes and nothing deploys.
+- **Done means:** against v1 on the same scripts: seconds to first word and in total for a plain turn, a check, a coin turn and a combat round; the `eval:repeats` score and a count of missing events; cached share and cost a turn; Vesa's blind read of 20 turns continued from the same megacampaign point by both.
+- **Stop rule:** if tools lose, one retry with structured output as the reply's last part. If that loses too, the rebuild plan stops and this list carries on in place. If the spike wins, the plan's phase 2 starts and this page says so.
+- **Needs:** keys for one local session; the megacampaign file from item 3.
 
 ### 5. Mechanics that bite — Vesa's design call
 - **How sure:** the facts are verified; what to do about them is taste. Rests are free and unlimited; flee is free; a DM-declared surrender pays full XP; conditions have no durations; enemy stats are invented per fight and XP is computed from them; armor proficiency is defined and never read.
@@ -72,7 +76,7 @@ This page is the only live work queue. Vesa, 2026-11-10: "focus clearly and only
   - **Item 5:** foes with one trait from a bounded palette; something to earn after level 5; an engine-owned calendar, which a rest gate needs anyway.
   - **Item 6:** more than one turn shape; `eval:menus` with a companion-voiced history.
   - **Item 7:** the default preset and the default instructions contradict each other (high fantasy against low-fantasy); first-run and layout notes ("The screen shows the story, not the ledger"); premise starters in more than one register.
-- **A from-scratch architecture review and a rebuild plan (2026-11-11): `docs/REWRITE_PLAN.md`.** A proposal; not scheduled, the order above unchanged, Vesa decides. Its phase 0 is items 2 and 3 as they stand; its phase 1 is item 4 widened from coins and items to the whole wire, with a stop rule; the moment log above is its memory design. Items 5 and 7 are unaffected; item 6 is overtaken only if the rebuild goes ahead.
+- **The rebuild's phases 2 to 6 (`docs/REWRITE_PLAN.md`)** wait on item 4. If the spike wins they are scheduled here. Items 5 and 7 are unaffected either way; item 6 is overtaken only if the rebuild goes ahead; the moment log above is the rebuild's memory design.
 
 ## Keep (do not redesign)
 

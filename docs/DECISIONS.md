@@ -8,6 +8,17 @@ Format: date · decision · why. Newest first.
 
 ---
 
+**2026-11-11 (later still) · The rebuild is accepted behind a gate: phases 0 and 1 of `docs/REWRITE_PLAN.md` go ahead, and rebuild code starts only if the phase-1 spike beats v1. REVISES, for new code only, the "no TypeScript beyond the dice engine" absence (`ARCHITECTURE.md`); REVISES, for the spike and what follows it, the 2026-08-22 focus plan's "the main DM call keeps narrate + trailing JSON"; EXTENDS 2026-08-22 (Gemini-first).**
+
+Vesa, on the four calls of the from-scratch review: "I trust you on this and go by your recommendation on everything." What that settles:
+1. **The gate.** The rebuild in `docs/REWRITE_PLAN.md` is built beside v1 only if its phase 1 wins. Phase 1 is the review queue's item 4, widened from coins and items to the whole wire: a headless spike in which the DM acts through tool calls, the engine resolves them and the DM narrates the result, on a real provider. It is measured against v1 on the same scripts: seconds to first word and in total for a plain turn, a check, a coin turn and a combat round; `eval:repeats` and a count of missing events; cached share and cost a turn; Vesa's blind read of 20 turns continued from the same megacampaign point by both. If tools lose, one retry with structured output as the reply's last part; if that loses too, the plan stops and the queue carries on in place.
+2. **Phase 0 is the queue's items 2 and 3, in v1.** Item 2 as it stands. Item 3 through its measurement and its first two slices (live state after the history, a token-sized window); its later slices wait for the gate: built in the rebuild if it goes ahead, in v1 if it stops. That is the one change to the queue's order. Their numbers are the baselines the spike is measured against, and Vesa's verdict on play with the long window is the first read on whether a long history makes the voice repeat itself.
+3. **TypeScript, strict, for the rebuild's code**, if it goes ahead. v1 stays plain JavaScript and nothing in `src/` is converted.
+4. **Gemini only in the rebuild's first version**, with the provider seam kept.
+5. **What does not change.** v1 is the game until Vesa has played the megacampaign on the rebuild. The queue's rules hold: one item per session, one change per deploy, every item ends on a number or a played verdict. No rebuild code is written before the spike's numbers and Vesa's read of them.
+
+Why: the review read four choices in the LLM half as the cause of most of the code, the waiting and the thin memory: the DM self-reports state in trailing JSON, the history is never cached, the records have many writers and nothing reconciles one store with another, and the game loop runs from effects in `ChatPanel.jsx`. Three of them (the wire, the memory model, the loop host) each touch most of `llm/`, the memory engine, the handlers and `ChatPanel.jsx`; changing them in place is three migrations through the pinning tests, under a rule that what exists stays. The two largest bets (a long cached history, tool calls on a Flash-class model) are cheap to test before anything is built on them, so they are tested first. Evidence, design, phases and risks: `docs/REWRITE_PLAN.md`.
+
 **2026-11-11 · Save safety (review queue item 1): restore points, the campaign file, the persistent-storage ask, the second-tab guard.**
 
 Built to the queue's proposal. Measured first on the megacampaign: payload 3.77 MB, site 18 MB of a 10 GB quota, so seven copies (about 26 MB) stay.

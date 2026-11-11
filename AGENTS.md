@@ -164,6 +164,9 @@ docs/         STATUS, IDEAS, DECISIONS, the three queues, ARCHITECTURE.md, flows
   with `node scripts/build-docs-map.mjs`).
 - `docs/DECISIONS.md` — every settled call with its reason (dated, newest first).
 - `docs/LLM_WOW_LAYER.md` — the narrative-memory design note.
+- `docs/REWRITE_PLAN.md` — the from-scratch design and the rebuild plan, accepted behind a gate
+  (2026-11-11): rebuild code starts only if the review queue's item-4 spike beats v1. Until then
+  v1 is the game and no rebuild code is written.
 - `.codex/README.md` — Codex routing (session conventions); `CLAUDE.md` is this file's twin for Claude Code.
 - The previous guide (every subsystem's dated detail inline, ~250 KB) is in git history:
   `git show 6b8278f:AGENTS.md`. Its stable half moved to `docs/ARCHITECTURE.md` and `docs/flows/`.
